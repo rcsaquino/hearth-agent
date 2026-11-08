@@ -13,7 +13,7 @@ pub use error::CoreError;
 pub use model::{
     Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,
     EffectStatus, Entry, NewEntry, NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission,
-    SubmissionStatus, SubmitResult, UsageEvent,
+    SubmissionStatus, SubmitResult, TelegramAdmission, TelegramUpdate, UsageEvent,
 };
 pub use prompt::{Prompt, PromptInput, parse_blocks};
 pub use session::{Harness, Session};

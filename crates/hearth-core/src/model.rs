@@ -243,6 +243,21 @@ pub struct SubmitResult {
     pub created: bool,
 }
 
+/// One Telegram update admitted with a submission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TelegramUpdate {
+    pub update_id: i64,
+    pub chat_id: i64,
+    pub message_id: i64,
+}
+
+/// The outcome of a Telegram admission attempt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TelegramAdmission {
+    pub submission: Submission,
+    pub duplicate: bool,
+}
+
 /// An entry to append in a save.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewEntry {
@@ -287,6 +302,8 @@ pub struct Save {
     pub(crate) submissions: Vec<NewSubmission>,
     pub(crate) settles: Vec<Settle>,
     pub(crate) effects: Vec<EffectIntent>,
+    pub(crate) telegram_update: Option<TelegramUpdate>,
+    pub(crate) telegram_offset: Option<i64>,
 }
 
 impl Save {
@@ -299,6 +316,8 @@ impl Save {
             submissions: Vec::new(),
             settles: Vec::new(),
             effects: Vec::new(),
+            telegram_update: None,
+            telegram_offset: None,
         }
     }
 
@@ -365,6 +384,18 @@ impl Save {
     /// Record an outside action that should happen after the save.
     pub fn effect(mut self, intent: EffectIntent) -> Self {
         self.effects.push(intent);
+        self
+    }
+
+    /// Record the Telegram update admitted by this save.
+    pub fn telegram_update(mut self, update: TelegramUpdate) -> Self {
+        self.telegram_update = Some(update);
+        self
+    }
+
+    /// Advance the Telegram offset in the same save.
+    pub fn telegram_offset(mut self, offset: i64) -> Self {
+        self.telegram_offset = Some(offset);
         self
     }
 }

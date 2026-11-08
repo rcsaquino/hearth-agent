@@ -10,8 +10,9 @@ use uuid::Uuid;
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
-    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewSubmission,
-    NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult, UsageEvent,
+    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewEntry,
+    NewSubmission, NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult,
+    TelegramAdmission, TelegramUpdate, UsageEvent,
 };
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
@@ -318,6 +319,21 @@ impl Session {
                     }
                 };
                 recorded_effect_ids.push(id);
+            }
+
+            if let Some(update) = &save.telegram_update {
+                writer.execute(
+                    "INSERT INTO telegram_updates (update_id, chat_id, message_id, processed_at) \
+                     VALUES (?, ?, ?, ?)",
+                    (update.update_id, update.chat_id, update.message_id, now),
+                )?;
+            }
+            if let Some(offset) = save.telegram_offset {
+                writer.execute(
+                    "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (offset.to_string(),),
+                )?;
             }
 
             writer.execute(
@@ -717,6 +733,68 @@ impl Session {
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// Hand in one Telegram update with a receipt.
+    pub fn submit_telegram(
+        &self,
+        conversation_id: &str,
+        request_id: &str,
+        content: Value,
+        update: TelegramUpdate,
+        next_offset: i64,
+    ) -> Result<TelegramAdmission, CoreError> {
+        let id = self.ids.new_id();
+        let entry = NewEntry {
+            kind: "user".to_owned(),
+            content: content.clone(),
+            source: Some(update.message_id.to_string()),
+            prompt_hash: None,
+        };
+        let save = Save::new(conversation_id)
+            .entry_with(entry)
+            .submission(NewSubmission {
+                id: id.clone(),
+                request_id: request_id.to_owned(),
+                kind: "input".to_owned(),
+                content,
+            })
+            .telegram_update(update)
+            .telegram_offset(next_offset);
+
+        match self.save(save) {
+            Ok(_) => {
+                let submission = self
+                    .submission_by_id(&id)?
+                    .ok_or_else(|| CoreError::SubmissionNotFound(id.clone()))?;
+                Ok(TelegramAdmission {
+                    submission,
+                    duplicate: false,
+                })
+            }
+            Err(CoreError::Storage(error)) if error.is_unique_violation() => {
+                match self.submission_by_request_id(request_id)? {
+                    Some(submission) => Ok(TelegramAdmission {
+                        submission,
+                        duplicate: true,
+                    }),
+                    None => Err(CoreError::Storage(error)),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Whether a Telegram update id was already admitted.
+    pub fn telegram_update_seen(&self, update_id: i64) -> Result<bool, CoreError> {
+        let seen: Option<i64> = self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT 1 FROM telegram_updates WHERE update_id = ?",
+                (update_id,),
+                |row| row.get(0),
+            )
+        })?;
+        Ok(seen.is_some())
     }
 
     /// Settle a submission exactly once.
