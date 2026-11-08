@@ -1,6 +1,7 @@
 //! The agent loop: one submission, one durable generation task, one answer.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use hearth_core::{
@@ -50,6 +51,7 @@ pub struct Agent {
     provider: Arc<dyn Provider>,
     pricing: Pricing,
     config: AgentConfig,
+    reservations: Mutex<HashSet<String>>,
 }
 
 impl Agent {
@@ -65,7 +67,23 @@ impl Agent {
             provider,
             pricing,
             config,
+            reservations: Mutex::new(HashSet::new()),
         }
+    }
+
+    fn reserve(&self, conversation_id: &str) -> Result<Reservation<'_>, AgentError> {
+        let mut reserved = self
+            .reservations
+            .lock()
+            .map_err(|_| AgentError::Invalid("reservation lock is poisoned".to_owned()))?;
+        if !reserved.insert(conversation_id.to_owned()) {
+            return Err(AgentError::Busy);
+        }
+        drop(reserved);
+        Ok(Reservation {
+            reservations: &self.reservations,
+            conversation_id: conversation_id.to_owned(),
+        })
     }
 
     /// Run one submission to a final answer or a settled failure.
@@ -79,6 +97,7 @@ impl Agent {
                 "submission is already settled".to_owned(),
             ));
         }
+        let _reservation = self.reserve(&submission.conversation_id)?;
         if self
             .session
             .active_generation_task(&submission.conversation_id)?
@@ -293,6 +312,19 @@ impl Agent {
             answer_text: None,
             notice: Some(notice),
         })
+    }
+}
+
+struct Reservation<'a> {
+    reservations: &'a Mutex<HashSet<String>>,
+    conversation_id: String,
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut reserved) = self.reservations.lock() {
+            reserved.remove(&self.conversation_id);
+        }
     }
 }
 
