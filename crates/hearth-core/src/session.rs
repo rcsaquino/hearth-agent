@@ -1274,6 +1274,103 @@ impl Session {
         raw.into_iter().map(RawEntry::into_entry).collect()
     }
 
+    /// Read the entries the model should see: the newest summary or reset
+    /// marker onward, with the summary first and the covered range excluded.
+    pub fn history_for_prompt(&self, conversation_id: &str) -> Result<Vec<Entry>, CoreError> {
+        let all = self.history(conversation_id)?;
+        let Some(marker) = all
+            .iter()
+            .rev()
+            .find(|entry| entry.kind == "summary" || entry.kind == "reset")
+        else {
+            return Ok(all);
+        };
+        if marker.kind == "summary" {
+            let first_kept = crate::compaction::summary_first_kept(marker)
+                .ok_or_else(|| CoreError::Corrupt("summary entry has no first_kept".to_owned()))?;
+            let mut visible = Vec::with_capacity(all.len());
+            visible.push(marker.clone());
+            visible.extend(
+                all.iter()
+                    .filter(|entry| {
+                        entry.seq >= first_kept
+                            && entry.id != marker.id
+                            && entry.kind != "summary"
+                            && entry.kind != "reset"
+                    })
+                    .cloned(),
+            );
+            Ok(visible)
+        } else {
+            let reset_seq = marker.seq;
+            Ok(all
+                .into_iter()
+                .filter(|entry| entry.seq > reset_seq)
+                .collect())
+        }
+    }
+
+    /// Return the best conversation for idle compaction, if any.
+    pub fn idle_compaction_candidate(
+        &self,
+        now_micros: i64,
+        idle_micros: i64,
+        min_tokens: u64,
+    ) -> Result<Option<Conversation>, CoreError> {
+        let sql = format!(
+            "{CONVERSATION_SELECT} WHERE archived = 0 AND updated_at <= ? \
+             ORDER BY updated_at DESC, id"
+        );
+        let cutoff = now_micros.saturating_sub(idle_micros);
+        let raw: Vec<RawConversation> = self.storage.read(|reader| {
+            reader.query(&sql, (cutoff,), |row| {
+                Ok(RawConversation {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    parent_entry_id: row.get(2)?,
+                    title: row.get(3)?,
+                    transport: row.get(4)?,
+                    transport_key: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    archived: row.get(8)?,
+                })
+            })
+        })?;
+        for raw in raw {
+            let conversation = raw.into_conversation();
+            if self.active_generation_task(&conversation.id)?.is_some() {
+                continue;
+            }
+            if self.queued_submission_count(&conversation.id)? > 0 {
+                continue;
+            }
+            let visible = self.history_for_prompt(&conversation.id)?;
+            let tokens: u64 = visible
+                .iter()
+                .map(|entry| entry.tokens_est.max(1) as u64)
+                .sum();
+            if tokens < min_tokens {
+                continue;
+            }
+            let all = self.history(&conversation.id)?;
+            let last_summary = all
+                .iter()
+                .rev()
+                .find(|entry| entry.kind == "summary")
+                .map(|entry| entry.seq)
+                .unwrap_or(0);
+            if !all
+                .iter()
+                .any(|entry| entry.kind != "summary" && entry.seq > last_summary)
+            {
+                continue;
+            }
+            return Ok(Some(conversation));
+        }
+        Ok(None)
+    }
+
     /// Assemble the prompt for a conversation.
     pub fn build_prompt(&self, input: PromptInput) -> Result<Prompt, CoreError> {
         crate::prompt::build_for(self, input)

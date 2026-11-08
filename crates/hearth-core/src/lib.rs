@@ -2,6 +2,7 @@
 
 mod budget;
 mod clock;
+mod compaction;
 mod error;
 mod model;
 mod prompt;
@@ -14,6 +15,9 @@ pub use budget::{
     SEGMENT_RUNTIME, SEGMENT_SKILLS, SEGMENT_STANDING, SEGMENT_TOOLS, TokenCounts,
 };
 pub use clock::{Clock, IdGen, SystemClock, UuidV7};
+pub use compaction::{
+    CompactionPlan, plan as plan_compaction, summary_content, summary_first_kept, summary_text,
+};
 pub use error::CoreError;
 pub use model::{
     Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,

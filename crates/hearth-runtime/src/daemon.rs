@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use hearth_config::{ConfigError, Media, Settings};
 use hearth_core::{
     ContextBudget, CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission,
+    plan_compaction,
 };
 use hearth_model::{
     MediaError, OpenAiCompatibleProvider, Pricing, Provider, ProviderError, Speaker, SpeechClient,
@@ -25,6 +26,7 @@ use signal_hook::iterator::Signals;
 use thiserror::Error;
 
 use crate::agent::{Agent, AgentConfig, AgentError, RunOutcome};
+use crate::compaction::Compactor;
 use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::ipc::{self, StatusContext};
@@ -364,14 +366,86 @@ impl StopHandler for RegistryStop {
 
 impl TelegramWorker {
     fn run(&self, shutdown: Arc<AtomicBool>) {
+        let mut last_idle_check = Instant::now();
+        let mut last_idle_compaction = 0i64;
+        let mut idle_attempted: HashMap<String, i64> = HashMap::new();
         while !shutdown.load(Ordering::Relaxed) {
             match self.session.next_queued_telegram_submission() {
                 Ok(Some(submission)) => self.run_one(submission),
-                Ok(None) => thread::sleep(Duration::from_millis(100)),
+                Ok(None) => {
+                    thread::sleep(Duration::from_millis(100));
+                    if last_idle_check.elapsed() >= Duration::from_secs(60) {
+                        last_idle_check = Instant::now();
+                        let now = self.session.now_micros();
+                        if now.saturating_sub(last_idle_compaction) >= 3_600_000_000 {
+                            let min_tokens = 100_000u64.min(self.budget.soft);
+                            match self.session.idle_compaction_candidate(
+                                now,
+                                3_600_000_000,
+                                min_tokens,
+                            ) {
+                                Ok(Some(conversation)) => {
+                                    let newest = self
+                                        .session
+                                        .history(&conversation.id)
+                                        .ok()
+                                        .and_then(|history| history.last().map(|entry| entry.seq))
+                                        .unwrap_or(0);
+                                    if idle_attempted.get(&conversation.id) == Some(&newest) {
+                                        continue;
+                                    }
+                                    idle_attempted.insert(conversation.id.clone(), newest);
+                                    if self.idle_compact(&conversation.id) {
+                                        last_idle_compaction = now;
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    tracing::warn!(%error, "idle compaction lookup failed")
+                                }
+                            }
+                        }
+                    }
+                }
                 Err(error) => {
                     tracing::error!(%error, "queued submission lookup failed");
                     thread::sleep(Duration::from_secs(1));
                 }
+            }
+        }
+    }
+
+    fn idle_compact(&self, conversation_id: &str) -> bool {
+        let history = match self.session.history_for_prompt(conversation_id) {
+            Ok(history) => history,
+            Err(error) => {
+                tracing::warn!(%error, "idle compaction history failed");
+                return false;
+            }
+        };
+        let Some(plan) = plan_compaction(&history, self.budget.keep_recent) else {
+            return false;
+        };
+        let compactor = Compactor::new(
+            self.session.clone(),
+            Arc::clone(&self.provider),
+            Pricing::default(),
+            Some(Arc::clone(&self.memory)),
+            self.model.clone(),
+            self.provider_name.clone(),
+            format!("daemon:idle:{}", self.pid),
+            self.budget.reserve,
+            self.budget.max_output_tokens,
+        );
+        match compactor.compact(conversation_id, &plan) {
+            Ok(Some(_)) => {
+                tracing::info!(conversation = conversation_id, "idle compaction complete");
+                true
+            }
+            Ok(None) => false,
+            Err(error) => {
+                tracing::warn!(%error, "idle compaction failed");
+                false
             }
         }
     }
@@ -465,7 +539,12 @@ impl TelegramWorker {
         let _ = typing.join();
 
         match outcome {
-            Ok(outcome) => self.deliver(chat_id, thread_id, &outcome),
+            Ok(outcome) => {
+                self.deliver(chat_id, thread_id, &outcome);
+                if let Err(error) = agent.compact_soft(&conversation.id) {
+                    tracing::warn!(%error, "soft compaction failed");
+                }
+            }
             Err(AgentError::Busy) => {
                 tracing::debug!(submission = %submission.id, "run is busy");
                 thread::sleep(Duration::from_millis(100));

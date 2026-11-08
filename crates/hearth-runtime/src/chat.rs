@@ -132,6 +132,9 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
                 } else if let Some(notice) = outcome.notice {
                     println!("{notice}");
                 }
+                if let Err(error) = agent.compact_soft(&conversation.id) {
+                    eprintln!("compaction: {error}");
+                }
             }
             Err(error) => println!("error: {error}"),
         }

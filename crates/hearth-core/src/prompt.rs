@@ -194,6 +194,15 @@ fn block_json(block: &ContentBlock) -> Value {
 
 /// Map one permanent entry to a chat message.
 pub fn message_for_entry(entry: &Entry) -> Option<ChatMessage> {
+    if entry.kind == "summary" {
+        let text = crate::compaction::summary_text(entry)?;
+        return Some(ChatMessage {
+            role: Role::System,
+            blocks: vec![ContentBlock::Text(format!(
+                "## Summary of earlier conversation\n\n{text}"
+            ))],
+        });
+    }
     let role = match entry.kind.as_str() {
         "user" => Role::User,
         "assistant" => Role::Assistant,
@@ -294,6 +303,6 @@ pub fn estimate_content(value: &Value) -> i64 {
 
 /// Build a prompt for a conversation.
 pub fn build_for(session: &Session, input: PromptInput) -> Result<Prompt, CoreError> {
-    let history = session.history(&input.conversation_id)?;
+    let history = session.history_for_prompt(&input.conversation_id)?;
     build(input, &history)
 }

@@ -4,6 +4,7 @@ use std::path::Path;
 
 mod agent;
 mod chat;
+mod compaction;
 mod daemon;
 mod doctor;
 mod effect_worker;
@@ -15,6 +16,7 @@ mod tools;
 
 pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};
 pub use chat::{ChatError, chat};
+pub use compaction::{CompactionError, Compactor};
 pub use daemon::{DaemonError, daemon};
 pub use doctor::{DoctorError, doctor};
 pub use effect_worker::EffectWorker;

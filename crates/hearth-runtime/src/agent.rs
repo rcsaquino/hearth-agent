@@ -9,9 +9,10 @@ use std::time::Instant;
 use hearth_core::{
     ContextBudget, CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session,
     StepOutput, Submission, SubmissionStatus, TerminalOutcome, build_prompt, parse_blocks,
+    plan_compaction,
 };
 use hearth_memory::MemoryService;
-use hearth_model::{ContentBlock, Pricing, Provider, StreamEvent, ToolCall, Usage};
+use hearth_model::{ContentBlock, Pricing, Provider, ProviderError, StreamEvent, ToolCall, Usage};
 use hearth_tools::{ToolError, ToolRegistry};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -19,6 +20,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::compaction::Compactor;
 use crate::events::{EventSink, NoopSink, RunEvent};
 use crate::memory_extract::MemoryExtractor;
 
@@ -120,6 +122,73 @@ impl Agent {
             })
             .unwrap_or_default();
         (standing, recall)
+    }
+
+    fn compactor(&self) -> Compactor {
+        Compactor::new(
+            self.session.clone(),
+            Arc::clone(&self.provider),
+            self.pricing.clone(),
+            self.memory.clone(),
+            self.config.model.clone(),
+            self.config.provider_name.clone(),
+            self.config.owner.clone(),
+            self.budget.reserve,
+            self.budget.max_output_tokens,
+        )
+    }
+
+    fn try_compact(&self, conversation_id: &str) -> bool {
+        let Ok(history) = self.session.history_for_prompt(conversation_id) else {
+            return false;
+        };
+        let Some(plan) = plan_compaction(&history, self.budget.keep_recent) else {
+            return false;
+        };
+        match self.compactor().compact(conversation_id, &plan) {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(error) => {
+                tracing::warn!(%error, "compaction failed");
+                false
+            }
+        }
+    }
+
+    /// Compact after a settled turn when the visible prompt exceeds the soft
+    /// threshold. The answer is already durable and delivered before this runs.
+    pub fn compact_soft(&self, conversation_id: &str) -> Result<bool, AgentError> {
+        let history = self.session.history_for_prompt(conversation_id)?;
+        let now = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| "unknown time".to_owned());
+        let runtime_note = format!(
+            "Current time: {now}. Conversation: {conversation_id}. Model: {}.",
+            self.config.model
+        );
+        let (standing, recall) = self.memory_context(latest_user_text(&history).as_deref());
+        let prompt = build_prompt(
+            PromptInput {
+                soul: self.config.soul.clone(),
+                conversation_id: conversation_id.to_owned(),
+                model: self.config.model.clone(),
+                tools: self.config.tools.specs(),
+                standing,
+                recall,
+                runtime_note,
+            },
+            &history,
+        )?;
+        if prompt.tokens.total <= self.budget.soft {
+            return Ok(false);
+        }
+        let Some(plan) = plan_compaction(&history, self.budget.keep_recent) else {
+            return Ok(false);
+        };
+        self.compactor()
+            .compact(conversation_id, &plan)
+            .map(|summary| summary.is_some())
+            .map_err(|error| AgentError::Invalid(error.to_string()))
     }
 
     fn reserve(&self, conversation_id: &str) -> Result<Reservation<'_>, AgentError> {
@@ -228,7 +297,9 @@ impl Agent {
             .and_then(Value::as_u64)
             .unwrap_or(0) as u32;
 
-        let history = self.session.history(&submission.conversation_id)?;
+        let history = self
+            .session
+            .history_for_prompt(&submission.conversation_id)?;
         let pending = pending_calls(&history);
         if !pending.is_empty() {
             self.execute_calls(&submission, &claimed.id, &pending, events)?;
@@ -244,7 +315,9 @@ impl Agent {
             );
         }
 
-        loop {
+        let mut hard_compacted = false;
+        let mut overflow_attempted = false;
+        'turn: loop {
             if cancel.load(Ordering::Relaxed) {
                 return self.settle_cancelled(&submission, &claimed.id, events);
             }
@@ -271,7 +344,9 @@ impl Agent {
                 "Current time: {now}. Conversation: {}. Model: {}.",
                 submission.conversation_id, self.config.model
             );
-            let history = self.session.history(&submission.conversation_id)?;
+            let history = self
+                .session
+                .history_for_prompt(&submission.conversation_id)?;
             let (standing, recall) = self.memory_context(latest_user_text(&history).as_deref());
             let tools = self.config.tools.specs();
             let make_input = |recall: String| PromptInput {
@@ -294,6 +369,19 @@ impl Agent {
             if prompt.tokens.total > self.budget.usable {
                 let shrunk = shrink_tool_results(&history);
                 prompt = build_prompt(make_input(recall_text), &shrunk)?;
+            }
+            if prompt.tokens.total > self.budget.hard && !hard_compacted {
+                hard_compacted = true;
+                if self.try_compact(&submission.conversation_id) {
+                    emit(
+                        events,
+                        &claimed.id,
+                        &submission.conversation_id,
+                        "task_step",
+                        json!({"phase": "compaction", "turn": turn}),
+                    );
+                    continue 'turn;
+                }
             }
             if prompt.tokens.total > self.budget.usable {
                 return self.settle_failure(
@@ -333,6 +421,12 @@ impl Agent {
             let stream = match self.provider.stream(prompt.request) {
                 Ok(stream) => stream,
                 Err(error) => {
+                    if !overflow_attempted && is_context_overflow(&error) {
+                        overflow_attempted = true;
+                        if self.try_compact(&submission.conversation_id) {
+                            continue 'turn;
+                        }
+                    }
                     return self.settle_failure(
                         &submission,
                         &claimed.id,
@@ -387,6 +481,12 @@ impl Agent {
                                 usage,
                                 cost_micros,
                             );
+                        }
+                        if !overflow_attempted && is_context_overflow(&error) {
+                            overflow_attempted = true;
+                            if self.try_compact(&submission.conversation_id) {
+                                continue 'turn;
+                            }
                         }
                         return self.settle_failure(
                             &submission,
@@ -919,6 +1019,29 @@ fn shrink_tool_results(history: &[Entry]) -> Vec<Entry> {
             }
         })
         .collect()
+}
+
+fn is_context_overflow(error: &ProviderError) -> bool {
+    let ProviderError::Request {
+        status, message, ..
+    } = error
+    else {
+        return false;
+    };
+    if *status != 400 {
+        return false;
+    }
+    let message = message.to_ascii_lowercase();
+    [
+        "context length",
+        "context window",
+        "maximum context",
+        "too many tokens",
+        "token limit",
+        "too long",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
 }
 
 fn has_usage(usage: Usage) -> bool {
