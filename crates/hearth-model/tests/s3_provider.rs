@@ -318,3 +318,28 @@ fn usage_chunk_maps_every_token_field() {
     server.request();
     server.finish();
 }
+
+#[test]
+fn reasoning_deltas_are_separate_from_text() {
+    let server = FakeServer::start(vec![TestResponse::sse(&[
+        r#"{"choices":[{"delta":{"reasoning_content":"think","content":"answer"},"finish_reason":"stop"}]}"#,
+    ])]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let events: Vec<StreamEvent> = provider
+        .stream(request())
+        .expect("stream")
+        .collect::<Result<_, _>>()
+        .expect("events");
+    assert_eq!(
+        events,
+        vec![
+            StreamEvent::ThinkingDelta("think".to_owned()),
+            StreamEvent::TextDelta("answer".to_owned()),
+            StreamEvent::Done {
+                finish_reason: Some("stop".to_owned())
+            },
+        ]
+    );
+    server.request();
+    server.finish();
+}
