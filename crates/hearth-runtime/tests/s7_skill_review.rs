@@ -3,13 +3,13 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use hearth_core::{ClaimedTask, Harness, Save, Session, StepOutput, SubmissionStatus};
+use hearth_core::{ClaimedTask, Harness, NewTask, Save, Session, StepOutput, SubmissionStatus};
 use hearth_memory::MemoryService;
 use hearth_model::{
     ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent, Usage,
 };
 use hearth_runtime::TaskHandler;
-use hearth_runtime::skill_review::{SkillReviewHandler, SkillReviewer};
+use hearth_runtime::skill_review::{ReviewReport, SkillReviewHandler, SkillReviewer};
 use hearth_runtime::skills::{SkillLibrary, SkillSave, SkillStatus};
 use serde_json::json;
 use tempfile::TempDir;
@@ -101,6 +101,14 @@ fn seed_run(session: &Session, conversation: &str, skill: &str, request: &str) -
     user
 }
 
+fn run_review(reviewer: &SkillReviewer, session: &Session) -> (ReviewReport, String) {
+    let task = session
+        .create_task(NewTask::new("skill.review", 1, "run", json!({})))
+        .expect("review task");
+    let report = reviewer.run(&task.id, session.now_micros()).expect("review");
+    (report, task.id)
+}
+
 fn learned_file(
     home: &Path,
     name: &str,
@@ -158,16 +166,14 @@ fn a_review_creates_a_skill_with_three_evidence_runs() {
     })
     .to_string();
     let (scripted, reviewer) = reviewer(session, home.path(), &response);
-    let report = reviewer
-        .run("task-review", session.now_micros())
-        .expect("review");
+    let (report, task_id) = run_review(&reviewer, session);
     assert!(report.applied >= 1, "{report:?}");
     let stored = SkillLibrary::new(home.path());
     let triage = stored.find("triage").expect("find").expect("triage");
     assert_eq!(triage.status, SkillStatus::Draft);
     let research = stored.find("research").expect("find").expect("research");
     assert_eq!(research.status, SkillStatus::Active);
-    let usage = session.usage_for_task("task-review").expect("usage");
+    let usage = session.usage_for_task(&task_id).expect("usage");
     assert_eq!(usage.len(), 1);
     assert_eq!(usage[0].kind, "skill.review");
     let prompt = session.latest_prompt().expect("prompt").expect("blob");
@@ -193,9 +199,7 @@ fn a_review_rejects_a_create_with_too_little_evidence() {
     })
     .to_string();
     let (_scripted, reviewer) = reviewer(session, home.path(), &response);
-    let report = reviewer
-        .run("task-review", session.now_micros())
-        .expect("review");
+    let (report, _) = run_review(&reviewer, session);
     assert_eq!(report.rejected, 1);
     assert!(SkillLibrary::new(home.path()).find("triage").expect("find").is_none());
 }
@@ -227,9 +231,7 @@ fn a_review_cannot_edit_a_user_skill() {
     })
     .to_string();
     let (_scripted, reviewer) = reviewer(session, home.path(), &response);
-    let report = reviewer
-        .run("task-review", session.now_micros())
-        .expect("review");
+    let (report, _) = run_review(&reviewer, session);
     assert_eq!(report.rejected, 1);
     let written = fs::read_to_string(&path).expect("read user skill");
     assert!(written.contains("Write clearly"), "{written}");
@@ -257,9 +259,7 @@ fn a_review_caps_changes_at_three() {
         .collect();
     let response = json!({"changes": changes}).to_string();
     let (_scripted, reviewer) = reviewer(session, home.path(), &response);
-    let report = reviewer
-        .run("task-review", session.now_micros())
-        .expect("review");
+    let (report, _) = run_review(&reviewer, session);
     assert_eq!(report.applied, 3);
     let stored = SkillLibrary::new(home.path());
     assert!(stored.find("cap-0").expect("find").is_some());
@@ -275,12 +275,10 @@ fn the_automatic_lifecycle_promotes_quarantines_and_archives() {
     let session = harness.session();
     learned_file(home.path(), "research", "draft", 1, 1, 0, "2026-11-01");
     learned_file(home.path(), "danger", "active", 2, 0, 2, "2026-11-01");
-    learned_file(home.path(), "old", "active", 1, 1, 0, "2020-01-01");
+    learned_file(home.path(), "old", "active", 1, 1, 0, "2020-01-01T00:00:00Z");
     let response = json!({"changes": []}).to_string();
     let (_scripted, reviewer) = reviewer(session, home.path(), &response);
-    let report = reviewer
-        .run("task-review", session.now_micros())
-        .expect("review");
+    let (report, _) = run_review(&reviewer, session);
     assert_eq!(report.applied, 3);
     let stored = SkillLibrary::new(home.path());
     assert_eq!(

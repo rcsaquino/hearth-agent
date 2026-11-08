@@ -406,7 +406,7 @@ fn run_view(entries: &[Entry]) -> (String, HashMap<String, String>) {
     (view, texts)
 }
 
-fn entry_text(entry: &Entry) -> String {
+pub(crate) fn entry_text(entry: &Entry) -> String {
     parse_blocks(&entry.content)
         .into_iter()
         .filter_map(|block| match block {
