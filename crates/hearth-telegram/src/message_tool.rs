@@ -16,6 +16,7 @@ use crate::api::{MediaKind, TelegramClient, TelegramError};
 pub struct MessageTool {
     client: TelegramClient,
     chat_id: i64,
+    thread_id: Option<i64>,
     workspace: Workspace,
     outbound: PathBuf,
     speaker: Option<Arc<dyn Speaker>>,
@@ -26,6 +27,7 @@ impl MessageTool {
     pub fn new(
         client: TelegramClient,
         chat_id: i64,
+        thread_id: Option<i64>,
         workspace: impl Into<PathBuf>,
         spill: impl Into<PathBuf>,
         outbound: impl Into<PathBuf>,
@@ -34,6 +36,7 @@ impl MessageTool {
         Self {
             client,
             chat_id,
+            thread_id,
             workspace: Workspace::new(workspace, spill),
             outbound: outbound.into(),
             speaker,
@@ -101,7 +104,7 @@ impl Tool for MessageTool {
             let voice = self.write_voice(&audio)?;
             let id = self
                 .client
-                .send_voice(self.chat_id, None, &voice, caption)
+                .send_voice(self.chat_id, self.thread_id, &voice, caption)
                 .map_err(telegram_error)?;
             sent.push(id);
         }
@@ -131,7 +134,7 @@ impl Tool for MessageTool {
                 let items: Vec<(MediaKind, PathBuf)> = resolved;
                 let ids = self
                     .client
-                    .send_media_group(self.chat_id, None, &items, caption)
+                    .send_media_group(self.chat_id, self.thread_id, &items, caption)
                     .map_err(telegram_error)?;
                 sent.extend(ids);
             } else {
@@ -168,10 +171,10 @@ impl MessageTool {
         caption: Option<&str>,
     ) -> Result<i64, ToolError> {
         let result = match kind {
-            MediaKind::Photo => self.client.send_photo(self.chat_id, None, path, caption),
-            MediaKind::Video => self.client.send_video(self.chat_id, None, path, caption),
-            MediaKind::Voice => self.client.send_voice(self.chat_id, None, path, caption),
-            MediaKind::Document => self.client.send_document(self.chat_id, None, path, caption),
+            MediaKind::Photo => self.client.send_photo(self.chat_id, self.thread_id, path, caption),
+            MediaKind::Video => self.client.send_video(self.chat_id, self.thread_id, path, caption),
+            MediaKind::Voice => self.client.send_voice(self.chat_id, self.thread_id, path, caption),
+            MediaKind::Document => self.client.send_document(self.chat_id, self.thread_id, path, caption),
         };
         result.map_err(telegram_error)
     }
