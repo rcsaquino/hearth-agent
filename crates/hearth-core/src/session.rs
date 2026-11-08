@@ -9,8 +9,8 @@ use serde_json::Value;
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
-    Commit, CommitRecord, Conversation, Document, Entry, NewSubmission, Save, Submission,
-    SubmissionStatus, SubmitResult,
+    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewSubmission, Save,
+    Submission, SubmissionStatus, SubmitResult,
 };
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
 
@@ -23,6 +23,8 @@ const SUBMISSION_SELECT: &str = "SELECT id, conversation_id, request_id, kind, c
 const TASK_SELECT: &str = "SELECT id, conversation_id, parent_task_id, kind, version, status, \
      phase, attempt, input_json, checkpoint_json, result_json, lease_owner, lease_until, \
      next_wake_at, created_at, updated_at, terminal_at FROM tasks";
+const EFFECT_SELECT: &str = "SELECT id, task_id, kind, key, payload_json, status, result_json, \
+     attempts, created_at, settled_at FROM effects";
 
 type RawCommitRow = (i64, i64, Option<String>, Option<String>, String);
 
@@ -114,6 +116,10 @@ impl Session {
         for _ in &save.entries {
             entry_ids.push(self.ids.new_id());
         }
+        let mut effect_ids = Vec::with_capacity(save.effects.len());
+        for _ in &save.effects {
+            effect_ids.push(self.ids.new_id());
+        }
         let conversation_id = save.conversation_id.clone();
 
         self.storage.write(move |writer| -> Result<Commit, CoreError> {
@@ -142,7 +148,7 @@ impl Session {
                 }
             }
 
-            let seq = record_commit(writer, now, Some(conversation_id.as_str()), None, "save")?;
+            let seq = next_sequence(writer)?;
             for (entry, id) in save.entries.iter().zip(entry_ids.iter()) {
                 let content = serde_json::to_string(&entry.content)
                     .map_err(|error| CoreError::Invalid(error.to_string()))?;
@@ -272,12 +278,56 @@ impl Session {
                 }
             }
 
+            let mut recorded_effect_ids = Vec::with_capacity(save.effects.len());
+            for (intent, generated_id) in save.effects.iter().zip(effect_ids.iter()) {
+                let existing: Option<String> = writer.query_optional(
+                    "SELECT id FROM effects WHERE kind = ? AND key = ?",
+                    (intent.kind.as_str(), intent.key.as_str()),
+                    |row| row.get(0),
+                )?;
+                let id = match existing {
+                    Some(id) => id,
+                    None => {
+                        let payload = serde_json::to_string(&intent.payload)
+                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        writer.execute(
+                            "INSERT INTO effects (id, task_id, kind, key, payload_json, status, \
+                             result_json, attempts, created_at, settled_at) \
+                             VALUES (?, ?, ?, ?, ?, 'intent', NULL, 0, ?, NULL)",
+                            (
+                                generated_id.as_str(),
+                                intent.task_id.as_deref(),
+                                intent.kind.as_str(),
+                                intent.key.as_str(),
+                                payload.as_str(),
+                                now,
+                            ),
+                        )?;
+                        generated_id.clone()
+                    }
+                };
+                recorded_effect_ids.push(id);
+            }
+
             writer.execute(
                 "UPDATE conversations SET updated_at = ? WHERE id = ?",
                 (now, conversation_id.as_str()),
             )?;
 
-            Ok(Commit { seq, entry_ids })
+            insert_commit(
+                writer,
+                seq,
+                now,
+                Some(conversation_id.as_str()),
+                None,
+                "save",
+            )?;
+
+            Ok(Commit {
+                seq,
+                entry_ids,
+                effect_ids: recorded_effect_ids,
+            })
         })
     }
 
@@ -307,6 +357,61 @@ impl Session {
                 task_id,
                 kind,
             },
+        ))
+    }
+
+    /// Read one recorded effect.
+    pub fn effect(&self, id: &str) -> Result<Option<Effect>, CoreError> {
+        let sql = format!("{EFFECT_SELECT} WHERE id = ?");
+        let raw: Option<RawEffect> = self.storage.read(|reader| {
+            reader.query_optional(&sql, (id,), |row| {
+                Ok(RawEffect {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    kind: row.get(2)?,
+                    key: row.get(3)?,
+                    payload_json: row.get(4)?,
+                    status: row.get(5)?,
+                    result_json: row.get(6)?,
+                    attempts: row.get(7)?,
+                    created_at: row.get(8)?,
+                    settled_at: row.get(9)?,
+                })
+            })
+        })?;
+        raw.map(RawEffect::into_effect).transpose()
+    }
+
+    /// Mark an effect intent as started.
+    pub fn begin_effect(&self, _id: &str) -> Result<Effect, CoreError> {
+        Err(CoreError::Invalid(
+            "effect lifecycle is not implemented".to_owned(),
+        ))
+    }
+
+    /// Settle a started effect.
+    pub fn finish_effect(&self, _id: &str, _result: Value) -> Result<Effect, CoreError> {
+        Err(CoreError::Invalid(
+            "effect lifecycle is not implemented".to_owned(),
+        ))
+    }
+
+    /// Record an effect failure, retryable or terminal.
+    pub fn fail_effect(
+        &self,
+        _id: &str,
+        _error: Value,
+        _retryable: bool,
+    ) -> Result<Effect, CoreError> {
+        Err(CoreError::Invalid(
+            "effect lifecycle is not implemented".to_owned(),
+        ))
+    }
+
+    /// Return a started effect to the intent state after a crash.
+    pub fn requeue_effect(&self, _id: &str) -> Result<Effect, CoreError> {
+        Err(CoreError::Invalid(
+            "effect lifecycle is not implemented".to_owned(),
         ))
     }
 
@@ -1225,6 +1330,45 @@ impl RawTask {
     }
 }
 
+struct RawEffect {
+    id: String,
+    task_id: Option<String>,
+    kind: String,
+    key: String,
+    payload_json: String,
+    status: String,
+    result_json: Option<String>,
+    attempts: i64,
+    created_at: i64,
+    settled_at: Option<i64>,
+}
+
+impl RawEffect {
+    fn into_effect(self) -> Result<Effect, CoreError> {
+        let status = EffectStatus::parse(&self.status)
+            .ok_or_else(|| CoreError::Corrupt(format!("unknown effect status: {}", self.status)))?;
+        let payload = serde_json::from_str(&self.payload_json)
+            .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+        let result = self
+            .result_json
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+        Ok(Effect {
+            id: self.id,
+            task_id: self.task_id,
+            kind: self.kind,
+            key: self.key,
+            payload,
+            status,
+            result,
+            attempts: self.attempts,
+            created_at: self.created_at,
+            settled_at: self.settled_at,
+        })
+    }
+}
+
 struct RawClaim {
     id: String,
     conversation_id: Option<String>,
@@ -1235,6 +1379,30 @@ struct RawClaim {
     checkpoint_json: Option<String>,
 }
 
+fn next_sequence(writer: &Writer<'_>) -> Result<i64, CoreError> {
+    Ok(writer.query_row(
+        "SELECT COALESCE(MAX(seq), 0) + 1 FROM commits",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn insert_commit(
+    writer: &Writer<'_>,
+    seq: i64,
+    now: i64,
+    conversation_id: Option<&str>,
+    task_id: Option<&str>,
+    kind: &str,
+) -> Result<(), CoreError> {
+    writer.execute(
+        "INSERT INTO commits (seq, created_at, conversation_id, task_id, kind) \
+         VALUES (?, ?, ?, ?, ?)",
+        (seq, now, conversation_id, task_id, kind),
+    )?;
+    Ok(())
+}
+
 fn record_commit(
     writer: &Writer<'_>,
     now: i64,
@@ -1242,15 +1410,8 @@ fn record_commit(
     task_id: Option<&str>,
     kind: &str,
 ) -> Result<i64, CoreError> {
-    let seq: i64 =
-        writer.query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM commits", [], |row| {
-            row.get(0)
-        })?;
-    writer.execute(
-        "INSERT INTO commits (seq, created_at, conversation_id, task_id, kind) \
-         VALUES (?, ?, ?, ?, ?)",
-        (seq, now, conversation_id, task_id, kind),
-    )?;
+    let seq = next_sequence(writer)?;
+    insert_commit(writer, seq, now, conversation_id, task_id, kind)?;
     Ok(seq)
 }
 
@@ -1279,3 +1440,4 @@ fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {
     })?;
     raw.map(RawTask::into_task).transpose()
 }
+

@@ -28,6 +28,10 @@ pub enum CoreError {
     TaskNotRunning(String, String),
     #[error("task {0} is leased by another worker")]
     LeaseLost(String),
+    #[error("effect {0} not found")]
+    EffectNotFound(String),
+    #[error("effect {id} is not ready (status {status})")]
+    EffectNotReady { id: String, status: String },
     #[error("invalid input: {0}")]
     Invalid(String),
     #[error("stored data is invalid: {0}")]

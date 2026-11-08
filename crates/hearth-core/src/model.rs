@@ -90,11 +90,94 @@ impl SubmissionStatus {
     }
 }
 
+/// The state of an outside action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectStatus {
+    Intent,
+    Started,
+    Done,
+    Failed,
+    Unknown,
+}
+
+impl EffectStatus {
+    /// The stored text for this status.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Intent => "intent",
+            Self::Started => "started",
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// Parse a stored status.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "intent" => Some(Self::Intent),
+            "started" => Some(Self::Started),
+            "done" => Some(Self::Done),
+            "failed" => Some(Self::Failed),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+
+    /// Whether this status is final.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Done | Self::Failed | Self::Unknown)
+    }
+}
+
+/// One recorded action outside the database.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Effect {
+    pub id: String,
+    pub task_id: Option<String>,
+    pub kind: String,
+    pub key: String,
+    pub payload: Value,
+    pub status: EffectStatus,
+    pub result: Option<Value>,
+    pub attempts: i64,
+    pub created_at: i64,
+    pub settled_at: Option<i64>,
+}
+
+/// An outside action to record in a save.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectIntent {
+    pub kind: String,
+    pub key: String,
+    pub payload: Value,
+    pub task_id: Option<String>,
+}
+
+impl EffectIntent {
+    /// Create an effect intent with a stable key.
+    pub fn new(kind: impl Into<String>, key: impl Into<String>, payload: Value) -> Self {
+        Self {
+            kind: kind.into(),
+            key: key.into(),
+            payload,
+            task_id: None,
+        }
+    }
+
+    /// Attach the effect to a task.
+    pub fn task(mut self, id: impl Into<String>) -> Self {
+        self.task_id = Some(id.into());
+        self
+    }
+}
+
 /// The outcome of one save.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commit {
     pub seq: i64,
     pub entry_ids: Vec<String>,
+    pub effect_ids: Vec<String>,
 }
 
 /// One line in the save log.
@@ -156,6 +239,7 @@ pub struct Save {
     pub(crate) documents: Vec<DocumentWrite>,
     pub(crate) submissions: Vec<NewSubmission>,
     pub(crate) settles: Vec<Settle>,
+    pub(crate) effects: Vec<EffectIntent>,
 }
 
 impl Save {
@@ -167,6 +251,7 @@ impl Save {
             documents: Vec::new(),
             submissions: Vec::new(),
             settles: Vec::new(),
+            effects: Vec::new(),
         }
     }
 
@@ -215,6 +300,12 @@ impl Save {
             status,
             answer_entry_id,
         });
+        self
+    }
+
+    /// Record an outside action that should happen after the save.
+    pub fn effect(mut self, intent: EffectIntent) -> Self {
+        self.effects.push(intent);
         self
     }
 }
