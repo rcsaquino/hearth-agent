@@ -736,3 +736,152 @@ fn near_duplicates_consolidate_into_one_active_row() {
     assert!(active.iter().any(|item| item.id == survivor));
     assert!(!active.iter().any(|item| item.id == duplicate));
 }
+
+#[test]
+fn a_direct_fact_is_recalled_when_standing_memory_is_full() {
+    let (_home, _session, service) = setup();
+    for index in 0..6 {
+        let mut preference = input(
+            &format!("Sam prefers style {index}"),
+            MemoryKind::Preference,
+        );
+        preference.importance = 95;
+        service.save(preference).expect("save preference");
+    }
+    let fact = service
+        .save(input(
+            "The primary project is Project Atlas.",
+            MemoryKind::Fact,
+        ))
+        .expect("save fact");
+    let items = service
+        .recall("What is the primary project?")
+        .expect("recall");
+    assert!(
+        items.iter().any(|item| item.id == fact.id),
+        "direct fact was pushed out by standing memory: {:?}",
+        items
+            .iter()
+            .map(|item| item.content.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn as_of_returns_a_fact_learned_after_the_query_time() {
+    let (_home, session, service) = setup();
+    let now = session.now_micros();
+    let mut fact = input("The lab is in Building 4.", MemoryKind::Fact);
+    fact.valid_from = Some(now - 10_000_000);
+    let saved = service.save(fact).expect("save");
+    let items = service
+        .as_of(Some("Where is the lab?"), now - 5_000_000)
+        .expect("as_of");
+    assert!(
+        items.iter().any(|item| item.id == saved.id),
+        "as_of missed a fact that was true before it was learned"
+    );
+}
+
+#[test]
+fn distinct_numeric_versions_are_not_merged() {
+    let (_home, _session, service) = setup();
+    let first = service
+        .save(input("The tool version is 1.0.", MemoryKind::Fact))
+        .expect("first");
+    let second = service
+        .save(input("The tool version is 1.1.", MemoryKind::Fact))
+        .expect("second");
+    assert_ne!(first.id, second.id, "distinct versions were merged");
+    assert_eq!(service.stats().expect("stats").total, 2);
+}
+
+#[test]
+fn a_tag_only_match_is_recalled() {
+    let (_home, _session, service) = setup();
+    let mut memory = input("The spare drive is ready.", MemoryKind::Fact);
+    memory.tags = vec!["nebula".to_owned()];
+    let saved = service.save(memory).expect("save");
+    let items = service.recall("nebula").expect("recall");
+    assert!(items.iter().any(|item| item.id == saved.id));
+}
+
+#[test]
+fn common_question_words_do_not_flood_recall() {
+    let (_home, _session, service) = setup();
+    for index in 0..10 {
+        service
+            .save(input(
+                &format!("The note {index} is about the weather."),
+                MemoryKind::Fact,
+            ))
+            .expect("save noise");
+    }
+    let fact = service
+        .save(input(
+            "The primary project is Project Atlas.",
+            MemoryKind::Fact,
+        ))
+        .expect("save fact");
+    let items = service
+        .recall("What is the primary project?")
+        .expect("recall");
+    assert!(
+        items.iter().any(|item| item.id == fact.id),
+        "stopword-only matches flooded recall: {:?}",
+        items
+            .iter()
+            .map(|item| item.content.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn the_fixture_direct_question_returns_the_expected_fact() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../hearth-eval/fixtures/memory_bench.json"))
+            .expect("fixture");
+    let (_home, _session, service) = setup();
+    let mut keys = std::collections::BTreeMap::new();
+    for memory in fixture["memories"].as_array().expect("memories") {
+        let key = memory["key"].as_str().expect("key").to_owned();
+        let kind = MemoryKind::parse(memory["kind"].as_str().expect("kind")).expect("kind");
+        let tags = memory["tags"]
+            .as_array()
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let supersedes = memory["supersedes_key"]
+            .as_str()
+            .and_then(|old| keys.get(old).cloned());
+        let input = NewMemoryInput {
+            content: memory["content"].as_str().expect("content").to_owned(),
+            kind,
+            tags,
+            importance: memory["importance"].as_i64().unwrap_or(50),
+            source_kind: SourceKind::Session,
+            source_ref: Some(key.clone()),
+            supersedes,
+            valid_from: memory["valid_from"].as_i64(),
+            valid_to: memory["valid_to"].as_i64(),
+        };
+        let item = service.save(input).expect("save fixture memory");
+        keys.insert(key, item.id);
+    }
+    let expected = keys.get("m001").expect("m001").clone();
+    let items = service
+        .recall("What is the primary project?")
+        .expect("recall");
+    assert!(
+        items.iter().any(|item| item.id == expected),
+        "fixture direct question missed m001: {:?}",
+        items
+            .iter()
+            .map(|item| item.content.as_str())
+            .collect::<Vec<_>>()
+    );
+}

@@ -342,30 +342,28 @@ impl MemoryService {
         let fts = query.map(fts_query).unwrap_or_default();
         let raw: Vec<RawMemory> = if fts.is_empty() {
             let sql = format!(
-                "{MEMORY_SELECT} WHERE status != 'deleted' AND created_at <= ? \
+                "{MEMORY_SELECT} WHERE status != 'deleted' \
                  AND (valid_from IS NULL OR valid_from <= ?) \
                  AND (valid_to IS NULL OR valid_to > ?) \
                  ORDER BY created_at LIMIT 50"
             );
             self.read(|reader| {
-                reader.query(&sql, (at_micros, at_micros, at_micros), |row| {
+                reader.query(&sql, (at_micros, at_micros), |row| {
                     Ok(RawMemory::from_row(row))
                 })
             })?
         } else {
             let sql = format!(
                 "{MEMORY_SELECT_M} JOIN memory_fts f ON m.rowid = f.rowid \
-                 WHERE memory_fts MATCH ? AND m.status != 'deleted' AND m.created_at <= ? \
+                 WHERE memory_fts MATCH ? AND m.status != 'deleted' \
                  AND (m.valid_from IS NULL OR m.valid_from <= ?) \
                  AND (m.valid_to IS NULL OR m.valid_to > ?) \
-                 ORDER BY m.created_at LIMIT 50"
+                 ORDER BY bm25(memory_fts) LIMIT 50"
             );
             self.read(|reader| {
-                reader.query(
-                    &sql,
-                    (fts.as_str(), at_micros, at_micros, at_micros),
-                    |row| Ok(RawMemory::from_row(row)),
-                )
+                reader.query(&sql, (fts.as_str(), at_micros, at_micros), |row| {
+                    Ok(RawMemory::from_row(row))
+                })
             })?
         };
         raw.into_iter().map(RawMemory::into_item).collect()
@@ -504,6 +502,11 @@ impl MemoryService {
             }
         }
 
+        let max_rrf = scores
+            .values()
+            .map(|(_, rrf)| *rrf)
+            .fold(0.0f64, f64::max)
+            .max(f64::EPSILON);
         let mut ranked: Vec<(MemoryItem, f64)> = scores
             .into_values()
             .map(|(item, rrf)| {
@@ -512,7 +515,7 @@ impl MemoryService {
                 let last_used = item.last_used_at.unwrap_or(item.created_at);
                 let stale_days = (now - last_used).max(0) as f64 / 86_400_000_000.0;
                 let staleness = 0.5f64.powf(stale_days / RECENCY_HALF_LIFE_DAYS);
-                let score = rrf
+                let score = (rrf / max_rrf)
                     + RECENCY_WEIGHT * recency
                     + IMPORTANCE_WEIGHT * (item.importance as f64 / 100.0)
                     - STALENESS_WEIGHT * staleness;
@@ -598,8 +601,10 @@ impl MemoryService {
                     continue;
                 }
                 let same = rows[i].fingerprint == rows[j].fingerprint;
-                let near =
-                    jaccard(&tokens(&rows[i].content), &tokens(&rows[j].content)) >= NEAR_DUPLICATE;
+                let near = jaccard(
+                    &content_tokens(&rows[i].content),
+                    &content_tokens(&rows[j].content),
+                ) >= NEAR_DUPLICATE;
                 if !same && !near {
                     continue;
                 }
@@ -663,27 +668,31 @@ impl MemoryService {
         if tags.is_empty() {
             return Ok(Vec::new());
         }
-        let mut clauses = Vec::with_capacity(tags.len());
-        let mut params: Vec<String> = Vec::with_capacity(tags.len());
-        for tag in &tags {
-            clauses.push("tags LIKE ?".to_owned());
-            params.push(format!("%\"{tag}\"%"));
-        }
+        let fts = tags
+            .iter()
+            .map(|tag| format!("\"{tag}\""))
+            .collect::<Vec<_>>()
+            .join(" OR ");
         let sql = format!(
-            "{MEMORY_SELECT} WHERE status = 'active' AND ({}) \
-             ORDER BY importance DESC, created_at DESC LIMIT 20",
-            clauses.join(" OR ")
+            "{MEMORY_SELECT_M} JOIN memory_fts f ON m.rowid = f.rowid \
+             WHERE memory_fts MATCH ? AND m.status = 'active' \
+             ORDER BY bm25(memory_fts) LIMIT 20"
         );
         let raw: Vec<RawMemory> = self.read(|reader| {
-            let values: Vec<&dyn rusqlite::ToSql> = params
-                .iter()
-                .map(|value| value as &dyn rusqlite::ToSql)
-                .collect();
-            reader.query(&sql, rusqlite::params_from_iter(values), |row| {
-                Ok(RawMemory::from_row(row))
-            })
+            reader.query(&sql, (fts.as_str(),), |row| Ok(RawMemory::from_row(row)))
         })?;
-        raw.into_iter().map(RawMemory::into_item).collect()
+        let mut items = Vec::new();
+        for row in raw {
+            let item = row.into_item()?;
+            if item
+                .tags
+                .iter()
+                .any(|tag| tags.iter().any(|query_tag| tag == query_tag))
+            {
+                items.push(item);
+            }
+        }
+        Ok(items)
     }
 
     fn commit(&self, writes: Vec<MemoryWrite>, bump: bool) -> Result<(), MemoryError> {
@@ -745,7 +754,7 @@ impl MemoryService {
     }
 
     fn find_near(&self, content: &str) -> Result<Option<MemoryItem>, MemoryError> {
-        let candidate_tokens = tokens(content);
+        let candidate_tokens = content_tokens(content);
         if candidate_tokens.is_empty() {
             return Ok(None);
         }
@@ -753,7 +762,7 @@ impl MemoryService {
         let raw: Vec<RawMemory> =
             self.read(|reader| reader.query(&sql, [], |row| Ok(RawMemory::from_row(row))))?;
         for row in raw {
-            let existing = tokens(&row.content);
+            let existing = content_tokens(&row.content);
             if jaccard(&candidate_tokens, &existing) >= NEAR_DUPLICATE {
                 return row.into_item().map(Some);
             }
@@ -849,7 +858,16 @@ fn date_string(micros: i64) -> String {
 }
 
 fn tokens_of(content: &str) -> BTreeSet<String> {
-    tokens(content)
+    content_tokens(content)
+}
+
+fn content_tokens(content: &str) -> BTreeSet<String> {
+    content
+        .to_lowercase()
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 struct RawMemory {

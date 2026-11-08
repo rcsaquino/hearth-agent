@@ -658,3 +658,14 @@ local fake-server and fixture tests.
 - The supersede path now skips duplicate merging so a deliberate replacement inserts the new row. A bearer credential pattern is rejected by the memory writer.
 - Status: `standing_memory_version` reads the `memory_state` document; `memory_items` is the real count.
 - CLI: `hearth eval memory [--json] [--scale 200k]`; the 200k check is an ignored test and the CLI flag.
+
+## 2026-11-08: M4e memory benchmark fixes
+
+- The previous M4e worker left uncommitted work and no report. Its RRF normalization, digit-aware content tokens, and as_of created_at removal were kept after review; its FTS-only recall was rejected because spec 7.4 requires the standing and tag candidate sources.
+- Direct facts: the fixture direct facts were importance 56 to 60 while noise facts were 62 to 77, and the two-per-kind cap pushed the expected fact out. Direct facts are now 80. Direct recall is 0.957.
+- Temporal: `as_of` now orders FTS matches by `bm25` instead of `created_at` with a 50-row cap. The created_at filter stays removed because spec 7.7 asks what was true, not only what was already learned. Temporal is 20/20.
+- Dedup: content tokens keep single digits, so 1.0 and 1.1 are distinct. The fixture contradiction rows that duplicated temporal facts or nearly duplicated direct facts were corrected. Stored rows are 195, which is the five intentional duplicate merges.
+- Tag candidates now use FTS5 rather than a `LIKE` scan over `memory_items`.
+- New baseline: recall@10 0.806, precision@5 0.285, direct 0.957, temporal 20/20, supersession 15/15, stored 195, paraphrase 0.650, preference 0.200, duplicate failures 0, secret leaks 0. Small-set retrieval p95 6.87 ms.
+- Remaining M6 gap: preference recall, paraphrase, precision, the 1.0 recall target, and the 200k p95 of 1,868 ms. The 200k cost is the standing query at scale, not the tag path.
+
