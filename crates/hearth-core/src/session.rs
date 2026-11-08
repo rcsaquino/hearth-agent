@@ -876,13 +876,13 @@ impl Session {
                         report.woken += 1;
                     }
                 }
-                let expired: Vec<(String, i64)> = writer.query(
-                    "SELECT id, attempt FROM tasks WHERE status = 'running' \
+                let expired: Vec<(String, i64, Option<String>)> = writer.query(
+                    "SELECT id, attempt, conversation_id FROM tasks WHERE status = 'running' \
                      AND (lease_until IS NULL OR lease_until <= ?)",
                     (now,),
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )?;
-                for (id, attempt) in expired {
+                for (id, attempt, conversation_id) in expired {
                     if attempt >= 2 {
                         let result = serde_json::to_string(&serde_json::json!({
                             "error": "poisoned"
@@ -906,6 +906,13 @@ impl Session {
                             (now, id.as_str()),
                         )?;
                         if changed == 1 {
+                            record_commit(
+                                writer,
+                                now,
+                                conversation_id.as_deref(),
+                                Some(id.as_str()),
+                                "task.recover",
+                            )?;
                             report.requeued += 1;
                         }
                     }
