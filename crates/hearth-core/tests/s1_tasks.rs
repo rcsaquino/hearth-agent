@@ -561,3 +561,120 @@ fn a_recovered_claim_continues_from_the_saved_checkpoint_and_phase() {
     assert_eq!(resumed.checkpoint, Some(json!({"step": 1})));
     assert_eq!(resumed.attempt, 2);
 }
+
+#[test]
+fn tasks_are_claimed_in_wake_order_with_creation_order_breaking_ties() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let first = session
+        .create_task(NewTask::new("first", 1, "start", json!({})))
+        .expect("create first");
+    let second = session
+        .create_task(NewTask::new("second", 1, "start", json!({})))
+        .expect("create second");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim first")
+        .expect("runnable");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim second")
+        .expect("runnable");
+
+    session
+        .finish_task(
+            &second.id,
+            "worker-a",
+            StepOutput::Failed {
+                error: json!({"code": "temporary"}),
+                retryable: true,
+            },
+        )
+        .expect("fail second early");
+    clock.advance(10_000_000);
+    session
+        .finish_task(
+            &first.id,
+            "worker-a",
+            StepOutput::Failed {
+                error: json!({"code": "temporary"}),
+                retryable: true,
+            },
+        )
+        .expect("fail first later");
+
+    clock.advance(1_000_000);
+    let claimed = session
+        .claim_task("worker-b", 60_000_000)
+        .expect("claim wake order")
+        .expect("runnable");
+    assert_eq!(claimed.id, second.id, "the earlier wake wins");
+    session
+        .finish_task(
+            &second.id,
+            "worker-b",
+            StepOutput::Terminal {
+                outcome: TerminalOutcome::Done,
+                result: json!({}),
+            },
+        )
+        .expect("finish second");
+    let claimed = session
+        .claim_task("worker-b", 60_000_000)
+        .expect("claim first")
+        .expect("runnable");
+    assert_eq!(claimed.id, first.id);
+    session
+        .finish_task(
+            &first.id,
+            "worker-b",
+            StepOutput::Terminal {
+                outcome: TerminalOutcome::Done,
+                result: json!({}),
+            },
+        )
+        .expect("finish first");
+
+    let third = session
+        .create_task(NewTask::new("third", 1, "start", json!({})))
+        .expect("create third");
+    let fourth = session
+        .create_task(NewTask::new("fourth", 1, "start", json!({})))
+        .expect("create fourth");
+    session
+        .claim_task("worker-c", 60_000_000)
+        .expect("claim third")
+        .expect("runnable");
+    session
+        .claim_task("worker-c", 60_000_000)
+        .expect("claim fourth")
+        .expect("runnable");
+    session
+        .finish_task(
+            &third.id,
+            "worker-c",
+            StepOutput::Failed {
+                error: json!({"code": "temporary"}),
+                retryable: true,
+            },
+        )
+        .expect("fail third");
+    session
+        .finish_task(
+            &fourth.id,
+            "worker-c",
+            StepOutput::Failed {
+                error: json!({"code": "temporary"}),
+                retryable: true,
+            },
+        )
+        .expect("fail fourth");
+
+    clock.advance(1_000_000);
+    let claimed = session
+        .claim_task("worker-d", 60_000_000)
+        .expect("claim tie")
+        .expect("runnable");
+    assert_eq!(claimed.id, third.id, "creation order breaks the tie");
+}
