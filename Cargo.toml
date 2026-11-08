@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/hearth-config",
+    "crates/hearth-core",
+    "crates/hearth-storage",
+    "crates/hearth-model",
+    "crates/hearth-memory",
+    "crates/hearth-tools",
+    "crates/hearth-telegram",
+    "crates/hearth-runtime",
+    "crates/hearth-cli",
+    "crates/hearth-eval",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.89"
+authors = ["rcsaquino"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
