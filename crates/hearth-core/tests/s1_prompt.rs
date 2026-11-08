@@ -240,3 +240,35 @@ fn saving_the_same_prompt_twice_reuses_the_hash() {
     assert_eq!(latest.hash, first);
     assert_eq!(latest.text, text);
 }
+
+#[test]
+fn saved_entries_get_token_estimates() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", serde_json::json!({"text": "hello"}))
+                .entry(
+                    "assistant",
+                    serde_json::json!([
+                        {"type": "tool_call", "id": "c1", "name": "read", "arguments": {"path": "notes"}}
+                    ]),
+                )
+                .entry("user", serde_json::json!({"text": ""})),
+        )
+        .expect("save entries");
+
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(history.len(), 3);
+    assert_eq!(history[0].tokens_est, 2);
+    assert!(
+        history[1].tokens_est > 0,
+        "tool call estimate was {}",
+        history[1].tokens_est
+    );
+    assert_eq!(history[2].tokens_est, 0);
+}
