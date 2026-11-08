@@ -298,3 +298,65 @@ fn saving_without_the_three_sections_is_rejected() {
         "{error}"
     );
 }
+
+#[test]
+fn recording_an_outcome_updates_counters_and_resets_consecutive_failures() {
+    let home = TempDir::new().expect("temp home");
+    learned_skill(
+        home.path(),
+        "research",
+        "active",
+        3,
+        2,
+        "2026-02-01",
+        "Research a topic",
+    );
+    let library = SkillLibrary::new(home.path());
+    let skill = library
+        .record_outcome("research", true)
+        .expect("success")
+        .expect("learned skill");
+    assert_eq!(skill.successes, 3);
+    assert_eq!(skill.failures, 0);
+    let skill = library
+        .record_outcome("research", false)
+        .expect("failure")
+        .expect("learned skill");
+    assert_eq!(skill.failures, 1);
+    let skill = library
+        .record_outcome("research", false)
+        .expect("failure")
+        .expect("learned skill");
+    assert_eq!(skill.failures, 2);
+    let stored = library.find("research").expect("find").expect("skill");
+    assert_eq!(stored.failures, 2);
+    assert_eq!(stored.successes, 3);
+}
+
+#[test]
+fn setting_a_status_keeps_the_version_and_writes_the_changelog() {
+    let home = TempDir::new().expect("temp home");
+    learned_skill(
+        home.path(),
+        "research",
+        "draft",
+        1,
+        1,
+        "2026-02-01",
+        "Research a topic",
+    );
+    let library = SkillLibrary::new(home.path());
+    let skill = library
+        .set_status("research", SkillStatus::Active)
+        .expect("promote");
+    assert_eq!(skill.status, SkillStatus::Active);
+    assert_eq!(skill.version, 1);
+    let changelog = fs::read_to_string(home.path().join("skills/learned/CHANGELOG.md"))
+        .expect("changelog");
+    assert!(changelog.contains("active"), "{changelog}");
+    assert!(
+        library
+            .set_status("missing", SkillStatus::Archived)
+            .is_err()
+    );
+}
