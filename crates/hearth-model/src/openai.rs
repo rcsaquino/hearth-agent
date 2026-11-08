@@ -18,8 +18,14 @@ pub struct OpenAiCompatibleProvider {
     headers: Vec<(HeaderName, HeaderValue)>,
     session_header: Option<HeaderName>,
     client: reqwest::blocking::Client,
-    #[allow(dead_code)]
     sleeper: Arc<dyn Sleeper>,
+}
+
+const MAX_ATTEMPTS: u32 = 3;
+const BASE_DELAY: Duration = Duration::from_millis(500);
+
+fn backoff(attempt: u32) -> Duration {
+    BASE_DELAY.saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1)))
 }
 
 impl OpenAiCompatibleProvider {
@@ -141,33 +147,55 @@ impl Provider for OpenAiCompatibleProvider {
     fn stream(&self, request: ChatRequest) -> Result<ProviderStream, ProviderError> {
         let body = self.body(&request)?;
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        let mut builder = self
-            .client
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .json(&body);
-        for (name, value) in &self.headers {
-            builder = builder.header(name, value);
-        }
-        if let (Some(header), Some(session)) = (&self.session_header, &request.session_id) {
-            let value = HeaderValue::from_str(session).map_err(|error| {
+        let session_value = match (&self.session_header, &request.session_id) {
+            (Some(_), Some(session)) => Some(HeaderValue::from_str(session).map_err(|error| {
                 ProviderError::Config(format!("invalid session header value: {error}"))
-            })?;
-            builder = builder.header(header, value);
+            })?),
+            _ => None,
+        };
+        for attempt in 1..=MAX_ATTEMPTS {
+            let mut builder = self
+                .client
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .json(&body);
+            for (name, value) in &self.headers {
+                builder = builder.header(name, value);
+            }
+            if let (Some(header), Some(value)) = (&self.session_header, &session_value) {
+                builder = builder.header(header, value);
+            }
+            match builder.send() {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        return Ok(Box::new(OpenAiStream::new(response)));
+                    }
+                    let retryable = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504);
+                    let message = response.text().unwrap_or_default();
+                    let error = ProviderError::Request {
+                        status: status.as_u16(),
+                        message,
+                        retryable,
+                    };
+                    if retryable && attempt < MAX_ATTEMPTS {
+                        self.sleeper.sleep(backoff(attempt));
+                        continue;
+                    }
+                    return Err(error);
+                }
+                Err(error) => {
+                    if attempt < MAX_ATTEMPTS {
+                        self.sleeper.sleep(backoff(attempt));
+                        continue;
+                    }
+                    return Err(ProviderError::Transport(error.to_string()));
+                }
+            }
         }
-        let response = builder
-            .send()
-            .map_err(|error| ProviderError::Transport(error.to_string()))?;
-        let status = response.status();
-        if !status.is_success() {
-            let message = response.text().unwrap_or_default();
-            return Err(ProviderError::Request {
-                status: status.as_u16(),
-                message,
-                retryable: false,
-            });
-        }
-        Ok(Box::new(OpenAiStream::new(response)))
+        Err(ProviderError::Transport(
+            "provider retry attempts exhausted".to_owned(),
+        ))
     }
 }
 
@@ -242,6 +270,13 @@ impl OpenAiStream {
         for choice in choices {
             if let Some(reason) = choice["finish_reason"].as_str() {
                 self.finish_reason = Some(reason.to_owned());
+            }
+            if let Some(reasoning) = choice["delta"]["reasoning_content"]
+                .as_str()
+                .or_else(|| choice["delta"]["reasoning"].as_str())
+            {
+                self.pending
+                    .push_back(Ok(StreamEvent::ThinkingDelta(reasoning.to_owned())));
             }
             if let Some(content) = choice["delta"]["content"].as_str() {
                 self.pending
