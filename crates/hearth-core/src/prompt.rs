@@ -3,6 +3,7 @@
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Role, ToolSpec};
 use serde_json::{Value, json};
 
+use crate::budget::TokenCounts;
 use crate::error::CoreError;
 use crate::model::Entry;
 use crate::session::Session;
@@ -31,6 +32,7 @@ pub struct PromptInput {
 pub struct Prompt {
     pub request: ChatRequest,
     pub document: Value,
+    pub tokens: TokenCounts,
 }
 
 /// Assemble the request and the audit document.
@@ -95,6 +97,23 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             })
         })
         .collect();
+    let tools_text = if tools.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(&tools).map_err(|error| CoreError::Invalid(error.to_string()))?
+    };
+    let transcript_text = serde_json::to_string(&transcript)
+        .map_err(|error| CoreError::Invalid(error.to_string()))?;
+    let tokens = TokenCounts::new(
+        tokens_for(&input.soul),
+        tokens_for(OPERATION),
+        tokens_for(&tools_text),
+        tokens_for(&input.standing),
+        0,
+        tokens_for(&transcript_text),
+        tokens_for(&input.recall),
+        tokens_for(&input.runtime_note),
+    );
     let document = json!({
         "identity": input.soul,
         "operation": OPERATION,
@@ -103,6 +122,18 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "recall": input.recall,
         "transcript": transcript,
         "runtime": input.runtime_note,
+        "tokens": {
+            "identity": tokens.identity,
+            "operation": tokens.operation,
+            "tools": tokens.tools,
+            "standing": tokens.standing,
+            "skills": tokens.skills,
+            "transcript": tokens.transcript,
+            "recall": tokens.recall,
+            "runtime": tokens.runtime,
+            "total": tokens.total,
+            "fixed": tokens.fixed,
+        },
     });
 
     let request = ChatRequest {
@@ -114,7 +145,15 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         session_id: Some(input.conversation_id),
     };
 
-    Ok(Prompt { request, document })
+    Ok(Prompt {
+        request,
+        document,
+        tokens,
+    })
+}
+
+fn tokens_for(text: &str) -> u64 {
+    hearth_model::estimate_tokens(text).max(0) as u64
 }
 
 fn role_str(role: Role) -> &'static str {
