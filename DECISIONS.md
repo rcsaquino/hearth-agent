@@ -95,3 +95,35 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - `usage_events` carries `reasoning_tokens` in migration `0001`. The M1 S2 storage
   conformance test will assert the full column set, because usage writes do not
   exist before M2.
+
+## 2026-11-08: M1a session and storage (pending M1 gate review)
+
+- `Storage` is a concrete type, not a trait. Q5 removed the in-memory backend, so a
+  trait with one implementation would be speculative. The public boundary and the
+  S2 conformance suite remain unchanged. This needs sir's confirmation at the M1
+  gate.
+- The commit sequence is allocated inside the save transaction as
+  `MAX(seq) + 1`, so a rolled-back save leaves no gap. All commits go through an
+  explicit sequence insert.
+- Entries saved together share their commit sequence. Their order is `seq, rowid`.
+- `tokens_est` is stored as `0` until the estimator arrives with the token-budget
+  milestone. The column remains part of the record.
+- `submit` writes the user entry and the queued submission in one save. A duplicate
+  request id returns the existing submission and creates nothing; the unique
+  constraint is the final guard for a race.
+- `settle` accepts only terminal statuses: `done`, `unanswered`, or `cancelled`.
+  A second settle returns `AlreadySettled` and leaves the first ending intact. A
+  settle is constrained to the save's conversation; a submission from another
+  conversation is rejected as invalid input.
+- `fork` copies the chosen entry and all earlier entries into a new conversation,
+  gives them new ids and one new commit sequence, and sets `parent_id` and
+  `parent_entry_id`. Documents are not copied. Titles are copied unchanged.
+- A successful save updates the conversation's `updated_at` to the save time.
+- `Harness::open_with` injects the clock and identifier source; production uses the
+  system clock and UUIDv7.
+- M1 is staged internally as M1a (session and storage), M1b (tasks, recovery, and
+  effects), and M1c (crash suite), with one M1 gate after M1c. This is execution
+  staging only; the product scope is unchanged.
+- The daemon still uses the low-level `hearth_storage::open` for its lock and
+  migration check. M1b will wire it to `Harness` so there is one session-facing
+  writer path.
