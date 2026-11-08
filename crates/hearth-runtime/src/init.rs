@@ -74,6 +74,13 @@ pub fn init(home: &Path, options: InitOptions) -> Result<(), InitError> {
         return Err(InitError::Exists(settings_path));
     }
 
+    let soul_path = home.join("SOUL.md");
+    if !soul_path.exists() {
+        let mut soul = open_settings(&soul_path)?;
+        soul.write_all(hearth_core::default_soul(&agent_name, &user_name).as_bytes())?;
+        soul.flush()?;
+    }
+
     let mut models = serde_json::json!({
         "kind": "openai-compatible",
         "base_url": base_url,
