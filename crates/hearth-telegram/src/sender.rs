@@ -122,6 +122,7 @@ impl TelegramSender {
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
+        self.limiter.wait(&*self.sleeper);
         self.client.send_photo(chat_id, thread_id, path, caption)
     }
 
@@ -133,6 +134,7 @@ impl TelegramSender {
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
+        self.limiter.wait(&*self.sleeper);
         self.client.send_document(chat_id, thread_id, path, caption)
     }
 
@@ -144,6 +146,7 @@ impl TelegramSender {
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
+        self.limiter.wait(&*self.sleeper);
         self.client.send_video(chat_id, thread_id, path, caption)
     }
 
@@ -155,6 +158,7 @@ impl TelegramSender {
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
+        self.limiter.wait(&*self.sleeper);
         self.client.send_voice(chat_id, thread_id, path, caption)
     }
 
@@ -166,6 +170,7 @@ impl TelegramSender {
         items: &[(MediaKind, PathBuf)],
         caption: Option<&str>,
     ) -> Result<Vec<i64>, TelegramError> {
+        self.limiter.wait(&*self.sleeper);
         self.client
             .send_media_group(chat_id, thread_id, items, caption)
     }
