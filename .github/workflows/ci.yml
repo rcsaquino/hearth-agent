@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format, lint, and test
+        run: ./scripts/ci.sh
+      - name: Secret scan
+        env:
+          PUBLIC_DENYLIST: ${{ secrets.HEARTH_PUBLIC_DENYLIST }}
+        run: |
+          if [ -n "$PUBLIC_DENYLIST" ]; then
+            printf '%s\n' "$PUBLIC_DENYLIST" > "$RUNNER_TEMP/hearth-public-denylist"
+            export HEARTH_PUBLIC_DENYLIST="$RUNNER_TEMP/hearth-public-denylist"
+          fi
+          ./scripts/secret-scan.sh
