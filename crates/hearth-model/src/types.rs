@@ -18,6 +18,8 @@ pub enum ContentBlock {
     Thinking(String),
     ToolCall(ToolCall),
     ToolResult { call_id: String, content: String },
+    Image { path: String, mime: String },
+    File { path: String, name: String, mime: String },
 }
 
 /// One message in a chat request.

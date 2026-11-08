@@ -114,6 +114,15 @@ fn block_json(block: &ContentBlock) -> Value {
             "call_id": call_id,
             "content": content,
         }),
+        ContentBlock::Image { path, mime } => {
+            json!({"type": "image", "path": path, "mime": mime})
+        }
+        ContentBlock::File { path, name, mime } => json!({
+            "type": "file",
+            "path": path,
+            "name": name,
+            "mime": mime,
+        }),
     }
 }
 
@@ -164,6 +173,27 @@ fn parse_block(object: &serde_json::Map<String, Value>) -> Option<ContentBlock> 
                 .unwrap_or_default()
                 .to_owned(),
         }),
+        Some("image") => Some(ContentBlock::Image {
+            path: object.get("path")?.as_str()?.to_owned(),
+            mime: object
+                .get("mime")
+                .and_then(Value::as_str)
+                .unwrap_or("application/octet-stream")
+                .to_owned(),
+        }),
+        Some("file") => Some(ContentBlock::File {
+            path: object.get("path")?.as_str()?.to_owned(),
+            name: object
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("file")
+                .to_owned(),
+            mime: object
+                .get("mime")
+                .and_then(Value::as_str)
+                .unwrap_or("application/octet-stream")
+                .to_owned(),
+        }),
         Some(_) => None,
         None => Some(ContentBlock::Text(text_field(object)?)),
     }
@@ -188,6 +218,8 @@ pub fn estimate_content(value: &Value) -> i64 {
             ContentBlock::Text(text) | ContentBlock::Thinking(text) => text.clone(),
             ContentBlock::ToolCall(call) => format!("{} {}", call.name, call.arguments),
             ContentBlock::ToolResult { content, .. } => content.clone(),
+            ContentBlock::Image { path, .. } => path.clone(),
+            ContentBlock::File { name, .. } => name.clone(),
         })
         .collect::<Vec<_>>()
         .join(" ");

@@ -1,10 +1,12 @@
 //! The OpenAI-compatible chat completions adapter.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::io::Cursor;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::Engine;
 use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use serde_json::{Value, json};
 
@@ -97,10 +99,39 @@ impl OpenAiCompatibleProvider {
                     } else {
                         "user"
                     };
-                    messages.push(json!({
-                        "role": role,
-                        "content": text_blocks(&message.blocks),
-                    }));
+                    let has_image = message
+                        .blocks
+                        .iter()
+                        .any(|block| matches!(block, ContentBlock::Image { .. }));
+                    if role == "user" && has_image {
+                        let mut parts = Vec::new();
+                        for block in &message.blocks {
+                            match block {
+                                ContentBlock::Text(text) => {
+                                    parts.push(json!({"type": "text", "text": text}));
+                                }
+                                ContentBlock::Image { path, .. } => {
+                                    parts.push(json!({
+                                        "type": "image_url",
+                                        "image_url": {"url": image_data_url(path)?},
+                                    }));
+                                }
+                                ContentBlock::File { path, name, .. } => {
+                                    parts.push(json!({
+                                        "type": "text",
+                                        "text": file_note(name, path),
+                                    }));
+                                }
+                                _ => {}
+                            }
+                        }
+                        messages.push(json!({"role": role, "content": parts}));
+                    } else {
+                        messages.push(json!({
+                            "role": role,
+                            "content": text_blocks(&message.blocks),
+                        }));
+                    }
                 }
                 Role::Assistant => {
                     let text = text_blocks(&message.blocks);
@@ -433,8 +464,36 @@ fn text_blocks(blocks: &[ContentBlock]) -> String {
     blocks
         .iter()
         .filter_map(|block| match block {
-            ContentBlock::Text(text) => Some(text.as_str()),
+            ContentBlock::Text(text) => Some(text.clone()),
+            ContentBlock::File { path, name, .. } => Some(file_note(name, path)),
             _ => None,
         })
-        .collect()
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn file_note(name: &str, path: &str) -> String {
+    format!("[file: {name} ({path})]")
+}
+
+fn image_data_url(path: &str) -> Result<String, ProviderError> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        ProviderError::Protocol(format!("image could not be read: {error}"))
+    })?;
+    let image = image::load_from_memory(&bytes).map_err(|error| {
+        ProviderError::Protocol(format!("image could not be decoded: {error}"))
+    })?;
+    let image = if image.width().max(image.height()) > 1568 {
+        image.thumbnail(1568, 1568)
+    } else {
+        image
+    };
+    let mut encoded = Cursor::new(Vec::new());
+    image
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .map_err(|error| {
+            ProviderError::Protocol(format!("image could not be encoded: {error}"))
+        })?;
+    let base64 = base64::engine::general_purpose::STANDARD.encode(encoded.into_inner());
+    Ok(format!("data:image/png;base64,{base64}"))
 }
