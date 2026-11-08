@@ -1755,3 +1755,59 @@ fn eval_tokens_reports_the_100_turn_run() {
     assert!(report["targets"].as_array().expect("targets").len() >= 5);
     assert_eq!(report["prefix_stable"], true);
 }
+
+#[test]
+fn backup_and_restore_work_through_the_cli() {
+    use hearth_core::Harness;
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+
+    let output = hearth()
+        .args(["backup", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("run backup");
+    assert!(
+        output.status.success(),
+        "backup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let backup = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("backup: "))
+        .map(std::path::PathBuf::from)
+        .expect("backup path in output");
+    assert!(backup.is_file(), "backup file is missing");
+
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        harness
+            .session()
+            .create_conversation("After", "local", "local:after")
+            .expect("create conversation");
+    }
+
+    let output = hearth()
+        .args(["restore"])
+        .arg(&backup)
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run restore");
+    assert!(
+        output.status.success(),
+        "restore failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    assert!(
+        harness
+            .session()
+            .conversation_by_transport("local", "local:after")
+            .expect("lookup")
+            .is_none(),
+        "the post-backup conversation survived the restore"
+    );
+}
