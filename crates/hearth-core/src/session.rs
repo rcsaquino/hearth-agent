@@ -610,18 +610,20 @@ impl Session {
         self.storage
             .write(move |writer| -> Result<Option<ClaimedTask>, CoreError> {
                 let row: Option<RawClaim> = writer.query_optional(
-                    "SELECT id, kind, phase, attempt, input_json, checkpoint_json FROM tasks \
-                     WHERE status = 'pending' AND (next_wake_at IS NULL OR next_wake_at <= ?) \
+                    "SELECT id, conversation_id, kind, phase, attempt, input_json, checkpoint_json \
+                     FROM tasks WHERE status = 'pending' \
+                     AND (next_wake_at IS NULL OR next_wake_at <= ?) \
                      ORDER BY COALESCE(next_wake_at, created_at), id LIMIT 1",
                     (now,),
                     |row| {
                         Ok(RawClaim {
                             id: row.get(0)?,
-                            kind: row.get(1)?,
-                            phase: row.get(2)?,
-                            attempt: row.get(3)?,
-                            input_json: row.get(4)?,
-                            checkpoint_json: row.get(5)?,
+                            conversation_id: row.get(1)?,
+                            kind: row.get(2)?,
+                            phase: row.get(3)?,
+                            attempt: row.get(4)?,
+                            input_json: row.get(5)?,
+                            checkpoint_json: row.get(6)?,
                         })
                     },
                 )?;
@@ -643,6 +645,13 @@ impl Session {
                 if changed != 1 {
                     return Ok(None);
                 }
+                record_commit(
+                    writer,
+                    now,
+                    row.conversation_id.as_deref(),
+                    Some(row.id.as_str()),
+                    "task.claim",
+                )?;
                 let input = serde_json::from_str(&row.input_json)
                     .map_err(|error| CoreError::Corrupt(error.to_string()))?;
                 let checkpoint = row
@@ -1175,6 +1184,7 @@ impl RawTask {
 
 struct RawClaim {
     id: String,
+    conversation_id: Option<String>,
     kind: String,
     phase: String,
     attempt: i64,
