@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use hearth_core::{CoreError, Session, TelegramUpdate};
 use hearth_model::Transcriber;
@@ -15,6 +15,11 @@ use crate::types::Message;
 
 /// The largest attachment Telegram may deliver to Hearth.
 pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+
+/// The most queued submissions one chat may have before Hearth turns it away.
+pub const MAX_QUEUED_PER_CHAT: usize = 10;
+
+const BUSY_NOTICE: &str = "I'm busy with the current queue. Try again shortly.";
 
 /// A polling failure.
 #[derive(Debug, Error)]
@@ -37,6 +42,7 @@ pub struct PollReport {
     pub duplicates: usize,
     pub ignored: usize,
     pub stopped: usize,
+    pub busy: usize,
     pub next_offset: i64,
 }
 
@@ -50,6 +56,7 @@ pub struct TelegramPoller {
     media: InboundMedia,
     transcriber: Option<Arc<dyn Transcriber>>,
     stop: Option<Arc<dyn StopHandler>>,
+    busy_notified: Mutex<HashSet<i64>>,
 }
 
 impl TelegramPoller {
@@ -74,6 +81,7 @@ impl TelegramPoller {
             media,
             transcriber,
             stop,
+            busy_notified: Mutex::new(HashSet::new()),
         }
     }
 
@@ -141,8 +149,7 @@ impl TelegramPoller {
                 continue;
             }
 
-            let blocks = self.blocks(message);
-            if blocks.is_empty() {
+            if !has_content(message) {
                 self.session.set_telegram_offset(next_offset)?;
                 report.ignored += 1;
                 continue;
@@ -167,6 +174,53 @@ impl TelegramPoller {
                     self.session.create_conversation(&title, "telegram", &key)?
                 }
             };
+
+            if self
+                .session
+                .queued_submission_count(&conversation.id)?
+                >= MAX_QUEUED_PER_CHAT
+            {
+                let notify = self
+                    .busy_notified
+                    .lock()
+                    .map(|mut chats| chats.insert(message.chat.id))
+                    .unwrap_or(false);
+                if notify
+                    && let Err(error) = self.client.send_message(
+                        message.chat.id,
+                        message.message_thread_id,
+                        BUSY_NOTICE,
+                        &[],
+                    )
+                {
+                    tracing::warn!(%error, "telegram busy notice failed");
+                }
+                let recorded = self.session.record_telegram_update(
+                    TelegramUpdate {
+                        update_id: update.update_id,
+                        chat_id: message.chat.id,
+                        message_id: message.message_id,
+                    },
+                    next_offset,
+                )?;
+                if !recorded {
+                    self.session.set_telegram_offset(next_offset)?;
+                    report.duplicates += 1;
+                } else {
+                    report.busy += 1;
+                }
+                continue;
+            }
+            if let Ok(mut chats) = self.busy_notified.lock() {
+                chats.remove(&message.chat.id);
+            }
+
+            let blocks = self.blocks(message);
+            if blocks.is_empty() {
+                self.session.set_telegram_offset(next_offset)?;
+                report.ignored += 1;
+                continue;
+            }
 
             let request_id = format!("tg:{}:{}", message.chat.id, message.message_id);
             let admission = self.session.submit_telegram(
@@ -360,6 +414,22 @@ impl TelegramPoller {
         }
         true
     }
+}
+
+fn has_content(message: &Message) -> bool {
+    message
+        .text
+        .as_deref()
+        .is_some_and(|text| !text.trim().is_empty())
+        || message
+            .caption
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+        || !message.photo.is_empty()
+        || message.document.is_some()
+        || message.audio.is_some()
+        || message.voice.is_some()
+        || message.video.is_some()
 }
 
 fn file_block(path: &std::path::Path, name: &str, mime: &str) -> Value {
