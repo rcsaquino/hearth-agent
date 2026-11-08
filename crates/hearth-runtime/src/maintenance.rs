@@ -66,10 +66,7 @@ pub fn ensure_maintenance_tasks(session: &Session) -> Result<(), CoreError> {
             continue;
         }
         let wake = next_daily_micros(now, offset, hour, minute);
-        session.create_sleeping_task(
-            NewTask::new(kind, 1, "run", json!({"slot": slot})),
-            wake,
-        )?;
+        session.create_sleeping_task(NewTask::new(kind, 1, "run", json!({"slot": slot})), wake)?;
     }
     Ok(())
 }
@@ -98,10 +95,7 @@ impl TaskHandler for MemoryMaintenanceHandler {
             MEMORY_CONSOLIDATE_HOUR,
             MEMORY_CONSOLIDATE_MINUTE,
         );
-        let merged = self
-            .memory
-            .consolidate()
-            .map_err(memory_handler_error)?;
+        let merged = self.memory.consolidate().map_err(memory_handler_error)?;
         let archived = self.memory.archive_stale().map_err(memory_handler_error)?;
         let episodes = self
             .memory

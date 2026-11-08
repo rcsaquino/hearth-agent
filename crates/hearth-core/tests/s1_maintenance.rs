@@ -20,7 +20,9 @@ fn a_meta_write_needs_no_conversation() {
         session.meta_value("last_review").expect("read"),
         Some("2026-11-09T04:30:00Z".to_owned())
     );
-    session.set_meta("last_review", "2026-11-10T04:30:00Z").expect("overwrite");
+    session
+        .set_meta("last_review", "2026-11-10T04:30:00Z")
+        .expect("overwrite");
     assert_eq!(
         session.meta_value("last_review").expect("read"),
         Some("2026-11-10T04:30:00Z".to_owned())

@@ -111,10 +111,12 @@ fn the_memory_maintenance_handler_consolidates_and_schedules_the_next_night() {
         }
         other => panic!("expected sleep, got {other:?}"),
     }
-    assert!(session
-        .meta_value("last_consolidation")
-        .expect("meta")
-        .is_some());
+    assert!(
+        session
+            .meta_value("last_consolidation")
+            .expect("meta")
+            .is_some()
+    );
     let stats = MemoryService::new(session.clone()).stats().expect("stats");
     assert_eq!(stats.by_kind.get("episode").copied().unwrap_or(0), 1);
 }

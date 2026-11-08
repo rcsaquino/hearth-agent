@@ -159,6 +159,13 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
     let counts = context.session.task_counts()?;
     let memory = context.session.memory_item_count()?;
     let standing_version = context.memory.standing_version().unwrap_or(0);
+    let last_consolidation = context.session.meta_value("last_consolidation")?;
+    let last_skill_review = context.session.meta_value("last_skill_review")?;
+    let last_skill_review_changes = context
+        .session
+        .meta_value("last_skill_review_changes")?
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
     let denominator = totals.input_tokens + totals.cache_read_tokens;
     let cache_hit_rate = if denominator > 0 {
         totals.cache_read_tokens as f64 / denominator as f64
@@ -176,7 +183,9 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         "cache_hit_rate": cache_hit_rate,
         "memory_items": memory,
         "standing_memory_version": standing_version,
-        "last_skill_review": Value::Null,
+        "last_consolidation": last_consolidation,
+        "last_skill_review": last_skill_review,
+        "last_skill_review_changes": last_skill_review_changes,
     }))
 }
 
@@ -316,6 +325,16 @@ pub fn status(home: &Path, json: bool) -> Result<(), IpcError> {
     println!(
         "tasks: {} running, {} asleep",
         status["tasks_running"], status["tasks_asleep"]
+    );
+    if let Some(value) = status["last_consolidation"].as_str() {
+        println!("last consolidation: {value}");
+    }
+    if let Some(value) = status["last_skill_review"].as_str() {
+        println!("last skill review: {value}");
+    }
+    println!(
+        "last review changes: {}",
+        status["last_skill_review_changes"]
     );
     println!(
         "today cost: {:.4}",

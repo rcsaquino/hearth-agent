@@ -729,6 +729,18 @@ fn hearth_status_reads_a_running_daemon() {
         use hearth_core::Harness;
         use hearth_memory::{MemoryKind, MemoryService, NewMemoryInput, SourceKind};
         let harness = Harness::open(home.path()).expect("open memory home");
+        harness
+            .session()
+            .set_meta("last_consolidation", "2026-11-09T03:30:00Z")
+            .expect("consolidation meta");
+        harness
+            .session()
+            .set_meta("last_skill_review", "2026-11-09T04:30:00Z")
+            .expect("review meta");
+        harness
+            .session()
+            .set_meta("last_skill_review_changes", "2")
+            .expect("review count");
         let memory = MemoryService::new(harness.session().clone());
         memory
             .save(NewMemoryInput {
@@ -774,8 +786,12 @@ fn hearth_status_reads_a_running_daemon() {
     assert_eq!(status["model"], "fake-model");
     assert!(status["uptime_seconds"].as_u64().is_some());
     assert_eq!(status["tasks_running"], 0);
+    assert_eq!(status["tasks_asleep"], 2);
     assert_eq!(status["memory_items"], 1);
     assert_eq!(status["standing_memory_version"], 1);
+    assert_eq!(status["last_consolidation"], "2026-11-09T03:30:00Z");
+    assert_eq!(status["last_skill_review"], "2026-11-09T04:30:00Z");
+    assert_eq!(status["last_skill_review_changes"], 2);
 
     daemon.stop();
     telegram_state.stop.store(true, Ordering::SeqCst);

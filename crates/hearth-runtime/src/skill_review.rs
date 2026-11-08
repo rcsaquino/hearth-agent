@@ -11,17 +11,15 @@ use hearth_model::{
 };
 use serde_json::{Value, json};
 use thiserror::Error;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::maintenance::{
     SKILL_REVIEW_HOUR, SKILL_REVIEW_MINUTE, local_offset, next_daily_micros, rfc3339,
 };
 use crate::memory_extract::entry_text;
 use crate::scheduler::{TaskHandler, TaskHandlerError};
-use crate::skills::{
-    Skill, SkillError, SkillLibrary, SkillSave, SkillScope, SkillStatus,
-};
+use crate::skills::{Skill, SkillError, SkillLibrary, SkillSave, SkillScope, SkillStatus};
 
 const MAX_CHANGES: usize = 3;
 const VIEW_TOKEN_CAP: i64 = 3000;
@@ -187,15 +185,18 @@ impl SkillReviewer {
                 status = SkillStatus::Active;
                 applied += 1;
             }
-            if skill.failures >= 2 && !matches!(status, SkillStatus::Quarantined | SkillStatus::Archived)
+            if skill.failures >= 2
+                && !matches!(status, SkillStatus::Quarantined | SkillStatus::Archived)
             {
-                self.skills.set_status(&skill.name, SkillStatus::Quarantined)?;
+                self.skills
+                    .set_status(&skill.name, SkillStatus::Quarantined)?;
                 status = SkillStatus::Quarantined;
                 applied += 1;
             }
             let unused = unused_days(&skill, now);
             let bad_rate = skill.uses >= 4 && skill.success_rate() < 0.5;
-            if matches!(status, SkillStatus::Active | SkillStatus::Draft) && (unused >= 90 || bad_rate)
+            if matches!(status, SkillStatus::Active | SkillStatus::Draft)
+                && (unused >= 90 || bad_rate)
             {
                 self.skills.set_status(&skill.name, SkillStatus::Archived)?;
                 applied += 1;
@@ -433,14 +434,12 @@ impl SkillReviewHandler {
 }
 
 impl TaskHandler for SkillReviewHandler {
-    fn step(&self, task: &hearth_core::ClaimedTask) -> Result<hearth_core::StepOutput, TaskHandlerError> {
+    fn step(
+        &self,
+        task: &hearth_core::ClaimedTask,
+    ) -> Result<hearth_core::StepOutput, TaskHandlerError> {
         let now = self.session.now_micros();
-        let next = next_daily_micros(
-            now,
-            local_offset(),
-            SKILL_REVIEW_HOUR,
-            SKILL_REVIEW_MINUTE,
-        );
+        let next = next_daily_micros(now, local_offset(), SKILL_REVIEW_HOUR, SKILL_REVIEW_MINUTE);
         let report = match self.reviewer.run(&task.id, now) {
             Ok(report) => report,
             Err(error) => {
@@ -497,8 +496,7 @@ fn unused_days(skill: &Skill, now: i64) -> i64 {
         .unwrap_or(&skill.created);
     OffsetDateTime::parse(stamp, &Rfc3339)
         .map(|stamp| {
-            (now - stamp.unix_timestamp_nanos().div_euclid(1_000) as i64).max(0)
-                / 86_400_000_000
+            (now - stamp.unix_timestamp_nanos().div_euclid(1_000) as i64).max(0) / 86_400_000_000
         })
         .unwrap_or(0)
 }
@@ -510,8 +508,8 @@ fn parse_changes(text: &str) -> Result<Vec<Value>, SkillReviewError> {
         .or_else(|| trimmed.strip_prefix("```"))
         .unwrap_or(trimmed);
     let body = body.strip_suffix("```").unwrap_or(body).trim();
-    let value: Value = serde_json::from_str(body)
-        .map_err(|error| SkillReviewError::Invalid(error.to_string()))?;
+    let value: Value =
+        serde_json::from_str(body).map_err(|error| SkillReviewError::Invalid(error.to_string()))?;
     let changes = value
         .get("changes")
         .and_then(Value::as_array)

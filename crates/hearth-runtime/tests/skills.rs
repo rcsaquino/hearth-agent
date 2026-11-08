@@ -351,8 +351,8 @@ fn setting_a_status_keeps_the_version_and_writes_the_changelog() {
         .expect("promote");
     assert_eq!(skill.status, SkillStatus::Active);
     assert_eq!(skill.version, 1);
-    let changelog = fs::read_to_string(home.path().join("skills/learned/CHANGELOG.md"))
-        .expect("changelog");
+    let changelog =
+        fs::read_to_string(home.path().join("skills/learned/CHANGELOG.md")).expect("changelog");
     assert!(changelog.contains("active"), "{changelog}");
     assert!(
         library

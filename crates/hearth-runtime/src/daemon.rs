@@ -31,7 +31,11 @@ use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
+use crate::maintenance::{
+    MEMORY_CONSOLIDATE_KIND, MemoryMaintenanceHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks,
+};
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
+use crate::skill_review::{SkillReviewHandler, SkillReviewer};
 use crate::skills::SkillLibrary;
 use crate::tools::{MessageTarget, TaskTarget, build_tools, memory_policy};
 use hearth_memory::{MemoryService, MemorySource};
@@ -269,15 +273,6 @@ impl TelegramRuntime {
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
         let helper_controls = Arc::new(HelperControls::new());
-        let registry = Arc::new(TaskRegistry::new().register(
-            "reminder",
-            Arc::new(ReminderHandler::new(session.clone(), sender.clone())),
-        ));
-        let scheduler = Scheduler::new(
-            session.clone(),
-            registry,
-            format!("scheduler:{}", std::process::id()),
-        );
         let budget = ContextBudget::new(
             models.context_window,
             models.max_output_tokens,
@@ -287,6 +282,40 @@ impl TelegramRuntime {
         );
         let pricing = crate::tools::pricing_from_settings(&settings);
         let skills = Arc::new(SkillLibrary::new(home));
+        let reviewer = Arc::new(SkillReviewer::new(
+            session.clone(),
+            Arc::clone(&provider),
+            pricing.clone(),
+            Arc::clone(&memory),
+            Arc::clone(&skills),
+            models.model.clone(),
+            models.kind.clone(),
+            1024,
+        ));
+        let registry = Arc::new(
+            TaskRegistry::new()
+                .register(
+                    "reminder",
+                    Arc::new(ReminderHandler::new(session.clone(), sender.clone())),
+                )
+                .register(
+                    MEMORY_CONSOLIDATE_KIND,
+                    Arc::new(MemoryMaintenanceHandler::new(
+                        session.clone(),
+                        Arc::clone(&memory),
+                    )),
+                )
+                .register(
+                    SKILL_REVIEW_KIND,
+                    Arc::new(SkillReviewHandler::new(session.clone(), reviewer)),
+                ),
+        );
+        let scheduler = Scheduler::new(
+            session.clone(),
+            registry,
+            format!("scheduler:{}", std::process::id()),
+        );
+        ensure_maintenance_tasks(&session)?;
         let helper_config = Arc::new(HelperConfig {
             settings: Arc::clone(&settings),
             session: session.clone(),

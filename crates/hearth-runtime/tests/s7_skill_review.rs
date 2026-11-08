@@ -31,7 +31,12 @@ impl Scripted {
 impl Provider for Scripted {
     fn stream(&self, request: ChatRequest) -> Result<ProviderStream, ProviderError> {
         self.requests.lock().expect("requests").push(request);
-        let text = self.responses.lock().expect("responses").pop_front().unwrap_or_default();
+        let text = self
+            .responses
+            .lock()
+            .expect("responses")
+            .pop_front()
+            .unwrap_or_default();
         let events: Vec<Result<StreamEvent, ProviderError>> = vec![
             Ok(StreamEvent::TextDelta(text)),
             Ok(StreamEvent::Usage(Usage {
@@ -96,7 +101,11 @@ fn seed_run(session: &Session, conversation: &str, skill: &str, request: &str) -
         .expect("assistant entry");
     let answer = assistant.entry_ids[0].clone();
     session
-        .settle(&submitted.submission.id, SubmissionStatus::Done, Some(&answer))
+        .settle(
+            &submitted.submission.id,
+            SubmissionStatus::Done,
+            Some(&answer),
+        )
         .expect("settle");
     user
 }
@@ -105,7 +114,9 @@ fn run_review(reviewer: &SkillReviewer, session: &Session) -> (ReviewReport, Str
     let task = session
         .create_task(NewTask::new("skill.review", 1, "run", json!({})))
         .expect("review task");
-    let report = reviewer.run(&task.id, session.now_micros()).expect("review");
+    let report = reviewer
+        .run(&task.id, session.now_micros())
+        .expect("review");
     (report, task.id)
 }
 
@@ -177,7 +188,11 @@ fn a_review_creates_a_skill_with_three_evidence_runs() {
     assert_eq!(usage.len(), 1);
     assert_eq!(usage[0].kind, "skill.review");
     let prompt = session.latest_prompt().expect("prompt").expect("blob");
-    assert!(prompt.text.contains("Recent successful runs"), "{}", prompt.text);
+    assert!(
+        prompt.text.contains("Recent successful runs"),
+        "{}",
+        prompt.text
+    );
     assert_eq!(scripted.requests.lock().expect("requests").len(), 1);
 }
 
@@ -201,7 +216,12 @@ fn a_review_rejects_a_create_with_too_little_evidence() {
     let (_scripted, reviewer) = reviewer(session, home.path(), &response);
     let (report, _) = run_review(&reviewer, session);
     assert_eq!(report.rejected, 1);
-    assert!(SkillLibrary::new(home.path()).find("triage").expect("find").is_none());
+    assert!(
+        SkillLibrary::new(home.path())
+            .find("triage")
+            .expect("find")
+            .is_none()
+    );
 }
 
 #[test]
@@ -214,7 +234,10 @@ fn a_review_cannot_edit_a_user_skill() {
     fs::create_dir_all(path.parent().expect("parent")).expect("skills dir");
     fs::write(
         &path,
-        format!("---\nname: writing\ndescription: Write clearly\n---\n\n{}\n", body()),
+        format!(
+            "---\nname: writing\ndescription: Write clearly\n---\n\n{}\n",
+            body()
+        ),
     )
     .expect("user skill");
     let evidence: Vec<String> = (0..3)
@@ -275,14 +298,26 @@ fn the_automatic_lifecycle_promotes_quarantines_and_archives() {
     let session = harness.session();
     learned_file(home.path(), "research", "draft", 1, 1, 0, "2026-11-01");
     learned_file(home.path(), "danger", "active", 2, 0, 2, "2026-11-01");
-    learned_file(home.path(), "old", "active", 1, 1, 0, "2020-01-01T00:00:00Z");
+    learned_file(
+        home.path(),
+        "old",
+        "active",
+        1,
+        1,
+        0,
+        "2020-01-01T00:00:00Z",
+    );
     let response = json!({"changes": []}).to_string();
     let (_scripted, reviewer) = reviewer(session, home.path(), &response);
     let (report, _) = run_review(&reviewer, session);
     assert_eq!(report.applied, 3);
     let stored = SkillLibrary::new(home.path());
     assert_eq!(
-        stored.find("research").expect("find").expect("research").status,
+        stored
+            .find("research")
+            .expect("find")
+            .expect("research")
+            .status,
         SkillStatus::Active
     );
     assert_eq!(
@@ -316,12 +351,16 @@ fn the_review_handler_records_the_night_and_sleeps() {
         panic!("expected sleep");
     };
     assert!(until_micros > session.now_micros());
-    assert!(session
-        .meta_value("last_skill_review")
-        .expect("meta")
-        .is_some());
+    assert!(
+        session
+            .meta_value("last_skill_review")
+            .expect("meta")
+            .is_some()
+    );
     assert_eq!(
-        session.meta_value("last_skill_review_changes").expect("meta"),
+        session
+            .meta_value("last_skill_review_changes")
+            .expect("meta"),
         Some("0".to_owned())
     );
 }
