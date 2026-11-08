@@ -9,6 +9,7 @@ mod init;
 
 pub use daemon::{DaemonError, daemon};
 pub use doctor::{DoctorError, doctor};
+pub use effect_worker::EffectWorker;
 pub use init::{InitError, InitOptions, init};
 
 /// Install the structured JSON logger used by the daemon.

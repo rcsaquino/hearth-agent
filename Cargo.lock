@@ -260,6 +260,13 @@ dependencies = [
 [[package]]
 name = "hearth-eval"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hearth-core",
+ "hearth-runtime",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "hearth-memory"
