@@ -440,6 +440,7 @@ impl Session {
         error: Value,
         retryable: bool,
     ) -> Result<Effect, CoreError> {
+        let now = self.clock.now_micros();
         let effect_id = id.to_owned();
         self.storage
             .write(move |writer| -> Result<(), CoreError> {
@@ -460,9 +461,11 @@ impl Session {
                         (error_json.as_str(), effect_id.as_str()),
                     )?;
                 } else {
-                    return Err(CoreError::Invalid(
-                        "non-retryable effect failure is not implemented".to_owned(),
-                    ));
+                    writer.execute(
+                        "UPDATE effects SET status = 'failed', result_json = ?, settled_at = ? \
+                         WHERE id = ?",
+                        (error_json.as_str(), now, effect_id.as_str()),
+                    )?;
                 }
                 Ok(())
             })?;
