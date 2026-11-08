@@ -99,7 +99,8 @@ impl TokenCounts {
         recall: u64,
         runtime: u64,
     ) -> Self {
-        let total = identity + operation + tools + standing + skills + transcript + recall + runtime;
+        let total =
+            identity + operation + tools + standing + skills + transcript + recall + runtime;
         let fixed = identity + operation + tools + standing + skills + runtime;
         Self {
             identity,

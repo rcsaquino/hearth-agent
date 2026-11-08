@@ -51,15 +51,17 @@ fn a_zero_context_window_is_rejected() {
     )
     .expect("settings");
     let error = settings.validate().expect_err("zero window");
-    assert!(error.to_string().contains("models.context_window"), "{error}");
+    assert!(
+        error.to_string().contains("models.context_window"),
+        "{error}"
+    );
 }
 
 #[test]
 fn soft_compaction_must_be_below_hard() {
-    let settings: Settings = serde_json::from_str(
-        r#"{"compaction":{"soft_compact":0.9,"hard_compact":0.8}}"#,
-    )
-    .expect("settings");
+    let settings: Settings =
+        serde_json::from_str(r#"{"compaction":{"soft_compact":0.9,"hard_compact":0.8}}"#)
+            .expect("settings");
     let error = settings.validate().expect_err("bad thresholds");
     assert!(
         error.to_string().contains("compaction.soft_compact"),
