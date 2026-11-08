@@ -685,3 +685,28 @@ local fake-server and fixture tests.
   paraphrase 0.650, 195 stored rows, temporal 20/20, supersession 15/15, zero
   secret leaks. The 200k retrieval p95 is 353 ms against the 80 ms target; that
   gap moves to M6b.
+
+## 2026-11-08: M6b episodes, decay, archive, and the 200k path
+
+- Decay is computed at retrieval time; the stored importance is unchanged. The
+  effective importance is 5 percent lower per 90 days without use, floored at 15
+  for unpinned items. Pinned items and rules whose source is the user never decay.
+  The recall score uses the effective importance.
+- `archive_stale` is an explicit maintenance pass. Active items unused for at least
+  three years and with stored importance below 20 become `archived`, except pinned
+  items and user-stated rules. The default `search` and `as_of` hide archived rows;
+  `search_with` and `as_of_with`, and the memory tool's `include_archived`, expose
+  them. Archived rows are never deleted.
+- `consolidate_episodes` writes one extractive episode per conversation for the
+  entries since the last episode. The summary is capped near 500 estimated tokens,
+  uses the conversation id as `source_ref`, records the last covered entry as
+  `covered:<entry-id>`, and makes no model call. A second run with no new entries
+  writes nothing. The duplicate consolidation skips episode rows.
+- The 200k path short-circuits `recall_read` when the FTS has no matches, before
+  the tag and standing queries. The 200k p95 is 0.617 ms against the 80 ms target;
+  the small-set p95 is 5.2 ms. The recall, precision, and ranking results are
+  unchanged.
+- Paraphrase remains 0.650. The porter stemmer covers inflection, but synonym-level
+  paraphrases need a curated expansion layer or embeddings; that belongs to a later
+  retrieval pass, not this slice.
+- The nightly consolidation and archive schedule remain M7 work.
