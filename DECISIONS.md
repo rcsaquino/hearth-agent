@@ -897,3 +897,35 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - `scripts/test-scripts.sh` checks both scripts: a temporary repository with a planted deny-list value and a planted credential pattern, a clean tree, and the host package contents and checksum.
 - The aarch64 package is documented but not built on this host; it needs `rustup target add aarch64-unknown-linux-gnu` and a cross linker.
 - Publication, the 7-day soak, and the M8 gate remain for M8c.
+
+## 2026-11-09: M8b documentation, packaging, and the public scan
+
+- The public docs are README, QUICKSTART, SECURITY, and CONTRIBUTING, with neutral
+  placeholders (`USER_NAME`, `123456789`, `~/.hearth`, `example.com`). The
+  packaging unit template is `packaging/hearth.service`.
+- `scripts/check-docs.sh` verifies the required docs, the placeholders, the
+  executable scripts, and the absence of credential-shaped values in the docs.
+  It runs from `scripts/ci.sh`.
+- `scripts/package.sh` reads the version from `cargo metadata`, builds the
+  requested target, packages the binary, LICENSE, README, QUICKSTART, SECURITY,
+  CONTRIBUTING, and the systemd unit, and writes a SHA-256 checksum. x86_64 is
+  built and smoke-tested. aarch64 is not built on this host because the Rust
+  target and `aarch64-linux-gnu-gcc` are absent; the prerequisite is
+  `rustup target add aarch64-unknown-linux-gnu` plus the cross linker. No
+  aarch64 artifact is claimed.
+- `scripts/public-scan.sh` and its `scripts/secret-scan.sh` wrapper scan the
+  tracked tree and git history for credential patterns and for a private
+  deny-list kept outside the tree. The deny-list path comes from
+  `HEARTH_PUBLIC_DENYLIST` (default `~/.hearth-public-denylist`). Matches are
+  redacted, the deliberately fake test harness and fixture paths are excluded,
+  and the deny-list itself never enters the tree.
+- The prepared `.github/workflows/ci.yml` runs `scripts/ci.sh` and the secret
+  scan. It is not pushed, and the deny-list is expected as a repository secret.
+- The scan against a private list found the author email in `Cargo.toml` and
+  `DECISIONS.md`, and the same metadata across the git history. The local tree
+  keeps the chosen author metadata for now; the public release needs neutral
+  author metadata and a clean-history rewrite, which is a separate decision. No
+  credential or Telegram id was found.
+- Backup, restore, service install, live doctor, and interactive init are M8a.
+  The soak, mid-stream crash point, optional tools, and the release acceptance
+  list remain for M8c.
