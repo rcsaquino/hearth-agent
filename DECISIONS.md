@@ -441,3 +441,25 @@ local fake-server and fixture tests.
   marker. A split pre entity stays a pre entity with its language.
 - Sends are spaced by at least 33 milliseconds, capped at about 30 per second.
 - `sendChatAction` typing is exposed for the daemon worker.
+
+## 2026-11-08: Telegram inbound media (M3b-2a)
+
+- Inbound files live at `$HEARTH_HOME/media/inbound/YYYY-MM-DD/`, are written at
+  mode `0600`, and have sanitized names prefixed with the Telegram message id.
+  The date comes from the message timestamp in UTC.
+- Telegram files over 20 MB are not downloaded; the message is admitted with a
+  short note instead. A failed `getFile`, download, or media save also admits a
+  note rather than dropping the user's message.
+- Photos become image blocks stored by path. The OpenAI adapter reads the file at
+  request time, downscales the long edge to 1568 pixels, encodes PNG, and base64s
+  it into an `image_url` data URL. The original file is retained.
+- Documents, audio, and video become file blocks. The adapter renders file blocks
+  as a compact text note with the name and path; it never embeds file bytes.
+- Voice notes are transcribed through Groq when `media.stt` is configured. The
+  transcript is the user text block and the original voice file is retained as a
+  file block. With no transcriber, the message is admitted with a
+  not-transcribed note and the file block.
+- A replayed Telegram update is detected before any download, so a replay costs no
+  media transfer.
+- New dependencies: reqwest multipart, image, and base64 in `hearth-model`; time in
+  `hearth-telegram`.
