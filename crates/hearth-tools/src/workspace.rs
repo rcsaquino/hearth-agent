@@ -87,6 +87,11 @@ impl Workspace {
 
     /// Write a text file under the workspace root.
     pub fn write_text(&self, path: &str, content: &str) -> Result<(), ToolError> {
+        self.write_bytes(path, content.as_bytes())
+    }
+
+    /// Write bytes under the workspace root, truncating an existing file.
+    pub fn write_bytes(&self, path: &str, content: &[u8]) -> Result<(), ToolError> {
         let target = self.resolve_write(path)?;
         let mut options = fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
@@ -96,7 +101,7 @@ impl Workspace {
             options.mode(0o600);
         }
         let mut file = options.open(&target)?;
-        file.write_all(content.as_bytes())?;
+        file.write_all(content)?;
         file.flush()?;
         #[cfg(unix)]
         {
