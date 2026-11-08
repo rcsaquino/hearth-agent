@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::api::{TelegramClient, TelegramError};
+use crate::format::{format_markdown, split_formatted};
 
 const RICH_TEXT_LIMIT: usize = 32_768;
 const RICH_BLOCK_LIMIT: usize = 500;
@@ -54,12 +55,30 @@ impl TelegramSender {
             self.limiter.wait(&*self.sleeper);
             match self.client.send_rich_message(chat_id, markdown) {
                 Ok(()) => return Ok(SendOutcome::Rich),
+                Err(TelegramError::Api {
+                    code: Some(code), ..
+                }) if (400..500).contains(&code) && code != 429 => {
+                    return self.send_fallback(chat_id, markdown);
+                }
                 Err(error) => return Err(error),
             }
         }
-        Err(TelegramError::Transport(
-            "the reply exceeds the rich message limit".to_owned(),
-        ))
+        self.send_fallback(chat_id, markdown)
+    }
+
+    fn send_fallback(&self, chat_id: i64, markdown: &str) -> Result<SendOutcome, TelegramError> {
+        let formatted = format_markdown(markdown);
+        let parts = split_formatted(&formatted, 4096);
+        let mut sent = 0;
+        for part in &parts {
+            if part.text.trim().is_empty() {
+                continue;
+            }
+            self.limiter.wait(&*self.sleeper);
+            self.client.send_message(chat_id, &part.text, &part.entities)?;
+            sent += 1;
+        }
+        Ok(SendOutcome::Fallback { parts: sent })
     }
 }
 

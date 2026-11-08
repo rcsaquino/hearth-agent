@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use crate::format::Entity;
 use crate::types::Update;
 
 /// A Telegram API failure. Messages never include the token or request URL.
@@ -140,6 +141,25 @@ impl TelegramClient {
                 "rich_message": {"markdown": markdown},
             }),
         )?;
+        Ok(())
+    }
+
+    /// Send plain text with native entities.
+    pub fn send_message(
+        &self,
+        chat_id: i64,
+        text: &str,
+        entities: &[Entity],
+    ) -> Result<(), TelegramError> {
+        let mut params = json!({"chat_id": chat_id, "text": text});
+        if !entities.is_empty() {
+            params["entities"] = serde_json::to_value(entities)
+                .map_err(|error| TelegramError::Protocol {
+                    method: "sendMessage".to_owned(),
+                    detail: format!("entities could not be serialized: {error}"),
+                })?;
+        }
+        self.call("sendMessage", params)?;
         Ok(())
     }
 
