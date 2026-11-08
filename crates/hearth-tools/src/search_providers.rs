@@ -501,3 +501,76 @@ impl SearchProvider for FirecrawlSearch {
         Ok(results)
     }
 }
+
+/// TinyFish's search endpoint.
+pub struct TinyFishSearch {
+    base: String,
+    api_key: String,
+    client: Client,
+}
+
+impl TinyFishSearch {
+    /// Build a TinyFish provider.
+    pub fn new(base: impl Into<String>, api_key: impl Into<String>) -> Result<Self, SearchError> {
+        Ok(Self {
+            base: base.into(),
+            api_key: api_key.into(),
+            client: client()?,
+        })
+    }
+}
+
+impl SearchProvider for TinyFishSearch {
+    fn name(&self) -> &'static str {
+        "tinyfish"
+    }
+
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
+        let mut url = reqwest::Url::parse(&self.base)
+            .map_err(|error| SearchError::permanent(format!("invalid TinyFish base URL: {error}")))?;
+        url.query_pairs_mut().append_pair("query", query);
+        if limit > 10 {
+            url.query_pairs_mut().append_pair("page", "0");
+        }
+        let response = self
+            .client
+            .get(url)
+            .header("X-API-Key", &self.api_key)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|error| SearchError::temporary(format!("TinyFish transport error: {error}")))?;
+        let text = response_text(response, "TinyFish")?;
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|error| SearchError::permanent(format!("TinyFish returned invalid JSON: {error}")))?;
+        let mut results = Vec::new();
+        if let Some(items) = value.get("results").and_then(Value::as_array) {
+            for item in items {
+                let Some(url) = item
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .filter(|url| !url.trim().is_empty())
+                else {
+                    continue;
+                };
+                let title = item
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or(url)
+                    .to_owned();
+                let snippet = item
+                    .get("snippet")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let date = item.get("date").and_then(Value::as_str).map(str::to_owned);
+                results.push(SearchResult {
+                    title,
+                    url: url.to_owned(),
+                    snippet: truncate(snippet, SNIPPET_CHARS),
+                    date,
+                });
+            }
+        }
+        Ok(results)
+    }
+}
