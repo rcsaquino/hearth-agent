@@ -200,3 +200,20 @@ fn splits_a_long_rejected_reply_into_marked_parts() {
     }
     assert!(total_units >= 10_000);
 }
+
+#[test]
+fn retries_a_429_with_the_requested_wait() {
+    let server = Server::start(vec![error(429, 429, "slow down", Some(2)), ok()]);
+    let (sender, sleeper) = sender(&server.base);
+    let outcome = sender.send_reply(42, "hi").expect("send");
+    assert_eq!(outcome, SendOutcome::Rich);
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|request| request.method == "sendRichMessage"));
+    let sleeps = sleeper.sleeps.lock().expect("sleeps");
+    assert!(
+        sleeps.contains(&Duration::from_secs(2)),
+        "missing 2 second wait: {:?}",
+        *sleeps
+    );
+}
