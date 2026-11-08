@@ -602,7 +602,6 @@ fn the_standing_render_includes_id_kind_date_and_importance() {
     assert!(rendered.contains("Use metric units"));
 }
 
-
 // ---- M4c: standing refresh and consolidation ----
 
 fn raw_memory(

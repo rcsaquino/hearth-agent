@@ -5,12 +5,12 @@ use std::thread;
 use std::time::Duration;
 
 use hearth_core::{Harness, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus};
+use hearth_memory::{MemoryKind, MemoryService, MemoryStatus, SourceKind};
 use hearth_model::{
     ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
     StreamEvent, ToolCall, Usage,
 };
 use hearth_runtime::{Agent, AgentConfig, AgentError, EventSink, RunEvent};
-use hearth_memory::{MemoryKind, MemoryService, NewMemoryInput, SourceKind};
 use hearth_tools::{FileTool, Tool, ToolRegistry};
 use serde_json::json;
 use std::fs;
@@ -1257,10 +1257,15 @@ fn an_answer_is_extracted_into_memory() {
         json_script(&extraction),
     ]));
 
-    let outcome = agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
+    let outcome = agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_memory(Arc::clone(&memory))
+    .run_submission(&submission.id)
+    .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Noted."));
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 
@@ -1360,10 +1365,15 @@ fn a_trivial_message_skips_extraction() {
     let memory = Arc::new(MemoryService::new(harness.session().clone()));
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
 
-    agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
+    agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_memory(Arc::clone(&memory))
+    .run_submission(&submission.id)
+    .expect("run");
 
     assert_eq!(provider.requests().len(), 1);
     assert!(latest_extract_task(&harness, &conversation).is_none());
@@ -1422,10 +1432,15 @@ fn the_extraction_request_contains_the_run_and_similar_memories() {
         noop_script(),
     ]));
 
-    agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
-        .with_memory(memory)
-        .run_submission(&submission.id)
-        .expect("run");
+    agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_memory(memory)
+    .run_submission(&submission.id)
+    .expect("run");
 
     let requests = provider.requests();
     assert_eq!(requests.len(), 2);
@@ -1436,4 +1451,75 @@ fn the_extraction_request_contains_the_run_and_similar_memories() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(extraction_text.contains("Sam prefers dark roast coffee"));
+}
+
+#[test]
+fn an_extraction_can_update_an_existing_memory() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let seed = memory
+        .save(memory_input("Sam prefers tea", MemoryKind::Preference, 50))
+        .expect("seed");
+    let (submission, user_entry) =
+        submit_text(&harness, &conversation, "req-update", "I prefer coffee now");
+    let extraction = format!(
+        r#"{{"operations":[{{"op":"update","kind":"preference","content":"Sam prefers coffee","tags":["coffee"],"importance":70,"evidence_entry_id":"{}","evidence_quote":"I prefer coffee now","supersedes_id":"{}"}}]}}"#,
+        user_entry, seed.id
+    );
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Updated."),
+        json_script(&extraction),
+    ]));
+
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("Updated."));
+    let updated = memory.get(&seed.id).expect("get").expect("row");
+    assert_eq!(updated.content, "Sam prefers coffee");
+    assert_eq!(updated.importance, 70);
+    assert_eq!(memory.stats().expect("stats").total, 1);
+    let task = latest_extract_task(&harness, &conversation).expect("task");
+    assert_eq!(task.status, TaskStatus::Done);
+    assert_eq!(task.result.as_ref().expect("result")["applied"], 1);
+}
+
+#[test]
+fn an_extraction_can_supersede_an_existing_memory() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let seed = memory
+        .save(memory_input("Sam lives in Manila", MemoryKind::Fact, 50))
+        .expect("seed");
+    let (submission, user_entry) = submit_text(
+        &harness,
+        &conversation,
+        "req-supersede",
+        "I moved to Quezon City",
+    );
+    let extraction = format!(
+        r#"{{"operations":[{{"op":"supersede","kind":"fact","content":"Sam lives in Quezon City","tags":[],"importance":60,"evidence_entry_id":"{}","evidence_quote":"I moved to Quezon City","supersedes_id":"{}"}}]}}"#,
+        user_entry, seed.id
+    );
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Moved."),
+        json_script(&extraction),
+    ]));
+
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("Moved."));
+    let old = memory.get(&seed.id).expect("get").expect("old");
+    assert_eq!(old.status, MemoryStatus::Superseded);
+    let found = memory.search("Quezon City", 5).expect("search");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].content, "Sam lives in Quezon City");
+    assert_eq!(memory.stats().expect("stats").total, 2);
+    let task = latest_extract_task(&harness, &conversation).expect("task");
+    assert_eq!(task.status, TaskStatus::Done);
 }
