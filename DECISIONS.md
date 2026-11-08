@@ -875,3 +875,16 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - The tool is registered in local chat, the Telegram daemon worker, and the prompt-audit tool set. Helper subagents keep their restricted tool subset and do not get the skill tool.
 - Skill review and the nightly maintenance schedules are M7c-2, not this slice.
 - Unrelated test fix: the memory as-of test could place the new fact on the same microsecond as the observation boundary under load; the test now sets valid_from strictly after the boundary.
+
+## 2026-11-09: Nightly maintenance and skill review (M7c-2)
+
+- Two global recurring tasks are maintained: `memory.consolidate` at 03:30 local and `skill.review` at 04:30 local. The times are constants (not settings); the local offset comes from the host through `time`'s `local-offset` feature with UTC as the fallback. That feature pulled the transitive `num_threads` crate into `Cargo.lock`; no direct dependency was added.
+- `ensure_maintenance_tasks` creates a task only when no open task of that kind exists. A missed night runs once on the next start, and the handler sleeps from the current time to the next slot, so several missed nights coalesce. A second start the same night creates nothing. Both tasks are silent in Telegram.
+- `memory.consolidate` runs the M4c duplicate consolidation, the M6b stale archive, and episode creation, then records `last_consolidation` and sleeps until the next 03:30.
+- `skill.review` records the outcome of every learned skill loaded during a settled run: a done submission is a success and resets the consecutive-failure counter; unanswered or cancelled runs are failures. A skill's own body is never evidence.
+- Automatic lifecycle before the model: a draft with at least one success becomes active; two failures quarantine; 90 days unused or a success rate below half after four uses archives. The model receives the recent successful entries, the skill index and bodies, and standing memory, and returns at most three evidence-backed changes.
+- A create requires evidence from at least three distinct successful submissions. All evidence ids must belong to a successful run; user skills are never edited. Applied and automatic transitions count toward `last_skill_review_changes`.
+- The review records usage with kind `skill.review` and no conversation id because the maintenance task is global. It saves the review prompt blob and uses `last_skill_review` as the next cutoff; the first review looks back 30 days.
+- Review failures are logged, the night is still recorded, and the task sleeps until the next night rather than retrying in a hot loop.
+- `hearth status` exposes `last_consolidation`, `last_skill_review`, and `last_skill_review_changes`.
+- The maintenance scheduler exists only on the Telegram daemon path. A daemon without Telegram does not create or run these tasks.
