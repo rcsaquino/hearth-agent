@@ -7,8 +7,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hearth_tools::{
-    FetchError, FetchProvider, FetchResult, HttpFetch, JinaFetch, TinyFishFetch, Tool,
-    WebFetchTool,
+    FetchError, FetchProvider, FetchResult, FirecrawlFetch, HttpFetch, JinaFetch,
+    TinyFishFetch, Tool, WebFetchTool,
 };
 use serde_json::json;
 
@@ -399,4 +399,45 @@ fn tinyfish_maps_its_fetch_response() {
     assert_eq!(body["urls"], json!(["https://93.184.216.34/page"]));
     assert_eq!(body["format"], "markdown");
     assert_eq!(body["per_url_timeout_ms"], 30000);
+}
+
+
+#[test]
+fn firecrawl_maps_its_scrape_response() {
+    let server = serve(vec![reply(
+        200,
+        "application/json",
+        r##"{"success":true,"data":{"markdown":"# Fire\n\nContent","metadata":{"title":"Fire Page"}}}"##,
+    )]);
+    let provider = Arc::new(
+        FirecrawlFetch::new(
+            "fire-key",
+            server.base.clone(),
+            Duration::from_secs(5),
+            2 * 1024 * 1024,
+        )
+        .expect("firecrawl"),
+    );
+    let tool = WebFetchTool::new(vec![provider], false);
+    let output = tool
+        .call(&json!({"url": "https://93.184.216.34/page"}))
+        .expect("fetch");
+    assert!(output.content.contains("Provider: firecrawl"));
+    assert!(output.content.contains("Title: Fire Page"));
+    assert!(output.content.contains("# Fire"));
+    assert!(output.content.contains("Content"));
+
+    let captured = server.thread.join().expect("server thread");
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].path, "/v2/scrape");
+    assert_eq!(
+        captured[0].headers.get("authorization").map(String::as_str),
+        Some("Bearer fire-key")
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&captured[0].body).expect("request body is JSON");
+    assert_eq!(body["url"], "https://93.184.216.34/page");
+    assert_eq!(body["formats"], json!(["markdown"]));
+    assert_eq!(body["onlyMainContent"], true);
+    assert_eq!(body["lockdown"], true);
 }
