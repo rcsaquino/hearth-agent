@@ -1,4 +1,4 @@
-use hearth_telegram::format_markdown;
+use hearth_telegram::{format_markdown, split_formatted};
 
 fn entity<'a>(value: &'a hearth_telegram::FormattedText, kind: &str) -> &'a hearth_telegram::Entity {
     value
@@ -39,4 +39,34 @@ fn counts_offsets_in_utf16_units() {
     let value = format_markdown("😀 **ok**");
     let bold = entity(&value, "bold");
     assert_eq!((bold.offset, bold.length), (3, 2));
+}
+
+#[test]
+fn splits_long_text_with_markers() {
+    let value = format_markdown(&"word ".repeat(30));
+    let parts = split_formatted(&value, 40);
+    assert!(parts.len() > 1);
+    let total = parts.len();
+    for (index, part) in parts.iter().enumerate() {
+        assert!(part.text.encode_utf16().count() <= 40, "part too long: {:?}", part.text);
+        assert!(part.text.ends_with(&format!("({}/{})", index + 1, total)), "missing marker: {:?}", part.text);
+    }
+}
+
+#[test]
+fn keeps_split_code_inside_pre_entities() {
+    let markdown = format!("```rust\n{}\n```", "a".repeat(5000));
+    let value = format_markdown(&markdown);
+    let parts = split_formatted(&value, 4096);
+    assert!(parts.len() > 1);
+    for (index, part) in parts.iter().enumerate() {
+        assert!(part.text.encode_utf16().count() <= 4096);
+        assert!(part.text.ends_with(&format!("({}/{})", index + 1, parts.len())));
+        assert!(
+            part.entities.iter().any(|entity| entity.kind == "pre" && entity.language.as_deref() == Some("rust")),
+            "part {} lost its pre entity: {:?}",
+            index + 1,
+            part.entities
+        );
+    }
 }
