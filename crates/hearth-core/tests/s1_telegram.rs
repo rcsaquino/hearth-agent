@@ -267,3 +267,76 @@ fn a_control_update_is_recorded_once_without_a_submission() {
         "a duplicate update must not advance the stored offset"
     );
 }
+
+#[test]
+fn queued_submissions_are_counted_per_conversation() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let telegram = session
+        .create_conversation("Telegram", "telegram", "1:0")
+        .expect("create telegram");
+    let other = session
+        .create_conversation("Other", "telegram", "2:0")
+        .expect("create other");
+
+    assert_eq!(
+        session
+            .queued_submission_count(&telegram.id)
+            .expect("count empty"),
+        0
+    );
+
+    let first = session
+        .submit_telegram(
+            &telegram.id,
+            "tg:1:10",
+            json!({"text": "a"}),
+            TelegramUpdate {
+                update_id: 1,
+                chat_id: 1,
+                message_id: 10,
+            },
+            2,
+        )
+        .expect("submit first");
+    session
+        .submit_telegram(
+            &telegram.id,
+            "tg:1:11",
+            json!({"text": "b"}),
+            TelegramUpdate {
+                update_id: 2,
+                chat_id: 1,
+                message_id: 11,
+            },
+            3,
+        )
+        .expect("submit second");
+    session
+        .submit(&other.id, "other:1", "input", json!({"text": "c"}))
+        .expect("submit other");
+
+    assert_eq!(
+        session
+            .queued_submission_count(&telegram.id)
+            .expect("count telegram"),
+        2
+    );
+    assert_eq!(
+        session
+            .queued_submission_count(&other.id)
+            .expect("count other"),
+        1
+    );
+
+    session
+        .settle(&first.submission.id, SubmissionStatus::Done, None)
+        .expect("settle first");
+    assert_eq!(
+        session
+            .queued_submission_count(&telegram.id)
+            .expect("count after settle"),
+        1
+    );
+}
