@@ -1060,7 +1060,10 @@ fn daemon_executes_a_file_write_effect() {
     let result = effect.result.expect("effect result");
     assert_eq!(result["path"], "notes/hello.txt");
     assert_eq!(result["bytes"], 5);
-    assert_eq!(std::fs::read_to_string(&target).expect("read file"), "hello");
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("read file"),
+        "hello"
+    );
 
     #[cfg(unix)]
     {
@@ -1072,4 +1075,218 @@ fn daemon_executes_a_file_write_effect() {
             & 0o777;
         assert_eq!(mode, 0o600, "file mode was {mode:o}");
     }
+}
+
+#[test]
+fn daemon_fails_a_path_escape_effect() {
+    use hearth_core::{EffectStatus, Harness};
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let effect_id = seed_effect(
+        home.path(),
+        "file_write",
+        "escape-1",
+        serde_json::json!({"path": "../escape.txt", "content": "bad"}),
+    );
+
+    let mut daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    wait_for_log(home.path(), "effect failed");
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let effect = harness
+        .session()
+        .effect(&effect_id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Failed);
+    let result = effect.result.expect("effect result");
+    assert_eq!(result["retryable"], false);
+    assert!(
+        !home.path().join("escape.txt").exists(),
+        "an escaped file was written"
+    );
+}
+
+#[test]
+fn daemon_fails_an_unknown_effect_kind() {
+    use hearth_core::{EffectStatus, Harness};
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let effect_id = seed_effect(
+        home.path(),
+        "unsupported.effect",
+        "unknown-1",
+        serde_json::json!({}),
+    );
+
+    let mut daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    wait_for_log(home.path(), "effect failed");
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let effect = harness
+        .session()
+        .effect(&effect_id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Failed);
+    let result = effect.result.expect("effect result");
+    assert_eq!(result["retryable"], false);
+}
+
+#[test]
+fn daemon_requeues_a_started_file_write_effect() {
+    use hearth_core::{EffectStatus, Harness};
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let effect_id = seed_effect(
+        home.path(),
+        "file_write",
+        "started-1",
+        serde_json::json!({"path": "notes/started.txt", "content": "again"}),
+    );
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        harness
+            .session()
+            .begin_effect(&effect_id)
+            .expect("begin effect");
+    }
+
+    let mut daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    let target = home.path().join("workspace/notes/started.txt");
+    wait_for_file(&target);
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let effect = harness
+        .session()
+        .effect(&effect_id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Done);
+    assert_eq!(effect.attempts, 2);
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("read file"),
+        "again"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn daemon_fails_a_symlink_escape_effect() {
+    use hearth_core::{EffectStatus, Harness};
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let outside = tempfile::TempDir::new().expect("outside");
+    std::os::unix::fs::symlink(outside.path(), home.path().join("workspace/link"))
+        .expect("create symlink");
+    let effect_id = seed_effect(
+        home.path(),
+        "file_write",
+        "symlink-1",
+        serde_json::json!({"path": "link/escape.txt", "content": "bad"}),
+    );
+
+    let mut daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    wait_for_log(home.path(), "effect failed");
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let effect = harness
+        .session()
+        .effect(&effect_id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Failed);
+    assert!(
+        !outside.path().join("escape.txt").exists(),
+        "a file escaped through a symlink"
+    );
+}
+
+#[test]
+fn daemon_stops_retrying_a_retryable_effect_after_three_attempts() {
+    use hearth_core::{EffectStatus, Harness};
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let effect_id = seed_effect(
+        home.path(),
+        "file_write",
+        "retry-1",
+        serde_json::json!({"path": "notes/retry.txt", "content": "x"}),
+    );
+    std::fs::remove_dir_all(home.path().join("workspace")).expect("remove workspace");
+    std::fs::write(home.path().join("workspace"), "not a directory").expect("block workspace");
+
+    let mut daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    wait_for_log(home.path(), "\"retryable\":false");
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let effect = harness
+        .session()
+        .effect(&effect_id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Failed);
+    assert_eq!(effect.attempts, 3);
+    let result = effect.result.expect("effect result");
+    assert_eq!(result["retryable"], false);
 }
