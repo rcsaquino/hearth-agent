@@ -191,7 +191,10 @@ fn splits_a_long_rejected_reply_into_marked_parts() {
         assert_eq!(request.method, "sendMessage");
         let text = request.body["text"].as_str().expect("text");
         assert!(text.encode_utf16().count() <= 4096, "part too long");
-        assert!(text.ends_with(&format!("({}/{})", index + 1, 3)), "missing marker: {text:?}");
+        assert!(
+            text.ends_with(&format!("({}/{})", index + 1, 3)),
+            "missing marker: {text:?}"
+        );
         total_units += text.encode_utf16().count();
         let has_pre = request.body["entities"]
             .as_array()
@@ -209,7 +212,11 @@ fn retries_a_429_with_the_requested_wait() {
     assert_eq!(outcome, SendOutcome::Rich);
     let requests = server.finish();
     assert_eq!(requests.len(), 2);
-    assert!(requests.iter().all(|request| request.method == "sendRichMessage"));
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.method == "sendRichMessage")
+    );
     let sleeps = sleeper.sleeps.lock().expect("sleeps");
     assert!(
         sleeps.contains(&Duration::from_secs(2)),
@@ -225,7 +232,10 @@ fn a_transport_failure_is_uncertain_and_is_not_resent() {
     drop(listener);
     let (sender, _) = sender(&base);
     let outcome = sender.send_reply(42, "hi").expect("send");
-    assert!(matches!(outcome, SendOutcome::Uncertain { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, SendOutcome::Uncertain { .. }),
+        "{outcome:?}"
+    );
 }
 
 #[test]
@@ -233,7 +243,10 @@ fn a_server_error_is_uncertain_and_does_not_fall_back() {
     let server = Server::start(vec![error(500, 500, "server exploded", None)]);
     let (sender, _) = sender(&server.base);
     let outcome = sender.send_reply(42, "hi").expect("send");
-    assert!(matches!(outcome, SendOutcome::Uncertain { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, SendOutcome::Uncertain { .. }),
+        "{outcome:?}"
+    );
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "sendRichMessage");
@@ -261,7 +274,9 @@ fn spaces_rapid_sends_by_at_least_one_interval() {
     assert_eq!(requests.len(), 2);
     let sleeps = sleeper.sleeps.lock().expect("sleeps");
     assert!(
-        sleeps.iter().any(|delay| *delay >= Duration::from_millis(33)),
+        sleeps
+            .iter()
+            .any(|delay| *delay >= Duration::from_millis(33)),
         "no send interval: {:?}",
         *sleeps
     );
@@ -283,4 +298,31 @@ fn retries_a_fallback_429_on_the_same_part() {
     assert_eq!(requests[2].method, "sendMessage");
     let sleeps = sleeper.sleeps.lock().expect("sleeps");
     assert!(sleeps.contains(&Duration::from_secs(1)), "{:?}", *sleeps);
+}
+
+#[test]
+fn oversized_markdown_skips_the_rich_path() {
+    let markdown = "a".repeat(32_769);
+    let replies = (0..9).map(|_| ok()).collect();
+    let server = Server::start(replies);
+    let (sender, _) = sender(&server.base);
+    let outcome = sender.send_reply(42, &markdown).expect("send");
+    assert!(
+        matches!(outcome, SendOutcome::Fallback { parts } if parts >= 8),
+        "{outcome:?}"
+    );
+    let requests = server.finish();
+    assert!(requests.iter().all(|request| request.method == "sendMessage"));
+}
+
+#[test]
+fn too_many_blocks_skips_the_rich_path() {
+    let markdown = "x\n".repeat(501);
+    let server = Server::start(vec![ok()]);
+    let (sender, _) = sender(&server.base);
+    let outcome = sender.send_reply(42, &markdown).expect("send");
+    assert_eq!(outcome, SendOutcome::Fallback { parts: 1 });
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sendMessage");
 }
