@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use hearth_config::Settings;
 use hearth_model::Speaker;
-use hearth_telegram::{MessageTool, TelegramClient};
+use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
     BraveSearch, DeepSeekFetch, DeepSeekSearch, ExaSearch, FetchError, FetchProvider, FileTool,
     FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, SearchError, SearchProvider, ShellTool,
@@ -16,7 +16,7 @@ use thiserror::Error;
 
 /// The Telegram values needed for the message tool.
 pub struct MessageTarget {
-    pub client: TelegramClient,
+    pub sender: TelegramSender,
     pub chat_id: i64,
     pub thread_id: Option<i64>,
     pub outbound: PathBuf,
@@ -47,7 +47,7 @@ pub fn build_tools(
     ];
     if let Some(target) = message {
         tools.push(Arc::new(MessageTool::new(
-            target.client,
+            target.sender,
             target.chat_id,
             target.thread_id,
             workspace,

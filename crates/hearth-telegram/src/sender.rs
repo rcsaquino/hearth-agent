@@ -1,9 +1,10 @@
 //! Telegram reply delivery with a rich-first path.
 
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::api::{TelegramClient, TelegramError};
+use crate::api::{MediaKind, TelegramClient, TelegramError};
 use crate::format::{format_markdown, split_formatted};
 
 const RICH_TEXT_LIMIT: usize = 32_768;
@@ -111,6 +112,62 @@ impl TelegramSender {
     pub fn send_typing(&self, chat_id: i64, thread_id: Option<i64>) -> Result<(), TelegramError> {
         self.limiter.wait(&*self.sleeper);
         self.client.send_chat_action(chat_id, thread_id, "typing")
+    }
+
+    /// Send one photo.
+    pub fn send_photo(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.client.send_photo(chat_id, thread_id, path, caption)
+    }
+
+    /// Send one document.
+    pub fn send_document(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.client.send_document(chat_id, thread_id, path, caption)
+    }
+
+    /// Send one video.
+    pub fn send_video(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.client.send_video(chat_id, thread_id, path, caption)
+    }
+
+    /// Send one voice file.
+    pub fn send_voice(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.client.send_voice(chat_id, thread_id, path, caption)
+    }
+
+    /// Send one album.
+    pub fn send_media_group(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        items: &[(MediaKind, PathBuf)],
+        caption: Option<&str>,
+    ) -> Result<Vec<i64>, TelegramError> {
+        self.client
+            .send_media_group(chat_id, thread_id, items, caption)
     }
 
     fn send_fallback(

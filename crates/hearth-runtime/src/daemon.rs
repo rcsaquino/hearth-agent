@@ -216,7 +216,6 @@ impl TelegramRuntime {
             settings: Arc::clone(&settings),
             session,
             provider,
-            client,
             sender,
             speaker,
             soul,
@@ -237,7 +236,6 @@ struct TelegramWorker {
     settings: Arc<Settings>,
     session: Session,
     provider: Arc<dyn Provider>,
-    client: TelegramClient,
     sender: TelegramSender,
     speaker: Option<Arc<dyn Speaker>>,
     soul: String,
@@ -354,7 +352,7 @@ impl TelegramWorker {
         let run_cancel = self.cancellations.register(chat_id);
 
         let target = MessageTarget {
-            client: self.client.clone(),
+            sender: self.sender.clone(),
             chat_id,
             thread_id,
             outbound: self.outbound.clone(),

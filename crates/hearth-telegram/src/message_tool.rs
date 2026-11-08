@@ -10,11 +10,12 @@ use hearth_model::{MediaError, Speaker, ToolSpec};
 use hearth_tools::{Tool, ToolError, ToolOutput, Workspace};
 use serde_json::{Value, json};
 
-use crate::api::{MediaKind, TelegramClient, TelegramError};
+use crate::api::{MediaKind, TelegramError};
+use crate::sender::TelegramSender;
 
 /// Sends files and voice replies to one Telegram chat.
 pub struct MessageTool {
-    client: TelegramClient,
+    sender: TelegramSender,
     chat_id: i64,
     thread_id: Option<i64>,
     workspace: Workspace,
@@ -25,7 +26,7 @@ pub struct MessageTool {
 impl MessageTool {
     /// Build a message tool for one chat.
     pub fn new(
-        client: TelegramClient,
+        sender: TelegramSender,
         chat_id: i64,
         thread_id: Option<i64>,
         workspace: impl Into<PathBuf>,
@@ -34,7 +35,7 @@ impl MessageTool {
         speaker: Option<Arc<dyn Speaker>>,
     ) -> Self {
         Self {
-            client,
+            sender,
             chat_id,
             thread_id,
             workspace: Workspace::new(workspace, spill),
@@ -103,7 +104,7 @@ impl Tool for MessageTool {
             let audio = speaker.speak(speech).map_err(media_error)?;
             let voice = self.write_voice(&audio)?;
             let id = self
-                .client
+                .sender
                 .send_voice(self.chat_id, self.thread_id, &voice, caption)
                 .map_err(telegram_error)?;
             sent.push(id);
@@ -133,7 +134,7 @@ impl Tool for MessageTool {
             } else if resolved.iter().all(|(kind, _)| kind.album_type().is_some()) {
                 let items: Vec<(MediaKind, PathBuf)> = resolved;
                 let ids = self
-                    .client
+                    .sender
                     .send_media_group(self.chat_id, self.thread_id, &items, caption)
                     .map_err(telegram_error)?;
                 sent.extend(ids);
@@ -172,16 +173,16 @@ impl MessageTool {
     ) -> Result<i64, ToolError> {
         let result = match kind {
             MediaKind::Photo => self
-                .client
+                .sender
                 .send_photo(self.chat_id, self.thread_id, path, caption),
             MediaKind::Video => self
-                .client
+                .sender
                 .send_video(self.chat_id, self.thread_id, path, caption),
             MediaKind::Voice => self
-                .client
+                .sender
                 .send_voice(self.chat_id, self.thread_id, path, caption),
             MediaKind::Document => {
-                self.client
+                self.sender
                     .send_document(self.chat_id, self.thread_id, path, caption)
             }
         };
