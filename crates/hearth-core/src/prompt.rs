@@ -68,25 +68,53 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
 pub fn message_for_entry(entry: &Entry) -> Option<ChatMessage> {
     let role = match entry.kind.as_str() {
         "user" => Role::User,
+        "assistant" => Role::Assistant,
+        "tool_result" => Role::Tool,
+        "system" | "notice" => Role::System,
         _ => return None,
     };
-    Some(ChatMessage {
-        role,
-        blocks: parse_blocks(&entry.content),
-    })
+    let blocks = parse_blocks(&entry.content)
+        .into_iter()
+        .filter(|block| !matches!(block, ContentBlock::Thinking(_)))
+        .collect();
+    Some(ChatMessage { role, blocks })
 }
 
 /// Parse entry content into provider-neutral blocks.
 pub fn parse_blocks(value: &Value) -> Vec<ContentBlock> {
     match value {
         Value::String(text) => vec![ContentBlock::Text(text.clone())],
-        Value::Object(object) => match object.get("text").and_then(Value::as_str) {
-            Some(text) => vec![ContentBlock::Text(text.to_owned())],
-            None => Vec::new(),
-        },
+        Value::Object(object) => parse_block(object).into_iter().collect(),
         Value::Array(items) => items.iter().flat_map(parse_blocks).collect(),
         _ => Vec::new(),
     }
+}
+
+fn parse_block(object: &serde_json::Map<String, Value>) -> Option<ContentBlock> {
+    let block_type = object.get("type").and_then(Value::as_str);
+    match block_type {
+        Some("text") => Some(ContentBlock::Text(text_field(object)?)),
+        Some("thinking") => Some(ContentBlock::Thinking(text_field(object)?)),
+        Some("tool_call") => Some(ContentBlock::ToolCall(hearth_model::ToolCall {
+            id: object.get("id")?.as_str()?.to_owned(),
+            name: object.get("name")?.as_str()?.to_owned(),
+            arguments: object.get("arguments").cloned().unwrap_or_else(|| json!({})),
+        })),
+        Some("tool_result") => Some(ContentBlock::ToolResult {
+            call_id: object.get("call_id")?.as_str()?.to_owned(),
+            content: object
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        }),
+        Some(_) => None,
+        None => Some(ContentBlock::Text(text_field(object)?)),
+    }
+}
+
+fn text_field(object: &serde_json::Map<String, Value>) -> Option<String> {
+    object.get("text").and_then(Value::as_str).map(str::to_owned)
 }
 
 /// Build a prompt for a conversation.
