@@ -1832,6 +1832,50 @@ impl Session {
             })
     }
 
+    /// Archive helper conversations beyond the retention window and newest run count.
+    pub fn prune_helpers(
+        &self,
+        retention_days: u32,
+        retention_runs: u32,
+        now: i64,
+    ) -> Result<usize, CoreError> {
+        let cutoff = now.saturating_sub(
+            (retention_days as i64).saturating_mul(86_400_000_000),
+        );
+        let rows: Vec<(String, Option<String>, i64)> = self.storage.read(|reader| {
+            reader.query(
+                "SELECT id, conversation_id, created_at FROM tasks WHERE kind = 'helper' \
+                 ORDER BY created_at DESC, id DESC",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+        })?;
+        let keep = retention_runs as usize;
+        let mut conversations = Vec::new();
+        for (index, (_id, conversation_id, created_at)) in rows.into_iter().enumerate() {
+            if index < keep || created_at >= cutoff {
+                continue;
+            }
+            if let Some(conversation_id) = conversation_id {
+                conversations.push(conversation_id);
+            }
+        }
+        if conversations.is_empty() {
+            return Ok(0);
+        }
+        let count = conversations.len();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            for conversation_id in &conversations {
+                writer.execute(
+                    "UPDATE conversations SET archived = 1 WHERE id = ?",
+                    (conversation_id,),
+                )?;
+            }
+            Ok(())
+        })?;
+        Ok(count)
+    }
+
     /// Claim the oldest runnable task.
     pub fn claim_task(
         &self,

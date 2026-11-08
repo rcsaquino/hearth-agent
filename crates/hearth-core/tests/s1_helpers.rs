@@ -115,7 +115,7 @@ fn helper_retention_archives_runs_beyond_the_newest_limit() {
             .create_conversation_with_parent(
                 "Helper",
                 "helper",
-                format!("helper:{index}:{now}"),
+                &format!("helper:{index}:{now}"),
                 &parent.id,
             )
             .expect("helper conversation");
