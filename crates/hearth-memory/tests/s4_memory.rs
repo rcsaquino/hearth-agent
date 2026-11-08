@@ -1167,3 +1167,27 @@ fn the_memory_tool_can_read_archived_memories() {
         .expect("as_of archived");
     assert!(as_of.content.contains(&old.id));
 }
+
+#[test]
+fn standing_is_cached_until_a_memory_write() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let first = service
+        .save(input_imp(
+            "A standing rule about caching",
+            MemoryKind::Rule,
+            90,
+        ))
+        .expect("save");
+    let standing = service.standing().expect("standing");
+    assert!(standing.items.iter().any(|item| item.id == first.id));
+    let second = service
+        .save(input_imp(
+            "A second standing rule about caching",
+            MemoryKind::Rule,
+            91,
+        ))
+        .expect("save");
+    let refreshed = service.standing().expect("standing");
+    assert!(refreshed.items.iter().any(|item| item.id == second.id));
+    assert!(refreshed.version > standing.version);
+}

@@ -1,6 +1,7 @@
 //! The memory library: store, merge, search, and temporal reads.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
 
 use hearth_core::{
     Conversation, CoreError, Document, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewMemory,
@@ -64,6 +65,7 @@ pub struct MemoryPatch {
 pub struct MemoryService {
     session: Session,
     policy: crate::constants::MemoryPolicy,
+    standing_cache: Arc<Mutex<Option<StandingMemory>>>,
 }
 
 impl MemoryService {
@@ -74,7 +76,17 @@ impl MemoryService {
 
     /// Build the library with explicit budgets.
     pub fn with_policy(session: Session, policy: crate::constants::MemoryPolicy) -> Self {
-        Self { session, policy }
+        Self {
+            session,
+            policy,
+            standing_cache: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn invalidate_standing(&self) {
+        if let Ok(mut cache) = self.standing_cache.lock() {
+            *cache = None;
+        }
     }
 
     /// Save one memory. Exact and near duplicates merge into the existing row.
@@ -465,7 +477,22 @@ impl MemoryService {
     }
 
     /// The current standing-memory block and its version.
+    /// The current standing-memory block and its version. Cached until a
+    /// memory write invalidates it.
     pub fn standing(&self) -> Result<StandingMemory, MemoryError> {
+        if let Ok(cache) = self.standing_cache.lock()
+            && let Some(cached) = cache.as_ref()
+        {
+            return Ok(cached.clone());
+        }
+        let result = self.standing_uncached()?;
+        if let Ok(mut cache) = self.standing_cache.lock() {
+            *cache = Some(result.clone());
+        }
+        Ok(result)
+    }
+
+    fn standing_uncached(&self) -> Result<StandingMemory, MemoryError> {
         let now = self.session.now_micros();
         let promoted_sql = format!(
             "{MEMORY_SELECT} WHERE status = 'active' \
@@ -922,6 +949,7 @@ impl MemoryService {
     }
 
     fn commit(&self, writes: Vec<MemoryWrite>, bump: bool) -> Result<(), MemoryError> {
+        self.invalidate_standing();
         if !bump {
             self.session.save_memory(writes)?;
             return Ok(());

@@ -13,11 +13,36 @@ fn memory_benchmark_runs() {
 }
 
 #[test]
+fn memory_scale_queries_match_fixture_memories() {
+    let report = hearth_eval::memory_bench::run_scale(2_000).expect("scale benchmark");
+    assert_eq!(report.items, 2_000);
+    assert_eq!(report.fixture_rows, 195);
+    assert_eq!(report.noise_rows, 1_805);
+    assert_eq!(report.queries, 20);
+    assert_eq!(
+        report.matched, 20,
+        "a scale query did not match a fixture memory"
+    );
+    assert!(
+        report.retrieval_ms_p95 <= 80.0,
+        "2k retrieval p95 was {} ms; {report:#?}",
+        report.retrieval_ms_p95
+    );
+    println!("{report:#?}");
+}
+
+#[test]
 #[ignore]
 fn memory_scale_200k() {
     let report = hearth_eval::memory_bench::run_scale(200_000).expect("scale benchmark");
     assert_eq!(report.items, 200_000);
+    assert_eq!(report.fixture_rows, 195);
+    assert_eq!(report.noise_rows, 199_805);
     assert_eq!(report.queries, 20);
+    assert_eq!(
+        report.matched, 20,
+        "a scale query did not match a fixture memory"
+    );
     assert!(
         report.retrieval_ms_p95 <= 80.0,
         "200k retrieval p95 was {} ms; {report:#?}",

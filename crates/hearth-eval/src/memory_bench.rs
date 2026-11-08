@@ -121,7 +121,12 @@ pub struct BenchTargets {
 #[derive(Debug, Clone, Serialize)]
 pub struct ScaleReport {
     pub items: usize,
+    pub fixture_rows: usize,
+    pub noise_rows: usize,
     pub queries: usize,
+    pub matched: usize,
+    pub search_ms_p95: f64,
+    pub standing_ms_p95: f64,
     pub retrieval_ms_p95: f64,
     pub target_ms: f64,
 }
@@ -151,14 +156,15 @@ impl Acc {
     }
 }
 
-/// Run the benchmark over the versioned fixture.
-pub fn run() -> Result<BenchReport> {
-    let fixture: Fixture = serde_json::from_str(FIXTURE).context("parse the memory fixture")?;
-    let dir = TempDir::new().context("create the benchmark home")?;
-    let harness = Harness::open_with(dir.path(), Arc::new(FixedClock), Arc::new(UuidV7))
-        .context("open the benchmark record")?;
-    let service = MemoryService::new(harness.session().clone());
+struct LoadedFixture {
+    key_to_id: BTreeMap<String, String>,
+    id_to_keys: BTreeMap<String, Vec<String>>,
+    duplicate_failures: usize,
+    stored_rows: usize,
+}
 
+/// Load the fixture memories and map their keys to stored ids.
+fn load_fixture(service: &MemoryService, fixture: &Fixture) -> Result<LoadedFixture> {
     let mut key_to_id: BTreeMap<String, String> = BTreeMap::new();
     let mut id_to_keys: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut duplicate_failures = 0usize;
@@ -201,8 +207,28 @@ pub fn run() -> Result<BenchReport> {
             .or_default()
             .push(memory.key.clone());
     }
-
     let stored_rows = service.stats().context("read memory stats")?.total as usize;
+    Ok(LoadedFixture {
+        key_to_id,
+        id_to_keys,
+        duplicate_failures,
+        stored_rows,
+    })
+}
+
+/// Run the benchmark over the versioned fixture.
+pub fn run() -> Result<BenchReport> {
+    let fixture: Fixture = serde_json::from_str(FIXTURE).context("parse the memory fixture")?;
+    let dir = TempDir::new().context("create the benchmark home")?;
+    let harness = Harness::open_with(dir.path(), Arc::new(FixedClock), Arc::new(UuidV7))
+        .context("open the benchmark record")?;
+    let service = MemoryService::new(harness.session().clone());
+
+    let loaded = load_fixture(&service, &fixture)?;
+    let key_to_id = loaded.key_to_id;
+    let id_to_keys = loaded.id_to_keys;
+    let duplicate_failures = loaded.duplicate_failures;
+    let stored_rows = loaded.stored_rows;
 
     let mut secret_leaks = 0usize;
     for secret in &fixture.secrets {
@@ -364,11 +390,20 @@ pub fn run_scale(items: usize) -> Result<ScaleReport> {
     let harness = Harness::open_with(dir.path(), Arc::new(FixedClock), Arc::new(UuidV7))
         .context("open the scale record")?;
     let session = harness.session().clone();
+    let service = MemoryService::new(session.clone());
+    let loaded = load_fixture(&service, &fixture)?;
+    if items < loaded.stored_rows {
+        bail!(
+            "scale item count must be at least the {} fixture rows",
+            loaded.stored_rows
+        );
+    }
+    let noise = items - loaded.stored_rows;
     let now = FIXED_NOW;
     session
         .storage()
         .write(move |writer| -> Result<(), hearth_storage::StorageError> {
-            for index in 0..items {
+            for index in 0..noise {
                 let id = format!("scale-{index:08}");
                 let content = format!("scale fact {index} about the benchmark corpus");
                 let fingerprint = format!("scale-fingerprint-{index:08}");
@@ -382,19 +417,49 @@ pub fn run_scale(items: usize) -> Result<ScaleReport> {
         })
         .context("seed the scale memory library")?;
 
-    let service = MemoryService::new(session);
     let queries: Vec<&FixtureQuestion> = fixture
         .questions
         .iter()
         .filter(|question| question.category == "direct")
         .take(20)
         .collect();
+    let mut matched = 0usize;
+    for question in &queries {
+        let found = service
+            .search(&question.question, 5)
+            .with_context(|| format!("scale search {}", question.key))?;
+        if found
+            .iter()
+            .any(|item| has_any(&item.id, &question.expected_keys, &loaded.id_to_keys))
+        {
+            matched += 1;
+        } else {
+            bail!(
+                "scale query {} did not match a fixture memory; the library has {} rows and the query returns {}",
+                question.key,
+                loaded.stored_rows + noise,
+                found.len()
+            );
+        }
+    }
     service.standing().context("warm the memory state")?;
     service
         .recall_read(&queries[0].question)
         .context("warm the retrieval path")?;
+    let mut search_latencies = Vec::with_capacity(queries.len());
+    let mut standing_latencies = Vec::with_capacity(queries.len());
     let mut latencies = Vec::with_capacity(queries.len());
     for question in &queries {
+        let started = Instant::now();
+        let _ = service
+            .search(&question.question, 40)
+            .with_context(|| format!("scale search {}", question.key))?;
+        search_latencies.push(started.elapsed().as_secs_f64() * 1000.0);
+        let started = Instant::now();
+        let _ = service
+            .standing()
+            .with_context(|| format!("scale standing {}", question.key))?;
+        standing_latencies.push(started.elapsed().as_secs_f64() * 1000.0);
         let started = Instant::now();
         let _ = service
             .recall_read(&question.question)
@@ -403,7 +468,12 @@ pub fn run_scale(items: usize) -> Result<ScaleReport> {
     }
     Ok(ScaleReport {
         items,
+        fixture_rows: loaded.stored_rows,
+        noise_rows: noise,
         queries: queries.len(),
+        matched,
+        search_ms_p95: p95_f64(&search_latencies),
+        standing_ms_p95: p95_f64(&standing_latencies),
         retrieval_ms_p95: p95_f64(&latencies),
         target_ms: TARGET_RETRIEVAL_MS,
     })

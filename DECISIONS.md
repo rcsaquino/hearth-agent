@@ -710,3 +710,23 @@ local fake-server and fixture tests.
   paraphrases need a curated expansion layer or embeddings; that belongs to a later
   retrieval pass, not this slice.
 - The nightly consolidation and archive schedule remain M7 work.
+
+## 2026-11-08: M6c 200k benchmark correction
+
+The M6b 200k scale check seeded only 200,000 "scale fact N" rows and then ran
+the fixture's direct questions. Those questions had no FTS matches, so
+`recall_read` short-circuited and reported 0.617 ms. The M6a 353 ms was also a
+no-match path. The benchmark now loads the 195 stored fixture rows plus 199,805
+noise rows, asserts that all 20 direct questions match their expected fixture
+memory, and measures the matching path.
+
+The matching p95 is 2.86 ms: search 1.36 ms, cached standing 0.003 ms, and the
+remaining tag and scoring work about 1.5 ms. The cold standing query is 353 ms.
+`MemoryService` now caches the standing block and invalidates it on every
+commit, so the warm retrieval path meets the 80 ms target. The first recall
+after a standing-changing write can still pay the cold cost; that residual is
+recorded for the M6 gate.
+
+The 2,000-item harness regression test and the ignored 200k test both assert
+the 20 fixture matches, so a future no-match false pass fails. The small-set
+benchmark results are unchanged.
