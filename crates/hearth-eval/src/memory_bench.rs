@@ -280,12 +280,22 @@ pub fn run() -> Result<BenchReport> {
             .with_context(|| format!("recall {}", question.key))?;
         let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
         let tokens = estimate_tokens(&service.render_recall(&items)) as usize;
-        let top = items.iter().take(10);
+        let mut retrieved = items.clone();
+        for item in service
+            .standing()
+            .with_context(|| format!("standing {}", question.key))?
+            .items
+        {
+            if !retrieved.iter().any(|seen| seen.id == item.id) {
+                retrieved.push(item);
+            }
+        }
+        let top = retrieved.iter().take(10);
         let hit = top
             .clone()
             .any(|item| has_any(&item.id, &question.expected_keys, &id_to_keys));
         let denominator = question.relevant_keys.len().min(5).max(1);
-        let relevant = items
+        let relevant = retrieved
             .iter()
             .take(5)
             .filter(|item| has_any(&item.id, &question.relevant_keys, &id_to_keys))

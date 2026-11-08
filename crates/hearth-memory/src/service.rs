@@ -486,8 +486,18 @@ impl MemoryService {
         }
         let now = self.session.now_micros();
         let fts = self.search(query, 40)?;
-        let standing = self.standing()?.items;
         let tags = self.tag_matches(query)?;
+        let relevant_ids: BTreeSet<&str> = fts
+            .iter()
+            .chain(tags.iter())
+            .map(|item| item.id.as_str())
+            .collect();
+        let standing: Vec<MemoryItem> = self
+            .standing()?
+            .items
+            .into_iter()
+            .filter(|item| relevant_ids.contains(item.id.as_str()))
+            .collect();
 
         let mut scores: HashMap<String, (MemoryItem, f64)> = HashMap::new();
         for list in [&fts, &standing, &tags] {
