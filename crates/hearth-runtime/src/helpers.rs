@@ -521,6 +521,7 @@ impl HelperPool {
             Some(target),
             Some(Arc::clone(&self.config.memory)),
             memory_source,
+            None,
             Some(task_target),
         ) {
             Ok(built) => built,

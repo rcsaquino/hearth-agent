@@ -31,8 +31,34 @@ enum Command {
     Prompt(PromptArgs),
     /// Check settings, database, and lock without printing secrets.
     Doctor,
+    /// Inspect or edit the skill library.
+    Skills(SkillsArgs),
     /// Run the offline evaluation suite.
     Eval(EvalArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct SkillsArgs {
+    #[command(subcommand)]
+    command: SkillsCommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum SkillsCommand {
+    /// List user and learned skills.
+    List,
+    /// Show a skill body.
+    Show { name: String },
+    /// List the saved versions of a learned skill.
+    History { name: String },
+    /// Compare two versions, newest two by default.
+    Diff {
+        name: String,
+        from: Option<u64>,
+        to: Option<u64>,
+    },
+    /// Show counts and the most-used skills.
+    Stats,
 }
 
 #[derive(Debug, clap::Args)]
@@ -185,6 +211,22 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 wire: args.wire,
             },
         )?,
+        Command::Skills(args) => {
+            let command = match args.command {
+                SkillsCommand::List => hearth_runtime::skills::SkillsCommand::List,
+                SkillsCommand::Show { name } => {
+                    hearth_runtime::skills::SkillsCommand::Show { name }
+                }
+                SkillsCommand::History { name } => {
+                    hearth_runtime::skills::SkillsCommand::History { name }
+                }
+                SkillsCommand::Diff { name, from, to } => {
+                    hearth_runtime::skills::SkillsCommand::Diff { name, from, to }
+                }
+                SkillsCommand::Stats => hearth_runtime::skills::SkillsCommand::Stats,
+            };
+            hearth_runtime::skills::run_cli(&home, command)?;
+        }
         Command::Doctor => hearth_runtime::doctor(&home)?,
         Command::Eval(args) => run_eval(args)?,
     }

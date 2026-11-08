@@ -13,6 +13,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::agent::{Agent, AgentConfig};
+use crate::skills::SkillLibrary;
 use crate::tools::{ToolBuildError, build_tools, memory_policy, pricing_from_settings};
 
 /// A failure that stopped local chat.
@@ -69,6 +70,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
 
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
+    let skills = Arc::new(SkillLibrary::new(home));
     let memory = Arc::new(MemoryService::with_policy(
         session.clone(),
         memory_policy(&settings),
@@ -102,6 +104,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
             None,
             Some(Arc::clone(&memory)),
             memory_source,
+            Some(Arc::clone(&skills)),
             None,
         )?;
         let agent = Agent::new(
@@ -119,6 +122,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
             },
         )
         .with_memory(Arc::clone(&memory))
+        .with_skills(Arc::clone(&skills))
         .with_groups(built.groups, built.selection)
         .with_budget(ContextBudget::new(
             models.context_window,

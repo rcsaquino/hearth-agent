@@ -425,9 +425,7 @@ pub fn request_from_document(document: &Value) -> Option<ChatRequest> {
     if !skills_index.trim().is_empty() {
         messages.push(ChatMessage {
             role: Role::System,
-            blocks: vec![ContentBlock::Text(format!(
-                "## Skills\n\n{skills_index}"
-            ))],
+            blocks: vec![ContentBlock::Text(format!("## Skills\n\n{skills_index}"))],
         });
     }
     let transcript = document.get("transcript")?.as_array()?;

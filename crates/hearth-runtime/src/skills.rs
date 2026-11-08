@@ -219,7 +219,9 @@ impl SkillLibrary {
             .collect();
         let mut learned: Vec<Skill> = skills
             .into_iter()
-            .filter(|skill| skill.scope == SkillScope::Learned && skill.status == SkillStatus::Active)
+            .filter(|skill| {
+                skill.scope == SkillScope::Learned && skill.status == SkillStatus::Active
+            })
             .collect();
         users.sort_by(|left, right| left.name.cmp(&right.name));
         learned.sort_by(|left, right| {
@@ -536,7 +538,9 @@ impl Tool for SkillTool {
                     .library
                     .find(name)
                     .map_err(skill_tool_error)?
-                    .ok_or_else(|| ToolError::invalid("not_found", format!("skill not found: {name}")))?;
+                    .ok_or_else(|| {
+                        ToolError::invalid("not_found", format!("skill not found: {name}"))
+                    })?;
                 let skill = if skill.scope == SkillScope::Learned {
                     self.library
                         .record_use(name)
@@ -619,7 +623,11 @@ fn skill_tool_error(error: SkillError) -> ToolError {
     ToolError::invalid("skill", error.to_string())
 }
 
-fn parse_file(path: &Path, scope: SkillScope, require_frontmatter: bool) -> Result<Skill, SkillError> {
+fn parse_file(
+    path: &Path,
+    scope: SkillScope,
+    require_frontmatter: bool,
+) -> Result<Skill, SkillError> {
     let text = fs::read_to_string(path)?;
     parse_skill(&text, path, scope, require_frontmatter)
 }
@@ -655,9 +663,8 @@ fn parse_skill(
         .unwrap_or_default();
     let version = number(&fields, "version", 1)?;
     let status = match fields.get("status").map(String::as_str) {
-        Some(value) if !value.is_empty() => SkillStatus::parse(value).ok_or_else(|| {
-            SkillError::Frontmatter(format!("unknown skill status: {value}"))
-        })?,
+        Some(value) if !value.is_empty() => SkillStatus::parse(value)
+            .ok_or_else(|| SkillError::Frontmatter(format!("unknown skill status: {value}")))?,
         _ if scope == SkillScope::User => SkillStatus::Active,
         _ => SkillStatus::Draft,
     };
@@ -736,11 +743,7 @@ fn parse_fields(front: &str) -> Result<BTreeMap<String, String>, SkillError> {
     Ok(fields)
 }
 
-fn number(
-    fields: &BTreeMap<String, String>,
-    key: &str,
-    default: u64,
-) -> Result<u64, SkillError> {
+fn number(fields: &BTreeMap<String, String>, key: &str, default: u64) -> Result<u64, SkillError> {
     match fields.get(key).filter(|value| !value.is_empty()) {
         Some(value) => value
             .parse()
@@ -776,17 +779,15 @@ fn default_name(path: &Path) -> String {
 fn first_description(body: &str) -> Option<String> {
     body.lines()
         .map(str::trim)
-        .find(|line| {
-            !line.is_empty() && !line.starts_with('#') && !line.starts_with("---")
-        })
+        .find(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with("---"))
         .map(str::to_owned)
 }
 
 fn validate_name(name: &str) -> Result<(), SkillError> {
     if name.is_empty()
-        || !name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
+        || !name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
         || name.starts_with('.')
         || name.starts_with('-')
     {
@@ -859,4 +860,113 @@ fn now() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "unknown".to_owned())
+}
+
+/// The read-only CLI actions for `hearth skills`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillsCommand {
+    List,
+    Show {
+        name: String,
+    },
+    History {
+        name: String,
+    },
+    Diff {
+        name: String,
+        from: Option<u64>,
+        to: Option<u64>,
+    },
+    Stats,
+}
+
+/// Run one `hearth skills` command.
+pub fn run_cli(home: &Path, command: SkillsCommand) -> Result<(), SkillError> {
+    let library = SkillLibrary::new(home);
+    match command {
+        SkillsCommand::List => {
+            let skills = library.load_all()?;
+            if skills.is_empty() {
+                println!("no skills");
+                return Ok(());
+            }
+            println!("name\tstatus\tversion\tuses\tsuccess\twhere");
+            for skill in skills {
+                println!(
+                    "{}\t{}\tv{}\t{}\t{:.2}\t{}",
+                    skill.name,
+                    skill.status.as_str(),
+                    skill.version,
+                    skill.uses,
+                    skill.success_rate(),
+                    skill.scope.as_str()
+                );
+            }
+        }
+        SkillsCommand::Show { name } => {
+            let skill = library
+                .find(&name)?
+                .ok_or_else(|| SkillError::NotFound(name.clone()))?;
+            println!("{}", skill.body);
+        }
+        SkillsCommand::History { name } => {
+            let versions = library.history(&name)?;
+            if versions.is_empty() {
+                return Err(SkillError::NotFound(name));
+            }
+            for version in versions {
+                println!("v{version}");
+            }
+        }
+        SkillsCommand::Diff { name, from, to } => {
+            let versions = library.history(&name)?;
+            if versions.is_empty() {
+                return Err(SkillError::NotFound(name));
+            }
+            let from = from.unwrap_or_else(|| {
+                versions
+                    .get(versions.len().saturating_sub(2))
+                    .copied()
+                    .unwrap_or(1)
+            });
+            let to = to.unwrap_or_else(|| versions.last().copied().unwrap_or(from));
+            let old = library
+                .version_body(&name, from)?
+                .ok_or_else(|| SkillError::NotFound(format!("{name} v{from}")))?;
+            let new = library
+                .version_body(&name, to)?
+                .ok_or_else(|| SkillError::NotFound(format!("{name} v{to}")))?;
+            println!("--- {name} v{from}");
+            println!("+++ {name} v{to}");
+            let old_lines: Vec<&str> = old.lines().collect();
+            let new_lines: Vec<&str> = new.lines().collect();
+            for line in &old_lines {
+                if !new_lines.contains(line) {
+                    println!("- {line}");
+                }
+            }
+            for line in &new_lines {
+                if !old_lines.contains(line) {
+                    println!("+ {line}");
+                }
+            }
+        }
+        SkillsCommand::Stats => {
+            let stats = library.stats()?;
+            println!(
+                "total {} active {} draft {} quarantined {} archived {} user {} learned {}",
+                stats.total,
+                stats.active,
+                stats.draft,
+                stats.quarantined,
+                stats.archived,
+                stats.user,
+                stats.learned
+            );
+            for (name, uses) in stats.top {
+                println!("{name}\t{uses}");
+            }
+        }
+    }
+    Ok(())
 }

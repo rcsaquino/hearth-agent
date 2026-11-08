@@ -15,8 +15,8 @@ mod ipc;
 mod memory_extract;
 mod prompt_audit;
 mod scheduler;
-mod stats;
 pub mod skills;
+mod stats;
 pub mod tool_groups;
 mod tools;
 

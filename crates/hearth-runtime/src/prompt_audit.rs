@@ -10,6 +10,7 @@ use hearth_model::OpenAiCompatibleProvider;
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use crate::skills::SkillLibrary;
 use crate::tools::{build_tools, memory_policy};
 
 /// Options for `hearth prompt`.
@@ -60,6 +61,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     settings.validate_for_run()?;
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
+    let skills = Arc::new(SkillLibrary::new(home));
     let memory = Arc::new(MemoryService::with_policy(
         session.clone(),
         memory_policy(&settings),
@@ -74,12 +76,13 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
         None,
         Some(Arc::clone(&memory)),
         None,
+        Some(Arc::clone(&skills)),
         None,
     )
     .map_err(|error| PromptError::Invalid(error.to_string()))?;
 
     if options.system {
-        let document = system_document(&settings, &session, &memory, &built.core, &soul)?;
+        let document = system_document(&settings, &session, &memory, &built.core, &soul, &skills)?;
         let output = if options.json {
             serde_json::to_string_pretty(&document).unwrap_or_else(|_| document.to_string())
         } else {
@@ -90,8 +93,15 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     }
 
     if let Some(text) = options.preview {
-        let (request, document) =
-            preview_document(&settings, &session, &memory, &built.core, &soul, &text)?;
+        let (request, document) = preview_document(
+            &settings,
+            &session,
+            &memory,
+            &built.core,
+            &soul,
+            &skills,
+            &text,
+        )?;
         if options.wire {
             let body = wire_body(&settings, &request)?;
             let output = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
@@ -171,6 +181,7 @@ fn system_document(
     memory: &MemoryService,
     tools: &hearth_tools::ToolRegistry,
     soul: &str,
+    skills: &SkillLibrary,
 ) -> Result<Value, PromptError> {
     let standing = memory.standing().ok();
     let standing_text = standing
@@ -190,7 +201,7 @@ fn system_document(
             standing: standing_text,
             standing_version,
             recall: String::new(),
-            skills_index: String::new(),
+            skills_index: skills.index().unwrap_or_default(),
             runtime_note: "system prefix".to_owned(),
         },
         &[],
@@ -205,6 +216,7 @@ fn preview_document(
     memory: &MemoryService,
     tools: &hearth_tools::ToolRegistry,
     soul: &str,
+    skills: &SkillLibrary,
     text: &str,
 ) -> Result<(hearth_model::ChatRequest, Value), PromptError> {
     let conversation = session.latest_conversation()?;
@@ -249,7 +261,7 @@ fn preview_document(
             standing: standing_text,
             standing_version,
             recall,
-            skills_index: String::new(),
+            skills_index: skills.index().unwrap_or_default(),
             runtime_note: "preview".to_owned(),
         },
         &history,

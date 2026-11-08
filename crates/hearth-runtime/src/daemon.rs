@@ -32,6 +32,7 @@ use crate::events::EventBus;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
+use crate::skills::SkillLibrary;
 use crate::tools::{MessageTarget, TaskTarget, build_tools, memory_policy};
 use hearth_memory::{MemoryService, MemorySource};
 
@@ -285,6 +286,7 @@ impl TelegramRuntime {
             settings.compaction.keep_recent_tokens,
         );
         let pricing = crate::tools::pricing_from_settings(&settings);
+        let skills = Arc::new(SkillLibrary::new(home));
         let helper_config = Arc::new(HelperConfig {
             settings: Arc::clone(&settings),
             session: session.clone(),
@@ -309,6 +311,7 @@ impl TelegramRuntime {
             settings: Arc::clone(&settings),
             session,
             memory,
+            skills: Arc::clone(&skills),
             provider,
             sender,
             speaker,
@@ -339,6 +342,7 @@ struct TelegramWorker {
     settings: Arc<Settings>,
     session: Session,
     memory: Arc<MemoryService>,
+    skills: Arc<SkillLibrary>,
     provider: Arc<dyn Provider>,
     sender: TelegramSender,
     speaker: Option<Arc<dyn Speaker>>,
@@ -553,6 +557,7 @@ impl TelegramWorker {
             Some(target),
             Some(Arc::clone(&self.memory)),
             memory_source,
+            Some(Arc::clone(&self.skills)),
             Some(TaskTarget {
                 depth: 0,
                 controls: Arc::clone(&self.helper_controls),
@@ -581,6 +586,7 @@ impl TelegramWorker {
             },
         )
         .with_memory(Arc::clone(&self.memory))
+        .with_skills(Arc::clone(&self.skills))
         .with_groups(built.groups, built.selection)
         .with_budget(self.budget);
 

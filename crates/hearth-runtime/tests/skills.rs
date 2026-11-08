@@ -17,9 +17,7 @@ fn write(path: &Path, text: &str) {
 fn user_skill(home: &Path, name: &str, description: &str, body: &str) {
     write(
         &home.join("skills").join(format!("{name}.md")),
-        &format!(
-            "---\nname: {name}\ndescription: {description}\n---\n\n{body}\n"
-        ),
+        &format!("---\nname: {name}\ndescription: {description}\n---\n\n{body}\n"),
     );
 }
 
@@ -47,8 +45,21 @@ fn body() -> &'static str {
 #[test]
 fn a_user_skill_and_a_learned_skill_are_indexed() {
     let home = TempDir::new().expect("temp home");
-    user_skill(home.path(), "writing", "Write clearly", "## When to use\n\nAlways.\n\n## Steps\n\nWrite.\n\n## Pitfalls\n\nDo not ramble.");
-    learned_skill(home.path(), "research", "active", 3, 2, "2026-02-01", "Research a topic");
+    user_skill(
+        home.path(),
+        "writing",
+        "Write clearly",
+        "## When to use\n\nAlways.\n\n## Steps\n\nWrite.\n\n## Pitfalls\n\nDo not ramble.",
+    );
+    learned_skill(
+        home.path(),
+        "research",
+        "active",
+        3,
+        2,
+        "2026-02-01",
+        "Research a topic",
+    );
 
     let library = SkillLibrary::new(home.path());
     let index = library.index().expect("index");
@@ -57,8 +68,12 @@ fn a_user_skill_and_a_learned_skill_are_indexed() {
 
     let skills = library.load_all().expect("load");
     assert_eq!(skills.len(), 2);
-    assert!(skills.iter().any(|skill| skill.name == "writing" && skill.scope == hearth_runtime::skills::SkillScope::User));
-    assert!(skills.iter().any(|skill| skill.name == "research" && skill.scope == hearth_runtime::skills::SkillScope::Learned));
+    assert!(
+        skills.iter().any(|skill| skill.name == "writing"
+            && skill.scope == hearth_runtime::skills::SkillScope::User)
+    );
+    assert!(skills.iter().any(|skill| skill.name == "research"
+        && skill.scope == hearth_runtime::skills::SkillScope::Learned));
 }
 
 #[test]
@@ -72,7 +87,11 @@ fn a_skill_without_frontmatter_uses_the_file_name_and_first_body_line() {
     let skills = library.load_all().expect("load");
     assert_eq!(skills.len(), 1);
     assert_eq!(skills[0].name, "simple");
-    assert!(skills[0].description.contains("simple work"), "{:?}", skills[0].description);
+    assert!(
+        skills[0].description.contains("simple work"),
+        "{:?}",
+        skills[0].description
+    );
 }
 
 #[test]
@@ -119,20 +138,35 @@ fn the_index_archives_low_success_learned_skills_over_the_cap() {
         .filter(|skill| skill.status == SkillStatus::Archived)
         .count();
     assert!(archived > 0, "no learned skill was archived");
-    assert!(archived >= 5, "the zero-success skills must be archived first");
+    assert!(
+        archived >= 5,
+        "the zero-success skills must be archived first"
+    );
 }
 
 #[test]
 fn the_tool_loads_a_skill_and_records_use() {
     let home = TempDir::new().expect("temp home");
-    learned_skill(home.path(), "research", "active", 0, 0, "", "Research a topic");
+    learned_skill(
+        home.path(),
+        "research",
+        "active",
+        0,
+        0,
+        "",
+        "Research a topic",
+    );
     let library = Arc::new(SkillLibrary::new(home.path()));
     let tool = SkillTool::new(Arc::clone(&library));
 
     let output = tool
         .call(&json!({"action": "load", "name": "research"}))
         .expect("load skill");
-    assert!(output.content.contains("Do the thing."), "{}", output.content);
+    assert!(
+        output.content.contains("Do the thing."),
+        "{}",
+        output.content
+    );
     let skill = library.find("research").expect("find").expect("exists");
     assert_eq!(skill.uses, 1);
     assert!(skill.last_used.is_some());
@@ -173,7 +207,8 @@ fn the_tool_saves_versions_with_history_and_changelog() {
         .expect("old version")
         .expect("old body");
     assert!(old.contains("A new procedure"), "{old}");
-    let changelog = fs::read_to_string(home.path().join("skills/learned/CHANGELOG.md")).expect("changelog");
+    let changelog =
+        fs::read_to_string(home.path().join("skills/learned/CHANGELOG.md")).expect("changelog");
     assert!(changelog.contains("new_skill"), "{changelog}");
 }
 
@@ -192,18 +227,32 @@ fn the_tool_rejects_writes_to_a_user_skill() {
             "body": body()
         }))
         .expect_err("user skill must be read-only");
-    assert!(error.to_string().contains("read-only") || error.to_string().contains("learned"), "{error}");
+    assert!(
+        error.to_string().contains("read-only") || error.to_string().contains("learned"),
+        "{error}"
+    );
 
     let error = tool
         .call(&json!({"action": "archive", "name": "writing"}))
         .expect_err("user skill cannot be archived");
-    assert!(error.to_string().contains("read-only") || error.to_string().contains("learned"), "{error}");
+    assert!(
+        error.to_string().contains("read-only") || error.to_string().contains("learned"),
+        "{error}"
+    );
 }
 
 #[test]
 fn the_tool_archives_a_learned_skill() {
     let home = TempDir::new().expect("temp home");
-    learned_skill(home.path(), "research", "active", 0, 0, "", "Research a topic");
+    learned_skill(
+        home.path(),
+        "research",
+        "active",
+        0,
+        0,
+        "",
+        "Research a topic",
+    );
     let library = Arc::new(SkillLibrary::new(home.path()));
     let tool = SkillTool::new(Arc::clone(&library));
 
@@ -227,5 +276,8 @@ fn saving_without_the_three_sections_is_rejected() {
             "body": "Only one section."
         }))
         .expect_err("missing sections");
-    assert!(error.to_string().contains("When to use") || error.to_string().contains("sections"), "{error}");
+    assert!(
+        error.to_string().contains("When to use") || error.to_string().contains("sections"),
+        "{error}"
+    );
 }

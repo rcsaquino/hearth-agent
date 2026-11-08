@@ -19,6 +19,7 @@ use thiserror::Error;
 
 use crate::helpers::{HelperControls, TaskTool};
 use crate::scheduler::ScheduleTool;
+use crate::skills::{SkillLibrary, SkillTool};
 use crate::tool_groups::{ToolGroups, ToolSearchTool};
 
 /// The Telegram values needed for the message tool.
@@ -86,6 +87,7 @@ pub fn memory_policy(settings: &Settings) -> MemoryPolicy {
 }
 
 /// Build the tools for one run.
+#[allow(clippy::too_many_arguments)]
 pub fn build_tools(
     settings: &Settings,
     workspace: &Path,
@@ -93,6 +95,7 @@ pub fn build_tools(
     message: Option<MessageTarget>,
     memory: Option<Arc<MemoryService>>,
     memory_source: Option<MemorySource>,
+    skills: Option<Arc<SkillLibrary>>,
     task: Option<TaskTarget>,
 ) -> Result<BuiltTools, ToolBuildError> {
     let groups = Arc::new(ToolGroups::default_groups());
@@ -113,6 +116,9 @@ pub fn build_tools(
             None => MemoryTool::new(memory),
         };
         tools.push(Arc::new(tool));
+    }
+    if let Some(skills) = skills {
+        tools.push(Arc::new(SkillTool::new(skills)));
     }
     if let Some(target) = message {
         tools.push(Arc::new(MessageTool::new(
@@ -347,6 +353,7 @@ mod core_budget_tests {
             Some(target),
             Some(memory),
             None,
+            Some(Arc::new(SkillLibrary::new(home.path()))),
             None,
         )
         .expect("tools");
@@ -365,6 +372,7 @@ mod core_budget_tests {
             "memory",
             "message",
             "schedule",
+            "skill",
             "tool_search",
         ] {
             assert!(
