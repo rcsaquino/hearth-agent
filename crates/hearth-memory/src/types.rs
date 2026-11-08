@@ -153,6 +153,13 @@ pub struct MemoryItem {
     pub last_used_at: Option<i64>,
 }
 
+/// The current standing-memory block and its version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandingMemory {
+    pub items: Vec<MemoryItem>,
+    pub version: u64,
+}
+
 /// Counts for the memory tool's stats action.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryStats {
