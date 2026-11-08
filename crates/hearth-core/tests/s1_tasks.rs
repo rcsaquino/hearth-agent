@@ -177,3 +177,68 @@ fn next_releases_the_lease_and_requeues_the_next_phase() {
     assert_eq!(again.attempt, 1);
     assert_eq!(again.checkpoint, Some(json!({"step": 1})));
 }
+
+#[test]
+fn sleep_sets_the_wake_time_and_recovery_requeues_it_when_due() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    let claimed = session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("a task is runnable");
+    let wake = clock.now() + 100_000_000;
+
+    let sleeping = session
+        .finish_task(
+            &claimed.id,
+            "worker-a",
+            StepOutput::Sleep {
+                until_micros: wake,
+                phase: "wait".to_owned(),
+                checkpoint: json!({"step": 2}),
+            },
+        )
+        .expect("sleep");
+    assert_eq!(sleeping.status, TaskStatus::Asleep);
+    assert_eq!(sleeping.next_wake_at, Some(wake));
+    assert_eq!(sleeping.attempt, 0);
+    assert!(sleeping.lease_owner.is_none());
+    assert!(sleeping.lease_until.is_none());
+
+    assert!(
+        session
+            .claim_task("worker-b", 60_000_000)
+            .expect("claim while asleep")
+            .is_none()
+    );
+
+    clock.advance(50_000_000);
+    let early = session.recover_tasks().expect("early recovery");
+    assert_eq!(early.woken, 0);
+    assert_eq!(
+        session
+            .task(&task.id)
+            .expect("read")
+            .expect("exists")
+            .status,
+        TaskStatus::Asleep
+    );
+
+    clock.advance(50_000_000);
+    let due = session.recover_tasks().expect("due recovery");
+    assert_eq!(due.woken, 1);
+    let woken = session.task(&task.id).expect("read").expect("exists");
+    assert_eq!(woken.status, TaskStatus::Pending);
+    assert!(woken.next_wake_at.is_none());
+
+    let claimed = session
+        .claim_task("worker-c", 60_000_000)
+        .expect("claim after wake")
+        .expect("the task is runnable");
+    assert_eq!(claimed.phase, "wait");
+    assert_eq!(claimed.checkpoint, Some(json!({"step": 2})));
+}
