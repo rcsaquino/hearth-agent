@@ -836,6 +836,51 @@ impl Session {
         self.read_submission("id", id)
     }
 
+    /// Mark a queued submission as running. A running submission is idempotent.
+    pub fn begin_submission(&self, id: &str) -> Result<Submission, CoreError> {
+        let now = self.clock.now_micros();
+        let submission_id = id.to_owned();
+        let write_id = submission_id.clone();
+        let changed = self
+            .storage
+            .write(move |writer| -> Result<bool, CoreError> {
+                let changed = writer.execute(
+                    "UPDATE submissions SET status = 'running' WHERE id = ? AND status = 'queued'",
+                    (write_id.as_str(),),
+                )?;
+                if changed == 1 {
+                    let conversation_id: String = writer.query_row(
+                        "SELECT conversation_id FROM submissions WHERE id = ?",
+                        (write_id.as_str(),),
+                        |row| row.get(0),
+                    )?;
+                    record_commit(
+                        writer,
+                        now,
+                        Some(conversation_id.as_str()),
+                        None,
+                        "submission.running",
+                    )?;
+                }
+                Ok(changed == 1)
+            })?;
+        let submission = self
+            .submission_by_id(&submission_id)?
+            .ok_or_else(|| CoreError::SubmissionNotFound(submission_id.clone()))?;
+        if changed || submission.status == SubmissionStatus::Running {
+            return Ok(submission);
+        }
+        match submission.status {
+            SubmissionStatus::Queued => Err(CoreError::Invalid(
+                "submission could not be started".to_owned(),
+            )),
+            status => Err(CoreError::AlreadySettled(
+                submission_id,
+                status.as_str().to_owned(),
+            )),
+        }
+    }
+
     /// Create a task in its first phase.
     pub fn create_task(&self, new: NewTask) -> Result<Task, CoreError> {
         if new.kind.trim().is_empty() {
@@ -1213,6 +1258,66 @@ impl Session {
 
                 load_task(writer, &task_id)?.ok_or(CoreError::TaskNotFound(task_id))
             })
+    }
+
+    /// Save the checkpoint of a running task without releasing its lease.
+    pub fn checkpoint_task(
+        &self,
+        task_id: &str,
+        owner: &str,
+        checkpoint: Value,
+    ) -> Result<Task, CoreError> {
+        let now = self.clock.now_micros();
+        let task_id = task_id.to_owned();
+        let owner = owner.to_owned();
+        self.storage
+            .write(move |writer| -> Result<Task, CoreError> {
+                let task = load_task(writer, &task_id)?
+                    .ok_or_else(|| CoreError::TaskNotFound(task_id.clone()))?;
+                if task.status != TaskStatus::Running {
+                    return Err(CoreError::TaskNotRunning(
+                        task_id.clone(),
+                        task.status.as_str().to_owned(),
+                    ));
+                }
+                if task.lease_owner.as_deref() != Some(owner.as_str()) {
+                    return Err(CoreError::LeaseLost(task_id.clone()));
+                }
+                let checkpoint = serde_json::to_string(&checkpoint)
+                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let changed = writer.execute(
+                    "UPDATE tasks SET checkpoint_json = ?, updated_at = ? \
+                     WHERE id = ? AND status = 'running' AND lease_owner = ?",
+                    (checkpoint, now, task_id.as_str(), owner.as_str()),
+                )?;
+                if changed != 1 {
+                    return Err(CoreError::LeaseLost(task_id));
+                }
+                record_commit(
+                    writer,
+                    now,
+                    task.conversation_id.as_deref(),
+                    Some(task_id.as_str()),
+                    "task.checkpoint",
+                )?;
+                load_task(writer, &task_id)?.ok_or(CoreError::TaskNotFound(task_id))
+            })
+    }
+
+    /// The running generation task for a conversation, if any.
+    pub fn active_generation_task(&self, conversation_id: &str) -> Result<Option<Task>, CoreError> {
+        let id: Option<String> = self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT id FROM tasks WHERE conversation_id = ? AND kind = 'generation' \
+                 AND status = 'running' ORDER BY created_at, id LIMIT 1",
+                (conversation_id,),
+                |row| row.get(0),
+            )
+        })?;
+        match id {
+            Some(id) => self.task(&id),
+            None => Ok(None),
+        }
     }
 
     /// Requeue tasks whose leases or sleeps expired.
