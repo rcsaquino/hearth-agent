@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hearth_config::Settings;
+use hearth_core::Session;
 use hearth_memory::{MemoryPolicy, MemoryService, MemorySource, MemoryTool};
 use hearth_model::{Price, Pricing, Speaker};
 use hearth_telegram::{MessageTool, TelegramSender};
@@ -16,10 +17,13 @@ use hearth_tools::{
 };
 use thiserror::Error;
 
+use crate::scheduler::ScheduleTool;
 use crate::tool_groups::{ToolGroups, ToolSearchTool};
 
 /// The Telegram values needed for the message tool.
 pub struct MessageTarget {
+    pub session: Session,
+    pub conversation_id: String,
     pub sender: TelegramSender,
     pub chat_id: i64,
     pub thread_id: Option<i64>,
@@ -102,13 +106,19 @@ pub fn build_tools(
     }
     if let Some(target) = message {
         tools.push(Arc::new(MessageTool::new(
-            target.sender,
+            target.sender.clone(),
             target.chat_id,
             target.thread_id,
             workspace,
             spill,
             target.outbound,
             target.speaker,
+        )));
+        tools.push(Arc::new(ScheduleTool::new(
+            target.session,
+            target.conversation_id,
+            target.chat_id,
+            target.thread_id,
         )));
     }
     Ok(BuiltTools {
@@ -297,6 +307,8 @@ mod core_budget_tests {
             Arc::new(SystemSleeper),
         );
         let target = MessageTarget {
+            session: harness.session().clone(),
+            conversation_id: "test".to_owned(),
             sender,
             chat_id: 1,
             thread_id: None,
@@ -327,6 +339,7 @@ mod core_budget_tests {
             "web_fetch",
             "memory",
             "message",
+            "schedule",
             "tool_search",
         ] {
             assert!(

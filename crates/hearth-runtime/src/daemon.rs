@@ -20,7 +20,7 @@ use hearth_telegram::{
     InboundMedia, SendOutcome, StopHandler, SystemSleeper, TelegramClient, TelegramError,
     TelegramPoller, TelegramSender,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use thiserror::Error;
@@ -30,6 +30,7 @@ use crate::compaction::Compactor;
 use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::ipc::{self, StatusContext};
+use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
 use crate::tools::{MessageTarget, build_tools, memory_policy};
 use hearth_memory::{MemoryService, MemorySource};
 
@@ -155,7 +156,10 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         let worker_shutdown = Arc::clone(&shutdown);
         let worker = runtime.worker;
         telegram_handles.push(thread::spawn(move || worker.run(worker_shutdown)));
-        tracing::info!("telegram poller and worker started");
+        let scheduler_shutdown = Arc::clone(&shutdown);
+        let scheduler = runtime.scheduler;
+        telegram_handles.push(thread::spawn(move || scheduler.run(scheduler_shutdown)));
+        tracing::info!("telegram poller, worker, and scheduler started");
     }
 
     tracing::info!(
@@ -186,6 +190,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
 struct TelegramRuntime {
     poller: TelegramPoller,
     worker: TelegramWorker,
+    scheduler: Scheduler,
 }
 
 impl TelegramRuntime {
@@ -252,6 +257,15 @@ impl TelegramRuntime {
             Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
+        let registry = Arc::new(TaskRegistry::new().register(
+            "reminder",
+            Arc::new(ReminderHandler::new(session.clone(), sender.clone())),
+        ));
+        let scheduler = Scheduler::new(
+            session.clone(),
+            registry,
+            format!("scheduler:{}", std::process::id()),
+        );
         let budget = ContextBudget::new(
             models.context_window,
             models.max_output_tokens,
@@ -280,7 +294,11 @@ impl TelegramRuntime {
             cancellations,
             events,
         };
-        Ok(Self { poller, worker })
+        Ok(Self {
+            poller,
+            worker,
+            scheduler,
+        })
     }
 }
 
@@ -480,6 +498,8 @@ impl TelegramWorker {
         let run_cancel = self.cancellations.register(chat_id);
 
         let target = MessageTarget {
+            session: self.session.clone(),
+            conversation_id: conversation.id.clone(),
             sender: self.sender.clone(),
             chat_id,
             thread_id,
@@ -647,11 +667,12 @@ impl TelegramWorker {
             }
         };
         let Some(effect) = effects.into_iter().find(|effect| {
-            effect
-                .payload
-                .get("chat_id")
-                .and_then(|value| value.as_i64())
-                == Some(chat_id)
+            effect.payload.get("reminder").and_then(Value::as_bool) != Some(true)
+                && effect
+                    .payload
+                    .get("chat_id")
+                    .and_then(|value| value.as_i64())
+                    == Some(chat_id)
         }) else {
             return;
         };

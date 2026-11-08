@@ -827,3 +827,13 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   recall p95 0.66 of 80 ms; 68 compactions and 2176 summary tokens. Recall tokens
   are zero because the seeded preference is standing memory and is already in L3.
 - Startup and recovery, idle memory use, and annual database size remain M8 work.
+
+## 2026-11-09: M7a scheduler and reminders
+
+- The scheduler claims only task kinds present in its handler registry, at most one due task per tick, with a 60 second lease and a heartbeat before and after the step. It starts after startup recovery and effect recovery.
+- Sleeping tasks are created atomically with `create_sleeping_task`; recovery wakes due asleep tasks and the scheduler claims only pending tasks. `claim_task_for_kind` prevents the scheduler from touching generation, compaction, or memory-extract tasks.
+- The reminder task kind is `reminder`. Its input carries chat id, thread id, message, repeat interval, and first wake. Its Telegram effect key is `reminder:<task_id>:<scheduled_wake>`, which makes the send at-most-once across retries and restarts.
+- An uncertain send is marked unknown and the task is retried once with backoff; the next step sees the unknown effect and settles the task done with delivery unknown instead of sending again. A permanent API rejection fails the task.
+- Recurring reminders re-sleep to now plus the repeat interval, coalescing missed runs into one send. One-shot reminders finish done.
+- The `schedule` tool is registered only on the Telegram path, where a notification transport exists. Local chat has no schedule tool.
+- The reminder effect payload carries `reminder: true` so answer-recovery does not resend it as a recovered reply.

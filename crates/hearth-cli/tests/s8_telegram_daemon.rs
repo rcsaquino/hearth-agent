@@ -875,3 +875,104 @@ fn hearth_watch_receives_live_run_events() {
     let _ = telegram_thread.join();
     let _ = provider_thread.join();
 }
+
+fn seed_reminder(home: &Path, wake_at: i64, message: &str) -> (String, String) {
+    use hearth_core::{Harness, NewTask};
+    let harness = Harness::open(home).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "telegram", "42:0")
+        .expect("conversation");
+    let task = session
+        .create_sleeping_task(
+            NewTask::new(
+                "reminder",
+                1,
+                "remind",
+                json!({
+                    "chat_id": 42,
+                    "thread_id": null,
+                    "message": message,
+                    "repeat_seconds": null,
+                    "first_wake": wake_at
+                }),
+            )
+            .conversation(&conversation.id),
+            wake_at,
+        )
+        .expect("reminder task");
+    (task.id, conversation.id)
+}
+
+#[test]
+fn a_reminder_fires_once_after_recovery() {
+    use hearth_core::{EffectStatus, Harness, TaskStatus};
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), "http://127.0.0.1:9");
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    add_telegram_base(home.path(), &telegram_base);
+    let now = {
+        let harness = Harness::open(home.path()).expect("harness");
+        harness.session().now_micros()
+    };
+    let (task_id, _conversation_id) = seed_reminder(home.path(), now - 1, "Reminder: drink water");
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let rich = wait_for_rich_count(&telegram_state, 1);
+    assert!(rich[0].contains("Reminder: drink water"), "{rich:?}");
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen");
+    let task = harness
+        .session()
+        .task(&task_id)
+        .expect("task read")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Done);
+    let effect = harness
+        .session()
+        .effect_by_key(
+            "telegram.send",
+            &format!("reminder:{}:{}", task_id, now - 1),
+        )
+        .expect("effect read")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Done);
+}
+
+#[test]
+fn a_reminder_survives_a_restart() {
+    use hearth_core::{Harness, TaskStatus};
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), "http://127.0.0.1:9");
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    add_telegram_base(home.path(), &telegram_base);
+    let now = {
+        let harness = Harness::open(home.path()).expect("harness");
+        harness.session().now_micros()
+    };
+    let wake = now + 2_000_000;
+    let (task_id, _conversation_id) = seed_reminder(home.path(), wake, "Restart reminder");
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    thread::sleep(Duration::from_millis(300));
+    daemon.stop();
+    thread::sleep(Duration::from_millis(2_200));
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let rich = wait_for_rich_count(&telegram_state, 1);
+    assert!(rich[0].contains("Restart reminder"), "{rich:?}");
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen");
+    let task = harness
+        .session()
+        .task(&task_id)
+        .expect("task read")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Done);
+}

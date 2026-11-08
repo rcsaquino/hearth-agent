@@ -1619,6 +1619,95 @@ impl Session {
         Ok(task)
     }
 
+    /// Create a task that starts asleep until `wake_at`.
+    pub fn create_sleeping_task(&self, new: NewTask, wake_at: i64) -> Result<Task, CoreError> {
+        if new.kind.trim().is_empty() {
+            return Err(CoreError::Invalid("task kind is empty".to_owned()));
+        }
+        if new.phase.trim().is_empty() {
+            return Err(CoreError::Invalid("task phase is empty".to_owned()));
+        }
+        if new.version < 1 {
+            return Err(CoreError::Invalid(
+                "task version must be positive".to_owned(),
+            ));
+        }
+
+        let now = self.clock.now_micros();
+        let id = self.ids.new_id();
+        let input = serde_json::to_string(&new.input)
+            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+        let task = Task {
+            id: id.clone(),
+            conversation_id: new.conversation_id,
+            parent_task_id: new.parent_task_id,
+            kind: new.kind,
+            version: new.version,
+            status: TaskStatus::Asleep,
+            phase: new.phase,
+            attempt: 0,
+            input: new.input,
+            checkpoint: None,
+            result: None,
+            lease_owner: None,
+            lease_until: None,
+            next_wake_at: Some(wake_at),
+            created_at: now,
+            updated_at: now,
+            terminal_at: None,
+        };
+        let insert = task.clone();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            if let Some(conversation_id) = insert.conversation_id.as_deref() {
+                let found: Option<i64> = writer.query_optional(
+                    "SELECT 1 FROM conversations WHERE id = ?",
+                    (conversation_id,),
+                    |row| row.get(0),
+                )?;
+                if found.is_none() {
+                    return Err(CoreError::ConversationNotFound(conversation_id.to_owned()));
+                }
+            }
+            if let Some(parent_id) = insert.parent_task_id.as_deref() {
+                let found: Option<i64> = writer.query_optional(
+                    "SELECT 1 FROM tasks WHERE id = ?",
+                    (parent_id,),
+                    |row| row.get(0),
+                )?;
+                if found.is_none() {
+                    return Err(CoreError::TaskNotFound(parent_id.to_owned()));
+                }
+            }
+            writer.execute(
+                "INSERT INTO tasks (id, conversation_id, parent_task_id, kind, version, status, \
+                 phase, attempt, input_json, checkpoint_json, result_json, lease_owner, \
+                 lease_until, next_wake_at, created_at, updated_at, terminal_at) \
+                 VALUES (?, ?, ?, ?, ?, 'asleep', ?, 0, ?, NULL, NULL, NULL, NULL, ?, ?, ?, NULL)",
+                (
+                    insert.id.as_str(),
+                    insert.conversation_id.as_deref(),
+                    insert.parent_task_id.as_deref(),
+                    insert.kind.as_str(),
+                    insert.version,
+                    insert.phase.as_str(),
+                    input.as_str(),
+                    insert.next_wake_at,
+                    insert.created_at,
+                    insert.updated_at,
+                ),
+            )?;
+            record_commit(
+                writer,
+                insert.created_at,
+                insert.conversation_id.as_deref(),
+                Some(insert.id.as_str()),
+                "task.create",
+            )?;
+            Ok(())
+        })?;
+        Ok(task)
+    }
+
     /// Read one task.
     pub fn task(&self, id: &str) -> Result<Option<Task>, CoreError> {
         let sql = format!("{TASK_SELECT} WHERE id = ?");
@@ -1654,6 +1743,28 @@ impl Session {
         owner: &str,
         lease_micros: i64,
     ) -> Result<Option<ClaimedTask>, CoreError> {
+        self.claim_task_matching(owner, lease_micros, None)
+    }
+
+    /// Claim the oldest runnable task of one kind.
+    pub fn claim_task_for_kind(
+        &self,
+        owner: &str,
+        lease_micros: i64,
+        kind: &str,
+    ) -> Result<Option<ClaimedTask>, CoreError> {
+        if kind.trim().is_empty() {
+            return Ok(None);
+        }
+        self.claim_task_matching(owner, lease_micros, Some(kind.to_owned()))
+    }
+
+    fn claim_task_matching(
+        &self,
+        owner: &str,
+        lease_micros: i64,
+        kind: Option<String>,
+    ) -> Result<Option<ClaimedTask>, CoreError> {
         if owner.trim().is_empty() {
             return Err(CoreError::Invalid("task owner is empty".to_owned()));
         }
@@ -1664,13 +1775,18 @@ impl Session {
         let owner = owner.to_owned();
         self.storage
             .write(move |writer| -> Result<Option<ClaimedTask>, CoreError> {
-                let row: Option<RawClaim> = writer.query_optional(
+                let (filter, kind) = match kind {
+                    Some(kind) => (" AND kind = ?", Some(kind)),
+                    None => ("", None),
+                };
+                let sql = format!(
                     "SELECT id, conversation_id, kind, phase, attempt, input_json, checkpoint_json \
                      FROM tasks WHERE status = 'pending' \
-                     AND (next_wake_at IS NULL OR next_wake_at <= ?) \
-                     ORDER BY COALESCE(next_wake_at, created_at), id LIMIT 1",
-                    (now,),
-                    |row| {
+                     AND (next_wake_at IS NULL OR next_wake_at <= ?){filter} \
+                     ORDER BY COALESCE(next_wake_at, created_at), id LIMIT 1"
+                );
+                let row: Option<RawClaim> = match &kind {
+                    None => writer.query_optional(&sql, (now,), |row| {
                         Ok(RawClaim {
                             id: row.get(0)?,
                             conversation_id: row.get(1)?,
@@ -1680,8 +1796,19 @@ impl Session {
                             input_json: row.get(5)?,
                             checkpoint_json: row.get(6)?,
                         })
-                    },
-                )?;
+                    })?,
+                    Some(kind) => writer.query_optional(&sql, (now, kind.as_str()), |row| {
+                        Ok(RawClaim {
+                            id: row.get(0)?,
+                            conversation_id: row.get(1)?,
+                            kind: row.get(2)?,
+                            phase: row.get(3)?,
+                            attempt: row.get(4)?,
+                            input_json: row.get(5)?,
+                            checkpoint_json: row.get(6)?,
+                        })
+                    })?,
+                };
                 let Some(row) = row else {
                     return Ok(None);
                 };
@@ -1717,6 +1844,7 @@ impl Session {
                     .map_err(|error| CoreError::Corrupt(error.to_string()))?;
                 Ok(Some(ClaimedTask {
                     id: row.id,
+                    conversation_id: row.conversation_id,
                     kind: row.kind,
                     phase: row.phase,
                     attempt,
@@ -1796,6 +1924,7 @@ impl Session {
                     .map_err(|error| CoreError::Corrupt(error.to_string()))?;
                 Ok(Some(ClaimedTask {
                     id: row.id,
+                    conversation_id: row.conversation_id,
                     kind: row.kind,
                     phase: row.phase,
                     attempt,

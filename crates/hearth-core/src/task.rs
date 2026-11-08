@@ -113,6 +113,7 @@ impl NewTask {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClaimedTask {
     pub id: String,
+    pub conversation_id: Option<String>,
     pub kind: String,
     pub phase: String,
     pub attempt: i64,

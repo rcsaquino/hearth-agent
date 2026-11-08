@@ -13,6 +13,7 @@ mod init;
 mod ipc;
 mod memory_extract;
 mod prompt_audit;
+mod scheduler;
 mod stats;
 pub mod tool_groups;
 mod tools;
@@ -27,6 +28,9 @@ pub use events::{EventBus, EventSink, NoopSink, RunEvent};
 pub use init::{InitError, InitOptions, init};
 pub use ipc::{IpcError, StatusContext, serve, status, watch};
 pub use prompt_audit::{PromptError, PromptOptions, prompt};
+pub use scheduler::{
+    ReminderHandler, ScheduleTool, Scheduler, TaskHandler, TaskHandlerError, TaskRegistry,
+};
 pub use stats::{StatsError, StatsReport, StatsRow, stats, stats_report};
 pub use tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
 
