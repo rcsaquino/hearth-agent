@@ -307,3 +307,21 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   assistant entry; it settles unanswered instead.
 - The assistant entry and the submission ending are separate saves for now. The M2
   gate should review whether to make the answer and ending one atomic save.
+
+## 2026-11-08: M2b-2b local chat and agent hardening
+
+- A successful run requires non-empty assistant text. A thinking-only stream is
+  private reasoning, not an answer; it settles unanswered with a notice and saves no
+  assistant entry. Usage is still recorded.
+- The agent keeps an in-process reservation set of conversation ids in addition to
+  the database active-generation check. The reservation is acquired before the
+  database check and released by a guard on every return path, so two concurrent
+  runs in one process cannot both start.
+- `hearth chat` loads the configured provider, reads `identity.soul_file` or
+  `$HEARTH_HOME/SOUL.md` with the default fallback, creates one fresh local
+  conversation, and runs a line-based loop. It prints only the answer or the notice
+  on its own line and exits on EOF.
+- Pricing is empty in local chat, so the configured model records tokens with zero
+  cost until a price is added.
+- The assistant entry, submission ending, and task terminal transition remain
+  separate saves. The M2 gate should review whether to combine them.
