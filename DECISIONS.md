@@ -590,3 +590,29 @@ local fake-server and fixture tests.
   RFC3339 or YYYY-MM-DD and reads the state valid at that instant.
 - The memory tool is in the local chat and daemon registries. Standing-memory
   prompt injection and automatic recall are M4b; extraction is M4c.
+
+## 2026-11-08: Standing memory and recall (M4b)
+
+- Q6 seed constants: RRF k=60, 180-day recency half-life, near-duplicate Jaccard
+  0.85, weights recency 0.20, importance 0.20, staleness 0.15, recall budget 900
+  tokens and 6 items, standing cap 1200 tokens, promotion threshold 85.
+- Standing memory includes pinned rows always and promotes active rule,
+  preference, and person rows at importance 85 or higher. Promoted rows beyond
+  the token cap are demoted to `none`; pinned rows are never demoted.
+- The standing version lives in the `memory_state` document on a hidden
+  `system:memory` conversation. It increments only when the standing set changes,
+  in the same save as the memory change. The document write carries its expected
+  version and retries once after a mismatch.
+- Recall uses FTS5 BM25 top 40, standing rows, and tag matches, fused with RRF.
+  Recency and staleness use the 180-day half-life. Diversity keeps at most two
+  rows per kind and collapses near duplicates. Returned rows update
+  `last_used_at` in a save.
+- Trivial input (two characters or fewer, a known greeting or acknowledgement,
+  or no alphanumeric characters) returns no recall without a model call.
+- Prompt L3 is a `## Standing memory` system message after identity and
+  operation. Prompt L6 is a `## Relevant memory` system message immediately
+  before the newest user message. Both appear in the audit document as
+  `standing_memory` and `recall`.
+- The agent reads standing and recall before every prompt. A memory error is
+  logged and the run continues with empty segments. The runtime builds the
+  policy from `settings.memory`.
