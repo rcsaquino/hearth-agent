@@ -266,3 +266,21 @@ fn spaces_rapid_sends_by_at_least_one_interval() {
         *sleeps
     );
 }
+
+#[test]
+fn retries_a_fallback_429_on_the_same_part() {
+    let server = Server::start(vec![
+        error(400, 400, "rich rejected", None),
+        error(429, 429, "slow down", Some(1)),
+        ok(),
+    ]);
+    let (sender, sleeper) = sender(&server.base);
+    let outcome = sender.send_reply(42, "**hi**").expect("send");
+    assert_eq!(outcome, SendOutcome::Fallback { parts: 1 });
+    let requests = server.finish();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[1].method, "sendMessage");
+    assert_eq!(requests[2].method, "sendMessage");
+    let sleeps = sleeper.sleeps.lock().expect("sleeps");
+    assert!(sleeps.contains(&Duration::from_secs(1)), "{:?}", *sleeps);
+}
