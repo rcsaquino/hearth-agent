@@ -45,6 +45,7 @@ impl Tool for MemoryTool {
                     "importance": {"type": "integer", "minimum": 0, "maximum": 100},
                     "supersedes": {"type": "string"},
                     "pinned": {"type": "boolean"},
+                    "include_archived": {"type": "boolean"},
                     "at": {"type": "string"}
                 },
                 "required": ["action"]
@@ -60,7 +61,14 @@ impl Tool for MemoryTool {
         match action {
             "search" => {
                 let query = required_str(arguments, "query")?;
-                let items = self.service.search(query, 10).map_err(tool_error)?;
+                let include_archived = arguments
+                    .get("include_archived")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let items = self
+                    .service
+                    .search_with(query, 10, include_archived)
+                    .map_err(tool_error)?;
                 Ok(ToolOutput {
                     content: render_items(&items),
                     is_error: false,
@@ -166,7 +174,14 @@ impl Tool for MemoryTool {
                     ToolError::invalid("invalid_arguments", "at must be RFC3339 or YYYY-MM-DD")
                 })?;
                 let query = arguments.get("query").and_then(Value::as_str);
-                let items = self.service.as_of(query, at_micros).map_err(tool_error)?;
+                let include_archived = arguments
+                    .get("include_archived")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let items = self
+                    .service
+                    .as_of_with(query, at_micros, include_archived)
+                    .map_err(tool_error)?;
                 Ok(ToolOutput {
                     content: render_items(&items),
                     is_error: false,

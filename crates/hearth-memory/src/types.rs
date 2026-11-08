@@ -175,6 +175,19 @@ pub struct ConsolidationReport {
     pub unchanged: usize,
 }
 
+/// The result of one stale-memory archive pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ArchiveReport {
+    pub archived: usize,
+}
+
+/// The result of one episode consolidation pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EpisodeReport {
+    pub written: usize,
+    pub skipped: usize,
+}
+
 /// A memory failure.
 #[derive(Debug, Error)]
 pub enum MemoryError {

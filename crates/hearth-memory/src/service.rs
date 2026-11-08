@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use hearth_core::{
-    Conversation, CoreError, Document, MemoryChange, MemoryUpdate, MemoryWrite, NewMemory, Save,
-    Session,
+    Conversation, CoreError, Document, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewMemory,
+    Save, Session,
 };
 use hearth_storage::rusqlite;
 use hearth_storage::{Reader, StorageError};
@@ -13,12 +13,13 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::constants::{
+    ARCHIVE_BELOW_IMPORTANCE, ARCHIVE_UNUSED_DAYS, DECAY_DAYS, DECAY_FACTOR, DECAY_FLOOR,
     IMPORTANCE_WEIGHT, NEAR_DUPLICATE, PROMOTE_IMPORTANCE, RECENCY_HALF_LIFE_DAYS, RECENCY_WEIGHT,
     RRF_K, STALENESS_WEIGHT, STOPWORDS, TRIVIAL,
 };
 use crate::types::{
-    MemoryError, MemoryItem, MemoryKind, MemoryStats, MemoryStatus, SourceKind, Standing,
-    StandingMemory,
+    ArchiveReport, EpisodeReport, MemoryError, MemoryItem, MemoryKind, MemoryStats, MemoryStatus,
+    SourceKind, Standing, StandingMemory,
 };
 
 const MEMORY_SELECT: &str = "SELECT id, kind, content, tags, fingerprint, importance, status, \
@@ -286,6 +287,65 @@ impl MemoryService {
             .ok_or_else(|| MemoryError::NotFound(id.to_owned()))
     }
 
+    /// The importance used for retrieval after gentle decay.
+    pub fn effective_importance(item: &MemoryItem, now: i64) -> i64 {
+        if item.standing == Standing::Pinned
+            || (item.kind == MemoryKind::Rule && item.source_kind == SourceKind::User)
+        {
+            return item.importance;
+        }
+        let last = item.last_used_at.unwrap_or(item.created_at);
+        let days = (now - last).max(0) as f64 / 86_400_000_000.0;
+        let decayed = item.importance as f64 * DECAY_FACTOR.powf(days / DECAY_DAYS);
+        let floor = DECAY_FLOOR.min(item.importance);
+        decayed
+            .floor()
+            .max(floor as f64)
+            .min(item.importance as f64) as i64
+    }
+
+    /// Archive low-importance memories that have been unused for three years.
+    pub fn archive_stale(&self) -> Result<ArchiveReport, MemoryError> {
+        let now = self.session.now_micros();
+        let cutoff = now - ARCHIVE_UNUSED_DAYS * 86_400_000_000;
+        let sql = format!(
+            "{MEMORY_SELECT} WHERE status = 'active' \
+             AND COALESCE(last_used_at, created_at) <= ? \
+             AND importance < ? \
+             AND standing <> 'pinned' \
+             AND NOT (kind = 'rule' AND source_kind = 'user')"
+        );
+        let raw: Vec<RawMemory> = self.read(|reader| {
+            reader.query(&sql, (cutoff, ARCHIVE_BELOW_IMPORTANCE), |row| {
+                Ok(RawMemory::from_row(row))
+            })
+        })?;
+        let items: Vec<MemoryItem> = raw
+            .into_iter()
+            .map(RawMemory::into_item)
+            .collect::<Result<_, _>>()?;
+        let writes: Vec<MemoryWrite> = items
+            .iter()
+            .map(|item| {
+                MemoryWrite::new(
+                    MemoryChange::Update(MemoryUpdate {
+                        id: item.id.clone(),
+                        status: Some(MemoryStatus::Archived.as_str().to_owned()),
+                        standing: Some(Standing::None.as_str().to_owned()),
+                        ..MemoryUpdate::default()
+                    }),
+                    "system",
+                )
+            })
+            .collect();
+        if !writes.is_empty() {
+            self.commit(writes, false)?;
+        }
+        Ok(ArchiveReport {
+            archived: items.len(),
+        })
+    }
+
     /// Read one memory by id, including tombstones.
     pub fn get(&self, id: &str) -> Result<Option<MemoryItem>, MemoryError> {
         let sql = format!("{MEMORY_SELECT} WHERE id = ?");
@@ -297,14 +357,29 @@ impl MemoryService {
 
     /// Search active memories by full text and tags.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryItem>, MemoryError> {
+        self.search_with(query, limit, false)
+    }
+
+    /// Search memories, optionally including archived rows.
+    pub fn search_with(
+        &self,
+        query: &str,
+        limit: usize,
+        include_archived: bool,
+    ) -> Result<Vec<MemoryItem>, MemoryError> {
         let fts = fts_query(query);
         if fts.is_empty() {
             return Ok(Vec::new());
         }
         let limit = limit.clamp(1, 100) as i64;
+        let status = if include_archived {
+            "m.status IN ('active','archived')"
+        } else {
+            "m.status = 'active'"
+        };
         let sql = format!(
             "{MEMORY_SELECT_M} JOIN memory_fts f ON m.rowid = f.rowid \
-             WHERE memory_fts MATCH ? AND m.status = 'active' \
+             WHERE memory_fts MATCH ? AND {status} \
              ORDER BY bm25(memory_fts) LIMIT ?"
         );
         let raw: Vec<RawMemory> = self.read(|reader| {
@@ -339,10 +414,30 @@ impl MemoryService {
         query: Option<&str>,
         at_micros: i64,
     ) -> Result<Vec<MemoryItem>, MemoryError> {
+        self.as_of_with(query, at_micros, false)
+    }
+
+    /// Read memories true at one instant, optionally including archived rows.
+    pub fn as_of_with(
+        &self,
+        query: Option<&str>,
+        at_micros: i64,
+        include_archived: bool,
+    ) -> Result<Vec<MemoryItem>, MemoryError> {
         let fts = query.map(fts_query).unwrap_or_default();
+        let status = if include_archived {
+            "status IN ('active','superseded','archived')"
+        } else {
+            "status IN ('active','superseded')"
+        };
+        let m_status = if include_archived {
+            "m.status IN ('active','superseded','archived')"
+        } else {
+            "m.status IN ('active','superseded')"
+        };
         let raw: Vec<RawMemory> = if fts.is_empty() {
             let sql = format!(
-                "{MEMORY_SELECT} WHERE status != 'deleted' \
+                "{MEMORY_SELECT} WHERE {status} \
                  AND (valid_from IS NULL OR valid_from <= ?) \
                  AND (valid_to IS NULL OR valid_to > ?) \
                  ORDER BY created_at LIMIT 50"
@@ -355,7 +450,7 @@ impl MemoryService {
         } else {
             let sql = format!(
                 "{MEMORY_SELECT_M} JOIN memory_fts f ON m.rowid = f.rowid \
-                 WHERE memory_fts MATCH ? AND m.status != 'deleted' \
+                 WHERE memory_fts MATCH ? AND {m_status} \
                  AND (m.valid_from IS NULL OR m.valid_from <= ?) \
                  AND (m.valid_to IS NULL OR m.valid_to > ?) \
                  ORDER BY bm25(memory_fts) LIMIT 50"
@@ -527,6 +622,9 @@ impl MemoryService {
         }
         let now = self.session.now_micros();
         let fts = self.search(query, 40)?;
+        if fts.is_empty() {
+            return Ok(Vec::new());
+        }
         let tags = self.tag_matches(query)?;
         let relevant_ids: BTreeSet<&str> = fts
             .iter()
@@ -568,7 +666,8 @@ impl MemoryService {
                 let staleness = 0.5f64.powf(stale_days / RECENCY_HALF_LIFE_DAYS);
                 let score = (rrf / max_rrf)
                     + RECENCY_WEIGHT * recency
-                    + IMPORTANCE_WEIGHT * (item.importance as f64 / 100.0)
+                    + IMPORTANCE_WEIGHT
+                        * (Self::effective_importance(&item, now) as f64 / 100.0)
                     - STALENESS_WEIGHT * staleness;
                 (item, score)
             })
@@ -637,6 +736,9 @@ impl MemoryService {
                 if removed.contains(&j) {
                     continue;
                 }
+                if rows[i].kind == MemoryKind::Episode || rows[j].kind == MemoryKind::Episode {
+                    continue;
+                }
                 let same = rows[i].fingerprint == rows[j].fingerprint;
                 let near = jaccard(
                     &content_tokens(&rows[i].content),
@@ -691,6 +793,95 @@ impl MemoryService {
             merged,
             unchanged: rows.len().saturating_sub(merged),
         })
+    }
+
+    /// Write one extractive episode row per conversation with new entries.
+    pub fn consolidate_episodes(&self) -> Result<EpisodeReport, MemoryError> {
+        let conversations: Vec<String> = self.read(|reader| {
+            reader.query(
+                "SELECT id FROM conversations WHERE transport <> 'system' ORDER BY created_at",
+                [],
+                |row| row.get(0),
+            )
+        })?;
+        let mut written = 0usize;
+        let mut skipped = 0usize;
+        for conversation in conversations {
+            let history = self.session.history(&conversation)?;
+            if history.is_empty() {
+                skipped += 1;
+                continue;
+            }
+            let covered = self
+                .latest_episode(&conversation)?
+                .and_then(|episode| {
+                    episode.tags.iter().find_map(|tag| {
+                        tag.strip_prefix("covered:").map(str::to_owned)
+                    })
+                });
+            let start = match covered {
+                Some(entry_id) => match history.iter().position(|entry| entry.id == entry_id) {
+                    Some(index) => index + 1,
+                    None => {
+                        skipped += 1;
+                        continue;
+                    }
+                },
+                None => 0,
+            };
+            let new_entries = &history[start..];
+            if new_entries.is_empty() {
+                skipped += 1;
+                continue;
+            }
+            let Some(last_entry) = new_entries.last() else {
+                skipped += 1;
+                continue;
+            };
+            let date = date_string(last_entry.created_at);
+            let content = episode_summary(&conversation, &date, new_entries);
+            if content.trim().is_empty() {
+                skipped += 1;
+                continue;
+            }
+            let now = self.session.now_micros();
+            let item = NewMemory {
+                id: self.session.new_id(),
+                kind: MemoryKind::Episode.as_str().to_owned(),
+                content: content.clone(),
+                tags: vec![
+                    "episode".to_owned(),
+                    date,
+                    format!("covered:{}", last_entry.id),
+                ],
+                fingerprint: fingerprint(&content),
+                importance: 40,
+                status: MemoryStatus::Active.as_str().to_owned(),
+                valid_from: Some(new_entries[0].created_at),
+                valid_to: None,
+                supersedes_id: None,
+                source_kind: SourceKind::Session.as_str().to_owned(),
+                source_ref: Some(conversation),
+                standing: Standing::None.as_str().to_owned(),
+                created_at: now,
+                last_used_at: None,
+            };
+            self.session
+                .save_memory(vec![MemoryWrite::new(MemoryChange::Add(item), "system")])?;
+            written += 1;
+        }
+        Ok(EpisodeReport { written, skipped })
+    }
+
+    fn latest_episode(&self, conversation_id: &str) -> Result<Option<MemoryItem>, MemoryError> {
+        let sql = format!(
+            "{MEMORY_SELECT} WHERE kind = 'episode' AND source_ref = ? AND status = 'active' \
+             ORDER BY created_at DESC LIMIT 1"
+        );
+        let raw: Option<RawMemory> = self.read(|reader| {
+            reader.query_optional(&sql, (conversation_id,), |row| Ok(RawMemory::from_row(row)))
+        })?;
+        raw.map(RawMemory::into_item).transpose()
     }
 
     fn line_tokens(&self, item: &MemoryItem) -> usize {
@@ -846,6 +1037,51 @@ impl MemoryService {
         run: impl FnOnce(&Reader<'_>) -> Result<T, StorageError>,
     ) -> Result<T, MemoryError> {
         Ok(self.session.storage().read(run)?)
+    }
+}
+
+fn entry_text(entry: &Entry) -> String {
+    match &entry.content {
+        Value::String(text) => text.clone(),
+        Value::Object(object) => object
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| item.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => String::new(),
+    }
+}
+
+fn episode_summary(conversation_id: &str, date: &str, entries: &[Entry]) -> String {
+    let mut content = format!(
+        "Episode {date} (conversation {conversation_id})\n"
+    );
+    for entry in entries {
+        if !matches!(entry.kind.as_str(), "user" | "assistant") {
+            continue;
+        }
+        let text = entry_text(entry);
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let role = if entry.kind == "user" { "User" } else { "Assistant" };
+        let line = format!("{role}: {text}\n");
+        let candidate = format!("{content}{line}");
+        if hearth_model::estimate_tokens(&candidate) > 500 {
+            break;
+        }
+        content = candidate;
+    }
+    if content.lines().count() <= 1 {
+        String::new()
+    } else {
+        content
     }
 }
 

@@ -59,6 +59,17 @@ impl Default for MemoryPolicy {
     }
 }
 
+/// Days without use for one 5 percent importance decay step.
+pub const DECAY_DAYS: f64 = 90.0;
+/// Importance multiplier per decay step.
+pub const DECAY_FACTOR: f64 = 0.95;
+/// Floor for the decayed importance of an unpinned item.
+pub const DECAY_FLOOR: i64 = 15;
+/// Days without use before a low-importance memory is archived.
+pub const ARCHIVE_UNUSED_DAYS: i64 = 3 * 365;
+/// Stored importance below which an unused memory can be archived.
+pub const ARCHIVE_BELOW_IMPORTANCE: i64 = 20;
+
 /// Common query words that add no retrieval signal.
 pub const STOPWORDS: &[&str] = &[
     "a", "about", "an", "and", "are", "as", "at", "be", "been", "being", "but", "by", "can",
