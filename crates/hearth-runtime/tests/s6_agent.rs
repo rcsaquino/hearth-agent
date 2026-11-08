@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use hearth_core::{Harness, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus};
-use hearth_memory::{MemoryKind, MemoryService, MemoryStatus, SourceKind};
+use hearth_memory::{MemoryKind, MemoryService, MemorySource, MemoryStatus, MemoryTool, SourceKind};
 use hearth_model::{
     ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
     StreamEvent, ToolCall, Usage,
@@ -1522,4 +1522,90 @@ fn an_extraction_can_supersede_an_existing_memory() {
     assert_eq!(memory.stats().expect("stats").total, 2);
     let task = latest_extract_task(&harness, &conversation).expect("task");
     assert_eq!(task.status, TaskStatus::Done);
+}
+
+#[test]
+fn a_memory_tool_call_uses_the_run_source() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let entry = harness
+        .session()
+        .latest_user_entry_id(&conversation)
+        .expect("latest")
+        .expect("entry");
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let tools = ToolRegistry::new(vec![Arc::new(MemoryTool::with_source(
+        Arc::clone(&memory),
+        MemorySource::user(entry.clone()),
+    ))]);
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        Ok(vec![
+            Ok(StreamEvent::ToolCall(ToolCall {
+                id: "call-mem".to_owned(),
+                name: "memory".to_owned(),
+                arguments: json!({
+                    "action": "save",
+                    "content": "Sam prefers metric units",
+                    "kind": "preference",
+                    "importance": 85
+                }),
+            })),
+            Ok(StreamEvent::Usage(Usage {
+                input_tokens: 8,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                output_tokens: 2,
+                reasoning_tokens: 0,
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned()),
+            }),
+        ]),
+        Ok(vec![
+            Ok(StreamEvent::TextDelta("saved".to_owned())),
+            Ok(StreamEvent::Usage(Usage {
+                input_tokens: 12,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                output_tokens: 2,
+                reasoning_tokens: 0,
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("stop".to_owned()),
+            }),
+        ]),
+    ]));
+
+    let outcome = agent_with(
+        home.path(),
+        &harness,
+        provider,
+        Pricing::default(),
+        4,
+        tools,
+    )
+    .run_submission(&submission.id)
+    .expect("run submission");
+    assert_eq!(outcome.answer_text.as_deref(), Some("saved"));
+
+    let items = memory.search("metric", 10).expect("search");
+    let item = items
+        .iter()
+        .find(|item| item.content.contains("metric units"))
+        .expect("saved memory");
+    assert_eq!(item.source_kind, SourceKind::User);
+    assert_eq!(item.source_ref.as_deref(), Some(entry.as_str()));
+    let action: String = harness
+        .session()
+        .storage()
+        .read(|reader| {
+            reader.query_row(
+                "SELECT action FROM memory_events ORDER BY created_at DESC, id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .expect("event");
+    assert_eq!(action, "add");
 }
