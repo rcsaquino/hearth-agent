@@ -530,3 +530,19 @@ local fake-server and fixture tests.
   `{"text":"Stopped."}` notice, settles the submission as `cancelled`, and finishes
   the generation task `aborted` with `{"reason":"cancelled"}`. Usage from a provider
   call that already started is recorded.
+
+## 2026-11-08: Telegram queue cap and shared limiter (M3c-2c)
+
+- One chat may have at most 10 queued submissions. The cap is a constant for now,
+  not a setting.
+- The poller checks the count after authorization, the stop path, and the update
+  dedupe, and before downloading any attachment. A message over the cap is not
+  admitted, gets no reaction, and is recorded as a control update with the next
+  offset.
+- The first over-cap message in an overflow period sends one plain notice:
+  `I'm busy with the current queue. Try again shortly.` The per-chat flag clears
+  when a later message finds the queue below the cap.
+- `PollReport` counts these as `busy`.
+- The message tool now holds a `TelegramSender`, and all of its photo, document,
+  video, voice, and album sends go through the sender's shared 33 millisecond
+  limiter. Replies, typing, and media sends therefore share one send budget.
