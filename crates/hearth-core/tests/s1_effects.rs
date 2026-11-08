@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
-use hearth_core::{Clock, CoreError, EffectIntent, EffectStatus, Harness, IdGen, Save};
+use hearth_core::{
+    Clock, CoreError, EffectIntent, EffectStatus, Harness, IdGen, NewTask, Save,
+};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -266,4 +268,89 @@ fn invalid_effect_transitions_are_rejected() {
         .finish_effect(&id, json!({}))
         .expect_err("finish twice");
     assert!(matches!(finish_again, CoreError::EffectNotReady { .. }));
+}
+
+#[test]
+fn effect_transitions_advance_the_save_sequence() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let task = session
+        .create_task(
+            NewTask::new("generation", 1, "start", json!({})).conversation(&conversation_id),
+        )
+        .expect("create task");
+
+    let commit = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({})).task(&task.id)),
+        )
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+    let before = session
+        .latest_commit()
+        .expect("read commit")
+        .expect("commit exists");
+    assert_eq!(before.kind, "save");
+
+    session.begin_effect(&id).expect("begin effect");
+    let started = session
+        .latest_commit()
+        .expect("read commit")
+        .expect("commit exists");
+    assert_eq!(started.kind, "effect.started");
+    assert_eq!(started.task_id.as_deref(), Some(task.id.as_str()));
+    assert_eq!(started.seq, before.seq + 1);
+
+    session
+        .finish_effect(&id, json!({"ok": true}))
+        .expect("finish effect");
+    let done = session
+        .latest_commit()
+        .expect("read commit")
+        .expect("commit exists");
+    assert_eq!(done.kind, "effect.done");
+    assert_eq!(done.seq, started.seq + 1);
+
+    let retry = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-2", json!({}))),
+        )
+        .expect("save");
+    let retry_id = retry.effect_ids[0].clone();
+    session.begin_effect(&retry_id).expect("begin retry");
+    session
+        .fail_effect(&retry_id, json!({"message": "temporary"}), true)
+        .expect("retryable failure");
+    let retried = session
+        .latest_commit()
+        .expect("read commit")
+        .expect("commit exists");
+    assert_eq!(retried.kind, "effect.retry");
+    session.begin_effect(&retry_id).expect("begin again");
+    session.requeue_effect(&retry_id).expect("requeue");
+    let requeued = session
+        .latest_commit()
+        .expect("read commit")
+        .expect("commit exists");
+    assert_eq!(requeued.kind, "effect.requeued");
+
+    let failed = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-3", json!({}))),
+        )
+        .expect("save");
+    let failed_id = failed.effect_ids[0].clone();
+    session.begin_effect(&failed_id).expect("begin failed");
+    session
+        .fail_effect(&failed_id, json!({"message": "permanent"}), false)
+        .expect("terminal failure");
+    let terminal = session
+        .latest_commit()
+        .expect("read commit")
+        .expect("commit exists");
+    assert_eq!(terminal.kind, "effect.failed");
 }
