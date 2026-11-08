@@ -455,7 +455,10 @@ fn each_query_is_capped_to_the_requested_results() {
     let mut results = HashMap::new();
     results.insert(
         "a".to_owned(),
-        Ok(vec![result("one", "https://one.example"), result("two", "https://two.example")]),
+        Ok(vec![
+            result("one", "https://one.example"),
+            result("two", "https://two.example"),
+        ]),
     );
     let provider: Arc<dyn SearchProvider> = Arc::new(ScriptedSearch { results });
     let tool = WebSearchTool::new(vec![provider], 3, 1, 10);

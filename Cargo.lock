@@ -435,6 +435,7 @@ name = "hearth-tools"
 version = "0.1.0"
 dependencies = [
  "hearth-model",
+ "reqwest",
  "serde_json",
  "tempfile",
  "thiserror",

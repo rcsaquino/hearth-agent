@@ -105,12 +105,18 @@ impl ExaSearch {
             .and_then(|item| item.get("text"))
             .and_then(Value::as_str)
             .ok_or_else(|| SearchError::permanent("Exa returned no result text"))?;
-        let parsed: Value = serde_json::from_str(inner)
-            .map_err(|error| SearchError::permanent(format!("Exa returned invalid result JSON: {error}")))?;
+        let parsed: Value = serde_json::from_str(inner).map_err(|error| {
+            SearchError::permanent(format!("Exa returned invalid result JSON: {error}"))
+        })?;
         Ok(map_results(&parsed))
     }
 
-    fn search_rest(&self, query: &str, limit: usize, api_key: &str) -> Result<Vec<SearchResult>, SearchError> {
+    fn search_rest(
+        &self,
+        query: &str,
+        limit: usize,
+        api_key: &str,
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let url = format!("{}/search", self.api_base.trim_end_matches('/'));
         let body = json!({
             "query": query,
@@ -127,8 +133,9 @@ impl ExaSearch {
             .send()
             .map_err(|error| SearchError::temporary(format!("Exa transport error: {error}")))?;
         let text = response_text(response, "Exa")?;
-        let parsed: Value = serde_json::from_str(&text)
-            .map_err(|error| SearchError::permanent(format!("Exa returned invalid JSON: {error}")))?;
+        let parsed: Value = serde_json::from_str(&text).map_err(|error| {
+            SearchError::permanent(format!("Exa returned invalid JSON: {error}"))
+        })?;
         Ok(map_results(&parsed))
     }
 }
@@ -172,11 +179,7 @@ fn map_results(value: &Value) -> Vec<SearchResult> {
                     .join(" ")
             })
             .filter(|text| !text.trim().is_empty())
-            .or_else(|| {
-                item.get("text")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
+            .or_else(|| item.get("text").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_default();
         let date = item
             .get("publishedDate")
@@ -238,7 +241,9 @@ fn client() -> Result<Client, SearchError> {
     Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .map_err(|error| SearchError::permanent(format!("could not build the search client: {error}")))
+        .map_err(|error| {
+            SearchError::permanent(format!("could not build the search client: {error}"))
+        })
 }
 
 fn truncate(text: &str, limit: usize) -> String {
@@ -276,11 +281,11 @@ impl SearchProvider for BraveSearch {
     }
 
     fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
-        let mut url = reqwest::Url::parse(&format!(
-            "{}/web/search",
-            self.base.trim_end_matches('/')
-        ))
-        .map_err(|error| SearchError::permanent(format!("invalid Brave base URL: {error}")))?;
+        let mut url =
+            reqwest::Url::parse(&format!("{}/web/search", self.base.trim_end_matches('/')))
+                .map_err(|error| {
+                    SearchError::permanent(format!("invalid Brave base URL: {error}"))
+                })?;
         url.query_pairs_mut()
             .append_pair("q", query)
             .append_pair("count", &limit.to_string());
@@ -292,8 +297,9 @@ impl SearchProvider for BraveSearch {
             .send()
             .map_err(|error| SearchError::temporary(format!("Brave transport error: {error}")))?;
         let text = response_text(response, "Brave")?;
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|error| SearchError::permanent(format!("Brave returned invalid JSON: {error}")))?;
+        let value: Value = serde_json::from_str(&text).map_err(|error| {
+            SearchError::permanent(format!("Brave returned invalid JSON: {error}"))
+        })?;
         let mut results = Vec::new();
         if let Some(items) = value
             .get("web")
@@ -385,10 +391,13 @@ impl SearchProvider for DeepSeekSearch {
             .header("Accept", "application/json")
             .json(&body)
             .send()
-            .map_err(|error| SearchError::temporary(format!("DeepSeek transport error: {error}")))?;
+            .map_err(|error| {
+                SearchError::temporary(format!("DeepSeek transport error: {error}"))
+            })?;
         let text = response_text(response, "DeepSeek")?;
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|error| SearchError::permanent(format!("DeepSeek returned invalid JSON: {error}")))?;
+        let value: Value = serde_json::from_str(&text).map_err(|error| {
+            SearchError::permanent(format!("DeepSeek returned invalid JSON: {error}"))
+        })?;
         let mut results = Vec::new();
         if let Some(items) = value.get("results").and_then(Value::as_array) {
             for item in items {
@@ -450,16 +459,21 @@ impl SearchProvider for FirecrawlSearch {
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&body)
             .send()
-            .map_err(|error| SearchError::temporary(format!("Firecrawl transport error: {error}")))?;
+            .map_err(|error| {
+                SearchError::temporary(format!("Firecrawl transport error: {error}"))
+            })?;
         let text = response_text(response, "Firecrawl")?;
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|error| SearchError::permanent(format!("Firecrawl returned invalid JSON: {error}")))?;
+        let value: Value = serde_json::from_str(&text).map_err(|error| {
+            SearchError::permanent(format!("Firecrawl returned invalid JSON: {error}"))
+        })?;
         if value.get("success").and_then(Value::as_bool) == Some(false) {
             let message = value
                 .get("error")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown error");
-            return Err(SearchError::permanent(format!("Firecrawl error: {message}")));
+            return Err(SearchError::permanent(format!(
+                "Firecrawl error: {message}"
+            )));
         }
         let data = value.get("data");
         let items = data
@@ -472,15 +486,27 @@ impl SearchProvider for FirecrawlSearch {
                 let url = item
                     .get("url")
                     .and_then(Value::as_str)
-                    .or_else(|| item.get("metadata").and_then(|m| m.get("sourceURL")).and_then(Value::as_str))
-                    .or_else(|| item.get("metadata").and_then(|m| m.get("url")).and_then(Value::as_str));
+                    .or_else(|| {
+                        item.get("metadata")
+                            .and_then(|m| m.get("sourceURL"))
+                            .and_then(Value::as_str)
+                    })
+                    .or_else(|| {
+                        item.get("metadata")
+                            .and_then(|m| m.get("url"))
+                            .and_then(Value::as_str)
+                    });
                 let Some(url) = url else {
                     continue;
                 };
                 let title = item
                     .get("title")
                     .and_then(Value::as_str)
-                    .or_else(|| item.get("metadata").and_then(|m| m.get("title")).and_then(Value::as_str))
+                    .or_else(|| {
+                        item.get("metadata")
+                            .and_then(|m| m.get("title"))
+                            .and_then(Value::as_str)
+                    })
                     .filter(|title| !title.trim().is_empty())
                     .unwrap_or(url)
                     .to_owned();
@@ -488,7 +514,11 @@ impl SearchProvider for FirecrawlSearch {
                     .get("description")
                     .and_then(Value::as_str)
                     .or_else(|| item.get("snippet").and_then(Value::as_str))
-                    .or_else(|| item.get("metadata").and_then(|m| m.get("description")).and_then(Value::as_str))
+                    .or_else(|| {
+                        item.get("metadata")
+                            .and_then(|m| m.get("description"))
+                            .and_then(Value::as_str)
+                    })
                     .unwrap_or_default();
                 results.push(SearchResult {
                     title,
@@ -526,8 +556,9 @@ impl SearchProvider for TinyFishSearch {
     }
 
     fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
-        let mut url = reqwest::Url::parse(&self.base)
-            .map_err(|error| SearchError::permanent(format!("invalid TinyFish base URL: {error}")))?;
+        let mut url = reqwest::Url::parse(&self.base).map_err(|error| {
+            SearchError::permanent(format!("invalid TinyFish base URL: {error}"))
+        })?;
         url.query_pairs_mut().append_pair("query", query);
         if limit > 10 {
             url.query_pairs_mut().append_pair("page", "0");
@@ -538,10 +569,13 @@ impl SearchProvider for TinyFishSearch {
             .header("X-API-Key", &self.api_key)
             .header("Accept", "application/json")
             .send()
-            .map_err(|error| SearchError::temporary(format!("TinyFish transport error: {error}")))?;
+            .map_err(|error| {
+                SearchError::temporary(format!("TinyFish transport error: {error}"))
+            })?;
         let text = response_text(response, "TinyFish")?;
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|error| SearchError::permanent(format!("TinyFish returned invalid JSON: {error}")))?;
+        let value: Value = serde_json::from_str(&text).map_err(|error| {
+            SearchError::permanent(format!("TinyFish returned invalid JSON: {error}"))
+        })?;
         let mut results = Vec::new();
         if let Some(items) = value.get("results").and_then(Value::as_array) {
             for item in items {

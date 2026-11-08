@@ -141,7 +141,7 @@ impl Tool for WebSearchTool {
         let mut all_retryable = true;
         let mut first_error: Option<SearchError> = None;
 
-        for (query, outcome) in queries.iter().zip(outcomes.into_iter()) {
+        for (query, outcome) in queries.iter().zip(outcomes) {
             match outcome {
                 Some(Ok(items)) => {
                     all_failed = false;
@@ -166,9 +166,8 @@ impl Tool for WebSearchTool {
         }
 
         if all_failed {
-            let error = first_error.unwrap_or_else(|| {
-                SearchError::permanent("every search provider failed")
-            });
+            let error = first_error
+                .unwrap_or_else(|| SearchError::permanent("every search provider failed"));
             return Err(ToolError {
                 code: "search_failed".to_owned(),
                 message: error.message,
@@ -220,7 +219,10 @@ fn parse_queries(arguments: &Value) -> Result<Vec<String>, ToolError> {
             .map(str::trim)
             .filter(|query| !query.is_empty())
             .ok_or_else(|| {
-                ToolError::invalid("invalid_arguments", "every query must be a non-empty string")
+                ToolError::invalid(
+                    "invalid_arguments",
+                    "every query must be a non-empty string",
+                )
             })?;
         queries.push(query.to_owned());
     }
@@ -235,7 +237,10 @@ fn search_with(
     let mut first_error = None;
     for provider in providers {
         match provider.search(query, limit) {
-            Ok(results) => return Ok(results),
+            Ok(mut results) => {
+                results.truncate(limit);
+                return Ok(results);
+            }
             Err(error) => {
                 if first_error.is_none() {
                     first_error = Some(error);
