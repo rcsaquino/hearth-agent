@@ -12,6 +12,7 @@ mod events;
 mod helpers;
 mod init;
 mod ipc;
+pub mod maintenance;
 mod memory_extract;
 mod prompt_audit;
 mod scheduler;
