@@ -401,3 +401,25 @@ local fake-server and fixture tests.
   is skipped. The chain follows `web.fetch.order`.
 - 429 and 5xx are retryable; other 4xx are permanent. Provider content is capped
   at the fetch limit with a truncation note.
+
+## 2026-11-08: Telegram admission (M3a)
+
+- Authorization requires the sender to be in `allowed_user_ids`; when
+  `allowed_chat_ids` is non-empty the chat must also be allowed. Bot senders are
+  rejected. A missing sender is unauthorized.
+- The transport key is `<chat_id>:<thread_id>`, with thread id 0 when absent. The
+  newest non-archived conversation for that key is reused; otherwise a new
+  conversation is created from the chat title, the sender's first name, or
+  `Telegram`.
+- The request id is `tg:<chat_id>:<message_id>`. The user entry's source is the
+  message id.
+- The `telegram_updates` row, the `meta.telegram_offset` update, the user entry,
+  and the queued submission commit in one save. A duplicate update id rolls the
+  save back and returns the existing submission; the poller advances the offset and
+  skips the reaction.
+- Ignored updates advance the offset directly. A failed admission returns without
+  advancing so Telegram can replay it.
+- The `👀` reaction is best effort. A failure is logged and does not fail the
+  admission.
+- Bot API errors and transport messages never include the token or request URL.
+  Attachments, voice, callbacks, and replies are deferred to M3b.
