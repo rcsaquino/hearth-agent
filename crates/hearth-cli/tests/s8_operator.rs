@@ -1,5 +1,8 @@
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 
 fn hearth() -> Command {
@@ -42,13 +45,17 @@ fn doctor_without_settings_fails_with_one_sentence() {
 }
 
 fn init_home(home: &std::path::Path) {
+    init_home_with_base_url(home, "https://example.com/v1");
+}
+
+fn init_home_with_base_url(home: &std::path::Path, base_url: &str) {
     let output = hearth()
         .args(["init", "--non-interactive"])
         .arg("--home")
         .arg(home)
         .args(["--telegram-token", "123:fake-token"])
         .args(["--allowed-user-id", "42"])
-        .args(["--base-url", "https://example.com/v1"])
+        .args(["--base-url", base_url])
         .args(["--api-key", "fake-key"])
         .args(["--model", "fake-model"])
         .args(["--timezone", "UTC"])
@@ -1314,4 +1321,128 @@ fn daemon_stops_retrying_a_retryable_effect_after_three_attempts() {
     assert_eq!(effect.attempts, 3);
     let result = effect.result.expect("effect result");
     assert_eq!(result["retryable"], false);
+}
+
+
+fn fake_sse_server(answer: &str) -> (String, thread::JoinHandle<Option<serde_json::Value>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    listener
+        .set_nonblocking(true)
+        .expect("set listener nonblocking");
+    let port = listener.local_addr().expect("server address").port();
+    let answer = answer.to_owned();
+    let handle = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        };
+        socket
+            .set_nonblocking(false)
+            .expect("set accepted socket blocking");
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).expect("request line");
+        let mut content_length = 0usize;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).expect("request header") == 0 {
+                break;
+            }
+            if line == "\r\n" || line == "\n" {
+                break;
+            }
+            let lower = line.to_ascii_lowercase();
+            if let Some(value) = lower.strip_prefix("content-length:") {
+                content_length = value.trim().parse().unwrap_or(0);
+            }
+        }
+        let mut body = vec![0u8; content_length];
+        reader.read_exact(&mut body).expect("request body");
+        let request: serde_json::Value =
+            serde_json::from_slice(&body).expect("request JSON");
+
+        let mut response = String::from(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+        );
+        response.push_str(&format!(
+            "data: {}\n\n",
+            serde_json::json!({"choices": [{"delta": {"content": answer}}]})
+        ));
+        response.push_str(&format!(
+            "data: {}\n\n",
+            serde_json::json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+        ));
+        response.push_str(&format!(
+            "data: {}\n\n",
+            serde_json::json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}})
+        ));
+        response.push_str("data: [DONE]\n\n");
+        socket
+            .write_all(response.as_bytes())
+            .expect("write response");
+        socket.flush().ok();
+        Some(request)
+    });
+    (format!("http://127.0.0.1:{port}/v1"), handle)
+}
+
+#[test]
+fn chat_runs_one_line_through_the_real_provider_adapter() {
+    let (base_url, server) = fake_sse_server("hello from the fake");
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home_with_base_url(home.path(), &base_url);
+
+    let mut child = hearth()
+        .args(["chat", "--home"])
+        .arg(home.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn chat");
+    {
+        let stdin = child.stdin.as_mut().expect("chat stdin");
+        stdin.write_all(b"hello\n").expect("write chat input");
+    }
+    drop(child.stdin.take());
+    let output = child.wait_with_output().expect("chat output");
+    let request = server
+        .join()
+        .expect("join fake provider")
+        .expect("provider request");
+
+    assert!(
+        output.status.success(),
+        "chat failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("hello from the fake"),
+        "chat output was: {stdout}"
+    );
+    assert_eq!(request["model"], "fake-model");
+    assert_eq!(request["stream"], true);
+    assert!(
+        request["messages"]
+            .as_array()
+            .is_some_and(|messages| !messages.is_empty()),
+        "request has no messages: {request}"
+    );
+    assert!(
+        request.to_string().contains("hello"),
+        "request did not carry the user text: {request}"
+    );
 }
