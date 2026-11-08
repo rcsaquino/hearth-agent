@@ -778,3 +778,26 @@ fn creating_a_task_records_a_task_commit() {
     assert!(latest.conversation_id.is_none());
     assert_eq!(latest.created_at, clock.now());
 }
+
+#[test]
+fn claiming_a_task_records_a_claim_commit() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("task is runnable");
+
+    let latest = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("a claim records a commit");
+    assert_eq!(latest.seq, 2);
+    assert_eq!(latest.kind, "task.claim");
+    assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
+    assert_eq!(latest.created_at, clock.now());
+}
