@@ -284,17 +284,14 @@ pub fn run() -> Result<BenchReport> {
         let hit = top
             .clone()
             .any(|item| has_any(&item.id, &question.expected_keys, &id_to_keys));
-        let denominator = items.len().min(5);
+        let denominator = question.relevant_keys.len().min(5).max(1);
         let relevant = items
             .iter()
             .take(5)
             .filter(|item| has_any(&item.id, &question.relevant_keys, &id_to_keys))
-            .count();
-        let precision = if denominator == 0 {
-            0.0
-        } else {
-            relevant as f64 / denominator as f64
-        };
+            .count()
+            .min(denominator);
+        let precision = relevant as f64 / denominator as f64;
 
         overall.count += 1;
         overall.hits += usize::from(hit);
