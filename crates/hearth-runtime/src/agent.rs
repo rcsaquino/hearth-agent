@@ -18,6 +18,8 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::events::{EventSink, NoopSink, RunEvent};
+
 /// Everything an agent needs beyond the record and the provider.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -94,7 +96,11 @@ impl Agent {
 
     /// Run one submission to a final answer or a settled failure.
     pub fn run_submission(&self, submission_id: &str) -> Result<RunOutcome, AgentError> {
-        self.run_submission_with_cancel(submission_id, Arc::new(AtomicBool::new(false)))
+        self.run_submission_with_events(
+            submission_id,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(NoopSink),
+        )
     }
 
     /// Run one submission, stopping at the next boundary when `cancel` is set.
@@ -102,6 +108,25 @@ impl Agent {
         &self,
         submission_id: &str,
         cancel: Arc<AtomicBool>,
+    ) -> Result<RunOutcome, AgentError> {
+        self.run_submission_with_events(submission_id, cancel, Arc::new(NoopSink))
+    }
+
+    /// Run one submission and publish live events to `events`.
+    pub fn run_submission_with_events(
+        &self,
+        submission_id: &str,
+        cancel: Arc<AtomicBool>,
+        events: Arc<dyn EventSink>,
+    ) -> Result<RunOutcome, AgentError> {
+        self.run(submission_id, cancel, events.as_ref())
+    }
+
+    fn run(
+        &self,
+        submission_id: &str,
+        cancel: Arc<AtomicBool>,
+        events: &dyn EventSink,
     ) -> Result<RunOutcome, AgentError> {
         let submission = self
             .session
@@ -142,8 +167,15 @@ impl Agent {
             })?;
         self.session
             .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
+        emit(
+            events,
+            &claimed.id,
+            &submission.conversation_id,
+            "run_started",
+            json!({"submission_id": submission.id}),
+        );
         if cancel.load(Ordering::Relaxed) {
-            return self.settle_cancelled(&submission, &claimed.id);
+            return self.settle_cancelled(&submission, &claimed.id, events);
         }
 
         let mut turn = claimed
@@ -156,15 +188,22 @@ impl Agent {
         let history = self.session.history(&submission.conversation_id)?;
         let pending = pending_calls(&history);
         if !pending.is_empty() {
-            self.execute_calls(&submission, &claimed.id, &pending)?;
+            self.execute_calls(&submission, &claimed.id, &pending, events)?;
             turn += 1;
             self.session
                 .checkpoint_task(&claimed.id, &self.config.owner, json!({"turn": turn}))?;
+            emit(
+                events,
+                &claimed.id,
+                &submission.conversation_id,
+                "task_step",
+                json!({"phase": "tools", "turn": turn}),
+            );
         }
 
         loop {
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id);
+                return self.settle_cancelled(&submission, &claimed.id, events);
             }
             if turn >= self.config.max_turns {
                 return self.settle_failure(
@@ -172,8 +211,16 @@ impl Agent {
                     &claimed.id,
                     "The turn limit was reached before a final answer.",
                     "turn_limit",
+                    events,
                 );
             }
+            emit(
+                events,
+                &claimed.id,
+                &submission.conversation_id,
+                "turn_started",
+                json!({"turn": turn}),
+            );
             let now = OffsetDateTime::now_utc()
                 .format(&Rfc3339)
                 .unwrap_or_else(|_| "unknown time".to_owned());
@@ -196,8 +243,15 @@ impl Agent {
                 &self.config.owner,
                 json!({"turn": turn, "prompt_hash": prompt_hash}),
             )?;
+            emit(
+                events,
+                &claimed.id,
+                &submission.conversation_id,
+                "task_step",
+                json!({"phase": "request", "turn": turn}),
+            );
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id);
+                return self.settle_cancelled(&submission, &claimed.id, events);
             }
 
             let started = Instant::now();
@@ -209,6 +263,7 @@ impl Agent {
                         &claimed.id,
                         &format!("Provider error: {error}"),
                         "provider_error",
+                        events,
                     );
                 }
             };
@@ -218,43 +273,77 @@ impl Agent {
             let mut usage = Usage::default();
             for event in stream {
                 match event {
-                    Ok(StreamEvent::TextDelta(delta)) => text.push_str(&delta),
-                    Ok(StreamEvent::ThinkingDelta(delta)) => thinking.push_str(&delta),
+                    Ok(StreamEvent::TextDelta(delta)) => {
+                        text.push_str(&delta);
+                        emit(
+                            events,
+                            &claimed.id,
+                            &submission.conversation_id,
+                            "text_delta",
+                            json!({"text": delta}),
+                        );
+                    }
+                    Ok(StreamEvent::ThinkingDelta(delta)) => {
+                        thinking.push_str(&delta);
+                        emit(
+                            events,
+                            &claimed.id,
+                            &submission.conversation_id,
+                            "thinking_delta",
+                            json!({"text": delta}),
+                        );
+                    }
                     Ok(StreamEvent::ToolCall(call)) => calls.push(call),
                     Ok(StreamEvent::Usage(value)) => usage = value,
                     Ok(StreamEvent::Done { .. }) => {}
                     Err(error) => {
                         let latency_ms = started.elapsed().as_millis() as i64;
                         if has_usage(usage) {
-                            self.record_usage(
+                            let cost_micros = self.record_usage(
                                 &claimed.id,
                                 &submission.conversation_id,
                                 usage,
                                 latency_ms,
                             )?;
+                            emit_usage(
+                                events,
+                                &claimed.id,
+                                &submission.conversation_id,
+                                usage,
+                                cost_micros,
+                            );
                         }
                         return self.settle_failure(
                             &submission,
                             &claimed.id,
                             &format!("Provider error: {error}"),
                             "provider_error",
+                            events,
                         );
                     }
                 }
             }
             let latency_ms = started.elapsed().as_millis() as i64;
-            self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
+            let cost_micros =
+                self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
+            emit_usage(
+                events,
+                &claimed.id,
+                &submission.conversation_id,
+                usage,
+                cost_micros,
+            );
             self.session
                 .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id);
+                return self.settle_cancelled(&submission, &claimed.id, events);
             }
 
             if !calls.is_empty() {
                 self.save_assistant(&submission, &prompt_hash, &thinking, &text, &calls)?;
-                self.execute_calls(&submission, &claimed.id, &calls)?;
+                self.execute_calls(&submission, &claimed.id, &calls, events)?;
                 if cancel.load(Ordering::Relaxed) {
-                    return self.settle_cancelled(&submission, &claimed.id);
+                    return self.settle_cancelled(&submission, &claimed.id, events);
                 }
                 turn += 1;
                 self.session.checkpoint_task(
@@ -262,6 +351,13 @@ impl Agent {
                     &self.config.owner,
                     json!({"turn": turn}),
                 )?;
+                emit(
+                    events,
+                    &claimed.id,
+                    &submission.conversation_id,
+                    "task_step",
+                    json!({"phase": "tools", "turn": turn}),
+                );
                 continue;
             }
             if text.is_empty() {
@@ -270,6 +366,7 @@ impl Agent {
                     &claimed.id,
                     "The model returned no answer.",
                     "empty_answer",
+                    events,
                 );
             }
 
@@ -288,6 +385,13 @@ impl Agent {
                     result: json!({"answer_entry_id": answer_entry_id}),
                 },
             )?;
+            emit(
+                events,
+                &claimed.id,
+                &submission.conversation_id,
+                "run_settled",
+                json!({"status": "done", "answer_entry_id": answer_entry_id}),
+            );
             return Ok(RunOutcome {
                 submission: settled,
                 task_id: claimed.id,
@@ -342,9 +446,21 @@ impl Agent {
         submission: &Submission,
         task_id: &str,
         calls: &[ToolCall],
+        events: &dyn EventSink,
     ) -> Result<(), AgentError> {
         let mut blocks = Vec::new();
         for call in calls {
+            emit(
+                events,
+                task_id,
+                &submission.conversation_id,
+                "tool_call_started",
+                json!({
+                    "call_id": call.id,
+                    "name": call.name,
+                    "arguments": preview(&call.arguments.to_string()),
+                }),
+            );
             let (content, is_error) = match self.config.tools.call(&call.name, &call.arguments) {
                 Some(Ok(output)) => {
                     let (content, spill_failed) = self.spill_output(&call.id, &output.content);
@@ -357,6 +473,17 @@ impl Agent {
                     (error.to_json().to_string(), true)
                 }
             };
+            emit(
+                events,
+                task_id,
+                &submission.conversation_id,
+                "tool_result",
+                json!({
+                    "call_id": call.id,
+                    "content": preview(&content),
+                    "is_error": is_error,
+                }),
+            );
             blocks.push(json!({
                 "type": "tool_result",
                 "call_id": call.id,
@@ -412,7 +539,7 @@ impl Agent {
         conversation_id: &str,
         usage: Usage,
         latency_ms: i64,
-    ) -> Result<(), AgentError> {
+    ) -> Result<i64, AgentError> {
         let cost_micros = self
             .pricing
             .price(&self.config.model)
@@ -428,13 +555,14 @@ impl Agent {
             cost_micros,
             latency_ms,
         })?;
-        Ok(())
+        Ok(cost_micros)
     }
 
     fn settle_cancelled(
         &self,
         submission: &Submission,
         task_id: &str,
+        events: &dyn EventSink,
     ) -> Result<RunOutcome, AgentError> {
         let notice = "Stopped.";
         self.session.save(
@@ -451,6 +579,13 @@ impl Agent {
                 result: json!({"reason": "cancelled"}),
             },
         )?;
+        emit(
+            events,
+            task_id,
+            &submission.conversation_id,
+            "run_settled",
+            json!({"status": "cancelled", "answer_entry_id": null}),
+        );
         Ok(RunOutcome {
             submission: settled,
             task_id: task_id.to_owned(),
@@ -466,6 +601,7 @@ impl Agent {
         task_id: &str,
         message: &str,
         reason: &str,
+        events: &dyn EventSink,
     ) -> Result<RunOutcome, AgentError> {
         let notice = short_notice(message);
         self.session.save(
@@ -485,6 +621,13 @@ impl Agent {
                 result: json!({"error": notice, "reason": reason}),
             },
         )?;
+        emit(
+            events,
+            task_id,
+            &submission.conversation_id,
+            "run_settled",
+            json!({"status": "unanswered", "answer_entry_id": null, "reason": reason}),
+        );
         Ok(RunOutcome {
             submission: settled,
             task_id: task_id.to_owned(),
@@ -591,4 +734,48 @@ fn short_notice(message: &str) -> String {
     } else {
         text
     }
+}
+
+fn emit(
+    events: &dyn EventSink,
+    task_id: &str,
+    conversation_id: &str,
+    kind: &'static str,
+    data: Value,
+) {
+    events.emit(RunEvent {
+        task_id: task_id.to_owned(),
+        conversation_id: conversation_id.to_owned(),
+        kind,
+        data,
+    });
+}
+
+fn emit_usage(
+    events: &dyn EventSink,
+    task_id: &str,
+    conversation_id: &str,
+    usage: Usage,
+    cost_micros: i64,
+) {
+    emit(
+        events,
+        task_id,
+        conversation_id,
+        "usage",
+        json!({
+            "input_tokens": usage.input_tokens,
+            "cache_read_tokens": usage.cache_read_tokens,
+            "output_tokens": usage.output_tokens,
+            "cost_micros": cost_micros,
+        }),
+    );
+}
+
+fn preview(text: &str) -> String {
+    let mut preview: String = text.chars().take(2000).collect();
+    if text.chars().count() > 2000 {
+        preview.push_str("...");
+    }
+    preview
 }

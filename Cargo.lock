@@ -677,6 +677,7 @@ dependencies = [
  "hearth-storage",
  "hearth-telegram",
  "hearth-tools",
+ "serde",
  "serde_json",
  "signal-hook",
  "tempfile",

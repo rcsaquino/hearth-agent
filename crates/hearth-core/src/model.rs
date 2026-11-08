@@ -218,6 +218,21 @@ pub struct UsageEvent {
     pub latency_ms: i64,
 }
 
+/// Task counts for the daemon status.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TaskCounts {
+    pub running: usize,
+    pub asleep: usize,
+}
+
+/// Usage totals since a timestamp.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UsageTotals {
+    pub input_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cost_micros: i64,
+}
+
 /// One saved prompt text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptBlob {

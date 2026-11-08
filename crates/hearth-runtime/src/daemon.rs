@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hearth_config::{ConfigError, Media, Settings};
 use hearth_core::{CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission};
@@ -24,6 +24,8 @@ use thiserror::Error;
 
 use crate::agent::{Agent, AgentConfig, AgentError, RunOutcome};
 use crate::effect_worker::EffectWorker;
+use crate::events::EventBus;
+use crate::ipc::{self, StatusContext};
 use crate::tools::{MessageTarget, build_tools};
 
 #[derive(Debug, Error)]
@@ -38,6 +40,8 @@ pub enum DaemonError {
     Media(#[from] MediaError),
     #[error(transparent)]
     Telegram(#[from] TelegramError),
+    #[error(transparent)]
+    Ipc(#[from] ipc::IpcError),
     #[error("another hearth daemon is already running (pid {0})")]
     AlreadyRunning(u32),
     #[error("another hearth daemon is already running")]
@@ -69,6 +73,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
 
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
+    let started = Instant::now();
     let recovery = session.recover_tasks()?;
     tracing::info!(
         requeued = recovery.requeued,
@@ -89,6 +94,24 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     tracing::info!(recovered, "effect recovery complete");
 
     let shutdown = Arc::new(AtomicBool::new(false));
+    let events = Arc::new(EventBus::new(collect_secrets(&settings)));
+    let model = settings
+        .models
+        .as_ref()
+        .map(|models| models.model.clone())
+        .unwrap_or_default();
+    let socket_handle = ipc::serve(
+        home,
+        StatusContext {
+            session: session.clone(),
+            model,
+            started,
+        },
+        Arc::clone(&events),
+        Arc::clone(&shutdown),
+    )?;
+    tracing::info!(socket = %ipc::socket_path(home).display(), "daemon socket ready");
+
     let effect_shutdown = Arc::clone(&shutdown);
     let effect_handle = thread::spawn(move || {
         while !effect_shutdown.load(Ordering::Relaxed) {
@@ -113,6 +136,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             session.clone(),
             workspace,
             spill,
+            Arc::clone(&events),
         )?;
         let poller_shutdown = Arc::clone(&shutdown);
         let poller = runtime.poller;
@@ -141,6 +165,9 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     if effect_handle.join().is_err() {
         tracing::error!("effect worker panicked");
     }
+    if socket_handle.join().is_err() {
+        tracing::error!("daemon socket panicked");
+    }
     drop(harness);
     Ok(())
 }
@@ -157,6 +184,7 @@ impl TelegramRuntime {
         session: Session,
         workspace: PathBuf,
         spill: PathBuf,
+        events: Arc<EventBus>,
     ) -> Result<Self, DaemonError> {
         let telegram = settings
             .telegram
@@ -227,6 +255,7 @@ impl TelegramRuntime {
             max_turns: settings.agent.max_turns,
             pid: std::process::id(),
             cancellations,
+            events,
         };
         Ok(Self { poller, worker })
     }
@@ -247,6 +276,7 @@ struct TelegramWorker {
     max_turns: u32,
     pid: u32,
     cancellations: Arc<CancellationRegistry>,
+    events: Arc<EventBus>,
 }
 
 #[derive(Default)]
@@ -393,7 +423,8 @@ impl TelegramWorker {
                 }
             }
         });
-        let outcome = agent.run_submission_with_cancel(&submission.id, run_cancel.token());
+        let events: Arc<dyn crate::events::EventSink> = self.events.clone();
+        let outcome = agent.run_submission_with_events(&submission.id, run_cancel.token(), events);
         let _ = stop_tx.send(());
         let _ = typing.join();
 
@@ -586,6 +617,52 @@ fn run_poller(poller: TelegramPoller, shutdown: Arc<AtomicBool>) {
             }
         }
     }
+}
+
+fn collect_secrets(settings: &Settings) -> Vec<String> {
+    let mut secrets = Vec::new();
+    if let Some(telegram) = &settings.telegram
+        && let Some(token) = &telegram.bot_token
+    {
+        secrets.push(token.clone());
+    }
+    if let Some(models) = &settings.models {
+        secrets.push(models.api_key.clone());
+        for value in models.headers.values() {
+            secrets.push(value.clone());
+        }
+    }
+    if let Some(media) = &settings.media {
+        if let Some(image) = &media.image
+            && let Some(key) = &image.api_key
+        {
+            secrets.push(key.clone());
+        }
+        if let Some(stt) = &media.stt
+            && let Some(key) = &stt.api_key
+        {
+            secrets.push(key.clone());
+        }
+        if let Some(tts) = &media.tts
+            && let Some(key) = &tts.api_key
+        {
+            secrets.push(key.clone());
+        }
+    }
+    if let Some(web) = &settings.web {
+        for provider in web.search.providers.values() {
+            if let Some(key) = &provider.api_key {
+                secrets.push(key.clone());
+            }
+        }
+        for provider in web.fetch.providers.values() {
+            if let Some(key) = &provider.api_key {
+                secrets.push(key.clone());
+            }
+        }
+    }
+    secrets.retain(|secret| !secret.is_empty());
+    secrets
 }
 
 fn build_transcriber(media: &Media) -> Result<Option<Arc<dyn Transcriber>>, DaemonError> {

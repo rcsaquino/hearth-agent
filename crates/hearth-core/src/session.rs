@@ -12,7 +12,7 @@ use crate::error::CoreError;
 use crate::model::{
     Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewEntry,
     NewSubmission, NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult,
-    TelegramAdmission, TelegramUpdate, UsageEvent,
+    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
 };
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
@@ -822,6 +822,54 @@ impl Session {
             )
         })?;
         Ok(raw)
+    }
+
+    /// Count running and asleep tasks.
+    pub fn task_counts(&self) -> Result<TaskCounts, CoreError> {
+        let rows: Vec<(String, i64)> = self.storage.read(|reader| {
+            reader.query(
+                "SELECT status, COUNT(*) FROM tasks \
+                 WHERE status IN ('running','asleep') GROUP BY status",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+        })?;
+        let mut counts = TaskCounts::default();
+        for (status, count) in rows {
+            match status.as_str() {
+                "running" => counts.running = count as usize,
+                "asleep" => counts.asleep = count as usize,
+                _ => {}
+            }
+        }
+        Ok(counts)
+    }
+
+    /// Sum usage recorded at or after `ts` in UTC microseconds.
+    pub fn usage_totals_since(&self, ts: i64) -> Result<UsageTotals, CoreError> {
+        Ok(self.storage.read(|reader| {
+            reader.query_row(
+                "SELECT COALESCE(SUM(input_tokens),0), \
+                 COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cost_micros),0) \
+                 FROM usage_events WHERE ts >= ?",
+                (ts,),
+                |row| {
+                    Ok(UsageTotals {
+                        input_tokens: row.get(0)?,
+                        cache_read_tokens: row.get(1)?,
+                        cost_micros: row.get(2)?,
+                    })
+                },
+            )
+        })?)
+    }
+
+    /// Count memory items, for status until memory arrives.
+    pub fn memory_item_count(&self) -> Result<usize, CoreError> {
+        let count: i64 = self.storage.read(|reader| {
+            reader.query_row("SELECT COUNT(*) FROM memory_items", [], |row| row.get(0))
+        })?;
+        Ok(count as usize)
     }
 
     /// Hand in a message with a receipt.

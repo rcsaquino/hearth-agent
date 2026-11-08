@@ -21,8 +21,28 @@ enum Command {
     Daemon,
     /// Talk to the agent from this terminal.
     Chat,
+    /// Follow live events from the running daemon.
+    Watch(WatchArgs),
+    /// Ask the running daemon for its status.
+    Status(StatusArgs),
     /// Check settings, database, and lock without printing secrets.
     Doctor,
+}
+
+#[derive(Debug, clap::Args)]
+struct WatchArgs {
+    /// Only show events for one task.
+    task_id: Option<String>,
+    /// Print one JSON object per line.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, clap::Args)]
+struct StatusArgs {
+    /// Print the raw status object.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -86,6 +106,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         )?,
         Command::Daemon => hearth_runtime::daemon(&home)?,
         Command::Chat => hearth_runtime::chat(&home)?,
+        Command::Watch(args) => hearth_runtime::watch(&home, args.task_id, args.json)?,
+        Command::Status(args) => hearth_runtime::status(&home, args.json)?,
         Command::Doctor => hearth_runtime::doctor(&home)?,
     }
     Ok(())
