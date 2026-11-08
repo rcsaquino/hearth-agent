@@ -67,11 +67,85 @@ impl Writer {
 /// Convert Markdown into plain text plus Telegram entities.
 pub fn format_markdown(markdown: &str) -> FormattedText {
     let mut writer = Writer::new();
-    inline(&mut writer, markdown);
+    blocks(&mut writer, markdown);
     FormattedText {
         text: writer.text,
         entities: writer.entities,
     }
+}
+
+fn blocks(writer: &mut Writer, markdown: &str) {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut index = 0;
+    let mut first = true;
+    while index < lines.len() {
+        let line = lines[index];
+        if line.trim().is_empty() {
+            index += 1;
+            continue;
+        }
+        if let Some((fence, language)) = fence_start(line) {
+            let mut code = Vec::new();
+            index += 1;
+            while index < lines.len() && !is_fence_close(lines[index], &fence) {
+                code.push(lines[index]);
+                index += 1;
+            }
+            if index < lines.len() {
+                index += 1;
+            }
+            if !first {
+                writer.append("\n\n");
+            }
+            first = false;
+            let code = code.join("\n");
+            let extra = if language.is_empty() {
+                None
+            } else {
+                Some(("language", language.as_str()))
+            };
+            writer.mark("pre", extra, |writer| writer.append(&code));
+            continue;
+        }
+        let mut paragraph = Vec::new();
+        while index < lines.len() {
+            let candidate = lines[index];
+            if candidate.trim().is_empty() || fence_start(candidate).is_some() {
+                break;
+            }
+            paragraph.push(candidate);
+            index += 1;
+        }
+        if paragraph.is_empty() {
+            index += 1;
+            continue;
+        }
+        if !first {
+            writer.append("\n\n");
+        }
+        first = false;
+        inline(writer, &paragraph.join("\n"));
+    }
+}
+
+fn fence_start(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim_start();
+    for marker in ["```", "~~~"] {
+        if let Some(rest) = trimmed.strip_prefix(marker) {
+            let fence: String = marker.chars().collect();
+            return Some((fence, rest.trim().to_owned()));
+        }
+    }
+    None
+}
+
+fn is_fence_close(line: &str, fence: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with(fence) && trimmed.trim_end_matches(fence_chars(fence)).trim().is_empty()
+}
+
+fn fence_chars(fence: &str) -> &str {
+    fence
 }
 
 fn inline(writer: &mut Writer, input: &str) {
