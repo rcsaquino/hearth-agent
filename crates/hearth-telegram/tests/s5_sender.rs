@@ -238,3 +238,15 @@ fn a_server_error_is_uncertain_and_does_not_fall_back() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "sendRichMessage");
 }
+
+#[test]
+fn sends_a_typing_action() {
+    let server = Server::start(vec![ok()]);
+    let (sender, _) = sender(&server.base);
+    sender.send_typing(42).expect("typing");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sendChatAction");
+    assert_eq!(requests[0].body["chat_id"], 42);
+    assert_eq!(requests[0].body["action"], "typing");
+}
