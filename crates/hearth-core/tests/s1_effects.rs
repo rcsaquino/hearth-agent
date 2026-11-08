@@ -199,3 +199,29 @@ fn a_non_retryable_effect_failure_settles_it_as_failed() {
     assert_eq!(effect.result.expect("result")["message"], "permanent");
     assert!(effect.settled_at.is_some());
 }
+
+#[test]
+fn a_started_effect_can_be_requeued_after_a_crash() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
+        )
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+    session.begin_effect(&id).expect("begin effect");
+
+    session.requeue_effect(&id).expect("requeue effect");
+
+    let effect = session
+        .effect(&id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Intent);
+    assert_eq!(effect.attempts, 1);
+    assert_eq!(effect.payload["path"], "a");
+    assert_eq!(effect.settled_at, None);
+}
