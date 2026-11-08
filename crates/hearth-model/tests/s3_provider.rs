@@ -343,3 +343,49 @@ fn reasoning_deltas_are_separate_from_text() {
     server.request();
     server.finish();
 }
+
+#[test]
+fn retryable_errors_retry_until_success() {
+    let server = FakeServer::start(vec![
+        TestResponse::text(503, "Service Unavailable", "busy"),
+        TestResponse::text(503, "Service Unavailable", "busy"),
+        TestResponse::sse(&[r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#]),
+    ]);
+    let sleeper = Arc::new(NoopSleeper::default());
+    let provider = provider(&server, sleeper.clone());
+    let events: Vec<StreamEvent> = provider
+        .stream(request())
+        .expect("stream")
+        .collect::<Result<_, _>>()
+        .expect("events");
+    assert_eq!(
+        events,
+        vec![
+            StreamEvent::TextDelta("ok".to_owned()),
+            StreamEvent::Done {
+                finish_reason: Some("stop".to_owned())
+            },
+        ]
+    );
+    assert_eq!(sleeper.sleeps(), 2);
+    assert_eq!(server.request().path, "/chat/completions");
+    assert_eq!(server.request().path, "/chat/completions");
+    assert_eq!(server.request().path, "/chat/completions");
+    server.finish();
+}
+
+#[test]
+fn client_errors_do_not_retry() {
+    let server = FakeServer::start(vec![TestResponse::text(401, "Unauthorized", "no")]);
+    let sleeper = Arc::new(NoopSleeper::default());
+    let provider = provider(&server, sleeper.clone());
+    let error = match provider.stream(request()) {
+        Ok(_) => panic!("401 should fail"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status(), Some(401));
+    assert!(!error.retryable());
+    assert_eq!(sleeper.sleeps(), 0);
+    server.request();
+    server.finish();
+}
