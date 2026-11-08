@@ -9,7 +9,7 @@ use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{Value, json};
 
 use crate::provider::{Provider, ProviderError, ProviderStream, Sleeper, SystemSleeper};
-use crate::types::{ChatRequest, ContentBlock, Role, StreamEvent, ToolCall};
+use crate::types::{ChatRequest, ContentBlock, Role, StreamEvent, ToolCall, Usage};
 
 /// A synchronous OpenAI-compatible provider.
 pub struct OpenAiCompatibleProvider {
@@ -177,6 +177,7 @@ struct OpenAiStream {
     done: bool,
     finish_reason: Option<String>,
     tool_calls: BTreeMap<usize, PartialToolCall>,
+    usage_sent: bool,
 }
 
 #[derive(Default)]
@@ -216,6 +217,7 @@ impl OpenAiStream {
             done: false,
             finish_reason: None,
             tool_calls: BTreeMap::new(),
+            usage_sent: false,
         }
     }
 
@@ -229,6 +231,11 @@ impl OpenAiStream {
         let Ok(value) = serde_json::from_str::<Value>(data) else {
             return;
         };
+        if !self.usage_sent && value.get("usage").is_some_and(|usage| !usage.is_null()) {
+            self.pending
+                .push_back(Ok(StreamEvent::Usage(parse_usage(&value["usage"]))));
+            self.usage_sent = true;
+        }
         let Some(choices) = value["choices"].as_array() else {
             return;
         };
@@ -307,5 +314,20 @@ impl Iterator for OpenAiStream {
                 }
             }
         }
+    }
+}
+
+fn parse_usage(value: &Value) -> Usage {
+    Usage {
+        input_tokens: value["prompt_tokens"].as_i64().unwrap_or(0),
+        cache_read_tokens: value["prompt_tokens_details"]["cached_tokens"]
+            .as_i64()
+            .or_else(|| value["cache_read_input_tokens"].as_i64())
+            .unwrap_or(0),
+        cache_write_tokens: value["cache_creation_input_tokens"].as_i64().unwrap_or(0),
+        output_tokens: value["completion_tokens"].as_i64().unwrap_or(0),
+        reasoning_tokens: value["completion_tokens_details"]["reasoning_tokens"]
+            .as_i64()
+            .unwrap_or(0),
     }
 }
