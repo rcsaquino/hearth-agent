@@ -719,3 +719,16 @@ fn a_task_for_an_unknown_conversation_or_parent_task_is_rejected() {
     );
     assert_eq!(child.parent_task_id.as_deref(), Some(parent.id.as_str()));
 }
+
+#[test]
+fn the_latest_commit_is_none_on_a_new_harness() {
+    let (_home, harness, _clock) = harness();
+
+    assert!(
+        harness
+            .session()
+            .latest_commit()
+            .expect("latest commit")
+            .is_none()
+    );
+}
