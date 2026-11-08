@@ -9,11 +9,13 @@ authors.workspace = true
 [dependencies]
 hearth-config = { path = "../hearth-config" }
 hearth-core = { path = "../hearth-core" }
+hearth-model = { path = "../hearth-model" }
 hearth-storage = { version = "0.1.0", path = "../hearth-storage" }
 hearth-tools = { path = "../hearth-tools" }
 serde_json = "1.0.154"
 signal-hook = "0.4.6"
 thiserror = "2.0.21"
+time = { version = "0.3", features = ["formatting"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json"] }
 
