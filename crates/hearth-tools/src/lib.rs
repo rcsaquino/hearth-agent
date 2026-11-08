@@ -10,7 +10,8 @@ mod tool;
 mod workspace;
 
 pub use fetch::{
-    FetchError, FetchProvider, FetchResult, HttpFetch, JinaFetch, TinyFishFetch, WebFetchTool,
+    FetchError, FetchProvider, FetchResult, FirecrawlFetch, HttpFetch, JinaFetch,
+    TinyFishFetch, WebFetchTool,
 };
 pub use file_tool::FileTool;
 pub use file_write::FileWrite;

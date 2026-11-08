@@ -536,6 +536,87 @@ impl FetchProvider for TinyFishFetch {
     }
 }
 
+/// Firecrawl scrape, keyed.
+pub struct FirecrawlFetch {
+    base: String,
+    api_key: String,
+    max_bytes: usize,
+    client: Client,
+}
+
+impl FirecrawlFetch {
+    /// Build the Firecrawl provider with explicit limits.
+    pub fn new(
+        api_key: impl Into<String>,
+        base: impl Into<String>,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> Result<Self, FetchError> {
+        let client = Client::builder()
+            .timeout(timeout)
+            .user_agent("Hearth/0.1")
+            .build()
+            .map_err(|error| {
+                FetchError::permanent(format!("could not build the HTTP client: {error}"))
+            })?;
+        Ok(Self {
+            base: base.into(),
+            api_key: api_key.into(),
+            max_bytes,
+            client,
+        })
+    }
+
+    /// The production defaults.
+    pub fn production(api_key: impl Into<String>) -> Result<Self, FetchError> {
+        Self::new(
+            api_key,
+            "https://api.firecrawl.dev",
+            Duration::from_secs(60),
+            DEFAULT_MAX_BYTES,
+        )
+    }
+}
+
+impl FetchProvider for FirecrawlFetch {
+    fn name(&self) -> &'static str {
+        "firecrawl"
+    }
+
+    fn fetch(&self, url: &str) -> Result<FetchResult, FetchError> {
+        let endpoint = format!("{}/v2/scrape", self.base.trim_end_matches('/'));
+        let body = json!({
+            "url": url,
+            "formats": ["markdown"],
+            "onlyMainContent": true,
+            "lockdown": true,
+        });
+        let response = self
+            .client
+            .post(endpoint)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .map_err(|error| FetchError::temporary(format!("request failed: {error}")))?;
+        let value = json_response(response, "Firecrawl fetch")?;
+        let data = &value["data"];
+        let markdown = data["markdown"].as_str().unwrap_or_default();
+        if markdown.trim().is_empty() {
+            return Err(FetchError::permanent("Firecrawl returned no markdown"));
+        }
+        let title = data["metadata"]["title"]
+            .as_str()
+            .or_else(|| data["title"].as_str())
+            .map(str::to_owned)
+            .filter(|title| !title.is_empty());
+        Ok(FetchResult {
+            text: cap_text(markdown.to_owned(), self.max_bytes),
+            final_url: url.to_owned(),
+            title,
+        })
+    }
+}
+
 fn json_response(
     response: reqwest::blocking::Response,
     label: &str,
