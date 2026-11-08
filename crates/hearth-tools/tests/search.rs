@@ -132,3 +132,29 @@ fn exa_mcp_streams_and_maps_results() {
     assert_eq!(request["params"]["arguments"]["query"], "rust");
     assert_eq!(request["params"]["arguments"]["numResults"], 5);
 }
+
+#[test]
+fn exa_rest_uses_the_api_key_and_maps_results() {
+    let server = serve(json_reply(json!({
+        "results": [{
+            "title": "Rest Example",
+            "url": "https://example.com/rest",
+            "publishedDate": "2026-02-03",
+            "text": "Rest snippet"
+        }]
+    })));
+    let provider: Arc<dyn SearchProvider> =
+        Arc::new(ExaSearch::new(server.base.clone(), server.base.clone(), Some("exa-key".to_owned())).expect("exa provider"));
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("search call");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(value["results"][0]["title"], "Rest Example");
+    assert_eq!(value["results"][0]["snippet"], "Rest snippet");
+
+    let captured = server.thread.join().expect("server thread");
+    assert_eq!(captured.path, "/search");
+    assert_eq!(captured.headers.get("x-api-key").map(String::as_str), Some("exa-key"));
+}
