@@ -286,3 +286,24 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   reasoning, cost, and latency.
 - `Price` and `Pricing` live in `hearth-model`. Prices are micros per million tokens
   and the default registry is empty, so unknown models record tokens with zero cost.
+
+## 2026-11-08: M2b-2a agent loop
+
+- Starting a submission and recording a task checkpoint are saves with a commit
+  kind of `submission.running` and `task.checkpoint`. A running submission is
+  idempotent; a settled submission cannot be started again.
+- The agent checks for an active generation task before beginning a submission, so
+  a busy conversation leaves the new submission queued.
+- One generation task is created per submission and claimed by id with a 60 second
+  lease. The task checkpoint records the turn and the prompt blob hash.
+- The prompt blob is saved before the provider request, and the assistant entry
+  links to it through `prompt_hash`.
+- Provider failures, stream errors, empty responses, and tool calls with no tools
+  settle the submission as unanswered with one notice entry and fail the task. The
+  notice is one line, truncated to 200 characters.
+- Usage is recorded after the stream. Cost comes from the pricing registry; an
+  unpriced model records zero cost.
+- Tool execution is deferred to M2b-3. A tool call is never saved as an orphaned
+  assistant entry; it settles unanswered instead.
+- The assistant entry and the submission ending are separate saves for now. The M2
+  gate should review whether to make the answer and ending one atomic save.
