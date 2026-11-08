@@ -5,7 +5,9 @@ use std::thread;
 use std::time::Duration;
 
 use hearth_core::{Harness, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus};
-use hearth_memory::{MemoryKind, MemoryService, MemorySource, MemoryStatus, MemoryTool, SourceKind};
+use hearth_memory::{
+    MemoryKind, MemoryService, MemorySource, MemoryStatus, MemoryTool, SourceKind,
+};
 use hearth_model::{
     ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
     StreamEvent, ToolCall, Usage,

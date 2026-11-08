@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use hearth_core::{Harness, MemoryChange, MemoryWrite, NewMemory, Save, Session};
 use hearth_memory::{
-    MemoryError, MemoryKind, MemoryPatch, MemoryService, MemoryStatus, MemorySource, MemoryTool,
+    MemoryError, MemoryKind, MemoryPatch, MemoryService, MemorySource, MemoryStatus, MemoryTool,
     NewMemoryInput, SourceKind,
 };
 use hearth_tools::Tool;
@@ -1199,7 +1199,12 @@ fn a_memory_tool_save_records_the_user_entry_source() {
         .create_conversation("Test", "local", "local:1")
         .expect("conversation");
     session
-        .submit(&conversation.id, "req-1", "input", json!({"text": "I prefer metric"}))
+        .submit(
+            &conversation.id,
+            "req-1",
+            "input",
+            json!({"text": "I prefer metric"}),
+        )
         .expect("submit");
     let entry = session
         .latest_user_entry_id(&conversation.id)
@@ -1255,8 +1260,14 @@ fn a_second_conversation_uses_its_own_entry_source() {
         .expect("second latest")
         .expect("second entry");
     let service = Arc::new(service);
-    let first_tool = MemoryTool::with_source(Arc::clone(&service), MemorySource::user(first_entry.clone()));
-    let second_tool = MemoryTool::with_source(Arc::clone(&service), MemorySource::user(second_entry.clone()));
+    let first_tool = MemoryTool::with_source(
+        Arc::clone(&service),
+        MemorySource::user(first_entry.clone()),
+    );
+    let second_tool = MemoryTool::with_source(
+        Arc::clone(&service),
+        MemorySource::user(second_entry.clone()),
+    );
     let first_id = first_tool
         .call(&json!({"action": "save", "content": "The lab bench is on the third floor", "kind": "fact"}))
         .expect("first save")
@@ -1270,11 +1281,19 @@ fn a_second_conversation_uses_its_own_entry_source() {
         .trim()
         .to_owned();
     assert_eq!(
-        service.get(&first_id).expect("get first").expect("first row").source_ref,
+        service
+            .get(&first_id)
+            .expect("get first")
+            .expect("first row")
+            .source_ref,
         Some(first_entry)
     );
     assert_eq!(
-        service.get(&second_id).expect("get second").expect("second row").source_ref,
+        service
+            .get(&second_id)
+            .expect("get second")
+            .expect("second row")
+            .source_ref,
         Some(second_entry)
     );
 }

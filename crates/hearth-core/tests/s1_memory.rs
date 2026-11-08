@@ -211,8 +211,5 @@ fn a_meta_mismatch_rolls_back_a_memory_write() {
         .expect_err("meta mismatch must abort");
     assert!(matches!(error, CoreError::MetaVersion { .. }));
     assert_eq!(count(session, "SELECT COUNT(*) FROM memory_items"), 0);
-    assert_eq!(
-        session.meta_value("standing_version").expect("read"),
-        None
-    );
+    assert_eq!(session.meta_value("standing_version").expect("read"), None);
 }
