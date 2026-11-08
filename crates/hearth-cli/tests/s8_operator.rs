@@ -994,3 +994,82 @@ fn daemon_recovers_an_expired_task_lease() {
         .expect("a commit exists");
     assert_eq!(commit.kind, "task.recover");
 }
+
+fn seed_effect(home: &Path, kind: &str, key: &str, payload: serde_json::Value) -> String {
+    use hearth_core::{EffectIntent, Harness, Save};
+
+    let harness = Harness::open(home).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let commit = session
+        .save(Save::new(&conversation.id).effect(EffectIntent::new(kind, key, payload)))
+        .expect("save effect intent");
+    commit.effect_ids[0].clone()
+}
+
+fn wait_for_file(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if path.exists() {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("file was not written: {}", path.display());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn daemon_executes_a_file_write_effect() {
+    use hearth_core::{EffectStatus, Harness};
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let effect_id = seed_effect(
+        home.path(),
+        "file_write",
+        "file-1",
+        serde_json::json!({"path": "notes/hello.txt", "content": "hello"}),
+    );
+
+    let mut daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    let target = home.path().join("workspace/notes/hello.txt");
+    wait_for_file(&target);
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let effect = harness
+        .session()
+        .effect(&effect_id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Done);
+    let result = effect.result.expect("effect result");
+    assert_eq!(result["path"], "notes/hello.txt");
+    assert_eq!(result["bytes"], 5);
+    assert_eq!(std::fs::read_to_string(&target).expect("read file"), "hello");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&target)
+            .expect("file metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "file mode was {mode:o}");
+    }
+}
