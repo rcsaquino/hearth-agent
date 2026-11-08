@@ -929,3 +929,32 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Backup, restore, service install, live doctor, and interactive init are M8a.
   The soak, mid-stream crash point, optional tools, and the release acceptance
   list remain for M8c.
+
+## 2026-11-09: M8c-1 crash, credentials, and the bounded soak
+
+- The `mid_stream` crash point aborts after a streamed delta and before the
+  assistant entry is saved. The crash driver's `agent` command runs the real
+  agent with a scripted provider; the S7 test expires the task lease, recovers
+  the generation task, and retries the same submission. The admitted user entry
+  survives, no partial answer is stored, and the retry produces exactly one
+  answer.
+- Credential detection is shared in `hearth_core::secrets`: `sk-`, `ghp_`,
+  `xoxb-`, `akia`, private-key markers, `Bearer` tokens, bot-token shapes, and
+  `api_key`/`apikey`/`token`/`password`/`secret` assignments. The memory writer,
+  the core save path, the prompt blobs, the JSON spill, the agent's outcome
+  text and notices, and the daemon log writer use it. Redaction replaces the
+  whole credential token with `[redacted]` and preserves the surrounding text.
+- The core save redacts entry content, submissions, documents, task inputs,
+  checkpoints, results, effect payloads, and conversation titles. The memory
+  writer refuses credential-shaped content at both the service and core layers.
+- Logs are written through a redacting writer; tests cover the memory rows, the
+  prompt audit, the transcript, the spill, the provider-error notice, and the
+  log file.
+- `scripts/soak.sh` runs a bounded local soak with a temp home, no Telegram
+  block, repeated daemon start/stop, status, backup, restore, doctor, and the
+  memory benchmark. It never touches `.devhome`.
+- `scripts/acceptance.sh` runs the S7 crash suite, the scheduler tests, the
+  fake Telegram end-to-end suite, the memory and token benchmarks, the soak,
+  and the secret scan. The private deny list for publication stays outside the
+  tree; the local acceptance uses an empty list so the credential-pattern scan
+  still runs. The seven-day soak remains a future real-time item.
