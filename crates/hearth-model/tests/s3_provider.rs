@@ -6,8 +6,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hearth_model::{
-    ChatMessage, ChatRequest, ContentBlock, OpenAiCompatibleProvider, Provider, Role, Sleeper,
-    StreamEvent, ToolSpec,
+    ChatMessage, ChatRequest, ContentBlock, OpenAiCompatibleProvider, Provider, ProviderError,
+    Role, Sleeper, StreamEvent, ToolSpec,
 };
 use serde_json::{Value, json};
 
@@ -472,6 +472,26 @@ fn assistant_tool_calls_and_tool_results_translate() {
     assert_eq!(messages[1]["role"], "tool");
     assert_eq!(messages[1]["tool_call_id"], "call_1");
     assert_eq!(messages[1]["content"], "result");
+    server.finish();
+}
+
+#[test]
+fn a_successful_non_sse_response_is_a_protocol_error() {
+    let server = FakeServer::start(vec![TestResponse::raw(
+        200,
+        "OK",
+        "application/json",
+        r#"{"error":"not a stream"}"#,
+    )]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+
+    let error = match provider.stream(request()) {
+        Ok(_) => panic!("a JSON body must not become an empty stream"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, ProviderError::Protocol(_)));
+    let captured = server.request();
+    assert_eq!(captured.method, "POST");
     server.finish();
 }
 
