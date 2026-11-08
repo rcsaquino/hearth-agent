@@ -723,6 +723,29 @@ impl Session {
                             return Err(CoreError::LeaseLost(task_id));
                         }
                     }
+                    StepOutput::Failed {
+                        error,
+                        retryable: false,
+                    } => {
+                        let result = serde_json::to_string(&error)
+                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let changed = writer.execute(
+                            "UPDATE tasks SET status = 'failed', result_json = ?, \
+                             terminal_at = ?, lease_owner = NULL, lease_until = NULL, \
+                             next_wake_at = NULL, updated_at = ? \
+                             WHERE id = ? AND status = 'running' AND lease_owner = ?",
+                            (
+                                result,
+                                now,
+                                now,
+                                task_id.as_str(),
+                                owner.as_str(),
+                            ),
+                        )?;
+                        if changed != 1 {
+                            return Err(CoreError::LeaseLost(task_id));
+                        }
+                    }
                     _ => {
                         return Err(CoreError::Invalid(
                             "step outcome is not implemented".to_owned(),
