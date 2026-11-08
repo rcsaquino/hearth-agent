@@ -810,3 +810,20 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Steering absorbs queued submissions for the same conversation at each turn boundary before a provider request. Their user entries are already in the transcript. The active run settles every absorbed submission with the same terminal outcome and answer entry, so the worker cannot pick up a duplicate. A run never changes a request already in flight.
 - The existing daemon uncertain-delivery test now delays its second update by 500 ms. Without the delay the second update is correctly absorbed into the first run, which leaves no later interaction to exercise recovered delivery. The concurrency test now expects the queued second submission to be absorbed and done rather than left queued.
 - Known limits for review: the optional groups are placeholders until the optional tools are built; the checkpoint selection is loaded on a claimed checkpoint, but cross-process task resume remains M7 work; absorbed submissions share the active answer entry by design.
+
+## 2026-11-09: M5d-2 token-efficiency benchmark
+
+- `hearth eval tokens [--json]` runs a deterministic 100-turn conversation on a
+  temporary home with a scripted provider. The script uses an 8192-token window,
+  1024 output tokens, 65/85 compaction, and a 2000-token keep-recent boundary. The
+  deliberately small window exercises compaction; 68 compactions in the run are
+  reported for visibility, not as a target.
+- The scripted provider simulates a provider prefix cache honestly: the first chat
+  has no cache read, and later chats cache only the stable prefix when its hash is
+  unchanged. The script asserts both the prompt-assembly prefix hash and the
+  provider's chat-prefix hash are stable.
+- Measured on this host: fixed prompt overhead p95 830 of 4500 tokens; cache-read
+  share 0.99 of 0.80; save p95 0.28 of 15 ms; prompt assembly p95 1.63 of 300 ms;
+  recall p95 0.66 of 80 ms; 68 compactions and 2176 summary tokens. Recall tokens
+  are zero because the seeded preference is standing memory and is already in L3.
+- Startup and recovery, idle memory use, and annual database size remain M8 work.
