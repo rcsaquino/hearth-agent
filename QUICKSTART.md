@@ -1,153 +1,158 @@
-# Quick start
+# Hearth Quick Start
 
-## 1. Create the bot
+This walks through a first install with one Telegram bot and one
+OpenAI-compatible model provider. Replace `USER_NAME`, `123456789`,
+`~/.hearth`, and `example.com` with your own values.
+
+## 1. Create the Telegram bot
 
 1. Open Telegram and talk to `@BotFather`.
-2. Send `/newbot`, choose a name and a username, and copy the token.
-3. Keep the token out of the repository and out of shell history.
-
-Export it for this shell:
-
-```bash
-export HEARTH_TELEGRAM_BOT_TOKEN='your-token-here'
-```
-
-## 2. Find your Telegram id
-
-Message `@userinfobot`, or send any message to your new bot and read the `from.id` in the update. That number is the only allowed user.
-
-## 3. Choose a provider
-
-Hearth speaks the OpenAI Chat Completions API. You need a base URL, a key, and a model name. Example:
+2. Send `/newbot`, choose a display name and a username ending in `bot`.
+3. Copy the bot token. Store it in an environment variable, not in a shell
+   history file:
 
 ```bash
-export HEARTH_PROVIDER_KEY='your-key-here'
+export HEARTH_TELEGRAM_BOT_TOKEN='your-bot-token'
 ```
 
-## 4. Create the home
+## 2. Get your numeric Telegram id
 
-Interactive:
+Message `@userinfobot` and copy the numeric id it returns. Hearth accepts only
+the ids listed in `telegram.allowed_user_ids`; an empty list is a startup error.
+
+## 3. Build and install
+
+```bash
+cargo build --release
+sudo install -m 755 target/release/hearth /usr/local/bin/hearth
+```
+
+You can skip the system install and run `./target/release/hearth` directly.
+
+## 4. Initialize the home
+
+Interactive setup asks for the token, your user id, the provider base URL, API
+key, and model, then offers optional media blocks:
 
 ```bash
 hearth init
 ```
 
-It prompts for the token, the allowed id, the base URL, the key, the model, the agent and user names, and the timezone, then offers optional image, speech-to-text, and text-to-speech blocks. Secrets are not echoed.
-
-Non-interactive:
+For a scripted setup:
 
 ```bash
+export PROVIDER_API_KEY='your-provider-key'
+
 hearth init --non-interactive \
   --telegram-token '${HEARTH_TELEGRAM_BOT_TOKEN}' \
   --allowed-user-id 123456789 \
-  --base-url https://example.com/v1 \
-  --api-key '${HEARTH_PROVIDER_KEY}' \
-  --model your-model \
+  --base-url 'https://example.com/v1' \
+  --api-key '${PROVIDER_API_KEY}' \
+  --model 'your-model-name' \
   --agent-name Hearth \
-  --user-name YourName \
-  --timezone Asia/Manila
+  --user-name USER_NAME \
+  --timezone UTC
 ```
 
-The `--telegram-token` and `--api-key` values may be `${VAR}` references; Hearth stores the reference and reads the variable at runtime. The default home is `~/.hearth`; pass `--home <path>` to use another.
+`hearth init` creates `~/.hearth`, writes `settings.json` with mode `0600`,
+creates `SOUL.md`, and opens the database. Values written as `${NAME}` are
+expanded from the environment when Hearth runs.
 
-## 5. Check it
+## 5. Check the install
 
 ```bash
-hearth doctor --home ~/.hearth
-hearth doctor --home ~/.hearth --live
+hearth doctor
 ```
 
-The first is offline. `--live` calls Telegram `getMe` and makes one minimal provider request; failures are reported without printing the token or key.
-
-## 6. Run it
-
-Foreground, for a first look:
+The offline check validates settings, the database, the schema, and the lock.
+With a real token and provider you can add one live check:
 
 ```bash
-hearth daemon --home ~/.hearth
+hearth doctor --live
 ```
 
-Or install the systemd user service:
+It sends a Telegram `getMe` and one small provider request. It never prints the
+token or key.
+
+## 6. Run the daemon
+
+Install the systemd user unit:
 
 ```bash
 hearth service install
-hearth service status
-systemctl --user status hearth.service
-journalctl --user -u hearth.service -f
+systemctl --user start hearth
+systemctl --user status hearth
 ```
 
-The unit is written to `~/.config/systemd/user/hearth.service` (or `$XDG_CONFIG_HOME/systemd/user`) and runs `hearth daemon --home <home>` with `Restart=on-failure`. Re-running `install` with a different unit requires `--force`.
-
-Stop it before restoring a backup:
+Or run it in the foreground:
 
 ```bash
-systemctl --user stop hearth.service
+hearth daemon
 ```
+
+While it runs:
+
+```bash
+hearth status
+hearth watch
+hearth watch --json
+```
+
+`hearth status` requires the daemon socket. `hearth watch` streams live events
+from the active run; detaching does not cancel the run.
 
 ## 7. Talk to it
 
-Send a Telegram message to the bot. Only the allowed id is answered. Text, images, voice notes, and files are accepted; replies use Telegram entities, and long replies are split at 4096 characters.
+Open your bot in Telegram and send a message. There are no slash commands. Send
+`stop` to cancel an active run. Hearth sends one final answer when the run
+settles.
 
-From the terminal:
+Send images, documents, or voice notes as you would to any contact. Voice notes
+become text through the configured transcription service. The `message` tool can
+send files, albums, and, when you explicitly ask for voice, a spoken reply.
 
-```bash
-hearth chat --home ~/.hearth
-```
-
-## 8. Inspect it
-
-```bash
-hearth status --home ~/.hearth
-hearth watch --home ~/.hearth
-hearth prompt --last --home ~/.hearth
-hearth prompt --last --json --home ~/.hearth
-hearth stats --home ~/.hearth
-```
-
-`watch` and `status` use the local socket `hearth.sock` (mode 0600). `prompt` shows the last assembled prompt, its segments, and its cache split. `stats` shows usage and cost; an unpriced model is reported as `unpriced`.
-
-## 9. Memory and skills
-
-Memory is managed by the agent in chat through the `memory` tool; ask it to remember or forget something. The memory benchmark is:
+For a terminal conversation without Telegram:
 
 ```bash
-hearth eval memory --home ~/.hearth --json
+hearth chat
 ```
 
-Skills live in `skills/user/` and `skills/learned/`:
+## 8. Backups
 
 ```bash
-hearth skills list --home ~/.hearth
-hearth skills show <name> --home ~/.hearth
-hearth skills history <name> --home ~/.hearth
-hearth skills diff <name> --home ~/.hearth
-hearth skills stats --home ~/.hearth
+hearth backup
 ```
 
-## 10. Back up and restore
+Snapshots go to `~/.hearth/backups/` and are pruned to seven daily and four
+weekly copies. A nightly backup runs from the daemon. To restore, stop the
+daemon first:
 
 ```bash
-hearth backup --home ~/.hearth
-hearth restore ~/.hearth/backups/hearth-20260101.db --home ~/.hearth
+systemctl --user stop hearth
+hearth restore ~/.hearth/backups/hearth-YYYYMMDD.db
+systemctl --user start hearth
 ```
 
-`backup` works while the daemon runs and keeps the newest 7 daily snapshots plus the newest snapshot of each of the 4 most recent weeks. A silent nightly backup runs at 03:00 local. `restore` requires the daemon stopped, verifies the snapshot, keeps a `pre-restore-<timestamp>.db` copy, and replaces the database atomically.
+## 9. Troubleshooting
 
-## 11. Packaging
+- **`another hearth daemon is already running`**: only one daemon may own a
+  home. Stop the old one, or use a different `--home`.
+- **Telegram conflict or duplicate polling**: only one process may call
+  `getUpdates` for a bot. Do not run two daemons with the same token.
+- **Bot ignores you**: check `telegram.allowed_user_ids` and, for groups,
+  `allowed_chat_ids`; both must allow the message.
+- **`settings.json has mode ...`**: run `chmod 600 ~/.hearth/settings.json`.
+- **Provider 401 or 404**: check the base URL, key, and model name. Most
+  OpenAI-compatible gateways use `https://example.com/v1` and no trailing
+  `/chat/completions`.
+- **Telegram 429**: Hearth honors `retry_after`; a busy bot may still pause.
+- **Rich reply rejected**: Hearth falls back to plain messages with entities.
+  The answer is still delivered once.
+- **Empty or odd answers**: inspect the exact prompt with
+  `hearth prompt --last` or `hearth prompt --json`. Credentials are redacted.
+- **Runaway tools**: send `stop`. The shell is not sandboxed; read
+  [SECURITY.md](SECURITY.md).
+- **Logs**: `~/.hearth/logs/hearth.log` is JSON and has no message bodies by
+  default. `hearth doctor` is the first check.
 
-```bash
-./scripts/package.sh
-./scripts/package.sh aarch64-unknown-linux-gnu
-```
-
-The first builds the host target. The second requires `rustup target add aarch64-unknown-linux-gnu` and a cross linker; the script fails clearly if either is missing. Packages are written to `dist/` with a SHA-256 checksum.
-
-## Troubleshooting
-
-- **Telegram 401 or `getMe` fails.** The token is wrong or revoked. Set `HEARTH_TELEGRAM_BOT_TOKEN`, confirm the settings reference, and run `hearth doctor --live`.
-- **The bot ignores you.** The sender id is not in `allowed_user_ids`. Add it to the settings and restart the daemon.
-- **Provider 401 or 404.** The base URL usually needs the `/v1` suffix, and the key must belong to that endpoint. Test the same URL and key with a small request.
-- **Permission errors.** The home is created 0700, settings and logs 0600, and the socket 0600. Check ownership and `umask`; do not loosen the modes.
-- **`database is locked` or a daemon start refusal.** Another daemon holds the lock. Stop it (`systemctl --user stop hearth.service`) before restoring or starting a second one. A stale lock is cleared by the next clean start.
-- **Costs show `unpriced`.** The model has no price table entry. Add the model to the pricing settings; usage is still recorded.
-- **A backup is refused.** The path must be a Hearth database with the expected schema version and a clean integrity check.
+The full behavior is in [SPEC.md](SPEC.md).

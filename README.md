@@ -1,81 +1,96 @@
 # Hearth
 
-Hearth is a single-user personal agent that lives in Telegram and keeps its own durable record in a local SQLite database. It is written in Rust and runs on one machine.
+Hearth is a single-user personal agent that lives in Telegram and keeps its own
+durable record in a local SQLite database. It is written in Rust. One daemon owns
+the database, runs the agent loop, and talks to one Telegram bot. There is no
+Hearth account, no telemetry, and no hosted storage.
 
-## Principles
+The full behavior and design are defined in [SPEC.md](SPEC.md); the storage
+columns are defined in [SCHEMA.md](SCHEMA.md), with the migrations as the
+executable authority. This tree is the local 1.0 implementation.
 
-1. The durable record is the truth. Messages, submissions, tool calls, effects, and memory rows are stored before they are acted on.
-2. The model is a reasoning engine, not the memory. Facts live in SQLite; the prompt is assembled from the record.
-3. Everything is a crate with a contract: harness, session, provider, tool, transport, memory.
-4. Efficiency is architecture: budgets, compaction, prompt caching, and lazy tools.
-5. The single user is the trust boundary: one allowlisted Telegram id, no multi-user tenancy.
-6. The agent survives interruption: tasks, leases, crash points, and recovery.
-7. It runs on one machine, forever: no hosted services and no telemetry.
+## What it does
 
-## Crates
-
-| Crate | Responsibility |
-|---|---|
-| `hearth-config` | Settings loading and validation |
-| `hearth-core` | Sessions, submissions, tasks, and the harness contracts |
-| `hearth-storage` | SQLite access, migrations, snapshots, and verification |
-| `hearth-model` | OpenAI-compatible provider adapter and SSE parsing |
-| `hearth-memory` | Extraction, recall, consolidation, and the memory tool |
-| `hearth-tools` | File, shell, web, message, schedule, skill, and task tools |
-| `hearth-telegram` | Telegram transport, media, and rich replies |
-| `hearth-runtime` | The agent loop, daemon, scheduler, service, backup, and init |
-| `hearth-cli` | The `hearth` command |
-| `hearth-eval` | Offline memory and token evaluations |
+- Keeps an append-only conversation record that survives crashes and restarts.
+- Remembers facts, preferences, people, projects, and past work in a local
+  library with full-text search, provenance, and maintenance.
+- Runs an agent loop with tools: files, shell, web search, web fetch, memory,
+  skills, reminders, helpers, and Telegram files or voice.
+- Speaks Telegram natively: text, images, documents, voice notes, albums, and
+  rich replies.
+- Provides a local line-based chat, live run watch, status, prompt audit, usage
+  stats, and offline evaluations.
+- Backs up to `~/.hearth/backups/` and installs as a systemd user service.
 
 ## Requirements
 
-- Linux (x86_64 or aarch64), glibc.
-- Rust 1.89 or newer and Cargo.
-- A Telegram bot from BotFather.
-- An OpenAI-compatible provider endpoint and key.
-- Optional: Groq for speech, ElevenLabs for voice, an image provider for pictures, Exa, Brave, DeepSeek, Firecrawl, or TinyFish for search.
-
-## Build and test
-
-```bash
-cargo build --release
-./scripts/ci.sh
-```
-
-`scripts/ci.sh` runs formatting, clippy with warnings denied, and the full test suite. The release package is built with `./scripts/package.sh`.
+- Linux on x86_64 or aarch64.
+- Rust 1.89 or newer to build. Release binaries need no toolchain.
+- A Telegram bot token and your numeric Telegram user id.
+- An OpenAI-compatible provider: base URL, API key, and model name.
+- Optional: Groq for transcription, ElevenLabs for speech, OpenRouter for
+  images, and Brave, DeepSeek, Firecrawl, or TinyFish for search fallbacks. Exa
+  search works without a key.
 
 ## Quick start
 
-See [QUICKSTART.md](QUICKSTART.md) for BotFather, provider, init, doctor, service, Telegram, backup, and troubleshooting steps.
+```bash
+cargo build --release
+./target/release/hearth init
+./target/release/hearth doctor
+./target/release/hearth service install
+./target/release/hearth daemon
+```
 
-## Commands
+Then open your bot in Telegram and send a message. Hearth answers only the
+allowed user ids.
 
-| Command | Purpose |
+For a terminal-only conversation:
+
+```bash
+./target/release/hearth chat
+```
+
+The home folder defaults to `~/.hearth`. `HEARTH_HOME` or `--home` moves it.
+[QUICKSTART.md](QUICKSTART.md) covers BotFather, your numeric id, provider
+settings, the service, backups, and troubleshooting.
+
+## Architecture
+
+Hearth is a Rust workspace with narrow crate boundaries:
+
+| Crate | Responsibility |
 |---|---|
-| `hearth init` | Create a home and a working settings file |
-| `hearth doctor [--live]` | Check settings, database, lock, Telegram, and provider |
-| `hearth daemon` | Run the long-lived agent |
-| `hearth chat` | Talk to the agent from the terminal |
-| `hearth watch` | Follow live events from the daemon |
-| `hearth status` | Ask the daemon for status |
-| `hearth stats` | Show usage and cost summaries |
-| `hearth prompt` | Inspect the exact prompt sent to the provider |
-| `hearth service install\|status` | Install or inspect the systemd user unit |
-| `hearth backup` | Snapshot the database into the home |
-| `hearth restore <file>` | Restore a snapshot with the daemon stopped |
-| `hearth skills` | Inspect the skill library |
-| `hearth eval memory\|tokens` | Run the offline evaluations |
+| `hearth-config` | Strict settings parsing, validation, and environment references. |
+| `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, compaction, memory records. |
+| `hearth-storage` | SQLite connections, migrations, snapshots, full-text search. |
+| `hearth-model` | OpenAI-compatible streaming, tool calls, usage, pricing, media clients. |
+| `hearth-memory` | Memory store, dedupe, standing memory, recall, extraction, consolidation. |
+| `hearth-tools` | Files, shell, web search, web fetch, workspace confinement, spill. |
+| `hearth-telegram` | Bot API polling, replies, attachments, the message tool. |
+| `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket, CLI wiring. |
+| `hearth-cli` | The `hearth` binary and its subcommands. |
+| `hearth-eval` | Offline memory and token benchmarks and crash tooling. |
 
-All commands accept `--home <path>`; the default is `HEARTH_HOME`, then `~/.hearth`.
-
-## Memory
-
-Memory is layered: the system prompt and identity, standing memory, recent conversation, recalled memory, and the current turn. Saves are extracted, deduplicated, and versioned in SQLite with full-text search. Recall combines full-text and recency ranks. Consolidation archives stale or duplicate rows and keeps episodes. The memory benchmark in `hearth eval memory` reports recall, precision, temporal accuracy, and supersession on a fixed question set.
+There is one writer thread for SQLite and a small read pool. Every durable change
+goes through one save path with a monotonic sequence. Tools and model providers
+are compiled capabilities, not a runtime plugin system.
 
 ## Security
 
-Hearth trusts one Telegram user, stores everything locally, and never sends telemetry. Tools run without a sandbox and only on the machine that hosts the database. Secrets are environment references and are redacted from logs and status. See [SECURITY.md](SECURITY.md).
+Hearth is built for one user on one machine. It runs tools without approval
+prompts and does not sandbox the shell. Read [SECURITY.md](SECURITY.md) before
+giving it data you care about. Telegram is a third-party transport: message
+content and attachments pass through Telegram.
 
-## Spec and license
+## Documentation
 
-The behavior is defined by `SPEC.md`; the schema is defined by `SCHEMA.md` and the migrations. The project is licensed under the MIT License; see [LICENSE](LICENSE).
+- [QUICKSTART.md](QUICKSTART.md) for setup and first use.
+- [SECURITY.md](SECURITY.md) for the trust model and secret handling.
+- [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
+- [SPEC.md](SPEC.md) for the binding product definition.
+- [DECISIONS.md](DECISIONS.md) for implementation decisions and deviations.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

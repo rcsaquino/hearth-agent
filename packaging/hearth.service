@@ -1,0 +1,13 @@
+[Unit]
+Description=Hearth personal agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hearth daemon --home %h/.hearth
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

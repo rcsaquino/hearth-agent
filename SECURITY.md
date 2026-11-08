@@ -1,40 +1,79 @@
 # Security
 
-## Trust model
+Hearth is a single-user, local-first agent. This document describes the trust
+model and the boundaries it does not cross.
 
-Hearth is built for one person. The Telegram allowlist is the only access control. Messages from any other id are ignored, and no command, tool, or schedule is exposed to them. Do not run Hearth for a group, a team, or an untrusted user.
+## Who can use it
 
-The bot token is a full credential for the bot. Anyone who has it can read updates and send messages as the bot. Treat it like a password.
+Hearth accepts Telegram messages only from the numeric user ids in
+`telegram.allowed_user_ids`. When `allowed_chat_ids` is non-empty, the chat must
+also be allowed. An empty user list is a startup error, not an open bot. There is
+no Hearth account and no multi-user permission system.
 
-## File permissions
+## What runs where
 
-- The home directory is created 0700.
-- `settings.json`, `logs/`, backups, and the local socket are 0600.
-- The SQLite database is 0600.
-- The systemd unit contains no secrets.
+- The database, memory, transcripts, media, backups, and logs live under the
+  Hearth home folder, by default `~/.hearth`.
+- Model requests go to the configured provider. Optional transcription, speech,
+  image, and search providers are separate choices.
+- Telegram messages and attachments pass through Telegram's infrastructure.
+  Telegram is a third-party transport. Do not send content you would not trust
+  to that transport.
+- There is no telemetry. Hearth does not contact a project server.
 
-Hearth does not loosen these modes. If a file is readable by other users, check ownership and the umask rather than changing the mode.
+## Files and modes
+
+`settings.json`, the database, the private socket, backups, and generated media
+are created with user-only permissions where the platform supports them. The
+settings file must be mode `0600`; the daemon refuses to start otherwise. Logs
+are structured and exclude message bodies by default.
 
 ## Secrets
 
-Secrets belong in the environment, not in the repository. Settings store `${ENV_VAR}` references and resolve them at startup. The token, provider key, and media keys are redacted from logs, status, doctor output, and error messages. A missing variable is reported by name, never by value.
+- Prefer environment references such as `${TELEGRAM_BOT_TOKEN}` over inline
+  values in `settings.json`.
+- Credentials are not written to prompts, memory, or transcripts by Hearth, and
+  error messages, `hearth status`, `hearth prompt`, and the live watch redact
+  configured secret values.
+- `hearth prompt` and `hearth watch` are local views. Treat their output as
+  sensitive anyway.
+- The token and API keys are not committed. The repository's local scan checks
+  the tree and history for common credential patterns and for a private
+  deny-list kept outside the tree.
 
-The model receives conversation content and tool results, and the provider receives the prompt. Do not put secrets in a message, a file the agent reads, or a memory row unless you accept that the provider will see them.
+## The yolo trust model
 
-## Tools and the machine
+Hearth ships without approval prompts and without a sandbox. The `shell` tool
+runs commands on the host from the workspace, and the `files` tool reads and
+writes within configured roots. The model can be influenced by untrusted web
+pages, documents, forwarded messages, or tool output. Hearth labels web content
+as untrusted data in the prompt, but that label is advisory.
 
-Hearth runs tools with the privileges of its user and without a sandbox. `file_write` and `shell` can change anything that user can change. This is intentional: the agent is a personal operator on a machine the user controls. Run it on a dedicated account or a dedicated machine if that risk is not acceptable.
+Do not run Hearth with access to data or credentials you are not willing to
+expose to the configured model provider. Guarded mode is deferred to a later
+release.
 
-The model decides which tools to call. Prompt injection through web pages, files, or messages is possible; treat tool results as untrusted content. Hearth labels web and tool content separately from user instructions, but labels are not a security boundary.
+## Untrusted content
 
-## Runtime network access
-
-The daemon contacts Telegram, the configured model provider, and the optional search, speech, image, and web-fetch services. It does not send telemetry or usage data anywhere else. All state stays in the local home.
+Web pages and files are data, never instructions. Prompt injection is still a
+risk. Review what the agent is asked to do, keep the workspace and secrets
+separate, and use a dedicated machine or account when testing unfamiliar tools.
 
 ## Backups
 
-Snapshots contain the full conversation, memory, and ledger history. They are written 0600 and should be stored with the same care as the live database. `restore` verifies integrity and schema version, refuses while the daemon is running, and keeps a pre-restore copy.
+Backups are complete database snapshots and contain conversations, memory, and
+metadata. Store them with the same care as the database. The pre-restore copy is
+kept beside the restored database. Media is not included in a database snapshot.
 
-## Reporting a vulnerability
+## Reporting a problem
 
-Report privately to the maintainer; do not open a public issue with a working exploit, a token, a key, or personal data. Include the affected version, the smallest reproduction, and the impact. There is no bug bounty.
+This is a local, source-distributed project. Report security issues privately to
+the maintainer rather than in a public issue. A placeholder contact is
+`security@example.com`; replace it with the project's real private channel before
+any public release.
+
+## Public release
+
+Publication is a separate decision. Before a public release, the history is
+scanned against a private deny-list kept outside the tree, personal paths and
+identifiers are removed from examples, and the release artifacts are checksummed.
