@@ -33,3 +33,10 @@ fn formats_a_fenced_code_block_with_its_language() {
     assert!(value.text.starts_with("Before"));
     assert!(value.text.ends_with("After"));
 }
+
+#[test]
+fn counts_offsets_in_utf16_units() {
+    let value = format_markdown("😀 **ok**");
+    let bold = entity(&value, "bold");
+    assert_eq!((bold.offset, bold.length), (3, 2));
+}
