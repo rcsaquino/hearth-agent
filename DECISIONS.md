@@ -484,3 +484,14 @@ local fake-server and fixture tests.
 - ElevenLabs defaults are `eleven_v4` and `opus_48000_64`; the client posts to
   `/v1/text-to-speech/<voice>?output_format=<format>` with `xi-api-key`.
 - New dependency: reqwest multipart in `hearth-telegram`.
+
+## 2026-11-08: M3c-1 Telegram daemon loop
+
+- `telegram.base_url` is an optional local Bot API or proxy override. It must be an
+  http or https URL and defaults to `https://api.telegram.org`. Spec draft is 0.5.
+- The daemon runs a poller thread and a one-at-a-time queued-submission worker when
+  Telegram is configured. Each run gets a fresh per-chat tool registry.
+- Typing is sent every four seconds while a run is active and stops before the final
+  answer is delivered.
+- A normal answer is sent with the rich-first sender; a notice is sent when the run
+  settles unanswered. A failed send leaves the durable answer in the record.

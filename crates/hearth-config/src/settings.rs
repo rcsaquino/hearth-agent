@@ -57,6 +57,8 @@ impl Default for Identity {
 #[serde(deny_unknown_fields)]
 pub struct Telegram {
     #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
     pub bot_token: Option<String>,
     #[serde(default)]
     pub allowed_user_ids: Vec<i64>,

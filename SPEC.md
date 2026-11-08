@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.4, plain-language edition
+**Status:** Draft 0.5, plain-language edition
 **Date:** 2026-11-08
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,8 @@
 ---
 
 ## A note on language
+
+Draft 0.5 adds the optional `telegram.base_url` override for local Bot API servers and self-hosted proxies.
 
 This document has two readers: the user, who wants to understand what Hearth is,
 and the builder or AI, who must make it real without guessing.
@@ -1300,7 +1302,8 @@ code.
   },
   "telegram": {
     "bot_token": "${HEARTH_TELEGRAM_BOT_TOKEN}",
-    "allowed_user_ids": [123456789]
+    "allowed_user_ids": [123456789],
+    "base_url": "https://api.telegram.org"
   },
   "models": {
     "kind": "openai-compatible",
@@ -1397,7 +1400,8 @@ Optional overrides, only when needed:
 
 - Unknown fields are rejected, to catch typos.
 - Telegram is enabled when `telegram.bot_token` is present. Then
-  `allowed_user_ids` must be non-empty.
+  `allowed_user_ids` must be non-empty. `telegram.base_url`, when present, must be
+  an http or https URL.
 - The `models` block requires `kind`, `base_url`, `api_key`, and `model`. `kind`
   must be `openai-compatible`.
 - Each `media` block is optional and enabled only when present. A block missing

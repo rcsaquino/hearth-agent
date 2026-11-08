@@ -108,6 +108,12 @@ impl Settings {
 
 impl Telegram {
     fn validate(&self) -> Result<(), ConfigError> {
+        if let Some(base_url) = &self.base_url {
+            require("telegram.base_url", base_url)?;
+            if !(base_url.starts_with("https://") || base_url.starts_with("http://")) {
+                return Err(invalid("telegram.base_url must be an http or https URL"));
+            }
+        }
         let Some(token) = &self.bot_token else {
             return Ok(());
         };
