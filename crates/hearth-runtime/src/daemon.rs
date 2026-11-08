@@ -32,7 +32,8 @@ use crate::events::EventBus;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
 use crate::maintenance::{
-    MEMORY_CONSOLIDATE_KIND, MemoryMaintenanceHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks,
+    BACKUP_KIND, BackupHandler, MEMORY_CONSOLIDATE_KIND, MemoryMaintenanceHandler,
+    SKILL_REVIEW_KIND, ensure_maintenance_tasks,
 };
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
 use crate::skill_review::{SkillReviewHandler, SkillReviewer};
@@ -308,6 +309,10 @@ impl TelegramRuntime {
                 .register(
                     SKILL_REVIEW_KIND,
                     Arc::new(SkillReviewHandler::new(session.clone(), reviewer)),
+                )
+                .register(
+                    BACKUP_KIND,
+                    Arc::new(BackupHandler::new(home.to_path_buf())),
                 ),
         );
         let scheduler = Scheduler::new(
