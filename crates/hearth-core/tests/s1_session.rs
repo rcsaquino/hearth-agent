@@ -555,3 +555,61 @@ fn a_fork_copies_the_current_documents() {
         .expect("source document exists");
     assert_eq!(source.version, 2);
 }
+
+#[test]
+fn beginning_a_submission_marks_it_running_once() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let submitted = session
+        .submit(&conversation.id, "req-1", "input", json!({"text": "hello"}))
+        .expect("submit");
+    assert_eq!(submitted.submission.status, SubmissionStatus::Queued);
+
+    let running = session
+        .begin_submission(&submitted.submission.id)
+        .expect("begin submission");
+    assert_eq!(running.status, SubmissionStatus::Running);
+    let commit = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("a commit exists");
+    assert_eq!(commit.kind, "submission.running");
+    let seq = commit.seq;
+
+    let again = session
+        .begin_submission(&submitted.submission.id)
+        .expect("begin again");
+    assert_eq!(again.status, SubmissionStatus::Running);
+    let after = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("a commit exists");
+    assert_eq!(after.seq, seq, "an idempotent begin added a commit");
+}
+
+#[test]
+fn beginning_a_settled_submission_is_rejected() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let submitted = session
+        .submit(&conversation.id, "req-1", "input", json!({"text": "hello"}))
+        .expect("submit");
+    session
+        .settle(
+            &submitted.submission.id,
+            SubmissionStatus::Done,
+            None,
+        )
+        .expect("settle");
+
+    let error = session
+        .begin_submission(&submitted.submission.id)
+        .expect_err("a settled submission cannot run");
+    assert!(matches!(error, CoreError::AlreadySettled(..)));
+}

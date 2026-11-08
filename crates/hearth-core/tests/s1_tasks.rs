@@ -1027,3 +1027,105 @@ fn claiming_a_task_clears_its_wake_time() {
     assert_eq!(running.status, TaskStatus::Running);
     assert!(running.next_wake_at.is_none());
 }
+
+#[test]
+fn a_checkpoint_updates_a_running_task_and_records_a_commit() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let task = session
+        .create_task(NewTask::new("generation", 1, "request", json!({"n": 1})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim")
+        .expect("task is claimable");
+
+    let updated = session
+        .checkpoint_task(&task.id, "worker-a", json!({"turn": 2, "prompt_hash": "abc"}))
+        .expect("checkpoint task");
+    assert_eq!(updated.status, TaskStatus::Running);
+    assert_eq!(updated.lease_owner.as_deref(), Some("worker-a"));
+    assert_eq!(updated.checkpoint, Some(json!({"turn": 2, "prompt_hash": "abc"})));
+
+    let commit = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("a commit exists");
+    assert_eq!(commit.kind, "task.checkpoint");
+    assert_eq!(commit.task_id.as_deref(), Some(task.id.as_str()));
+}
+
+#[test]
+fn a_stale_owner_cannot_checkpoint_a_task() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let task = session
+        .create_task(NewTask::new("generation", 1, "request", json!({})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim")
+        .expect("task is claimable");
+
+    let error = session
+        .checkpoint_task(&task.id, "worker-b", json!({"turn": 1}))
+        .expect_err("a stale owner cannot checkpoint");
+    assert!(matches!(error, hearth_core::CoreError::LeaseLost(..)));
+}
+
+#[test]
+fn an_active_generation_task_is_found_only_while_running() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+
+    assert!(
+        session
+            .active_generation_task(&conversation.id)
+            .expect("read active task")
+            .is_none()
+    );
+
+    let task = session
+        .create_task(
+            NewTask::new("generation", 1, "request", json!({"submission_id": "s1"}))
+                .conversation(&conversation.id),
+        )
+        .expect("create task");
+    assert!(
+        session
+            .active_generation_task(&conversation.id)
+            .expect("read active task")
+            .is_none(),
+        "a pending task is not an active run"
+    );
+
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim")
+        .expect("task is claimable");
+    let active = session
+        .active_generation_task(&conversation.id)
+        .expect("read active task")
+        .expect("a running task exists");
+    assert_eq!(active.id, task.id);
+
+    session
+        .finish_task(
+            &task.id,
+            "worker-a",
+            StepOutput::Terminal {
+                outcome: TerminalOutcome::Done,
+                result: json!({"ok": true}),
+            },
+        )
+        .expect("finish task");
+    assert!(
+        session
+            .active_generation_task(&conversation.id)
+            .expect("read active task")
+            .is_none()
+    );
+}
