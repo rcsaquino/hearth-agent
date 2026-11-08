@@ -170,6 +170,24 @@ fn text_field(object: &serde_json::Map<String, Value>) -> Option<String> {
     object.get("text").and_then(Value::as_str).map(str::to_owned)
 }
 
+/// Estimate the tokens an entry contributes.
+pub fn estimate_content(value: &Value) -> i64 {
+    let blocks = parse_blocks(value);
+    if blocks.is_empty() {
+        return hearth_model::estimate_tokens(&value.to_string());
+    }
+    let text = blocks
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text(text) | ContentBlock::Thinking(text) => text.clone(),
+            ContentBlock::ToolCall(call) => format!("{} {}", call.name, call.arguments),
+            ContentBlock::ToolResult { content, .. } => content.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    hearth_model::estimate_tokens(&text)
+}
+
 /// Build a prompt for a conversation.
 pub fn build_for(session: &Session, input: PromptInput) -> Result<Prompt, CoreError> {
     let history = session.history(&input.conversation_id)?;

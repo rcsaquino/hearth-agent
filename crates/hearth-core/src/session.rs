@@ -154,16 +154,18 @@ impl Session {
             for (entry, id) in save.entries.iter().zip(entry_ids.iter()) {
                 let content = serde_json::to_string(&entry.content)
                     .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let tokens_est = crate::prompt::estimate_content(&entry.content);
                 writer.execute(
                     "INSERT INTO entries (id, conversation_id, seq, kind, content_json, \
                      tokens_est, source, prompt_hash, created_at) \
-                     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         id.as_str(),
                         conversation_id.as_str(),
                         seq,
                         entry.kind.as_str(),
                         content.as_str(),
+                        tokens_est,
                         entry.source.as_deref(),
                         entry.prompt_hash.as_deref(),
                         now,
