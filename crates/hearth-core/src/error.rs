@@ -20,6 +20,12 @@ pub enum CoreError {
         expected: Option<u64>,
         found: Option<u64>,
     },
+    #[error("meta {key} value mismatch: expected {expected:?}, found {found:?}")]
+    MetaVersion {
+        key: String,
+        expected: Option<String>,
+        found: Option<String>,
+    },
     #[error("submission {0} is already settled as {1}")]
     AlreadySettled(String, String),
     #[error("task {0} not found")]

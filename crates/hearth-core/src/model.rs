@@ -368,6 +368,14 @@ impl MemoryWrite {
     }
 }
 
+/// One meta update with an optional expected current value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MetaWrite {
+    pub key: String,
+    pub value: String,
+    pub expected: Option<String>,
+}
+
 /// Everything that belongs to one change.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Save {
@@ -380,6 +388,7 @@ pub struct Save {
     pub(crate) effects: Vec<EffectIntent>,
     pub(crate) telegram_update: Option<TelegramUpdate>,
     pub(crate) telegram_offset: Option<i64>,
+    pub(crate) meta: Vec<MetaWrite>,
 }
 
 impl Save {
@@ -395,6 +404,7 @@ impl Save {
             effects: Vec::new(),
             telegram_update: None,
             telegram_offset: None,
+            meta: Vec::new(),
         }
     }
 
@@ -479,6 +489,21 @@ impl Save {
     /// Advance the Telegram offset in the same save.
     pub fn telegram_offset(mut self, offset: i64) -> Self {
         self.telegram_offset = Some(offset);
+        self
+    }
+
+    /// Update a meta value, optionally requiring the current value.
+    pub fn meta(
+        mut self,
+        key: impl Into<String>,
+        expected: Option<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.meta.push(MetaWrite {
+            key: key.into(),
+            value: value.into(),
+            expected,
+        });
         self
     }
 }

@@ -352,6 +352,25 @@ impl Session {
                     (offset.to_string(),),
                 )?;
             }
+            for meta in &save.meta {
+                let found: Option<String> = writer.query_optional(
+                    "SELECT value FROM meta WHERE key = ?",
+                    (meta.key.as_str(),),
+                    |row| row.get(0),
+                )?;
+                if found != meta.expected {
+                    return Err(CoreError::MetaVersion {
+                        key: meta.key.clone(),
+                        expected: meta.expected.clone(),
+                        found,
+                    });
+                }
+                writer.execute(
+                    "INSERT INTO meta (key, value) VALUES (?, ?) \
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (meta.key.as_str(), meta.value.as_str()),
+                )?;
+            }
 
             writer.execute(
                 "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -1135,6 +1154,27 @@ impl Session {
     }
 
     /// Read the next Telegram update offset. Zero means no offset yet.
+    /// Read one global meta value.
+    pub fn meta_value(&self, key: &str) -> Result<Option<String>, CoreError> {
+        Ok(self.storage.read(|reader| {
+            reader.query_optional("SELECT value FROM meta WHERE key = ?", (key,), |row| {
+                row.get(0)
+            })
+        })?)
+    }
+
+    /// The newest user entry in a conversation.
+    pub fn latest_user_entry_id(&self, conversation_id: &str) -> Result<Option<String>, CoreError> {
+        Ok(self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT id FROM entries WHERE conversation_id = ? AND kind = 'user' \
+                 ORDER BY seq DESC, rowid DESC LIMIT 1",
+                (conversation_id,),
+                |row| row.get(0),
+            )
+        })?)
+    }
+
     pub fn telegram_offset(&self) -> Result<i64, CoreError> {
         let value: Option<String> = self.storage.read(|reader| {
             reader.query_optional(
