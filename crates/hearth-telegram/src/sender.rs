@@ -100,6 +100,12 @@ impl TelegramSender {
         self.send_fallback(chat_id, markdown)
     }
 
+    /// Show the typing indicator.
+    pub fn send_typing(&self, chat_id: i64) -> Result<(), TelegramError> {
+        self.limiter.wait(&*self.sleeper);
+        self.client.send_chat_action(chat_id, "typing")
+    }
+
     fn send_fallback(&self, chat_id: i64, markdown: &str) -> Result<SendOutcome, TelegramError> {
         let formatted = format_markdown(markdown);
         let parts = split_formatted(&formatted, 4096);
@@ -140,7 +146,7 @@ impl RateLimiter {
         let now = Instant::now();
         if let Ok(mut next) = self.next.lock() {
             if *next > now {
-                sleeper.sleep(*next - now);
+                sleeper.sleep(SEND_INTERVAL);
             }
             *next = Instant::now() + SEND_INTERVAL;
         }

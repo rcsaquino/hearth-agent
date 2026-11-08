@@ -132,6 +132,15 @@ impl TelegramClient {
         })
     }
 
+    /// Show a chat action such as typing.
+    pub fn send_chat_action(&self, chat_id: i64, action: &str) -> Result<(), TelegramError> {
+        self.call(
+            "sendChatAction",
+            json!({"chat_id": chat_id, "action": action}),
+        )?;
+        Ok(())
+    }
+
     /// Send one native rich message with Markdown.
     pub fn send_rich_message(&self, chat_id: i64, markdown: &str) -> Result<(), TelegramError> {
         self.call(
