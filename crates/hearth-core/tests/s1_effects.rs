@@ -172,3 +172,30 @@ fn a_retryable_effect_failure_returns_it_to_intent() {
     assert_eq!(effect.settled_at, None);
     assert_eq!(effect.attempts, 1);
 }
+
+#[test]
+fn a_non_retryable_effect_failure_settles_it_as_failed() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
+        )
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+    session.begin_effect(&id).expect("begin effect");
+
+    session
+        .fail_effect(&id, json!({"message": "permanent"}), false)
+        .expect("record terminal failure");
+
+    let effect = session
+        .effect(&id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Failed);
+    assert_eq!(effect.result.expect("result")["message"], "permanent");
+    assert!(effect.settled_at.is_some());
+}
