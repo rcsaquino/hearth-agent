@@ -20,6 +20,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::events::{EventSink, NoopSink, RunEvent};
+use crate::memory_extract::MemoryExtractor;
 
 /// Everything an agent needs beyond the record and the provider.
 #[derive(Debug, Clone)]
@@ -427,6 +428,7 @@ impl Agent {
                 "run_settled",
                 json!({"status": "done", "answer_entry_id": answer_entry_id}),
             );
+            self.extract_memory(&submission, &answer_entry_id);
             return Ok(RunOutcome {
                 submission: settled,
                 task_id: claimed.id,
@@ -434,6 +436,39 @@ impl Agent {
                 answer_text: Some(text),
                 notice: None,
             });
+        }
+    }
+
+    fn extract_memory(&self, submission: &Submission, answer_entry_id: &str) {
+        let Some(memory) = &self.memory else {
+            return;
+        };
+        let history = match self.session.history(&submission.conversation_id) {
+            Ok(history) => history,
+            Err(error) => {
+                tracing::warn!(%error, "memory extraction history could not be read");
+                return;
+            }
+        };
+        let entries = run_entries(&history, submission, answer_entry_id);
+        let Some(query) = latest_user_text(&entries) else {
+            return;
+        };
+        if hearth_memory::is_trivial(&query) {
+            return;
+        }
+        let extractor = MemoryExtractor::new(
+            self.session.clone(),
+            Arc::clone(&self.provider),
+            self.pricing.clone(),
+            Arc::clone(memory),
+            self.config.model.clone(),
+            self.config.provider_name.clone(),
+            self.config.owner.clone(),
+        );
+        if let Err(error) = extractor.extract(&submission.conversation_id, &submission.id, &entries)
+        {
+            tracing::warn!(%error, "memory extraction failed");
         }
     }
 
@@ -750,6 +785,28 @@ fn write_private(path: &std::path::Path, content: &str) -> std::io::Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
+}
+
+fn run_entries(history: &[Entry], submission: &Submission, answer_entry_id: &str) -> Vec<Entry> {
+    let Some(start) = history.iter().position(|entry| {
+        entry.kind == "user"
+            && entry.created_at == submission.created_at
+            && entry.content == submission.content
+    }) else {
+        return Vec::new();
+    };
+    let Some(end) = history.iter().position(|entry| entry.id == answer_entry_id) else {
+        return Vec::new();
+    };
+    if end < start {
+        return Vec::new();
+    }
+    let start_id = history[start].id.clone();
+    history[start..=end]
+        .iter()
+        .filter(|entry| entry.kind != "user" || entry.id == start_id)
+        .cloned()
+        .collect()
 }
 
 fn latest_user_text(history: &[Entry]) -> Option<String> {

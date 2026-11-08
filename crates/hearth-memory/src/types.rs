@@ -168,6 +168,13 @@ pub struct MemoryStats {
     pub by_kind: std::collections::BTreeMap<String, i64>,
 }
 
+/// The result of one consolidation pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConsolidationReport {
+    pub merged: usize,
+    pub unchanged: usize,
+}
+
 /// A memory failure.
 #[derive(Debug, Error)]
 pub enum MemoryError {

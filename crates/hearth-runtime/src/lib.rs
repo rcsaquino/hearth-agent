@@ -10,6 +10,7 @@ mod effect_worker;
 mod events;
 mod init;
 mod ipc;
+mod memory_extract;
 mod tools;
 
 pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};

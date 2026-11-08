@@ -389,11 +389,23 @@ impl MemoryService {
             candidates.push(row.into_item()?);
         }
 
+        let before: Vec<(String, String)> = self.read(|reader| {
+            reader.query(
+                "SELECT id, standing FROM memory_items WHERE status = 'active' \
+                 AND standing IN ('pinned','promoted') \
+                 AND (valid_from IS NULL OR valid_from <= ?) \
+                 AND (valid_to IS NULL OR valid_to > ?)",
+                (now, now),
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+        })?;
+        let before_map: BTreeMap<String, String> = before.into_iter().collect();
+
         let cap = self.policy.standing_max_tokens;
         let mut items = Vec::new();
+        let mut final_map = BTreeMap::new();
         let mut tokens = 0usize;
         let mut writes = Vec::new();
-        let mut demoted = false;
         for mut item in candidates {
             let line_tokens = self.line_tokens(&item);
             let pinned = item.standing == Standing::Pinned;
@@ -410,6 +422,7 @@ impl MemoryService {
                         "system",
                     ));
                 }
+                final_map.insert(item.id.clone(), item.standing.as_str().to_owned());
                 items.push(item);
             } else if item.standing == Standing::Promoted {
                 item.standing = Standing::None;
@@ -421,11 +434,11 @@ impl MemoryService {
                     }),
                     "system",
                 ));
-                demoted = true;
             }
         }
+        let bump = before_map != final_map;
         if !writes.is_empty() {
-            self.commit(writes, demoted)?;
+            self.commit(writes, bump)?;
         }
         let version = self.standing_version()?;
         Ok(StandingMemory { items, version })
@@ -556,6 +569,83 @@ impl MemoryService {
             }
         }
         Ok(selected)
+    }
+
+    /// Merge duplicate active memories. This is the M4 skeleton: exact and
+    /// near duplicates merge into the earlier row, and the later row is
+    /// superseded. No episode summaries or recurrence is produced here.
+    pub fn consolidate(&self) -> Result<crate::types::ConsolidationReport, MemoryError> {
+        let sql =
+            format!("{MEMORY_SELECT} WHERE status = 'active' ORDER BY created_at, id LIMIT 500");
+        let raw: Vec<RawMemory> =
+            self.read(|reader| reader.query(&sql, [], |row| Ok(RawMemory::from_row(row))))?;
+        let mut rows: Vec<MemoryItem> = raw
+            .into_iter()
+            .map(RawMemory::into_item)
+            .collect::<Result<_, _>>()?;
+        let now = self.session.now_micros();
+        let mut merged = 0usize;
+        let mut removed = BTreeSet::new();
+        for i in 0..rows.len() {
+            if removed.contains(&i) {
+                continue;
+            }
+            for j in (i + 1)..rows.len() {
+                if removed.contains(&j) {
+                    continue;
+                }
+                let same = rows[i].fingerprint == rows[j].fingerprint;
+                let near =
+                    jaccard(&tokens(&rows[i].content), &tokens(&rows[j].content)) >= NEAR_DUPLICATE;
+                if !same && !near {
+                    continue;
+                }
+                let mut tags = rows[i].tags.clone();
+                for tag in &rows[j].tags {
+                    if !tags.contains(tag) {
+                        tags.push(tag.clone());
+                    }
+                }
+                tags.sort();
+                tags.dedup();
+                let importance = rows[i].importance.max(rows[j].importance);
+                let standing = auto_standing(rows[i].kind.as_str(), importance, rows[i].standing);
+                let bump = standing != rows[i].standing || rows[j].standing != Standing::None;
+                let survivor = MemoryUpdate {
+                    id: rows[i].id.clone(),
+                    tags: Some(tags.clone()),
+                    importance: Some(importance),
+                    standing: (standing != rows[i].standing).then(|| standing.as_str().to_owned()),
+                    ..MemoryUpdate::default()
+                };
+                let duplicate = MemoryUpdate {
+                    id: rows[j].id.clone(),
+                    status: Some(MemoryStatus::Superseded.as_str().to_owned()),
+                    valid_to: Some(now),
+                    standing: Some(Standing::None.as_str().to_owned()),
+                    ..MemoryUpdate::default()
+                };
+                self.commit(
+                    vec![
+                        MemoryWrite::new(MemoryChange::Update(survivor), "system"),
+                        MemoryWrite::new(MemoryChange::Update(duplicate), "system"),
+                    ],
+                    bump,
+                )?;
+                rows[i].tags = tags;
+                rows[i].importance = importance;
+                rows[i].standing = standing;
+                rows[j].status = MemoryStatus::Superseded;
+                rows[j].valid_to = Some(now);
+                rows[j].standing = Standing::None;
+                removed.insert(j);
+                merged += 1;
+            }
+        }
+        Ok(crate::types::ConsolidationReport {
+            merged,
+            unchanged: rows.len().saturating_sub(merged),
+        })
     }
 
     fn line_tokens(&self, item: &MemoryItem) -> usize {
@@ -719,6 +809,11 @@ fn auto_standing(kind: &str, importance: i64, current: Standing) -> Standing {
     } else {
         Standing::None
     }
+}
+
+/// Whether an input is too trivial to trigger recall or extraction.
+pub fn is_trivial(query: &str) -> bool {
+    trivial(query)
 }
 
 fn trivial(query: &str) -> bool {
