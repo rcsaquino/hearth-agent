@@ -1093,6 +1093,35 @@ impl Session {
         Ok(count.max(0) as usize)
     }
 
+    /// Queued submissions in one conversation, oldest first.
+    pub fn queued_submissions(&self, conversation_id: &str) -> Result<Vec<Submission>, CoreError> {
+        let raw: Vec<RawSubmission> = self.storage.read(|reader| {
+            reader.query(
+                "SELECT id, conversation_id, request_id, kind, content_json, status, \
+                 answer_entry_id, error_json, created_at, settled_at FROM submissions \
+                 WHERE conversation_id = ? AND status = 'queued' ORDER BY created_at, id",
+                (conversation_id,),
+                |row| {
+                    Ok(RawSubmission {
+                        id: row.get(0)?,
+                        conversation_id: row.get(1)?,
+                        request_id: row.get(2)?,
+                        kind: row.get(3)?,
+                        content_json: row.get(4)?,
+                        status: row.get(5)?,
+                        answer_entry_id: row.get(6)?,
+                        error_json: row.get(7)?,
+                        created_at: row.get(8)?,
+                        settled_at: row.get(9)?,
+                    })
+                },
+            )
+        })?;
+        raw.into_iter()
+            .map(RawSubmission::into_submission)
+            .collect()
+    }
+
     /// The oldest queued Telegram submission.
     pub fn next_queued_telegram_submission(&self) -> Result<Option<Submission>, CoreError> {
         let raw: Option<RawSubmission> = self.storage.read(|reader| {
