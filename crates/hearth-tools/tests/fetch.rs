@@ -336,3 +336,22 @@ fn every_provider_failing_returns_the_first_error() {
     first.thread.join().expect("first thread");
     second.thread.join().expect("second thread");
 }
+
+#[test]
+fn a_large_error_body_is_shortened() {
+    let direct = serve(vec![reply(500, "text/plain", "x".repeat(1000))]);
+    let target = target(&direct, "/error");
+    let provider = Arc::new(
+        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5)).expect("direct"),
+    );
+    let tool = WebFetchTool::new(vec![provider], true);
+    let error = tool
+        .call(&json!({"url": target}))
+        .expect_err("server error");
+    assert!(
+        error.message.len() < 300,
+        "message was {} bytes",
+        error.message.len()
+    );
+    direct.thread.join().expect("direct thread");
+}
