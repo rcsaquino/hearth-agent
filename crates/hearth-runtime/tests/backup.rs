@@ -115,8 +115,7 @@ fn backup_and_restore_report_missing_paths() {
     assert!(matches!(error, BackupError::MissingDatabase(_)));
 
     let home = home_with_database();
-    let error = restore(home.path(), &home.path().join("nope.db"))
-        .expect_err("missing backup");
+    let error = restore(home.path(), &home.path().join("nope.db")).expect_err("missing backup");
     assert!(matches!(error, BackupError::MissingBackup(_)));
 }
 

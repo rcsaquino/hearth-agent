@@ -80,7 +80,11 @@ pub fn init_with_io<R: BufRead, W: Write>(
         {
             options.api_key = Some(prompt(reader, writer, "Provider API key: ")?);
         }
-        if options.model.as_deref().is_none_or(|value| value.is_empty()) {
+        if options
+            .model
+            .as_deref()
+            .is_none_or(|value| value.is_empty())
+        {
             options.model = Some(prompt(reader, writer, "Model: ")?);
         }
         if options.agent_name.is_none() {
@@ -182,11 +186,7 @@ pub fn init_with_io<R: BufRead, W: Write>(
     hearth_storage::open(&database)?;
 
     writeln!(writer, "created {}", home.display())?;
-    writeln!(
-        writer,
-        "settings: {} (mode 0600)",
-        settings_path.display()
-    )?;
+    writeln!(writer, "settings: {} (mode 0600)", settings_path.display())?;
     writeln!(
         writer,
         "database: {} (schema {})",

@@ -121,6 +121,8 @@ fn config_dir() -> Result<PathBuf, ServiceError> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .ok_or_else(|| ServiceError::Config("HOME is not set; pass an XDG config directory".into()))?;
+        .ok_or_else(|| {
+            ServiceError::Config("HOME is not set; pass an XDG config directory".into())
+        })?;
     Ok(base.join("systemd/user"))
 }

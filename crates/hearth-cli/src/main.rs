@@ -30,7 +30,9 @@ enum Command {
     /// Inspect the exact prompt sent to the provider.
     Prompt(PromptArgs),
     /// Check settings, database, and lock without printing secrets.
-    Doctor,
+    Doctor(DoctorArgs),
+    /// Install or inspect the systemd user service.
+    Service(ServiceArgs),
     /// Back up the database into the home backups folder.
     Backup,
     /// Restore the database from a backup. Stop the daemon first.
@@ -124,6 +126,31 @@ struct PromptArgs {
     /// Print the OpenAI-compatible wire body without sending it.
     #[arg(long)]
     wire: bool,
+}
+
+#[derive(Debug, clap::Args)]
+struct DoctorArgs {
+    /// Also check Telegram and the provider credentials.
+    #[arg(long)]
+    live: bool,
+}
+
+#[derive(Debug, clap::Args)]
+struct ServiceArgs {
+    #[command(subcommand)]
+    command: ServiceCommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum ServiceCommand {
+    /// Write and enable the systemd user unit.
+    Install {
+        /// Replace a different existing unit.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Report the unit path and whether it is installed.
+    Status,
 }
 
 #[derive(Debug, clap::Args)]
@@ -237,7 +264,25 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             };
             hearth_runtime::skills::run_cli(&home, command)?;
         }
-        Command::Doctor => hearth_runtime::doctor(&home)?,
+        Command::Doctor(args) => hearth_runtime::doctor(&home, args.live)?,
+        Command::Service(args) => match args.command {
+            ServiceCommand::Install { force } => {
+                let report = hearth_runtime::service::install(&home, force)?;
+                println!("unit: {}", report.unit.display());
+            }
+            ServiceCommand::Status => {
+                let status = hearth_runtime::service::status(&home)?;
+                println!(
+                    "unit: {} ({})",
+                    status.unit.display(),
+                    if status.installed {
+                        "installed"
+                    } else {
+                        "not installed"
+                    }
+                );
+            }
+        },
         Command::Backup => {
             let report = hearth_runtime::backup::backup(&home)?;
             println!("backup: {}", report.path.display());

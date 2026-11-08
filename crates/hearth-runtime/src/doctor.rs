@@ -1,22 +1,37 @@
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use hearth_config::{ConfigError, Settings};
+use hearth_model::{
+    ChatMessage, ChatRequest, ContentBlock, OpenAiCompatibleProvider, Provider, ProviderError, Role,
+};
+use hearth_telegram::{TelegramClient, TelegramError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DoctorError {
     #[error(transparent)]
-    Config(#[from] hearth_config::ConfigError),
+    Config(#[from] ConfigError),
     #[error(transparent)]
     Storage(#[from] hearth_storage::StorageError),
     #[error("database not found at {0}; run hearth init")]
     DatabaseMissing(PathBuf),
-    #[error("doctor file operation failed: {0}")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Telegram(#[from] TelegramError),
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
 }
 
 /// Check the home folder without printing secrets.
-pub fn doctor(home: &Path) -> Result<(), DoctorError> {
+pub fn doctor(home: &Path, live: bool) -> Result<(), DoctorError> {
+    doctor_with(home, live, &mut std::io::stdout())
+}
+
+/// Check the home folder and write the findings to a writer.
+pub fn doctor_with(home: &Path, live: bool, out: &mut impl Write) -> Result<(), DoctorError> {
     let settings = hearth_config::load(home)?;
     settings.validate_for_run()?;
 
@@ -30,9 +45,73 @@ pub fn doctor(home: &Path) -> Result<(), DoctorError> {
 
     let lock = lock_state(home)?;
 
-    println!("settings: ok");
-    println!("database: ok (schema {version})");
-    println!("lock: {lock}");
+    writeln!(out, "settings: ok")?;
+    writeln!(out, "database: ok (schema {version})")?;
+    writeln!(out, "lock: {lock}")?;
+
+    if live {
+        check_telegram(&settings, out)?;
+        check_provider(&settings, out)?;
+    }
+    Ok(())
+}
+
+fn check_telegram(settings: &Settings, out: &mut impl Write) -> Result<(), DoctorError> {
+    let Some(telegram) = settings.telegram.as_ref() else {
+        writeln!(out, "telegram: not configured")?;
+        return Ok(());
+    };
+    let Some(token) = telegram
+        .bot_token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+    else {
+        writeln!(out, "telegram: not configured")?;
+        return Ok(());
+    };
+    let client = match telegram.base_url.as_deref() {
+        Some(base_url) => TelegramClient::with_base_url(token, base_url)?,
+        None => TelegramClient::new(token)?,
+    };
+    let me = client.get_me()?;
+    let label = me
+        .username
+        .map(|username| format!("@{username}"))
+        .unwrap_or_else(|| me.id.to_string());
+    writeln!(out, "telegram: ok ({label})")?;
+    Ok(())
+}
+
+fn check_provider(settings: &Settings, out: &mut impl Write) -> Result<(), DoctorError> {
+    let models = settings.models.as_ref().ok_or_else(|| {
+        DoctorError::Config(ConfigError::Invalid("models is required".to_owned()))
+    })?;
+    let provider = OpenAiCompatibleProvider::new(
+        models.base_url.clone(),
+        models.api_key.clone(),
+        models
+            .headers
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+        models.session_header.clone(),
+    )?;
+    let request = ChatRequest {
+        model: models.model.clone(),
+        messages: vec![ChatMessage {
+            role: Role::User,
+            blocks: vec![ContentBlock::Text("Reply with OK.".to_owned())],
+        }],
+        tools: Vec::new(),
+        temperature: None,
+        max_tokens: Some(1),
+        session_id: None,
+    };
+    let stream = provider.stream(request)?;
+    for event in stream {
+        event?;
+    }
+    writeln!(out, "provider: ok ({})", models.model)?;
     Ok(())
 }
 

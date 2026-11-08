@@ -25,7 +25,11 @@ fn add_telegram_base(home: &std::path::Path, base: &str) {
         serde_json::from_str(&std::fs::read_to_string(&path).expect("read settings"))
             .expect("parse settings");
     settings["telegram"]["base_url"] = serde_json::json!(base);
-    std::fs::write(&path, serde_json::to_string_pretty(&settings).expect("settings")).expect("write");
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&settings).expect("settings"),
+    )
+    .expect("write");
 }
 
 fn init_home(home: &std::path::Path, provider_base: &str) {
@@ -66,7 +70,10 @@ fn live_doctor_checks_telegram_and_provider_without_secrets() {
     let mut output = Vec::new();
     doctor_with(home.path(), true, &mut output).expect("live doctor");
     let text = String::from_utf8(output).expect("utf-8 output");
-    assert!(text.contains("telegram: ok (@hearth_test)"), "output: {text}");
+    assert!(
+        text.contains("telegram: ok (@hearth_test)"),
+        "output: {text}"
+    );
     assert!(text.contains("provider: ok (fake-model)"), "output: {text}");
     assert!(!text.contains("fake-token"), "the token leaked: {text}");
     assert!(!text.contains("fake-key"), "the key leaked: {text}");

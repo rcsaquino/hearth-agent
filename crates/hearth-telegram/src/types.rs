@@ -59,6 +59,18 @@ pub struct User {
     pub username: Option<String>,
 }
 
+/// The bot's own identity.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Me {
+    pub id: i64,
+    #[serde(default)]
+    pub is_bot: bool,
+    #[serde(default)]
+    pub first_name: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+}
+
 /// One size of an incoming photo.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PhotoSize {

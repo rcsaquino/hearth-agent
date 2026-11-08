@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::format::Entity;
-use crate::types::{FileInfo, Update};
+use crate::types::{FileInfo, Me, Update};
 
 /// A Telegram API failure. Messages never include the token or request URL.
 #[derive(Debug, Error)]
@@ -181,6 +181,15 @@ impl TelegramClient {
         serde_json::from_value(result).map_err(|error| TelegramError::Protocol {
             method: "getUpdates".to_owned(),
             detail: format!("invalid update list: {error}"),
+        })
+    }
+
+    /// Read the bot identity.
+    pub fn get_me(&self) -> Result<Me, TelegramError> {
+        let result = self.call("getMe", json!({}))?;
+        serde_json::from_value(result).map_err(|error| TelegramError::Protocol {
+            method: "getMe".to_owned(),
+            detail: format!("invalid bot identity: {error}"),
         })
     }
 

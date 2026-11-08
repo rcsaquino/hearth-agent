@@ -29,9 +29,11 @@ fn a_snapshot_copies_the_live_database() {
     );
     let connection = open_read_only(&destination).expect("open snapshot");
     let value: String = connection
-        .query_row("SELECT value FROM meta WHERE key = 'snapshot-test'", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'snapshot-test'",
+            [],
+            |row| row.get(0),
+        )
         .expect("read snapshot row");
     assert_eq!(value, "kept");
 
