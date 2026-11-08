@@ -83,3 +83,15 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - M0 estimate: one working session. M1: about three. If a milestone reaches twice
   its estimate, stop and report what is blocking.
 - M2 target provider: opencode-go with `deepseek-v4.1-flash`.
+
+## 2026-11-08: M0.1 corrections (approved)
+
+- `signal-hook` is approved for SIGTERM and SIGINT. The standard library has no
+  portable signal API and Hearth forbids unsafe code.
+- Daemon logs are mode `0600`, even though the spec only mandates `0600` for
+  settings, the socket, and the database. Logs carry paths, PIDs, and timing.
+- The default timezone order is non-empty `TZ`, then the `/etc/localtime` symlink
+  target, then `/etc/timezone`, then UTC. An explicit `--timezone` wins over all.
+- `usage_events` carries `reasoning_tokens` in migration `0001`. The M1 S2 storage
+  conformance test will assert the full column set, because usage writes do not
+  exist before M2.
