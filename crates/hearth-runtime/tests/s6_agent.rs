@@ -271,3 +271,49 @@ fn a_tool_call_without_tools_settles_unanswered() {
         "an orphaned assistant tool call was saved"
     );
 }
+
+#[test]
+fn a_thinking_only_response_settles_unanswered() {
+    let (_home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::ThinkingDelta("private reasoning".to_owned())),
+        Ok(StreamEvent::Usage(Usage {
+            input_tokens: 4,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 2,
+            reasoning_tokens: 0,
+        })),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+
+    let outcome = agent(&harness, provider, Pricing::default())
+        .run_submission(&submission.id)
+        .expect("run submission");
+
+    assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
+    assert!(outcome.answer_text.is_none());
+    assert!(outcome.notice.expect("notice").contains("no answer"));
+    let history = harness.session().history(&conversation).expect("history");
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].kind, "notice");
+    assert!(
+        history.iter().all(|entry| entry.kind != "assistant"),
+        "a thinking-only response was saved as an answer"
+    );
+    let usage = harness
+        .session()
+        .usage_for_task(&outcome.task_id)
+        .expect("usage");
+    assert_eq!(usage.len(), 1);
+    let task = harness
+        .session()
+        .task(&outcome.task_id)
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Failed);
+}
