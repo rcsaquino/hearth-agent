@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use hearth_config::{ConfigError, Media, Settings};
-use hearth_core::{CoreError, Harness, Session, Submission};
+use hearth_core::{CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission};
 use hearth_model::{
     MediaError, OpenAiCompatibleProvider, Pricing, Provider, ProviderError, Speaker, SpeechClient,
     Transcriber, TranscriptionClient,
@@ -16,6 +16,7 @@ use hearth_telegram::{
     InboundMedia, SendOutcome, SystemSleeper, TelegramClient, TelegramError, TelegramPoller,
     TelegramSender,
 };
+use serde_json::json;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use thiserror::Error;
@@ -282,6 +283,8 @@ impl TelegramWorker {
             return;
         };
 
+        self.recover_delivery(chat_id, thread_id);
+
         let target = MessageTarget {
             client: self.client.clone(),
             chat_id,
@@ -350,16 +353,146 @@ impl TelegramWorker {
         let Some(text) = text else {
             return;
         };
+        let key = format!("tg:{}", outcome.submission.id);
+        let payload = json!({
+            "chat_id": chat_id,
+            "thread_id": thread_id,
+            "markdown": text,
+            "submission_id": outcome.submission.id,
+        });
+        let intent = Save::new(&outcome.submission.conversation_id).effect(EffectIntent::new(
+            "telegram.send",
+            key,
+            payload,
+        ));
+        let effect_id = match self.session.save(intent) {
+            Ok(commit) => match commit.effect_ids.first().cloned() {
+                Some(id) => id,
+                None => {
+                    tracing::warn!(chat_id, "delivery intent has no effect id");
+                    return;
+                }
+            },
+            Err(error) => {
+                tracing::warn!(chat_id, %error, "delivery intent could not be saved");
+                return;
+            }
+        };
+        if let Err(error) = self.session.begin_effect(&effect_id) {
+            tracing::warn!(chat_id, %error, "delivery effect could not start");
+            return;
+        }
         match self.sender.send_reply(chat_id, thread_id, text) {
-            Ok(SendOutcome::Rich) => tracing::info!(chat_id, "telegram reply sent"),
+            Ok(SendOutcome::Rich) => {
+                if let Err(error) = self
+                    .session
+                    .finish_effect(&effect_id, json!({"delivered": true}))
+                {
+                    tracing::warn!(chat_id, %error, "delivery result could not be saved");
+                }
+                tracing::info!(chat_id, "telegram reply sent");
+            }
             Ok(SendOutcome::Fallback { parts }) => {
+                if let Err(error) = self
+                    .session
+                    .finish_effect(&effect_id, json!({"delivered": true, "parts": parts}))
+                {
+                    tracing::warn!(chat_id, %error, "delivery result could not be saved");
+                }
                 tracing::info!(chat_id, parts, "telegram fallback reply sent");
             }
             Ok(SendOutcome::Uncertain { message }) => {
+                if let Err(error) = self
+                    .session
+                    .mark_effect_unknown(&effect_id, json!({"message": message}))
+                {
+                    tracing::warn!(chat_id, %error, "uncertain delivery could not be saved");
+                }
                 tracing::warn!(chat_id, %message, "telegram delivery is uncertain");
             }
             Err(error) => {
+                if let Err(save_error) = self
+                    .session
+                    .mark_effect_failed(&effect_id, json!({"error": error.to_string()}))
+                {
+                    tracing::warn!(chat_id, %save_error, "failed delivery could not be saved");
+                }
                 tracing::warn!(chat_id, %error, "telegram reply failed");
+            }
+        }
+    }
+
+    fn recover_delivery(&self, chat_id: i64, thread_id: Option<i64>) {
+        let effects = match self.session.effects_awaiting_delivery("telegram.send") {
+            Ok(effects) => effects,
+            Err(error) => {
+                tracing::warn!(%error, "pending telegram deliveries could not be read");
+                return;
+            }
+        };
+        let Some(effect) = effects.into_iter().find(|effect| {
+            effect
+                .payload
+                .get("chat_id")
+                .and_then(|value| value.as_i64())
+                == Some(chat_id)
+        }) else {
+            return;
+        };
+        let markdown = effect
+            .payload
+            .get("markdown")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if markdown.is_empty() {
+            let _ = self
+                .session
+                .mark_effect_failed(&effect.id, json!({"error": "empty recovered reply"}));
+            return;
+        }
+        let recovered_thread = effect
+            .payload
+            .get("thread_id")
+            .and_then(|value| value.as_i64())
+            .or(thread_id);
+        if effect.status == EffectStatus::Intent
+            && let Err(error) = self.session.begin_effect(&effect.id)
+        {
+            tracing::warn!(%error, "recovered delivery could not start");
+            return;
+        }
+        match self.sender.send_reply(
+            chat_id,
+            recovered_thread,
+            &format!("Recovered reply:\n\n{markdown}"),
+        ) {
+            Ok(SendOutcome::Rich) | Ok(SendOutcome::Fallback { .. }) => {
+                if let Err(error) = self
+                    .session
+                    .mark_effect_done(&effect.id, json!({"recovered": true}))
+                {
+                    tracing::warn!(%error, "recovered delivery could not be saved");
+                } else {
+                    tracing::info!(chat_id, effect = %effect.id, "recovered telegram reply sent");
+                }
+            }
+            Ok(SendOutcome::Uncertain { message }) => {
+                if let Err(error) = self
+                    .session
+                    .mark_effect_unknown(&effect.id, json!({"message": message}))
+                {
+                    tracing::warn!(%error, "uncertain recovered delivery could not be saved");
+                }
+                tracing::warn!(chat_id, %message, "recovered delivery is uncertain");
+            }
+            Err(error) => {
+                if let Err(save_error) = self
+                    .session
+                    .mark_effect_failed(&effect.id, json!({"error": error.to_string()}))
+                {
+                    tracing::warn!(%save_error, "failed recovered delivery could not be saved");
+                }
+                tracing::warn!(chat_id, %error, "recovered delivery failed");
             }
         }
     }
