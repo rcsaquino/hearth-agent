@@ -512,3 +512,21 @@ local fake-server and fixture tests.
   A recovery failure does not block the new submission.
 - `Session::mark_effect_done`, `mark_effect_failed`, `mark_effect_unknown`, and
   `effects_awaiting_delivery` support this recovery path.
+
+## 2026-11-08: Telegram stop handling (M3c-2b)
+
+- A message whose trimmed text is exactly `stop`, case-insensitive, is a control
+  message. It is not admitted as a submission and gets no reaction.
+- The stop update is recorded in `telegram_updates` and the next offset is stored
+  with `Session::record_telegram_update`, in one transaction. A replay of the same
+  update id advances the offset but does not call the handler again.
+- The poller calls an optional `StopHandler` with the chat id. The daemon's handler
+  sets a per-chat cancellation token.
+- The worker registers a token before each run and removes it through a drop guard.
+  `Agent::run_submission_with_cancel` checks the token after the task claim, before
+  every provider request, after the stream and usage recording, and after tool
+  execution.
+- Cancellation discards unsaved streamed text and tool calls, saves one
+  `{"text":"Stopped."}` notice, settles the submission as `cancelled`, and finishes
+  the generation task `aborted` with `{"reason":"cancelled"}`. Usage from a provider
+  call that already started is recorded.
