@@ -124,32 +124,11 @@ keys.
 - `memory_items`, `memory_fts`, `memory_events`:
   the memory library.
 
-The exact schema:
-
-```
-meta(key, value)
-commits(seq INTEGER PRIMARY KEY, created_at, conversation_id, task_id, kind)
-conversations(id, parent_id, parent_entry_id, title, transport, transport_key,
-              created_at, updated_at, archived)
-entries(id, conversation_id, seq, kind, content_json, tokens_est, source,
-        prompt_hash, created_at)
-prompt_blobs(hash PRIMARY KEY, text, created_at)
-documents(conversation_id, kind, version, json, updated_at)
-submissions(id, conversation_id, request_id, kind, content_json, status,
-            answer_entry_id, error_json, created_at, settled_at)
-tasks(id, conversation_id, parent_task_id, kind, version, status, phase, attempt,
-      input_json, checkpoint_json, result_json, lease_owner, lease_until,
-      next_wake_at, created_at, updated_at, terminal_at)
-effects(id, task_id, kind, key, payload_json, status, result_json, attempts,
-        created_at, settled_at)
-usage_events(id, ts, task_id, conversation_id, provider, model, kind,
-             input_tokens, cache_read_tokens, cache_write_tokens, output_tokens,
-             cost_micros, latency_ms)
-telegram_updates(update_id PRIMARY KEY, chat_id, message_id, processed_at)
-memory_items(...)
-memory_fts(content, tags, content='memory_items', content_rowid='rowid')
-memory_events(id, item_id, action, actor, old_hash, new_hash, created_at)
-```
+The exact DDL is `crates/hearth-storage/migrations/0001.sql`, applied by
+`MIGRATION_0001`. The migration is the executable schema authority; if this
+document and the migration disagree, the migration wins. `memory_items` also has a
+`fingerprint` column and index for exact-duplicate detection, and `effects` has a
+`UNIQUE (kind, key)` constraint.
 
 ## Indexes
 
