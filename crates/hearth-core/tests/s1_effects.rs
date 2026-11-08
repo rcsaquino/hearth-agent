@@ -393,10 +393,11 @@ fn pending_and_started_effects_are_listed_in_order() {
     let mut ids = Vec::new();
     for key in ["a", "b", "c"] {
         let commit = session
-            .save(
-                Save::new(&conversation_id)
-                    .effect(EffectIntent::new("file_write", key, json!({}))),
-            )
+            .save(Save::new(&conversation_id).effect(EffectIntent::new(
+                "file_write",
+                key,
+                json!({}),
+            )))
             .expect("save");
         ids.push(commit.effect_ids[0].clone());
     }
@@ -404,7 +405,10 @@ fn pending_and_started_effects_are_listed_in_order() {
 
     let pending = session.pending_effects(10).expect("pending effects");
     assert_eq!(
-        pending.iter().map(|effect| effect.key.as_str()).collect::<Vec<_>>(),
+        pending
+            .iter()
+            .map(|effect| effect.key.as_str())
+            .collect::<Vec<_>>(),
         vec!["a", "c"]
     );
     let started = session.started_effects().expect("started effects");

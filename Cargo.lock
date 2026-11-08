@@ -276,6 +276,7 @@ dependencies = [
  "hearth-config",
  "hearth-core",
  "hearth-storage",
+ "hearth-tools",
  "serde_json",
  "signal-hook",
  "tempfile",
@@ -300,6 +301,10 @@ version = "0.1.0"
 [[package]]
 name = "hearth-tools"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "heck"
