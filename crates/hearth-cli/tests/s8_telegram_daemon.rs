@@ -124,13 +124,14 @@ fn fake_telegram_script(
     updates: Vec<Value>,
     fail_first_rich: bool,
 ) -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
-    fake_telegram_script_with_delays(updates, fail_first_rich, Vec::new())
+    fake_telegram_script_with_delays(updates, fail_first_rich, Vec::new(), None)
 }
 
 fn fake_telegram_script_with_delays(
     updates: Vec<Value>,
     fail_first_rich: bool,
     delays: Vec<Duration>,
+    stop_gate: Option<Arc<AtomicBool>>,
 ) -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind telegram");
     listener
@@ -152,6 +153,14 @@ fn fake_telegram_script_with_delays(
                             let index = next_update.fetch_add(1, Ordering::SeqCst);
                             if let Some(delay) = delays.get(index) {
                                 thread::sleep(*delay);
+                            }
+                            if index == 1
+                                && let Some(gate) = &stop_gate
+                            {
+                                let deadline = Instant::now() + Duration::from_secs(5);
+                                while !gate.load(Ordering::SeqCst) && Instant::now() < deadline {
+                                    thread::sleep(Duration::from_millis(5));
+                                }
                             }
                             if let Some(update) = updates.get(index) {
                                 json!({"ok": true, "result": [update.clone()]})
@@ -491,41 +500,112 @@ fn the_daemon_recovers_an_uncertain_telegram_answer() {
     );
 }
 
-fn fake_provider_slow(answer: &str, delay: Duration) -> (String, thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider");
-    let base = format!("http://{}", listener.local_addr().expect("provider addr"));
-    let answer = answer.to_owned();
-    let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("provider accept");
-        let _ = read_request(&mut stream);
-        let delta = json!({"choices": [{"delta": {"content": answer}}]});
-        let finish = json!({"choices": [{"delta": {}, "finish_reason": "stop"}]});
-        let usage = json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}});
-        let first = format!("data: {}\n\n", delta);
-        let rest = format!("data: {}\n\ndata: {}\n\ndata: [DONE]\n\n", finish, usage);
-        let total = first.len() + rest.len();
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
-        )
-        .expect("provider headers");
-        stream
-            .write_all(first.as_bytes())
-            .expect("provider first chunk");
-        stream.flush().expect("provider flush");
-        thread::sleep(delay);
-        stream.write_all(rest.as_bytes()).expect("provider rest");
-        stream.flush().expect("provider flush rest");
-    });
-    (format!("{base}/v1"), handle)
+struct SlowProvider {
+    base: String,
+    started: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl SlowProvider {
+    fn new(answer: &str, delay: Duration) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking provider");
+        let base = format!(
+            "http://{}/v1",
+            listener.local_addr().expect("provider addr")
+        );
+        let started = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_started = Arc::clone(&started);
+        let thread_stop = Arc::clone(&stop);
+        let answer = answer.to_owned();
+        let handle = thread::spawn(move || {
+            while !thread_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                        let _ = read_request(&mut stream);
+                        let delta = json!({"choices": [{"delta": {"content": answer}}]});
+                        let finish = json!({"choices": [{"delta": {}, "finish_reason": "stop"}]});
+                        let usage = json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}});
+                        let first = format!("data: {}\n\n", delta);
+                        let rest =
+                            format!("data: {}\n\ndata: {}\n\ndata: [DONE]\n\n", finish, usage);
+                        let total = first.len() + rest.len();
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
+                        )
+                        .expect("provider headers");
+                        stream
+                            .write_all(first.as_bytes())
+                            .expect("provider first chunk");
+                        stream.flush().expect("provider flush");
+                        thread_started.store(true, Ordering::SeqCst);
+                        thread::sleep(delay);
+                        stream.write_all(rest.as_bytes()).expect("provider rest");
+                        stream.flush().expect("provider flush rest");
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Self {
+            base,
+            started,
+            stop,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for SlowProvider {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+struct FakeTelegramGuard {
+    base: String,
+    state: Arc<TelegramState>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for FakeTelegramGuard {
+    fn drop(&mut self) {
+        self.state.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn wait_for_flag(flag: &AtomicBool, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !flag.load(Ordering::SeqCst) {
+        if Instant::now() >= deadline {
+            panic!("{message}");
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
 fn the_daemon_stops_an_active_run() {
     use hearth_core::{EffectStatus, Harness, SubmissionStatus};
 
-    let (provider_base, provider_thread) =
-        fake_provider_slow("Partial answer", Duration::from_millis(300));
+    let provider = SlowProvider::new("Partial answer", Duration::from_secs(1));
+    let stop_gate = Arc::new(AtomicBool::new(false));
     let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script_with_delays(
         vec![
             json!({
@@ -550,25 +630,32 @@ fn the_daemon_stops_an_active_run() {
             }),
         ],
         false,
-        vec![Duration::ZERO, Duration::from_millis(100)],
+        Vec::new(),
+        Some(Arc::clone(&stop_gate)),
     );
+    let telegram = FakeTelegramGuard {
+        base: telegram_base,
+        state: telegram_state,
+        handle: Some(telegram_thread),
+    };
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path(), &provider_base);
-    add_telegram_base(home.path(), &telegram_base);
+    init_home(home.path(), &provider.base);
+    add_telegram_base(home.path(), &telegram.base);
 
     let daemon = DaemonGuard::new(start_daemon(home.path()));
-    let rich = wait_for_rich_count(&telegram_state, 1);
+    wait_for_flag(&provider.started, "the provider never started");
+    stop_gate.store(true, Ordering::SeqCst);
+    let rich = wait_for_rich_count(&telegram.state, 1);
     assert!(
         rich[0].contains("Stopped."),
         "the daemon did not stop the run: {rich:?}"
     );
-    assert!(telegram_state.typing.load(Ordering::SeqCst) > 0);
-    assert_eq!(telegram_state.reactions.load(Ordering::SeqCst), 1);
+    assert!(telegram.state.typing.load(Ordering::SeqCst) > 0);
+    assert_eq!(telegram.state.reactions.load(Ordering::SeqCst), 1);
 
     daemon.stop();
-    telegram_state.stop.store(true, Ordering::SeqCst);
-    let _ = telegram_thread.join();
-    let _ = provider_thread.join();
+    drop(telegram);
+    drop(provider);
 
     let harness = Harness::open(home.path()).expect("reopen harness");
     let session = harness.session();
