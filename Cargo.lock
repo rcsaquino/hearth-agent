@@ -673,6 +673,15 @@ dependencies = [
 [[package]]
 name = "hearth-telegram"
 version = "0.1.0"
+dependencies = [
+ "hearth-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "hearth-tools"
