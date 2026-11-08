@@ -135,3 +135,20 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - A settlement's `answer_entry_id`, when present, must belong to the same
   conversation as the submission. A foreign entry returns `EntryNotFound`, and the
   submission stays unsettled.
+
+## 2026-11-08: M1b-1 task state machine
+
+- Sir confirmed the concrete `Storage` type on 2026-11-08, so the S1 and S2
+  boundaries stay as built.
+- Tasks are claimed in `COALESCE(next_wake_at, created_at), id` order. A pending
+  task with no wake time or a due wake time is runnable; a running task is not
+  claimable until recovery.
+- `attempt` counts claims of the current step. `Next`, `Sleep`, and a saved
+  retryable failure reset it to 0. A task whose expired lease is recovered at
+  attempt 2 or more becomes failed with the result `{"error": "poisoned"}`.
+- A retryable failure requeues after one second. A non-retryable failure settles
+  the task as failed with the error as its result.
+- A claim sets a lease; a heartbeat extends it only for the current owner. A stale
+  owner cannot heartbeat or finish.
+- Recovery requeues expired running leases below attempt 2, wakes due sleeps, and
+  leaves pending and terminal tasks alone. It is idempotent.
