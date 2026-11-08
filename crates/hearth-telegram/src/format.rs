@@ -70,8 +70,59 @@ pub fn format_markdown(markdown: &str) -> FormattedText {
     blocks(&mut writer, markdown);
     FormattedText {
         text: writer.text,
-        entities: writer.entities,
+        entities: finalize(writer.entities),
     }
+}
+
+fn finalize(entities: Vec<Entity>) -> Vec<Entity> {
+    let protected: Vec<(usize, usize)> = entities
+        .iter()
+        .filter(|entity| entity.kind == "code" || entity.kind == "pre")
+        .map(|entity| (entity.offset, entity.offset + entity.length))
+        .collect();
+    let mut result = Vec::new();
+    for entity in entities {
+        if entity.kind == "code" || entity.kind == "pre" {
+            result.push(entity);
+            continue;
+        }
+        let mut segments = vec![entity];
+        for (start, end) in &protected {
+            segments = segments
+                .into_iter()
+                .flat_map(|segment| {
+                    let segment_end = segment.offset + segment.length;
+                    if *end <= segment.offset || *start >= segment_end {
+                        vec![segment]
+                    } else {
+                        let mut parts = Vec::new();
+                        if *start > segment.offset {
+                            parts.push(Entity {
+                                length: *start - segment.offset,
+                                ..segment.clone()
+                            });
+                        }
+                        if *end < segment_end {
+                            parts.push(Entity {
+                                offset: *end,
+                                length: segment_end - *end,
+                                ..segment.clone()
+                            });
+                        }
+                        parts
+                    }
+                })
+                .collect();
+        }
+        result.extend(segments);
+    }
+    result.sort_by(|left, right| {
+        left.offset
+            .cmp(&right.offset)
+            .then_with(|| right.length.cmp(&left.length))
+    });
+    result.truncate(100);
+    result
 }
 
 fn blocks(writer: &mut Writer, markdown: &str) {
