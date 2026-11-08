@@ -958,3 +958,30 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   and the secret scan. The private deny list for publication stays outside the
   tree; the local acceptance uses an empty list so the credential-pattern scan
   still runs. The seven-day soak remains a future real-time item.
+
+## 2026-11-09: M8c-2a documents and media tools
+
+- The `documents` group now ships a real read-only extractor for PDF, DOCX, PPTX,
+  and XLSX. PDF uses the existing `pdf-extract`. DOCX and PPTX read
+  `word/document.xml` and `ppt/slides/slide*.xml`; XLSX reads shared strings and
+  sheet XML. These use new minimal dependencies, `zip` 2.6.1 and `quick-xml`
+  0.37.5. `calamine` was not added; the small XLSX reader is enough for text
+  extraction and keeps the dependency surface smaller.
+- Document reads may use the workspace, spill, or inbound-media roots. Absolute
+  paths are accepted only by the documents/media workspace; the ordinary file and
+  shell tools still reject absolute paths. The inbound media root is read-only.
+- The `documents` tool extracts text. It does not create or rewrite PDF, DOCX,
+  PPTX, or XLSX files yet; spec 9.2's "read and create" remains partly open for
+  the M8 gate.
+- The `media` group ships image generation, transcription, and speech. Image
+  generation uses an OpenRouter Images-compatible `{base}/images/generations`
+  client with b64 or URL responses; transcription reuses the Groq client; speech
+  reuses the ElevenLabs client. Generated media is written under
+  `media/outbound` at 0600. The media group is available only when at least one
+  media block is configured; the actions that lack a service return a clear
+  `media_not_configured` error.
+- The old placeholder `ToolGroups::default_groups` was removed. The runtime
+  builds the browser placeholder, the real documents group, and the configured
+  media group; the browser remains an honest empty placeholder.
+- The 100-turn token benchmark uses an empty optional-group registry because it
+  measures core prompt cost, not optional tools.
