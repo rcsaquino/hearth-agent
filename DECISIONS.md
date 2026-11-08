@@ -888,3 +888,12 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Review failures are logged, the night is still recorded, and the task sleeps until the next night rather than retrying in a hot loop.
 - `hearth status` exposes `last_consolidation`, `last_skill_review`, and `last_skill_review_changes`.
 - The maintenance scheduler exists only on the Telegram daemon path. A daemon without Telegram does not create or run these tasks.
+
+## 2026-11-09: Documentation, packaging, and the release scan (M8b)
+
+- `README.md` is the technical overview; `QUICKSTART.md` is the operator path; `SECURITY.md` and `CONTRIBUTING.md` are the policy documents. No command is documented unless it exists.
+- `scripts/package.sh` builds one target with `cargo build --release --locked`, stages the binary, `README.md`, `LICENSE`, and `QUICKSTART.md`, writes a versioned tarball under `dist/`, and writes a SHA-256 checksum. It requires the target to be installed and fails with the `rustup target add` hint otherwise. It does not publish.
+- `scripts/public-scan.sh` is a release gate, not part of `scripts/ci.sh`. It reads a private deny list from `HEARTH_PUBLIC_DENYLIST` (default `~/.hearth-public-denylist`), scans every git-tracked file for literal entries and common credential patterns, and prints only the offending file name. It refuses to run without a deny list.
+- `scripts/test-scripts.sh` checks both scripts: a temporary repository with a planted deny-list value and a planted credential pattern, a clean tree, and the host package contents and checksum.
+- The aarch64 package is documented but not built on this host; it needs `rustup target add aarch64-unknown-linux-gnu` and a cross linker.
+- Publication, the 7-day soak, and the M8 gate remain for M8c.
