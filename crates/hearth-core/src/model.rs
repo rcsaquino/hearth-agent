@@ -97,6 +97,16 @@ pub struct Commit {
     pub entry_ids: Vec<String>,
 }
 
+/// One line in the save log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitRecord {
+    pub seq: i64,
+    pub created_at: i64,
+    pub conversation_id: Option<String>,
+    pub task_id: Option<String>,
+    pub kind: String,
+}
+
 /// The outcome of submitting a message.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubmitResult {

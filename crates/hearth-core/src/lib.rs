@@ -9,8 +9,8 @@ mod task;
 pub use clock::{Clock, IdGen, SystemClock, UuidV7};
 pub use error::CoreError;
 pub use model::{
-    Commit, Conversation, Document, DocumentWrite, Entry, NewEntry, NewSubmission, Save, Settle,
-    Submission, SubmissionStatus, SubmitResult,
+    Commit, CommitRecord, Conversation, Document, DocumentWrite, Entry, NewEntry, NewSubmission,
+    Save, Settle, Submission, SubmissionStatus, SubmitResult,
 };
 pub use session::{Harness, Session};
 pub use task::{

@@ -9,8 +9,8 @@ use serde_json::Value;
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
-    Commit, Conversation, Document, Entry, NewSubmission, Save, Submission, SubmissionStatus,
-    SubmitResult,
+    Commit, CommitRecord, Conversation, Document, Entry, NewSubmission, Save, Submission,
+    SubmissionStatus, SubmitResult,
 };
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
 
@@ -287,6 +287,36 @@ impl Session {
 
             Ok(Commit { seq, entry_ids })
         })
+    }
+
+    /// Read the newest line in the save log.
+    pub fn latest_commit(&self) -> Result<Option<CommitRecord>, CoreError> {
+        let raw: Option<(i64, i64, Option<String>, Option<String>, String)> =
+            self.storage.read(|reader| {
+                reader.query_optional(
+                    "SELECT seq, created_at, conversation_id, task_id, kind FROM commits \
+                     ORDER BY seq DESC LIMIT 1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )
+            })?;
+        Ok(raw.map(
+            |(seq, created_at, conversation_id, task_id, kind)| CommitRecord {
+                seq,
+                created_at,
+                conversation_id,
+                task_id,
+                kind,
+            },
+        ))
     }
 
     /// Hand in a message with a receipt.
