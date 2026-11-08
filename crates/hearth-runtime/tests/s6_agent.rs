@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -704,4 +705,39 @@ fn a_pending_tool_call_is_replayed_before_the_next_request() {
                 matches!(block, ContentBlock::ToolResult { call_id, .. } if call_id == "call-1")
             })
     }));
+}
+
+#[test]
+fn a_cancelled_run_before_the_stream_settles_cancelled() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![Ok(
+        StreamEvent::TextDelta("never".to_owned()),
+    )])]));
+    let agent = agent(home.path(), &harness, provider.clone(), Pricing::default());
+    let cancel = Arc::new(AtomicBool::new(true));
+
+    let outcome = agent
+        .run_submission_with_cancel(&submission.id, cancel)
+        .expect("run submission");
+
+    assert_eq!(outcome.submission.status, SubmissionStatus::Cancelled);
+    assert_eq!(outcome.notice.as_deref(), Some("Stopped."));
+    assert!(outcome.answer_entry_id.is_none());
+    assert!(provider.requests().is_empty(), "the provider was called");
+    let history = harness.session().history(&conversation).expect("history");
+    assert_eq!(history.len(), 2, "history was {history:?}");
+    assert_eq!(history[1].kind, "notice");
+    assert_eq!(history[1].content["text"], "Stopped.");
+    let task = harness
+        .session()
+        .task(&outcome.task_id)
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Aborted);
+    assert!(
+        harness.session().latest_usage().expect("usage").is_none(),
+        "no provider call should mean no usage row"
+    );
 }
