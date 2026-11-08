@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hearth_core::{Harness, SubmissionStatus};
-use hearth_telegram::{TelegramClient, TelegramPoller};
+use hearth_telegram::{InboundMedia, TelegramClient, TelegramPoller};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -193,7 +193,8 @@ fn setup(
     let session = harness.session().clone();
     let client =
         TelegramClient::with_base_url("123:fake", api.base_url.clone()).expect("telegram client");
-    let poller = TelegramPoller::new(client, session, allowed_users, allowed_chats, 0);
+    let media = InboundMedia::new(home.path().join("media/inbound"));
+    let poller = TelegramPoller::new(client, session, allowed_users, allowed_chats, 0, media, None);
     (home, harness, poller)
 }
 
@@ -216,7 +217,7 @@ fn an_authorized_text_update_is_admitted() {
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].kind, "user");
     assert_eq!(history[0].source.as_deref(), Some("10"));
-    assert_eq!(history[0].content["text"], "hello");
+    assert_eq!(history[0].content[0]["text"], "hello");
 
     let submission = session
         .submission_by_request_id("tg:1:10")

@@ -699,6 +699,7 @@ name = "hearth-telegram"
 version = "0.1.0"
 dependencies = [
  "hearth-core",
+ "hearth-model",
  "reqwest",
  "serde",
  "serde_json",
