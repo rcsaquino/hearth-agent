@@ -687,6 +687,37 @@ impl Session {
         Ok(raw)
     }
 
+    /// Read the newest usage row.
+    pub fn latest_usage(&self) -> Result<Option<UsageEvent>, CoreError> {
+        let raw: Option<UsageEvent> = self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT id, ts, task_id, conversation_id, provider, model, kind, input_tokens, \
+                 cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, \
+                 cost_micros, latency_ms FROM usage_events ORDER BY ts DESC, id DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok(UsageEvent {
+                        id: row.get(0)?,
+                        ts: row.get(1)?,
+                        task_id: row.get(2)?,
+                        conversation_id: row.get(3)?,
+                        provider: row.get(4)?,
+                        model: row.get(5)?,
+                        kind: row.get(6)?,
+                        input_tokens: row.get(7)?,
+                        cache_read_tokens: row.get(8)?,
+                        cache_write_tokens: row.get(9)?,
+                        output_tokens: row.get(10)?,
+                        reasoning_tokens: row.get(11)?,
+                        cost_micros: row.get(12)?,
+                        latency_ms: row.get(13)?,
+                    })
+                },
+            )
+        })?;
+        Ok(raw)
+    }
+
     /// Hand in a message with a receipt.
     pub fn submit(
         &self,
