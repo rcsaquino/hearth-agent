@@ -616,3 +616,35 @@ local fake-server and fixture tests.
 - The agent reads standing and recall before every prompt. A memory error is
   logged and the run continues with empty segments. The runtime builds the
   policy from `settings.memory`.
+
+## 2026-11-08: Memory extraction and consolidation (M4c)
+
+- After a done run with non-trivial user content, the agent creates a durable
+  `memory.extract` task in the conversation, claims it, and runs one bounded
+  extraction call before returning. A trivial run creates no task. Extraction
+  failure never changes the answer.
+- The extraction view is the run's user entry through its final assistant entry,
+  excluding later queued user entries, capped near 2000 estimated tokens. It
+  carries entry ids. The request also includes the five most similar memories by
+  FTS.
+- The model returns JSON `{"operations":[...]}` with at most three add, update,
+  supersede, or noop operations. Every non-noop operation must cite a run entry
+  id and a quote that appears in that entry after whitespace and case
+  normalization; invalid evidence is rejected.
+- Adds use source_kind session and source_ref the evidence entry id, with actor
+  system. Updates target `supersedes_id`; supersedes insert a new row and close
+  the old one. The memory service's secret rejection still applies.
+- The extraction call is metered with kind `memory.extract`, linked to the task,
+  and its prompt is saved as a prompt blob. The task ends done with applied and
+  rejected counts, or failed on a provider or JSON error.
+- The standing refresh now compares the final standing set with the stored set
+  and bumps the version only when they differ, so a qualifying row that does not
+  fit the cap does not step the version.
+- Consolidation is a skeleton: it scans active rows, merges exact and near
+  duplicates into the earlier row with max importance and unioned tags, and
+  supersedes the later rows. No episode summaries, nightly schedule, or
+  importance recompute beyond the merge rule.
+- The S8 recovery test exposed that the extraction must use the run's own user
+  entry and final answer, not the newest user entry, because a queued input can
+  arrive mid-run. The run-entry selection now matches the submission's
+  created_at and content and stops at the answer entry.
