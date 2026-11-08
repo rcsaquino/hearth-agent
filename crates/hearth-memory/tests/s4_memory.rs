@@ -936,7 +936,6 @@ fn inflected_words_match_with_stemming() {
     );
 }
 
-
 #[test]
 fn importance_decays_without_use_and_has_a_floor() {
     let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
@@ -990,10 +989,18 @@ fn importance_decays_without_use_and_has_a_floor() {
 fn archived_memories_are_hidden_by_default_and_kept() {
     let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
     let old = service
-        .save(input_imp("The archiveonly fact about cobalt", MemoryKind::Fact, 10))
+        .save(input_imp(
+            "The archiveonly fact about cobalt",
+            MemoryKind::Fact,
+            10,
+        ))
         .expect("save old fact");
     let pinned = service
-        .save(input_imp("The pinned fact about cobalt", MemoryKind::Fact, 10))
+        .save(input_imp(
+            "The pinned fact about cobalt",
+            MemoryKind::Fact,
+            10,
+        ))
         .expect("save pinned fact");
     service.pin(&pinned.id, true).expect("pin");
     let rule = service
@@ -1002,13 +1009,20 @@ fn archived_memories_are_hidden_by_default_and_kept() {
     clock.advance_days(4 * 365);
 
     let report = service.archive_stale().expect("archive");
-    assert_eq!(report.archived, 1, "only the old unpinned fact should archive");
+    assert_eq!(
+        report.archived, 1,
+        "only the old unpinned fact should archive"
+    );
     assert_eq!(
         service.get(&old.id).expect("get").expect("exists").status,
         MemoryStatus::Archived
     );
     assert_eq!(
-        service.get(&pinned.id).expect("get").expect("exists").status,
+        service
+            .get(&pinned.id)
+            .expect("get")
+            .expect("exists")
+            .status,
         MemoryStatus::Active
     );
     assert_eq!(
@@ -1017,7 +1031,10 @@ fn archived_memories_are_hidden_by_default_and_kept() {
     );
 
     assert!(
-        service.search("archiveonly", 10).expect("search").is_empty(),
+        service
+            .search("archiveonly", 10)
+            .expect("search")
+            .is_empty(),
         "archived memory appeared in the default search"
     );
     assert!(
@@ -1030,7 +1047,10 @@ fn archived_memories_are_hidden_by_default_and_kept() {
     );
     let now = clock.now_micros();
     assert!(
-        service.as_of(Some("archiveonly"), now).expect("as_of").is_empty(),
+        service
+            .as_of(Some("archiveonly"), now)
+            .expect("as_of")
+            .is_empty(),
         "archived memory appeared in the default as_of"
     );
     assert!(
@@ -1071,7 +1091,10 @@ fn episodes_are_written_once_per_conversation_and_searchable() {
         .iter()
         .find(|item| item.kind == MemoryKind::Episode)
         .expect("episode");
-    assert_eq!(episode.source_ref.as_deref(), Some(conversation.id.as_str()));
+    assert_eq!(
+        episode.source_ref.as_deref(),
+        Some(conversation.id.as_str())
+    );
     assert!(episode.tags.iter().any(|tag| tag == "episode"));
     assert!(
         episode
@@ -1097,10 +1120,10 @@ fn episodes_are_written_once_per_conversation_and_searchable() {
         .create_conversation("Other", "local", "local:episode-2")
         .expect("conversation");
     session
-        .save(
-            Save::new(&second_conversation.id)
-                .entry("user", json!({"text": "The Borealis project starts Monday."})),
-        )
+        .save(Save::new(&second_conversation.id).entry(
+            "user",
+            json!({"text": "The Borealis project starts Monday."}),
+        ))
         .expect("save entries");
     let third = service.consolidate_episodes().expect("episodes");
     assert_eq!(third.written, 1);
@@ -1113,12 +1136,15 @@ fn episodes_are_written_once_per_conversation_and_searchable() {
     assert_eq!(total, 2);
 }
 
-
 #[test]
 fn the_memory_tool_can_read_archived_memories() {
     let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
     let old = service
-        .save(input_imp("The toolarchive fact about cobalt", MemoryKind::Fact, 10))
+        .save(input_imp(
+            "The toolarchive fact about cobalt",
+            MemoryKind::Fact,
+            10,
+        ))
         .expect("save");
     clock.advance_days(4 * 365);
     service.archive_stale().expect("archive");

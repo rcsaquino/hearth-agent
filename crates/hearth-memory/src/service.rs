@@ -666,8 +666,7 @@ impl MemoryService {
                 let staleness = 0.5f64.powf(stale_days / RECENCY_HALF_LIFE_DAYS);
                 let score = (rrf / max_rrf)
                     + RECENCY_WEIGHT * recency
-                    + IMPORTANCE_WEIGHT
-                        * (Self::effective_importance(&item, now) as f64 / 100.0)
+                    + IMPORTANCE_WEIGHT * (Self::effective_importance(&item, now) as f64 / 100.0)
                     - STALENESS_WEIGHT * staleness;
                 (item, score)
             })
@@ -812,13 +811,12 @@ impl MemoryService {
                 skipped += 1;
                 continue;
             }
-            let covered = self
-                .latest_episode(&conversation)?
-                .and_then(|episode| {
-                    episode.tags.iter().find_map(|tag| {
-                        tag.strip_prefix("covered:").map(str::to_owned)
-                    })
-                });
+            let covered = self.latest_episode(&conversation)?.and_then(|episode| {
+                episode
+                    .tags
+                    .iter()
+                    .find_map(|tag| tag.strip_prefix("covered:").map(str::to_owned))
+            });
             let start = match covered {
                 Some(entry_id) => match history.iter().position(|entry| entry.id == entry_id) {
                     Some(index) => index + 1,
@@ -1058,9 +1056,7 @@ fn entry_text(entry: &Entry) -> String {
 }
 
 fn episode_summary(conversation_id: &str, date: &str, entries: &[Entry]) -> String {
-    let mut content = format!(
-        "Episode {date} (conversation {conversation_id})\n"
-    );
+    let mut content = format!("Episode {date} (conversation {conversation_id})\n");
     for entry in entries {
         if !matches!(entry.kind.as_str(), "user" | "assistant") {
             continue;
@@ -1070,7 +1066,11 @@ fn episode_summary(conversation_id: &str, date: &str, entries: &[Entry]) -> Stri
         if text.is_empty() {
             continue;
         }
-        let role = if entry.kind == "user" { "User" } else { "Assistant" };
+        let role = if entry.kind == "user" {
+            "User"
+        } else {
+            "Assistant"
+        };
         let line = format!("{role}: {text}\n");
         let candidate = format!("{content}{line}");
         if hearth_model::estimate_tokens(&candidate) > 500 {
