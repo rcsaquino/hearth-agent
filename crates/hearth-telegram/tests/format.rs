@@ -83,3 +83,19 @@ fn formats_italic_strikethrough_spoiler_and_underline() {
     assert_eq!((entity(&value, "spoiler").offset, entity(&value, "spoiler").length), (8, 6));
     assert_eq!((entity(&value, "underline").offset, entity(&value, "underline").length), (15, 5));
 }
+
+#[test]
+fn formats_headings_lists_quotes_and_tables() {
+    let value = format_markdown(
+        "# Title\n\n- one\n- two\n\n> quoted\n\n| A | B |\n|---|---|\n| 1 | 2 |",
+    );
+    let heading = entity(&value, "bold");
+    assert_eq!(
+        &value.text[heading.offset..heading.offset + heading.length],
+        "Title"
+    );
+    assert!(value.text.contains("• one\n• two"), "{}", value.text);
+    assert!(value.text.contains("› quoted"), "{}", value.text);
+    assert!(value.text.contains("A: 1"), "{}", value.text);
+    assert!(value.text.contains("B: 2"), "{}", value.text);
+}
