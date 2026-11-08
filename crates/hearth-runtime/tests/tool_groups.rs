@@ -90,7 +90,11 @@ fn selecting_a_group_adds_its_specs_and_calls_are_confined() {
     assert_eq!(specs[0].name, "echo");
 
     let output = groups
-        .call_selected("echo", &json!({"text": "hello"}), &selection.lock().expect("selection"))
+        .call_selected(
+            "echo",
+            &json!({"text": "hello"}),
+            &selection.lock().expect("selection"),
+        )
         .expect("the selected tool exists")
         .expect("the call succeeds");
     assert_eq!(output.content, "hello");
@@ -113,9 +117,7 @@ fn unselected_groups_stay_out_and_bad_selections_are_errors() {
     assert_eq!(error.code, "group_unavailable");
 
     assert!(
-        groups
-            .selected_specs(&HashSet::new())
-            .is_empty(),
+        groups.selected_specs(&HashSet::new()).is_empty(),
         "nothing may be selected"
     );
 }
