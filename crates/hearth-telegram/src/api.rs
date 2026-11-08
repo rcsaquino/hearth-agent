@@ -259,7 +259,14 @@ impl TelegramClient {
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
-        self.send_file("sendDocument", "document", chat_id, thread_id, path, caption)
+        self.send_file(
+            "sendDocument",
+            "document",
+            chat_id,
+            thread_id,
+            path,
+            caption,
+        )
     }
 
     /// Send one video and return its message id.

@@ -39,8 +39,11 @@ fn add_telegram_base(home: &Path, base: &str) {
         serde_json::from_str(&std::fs::read_to_string(&path).expect("read settings"))
             .expect("parse settings");
     value["telegram"]["base_url"] = json!(base);
-    std::fs::write(&path, serde_json::to_string_pretty(&value).expect("settings json"))
-        .expect("write settings");
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&value).expect("settings json"),
+    )
+    .expect("write settings");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -269,10 +272,7 @@ fn the_daemon_answers_a_telegram_message() {
 
     let daemon = DaemonGuard::new(start_daemon(home.path()));
     let answer = wait_for_answer(&telegram_state);
-    assert!(
-        answer.contains("Telegram answer"),
-        "answer was {answer:?}"
-    );
+    assert!(answer.contains("Telegram answer"), "answer was {answer:?}");
     assert!(telegram_state.typing.load(Ordering::SeqCst) > 0);
     assert!(telegram_state.reactions.load(Ordering::SeqCst) > 0);
 

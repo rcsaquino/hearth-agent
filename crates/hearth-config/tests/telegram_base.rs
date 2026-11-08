@@ -31,7 +31,10 @@ fn a_custom_telegram_base_url_is_accepted() {
     value["telegram"]["base_url"] = json!("http://127.0.0.1:8080");
     let settings = settings(value);
     assert_eq!(
-        settings.telegram.as_ref().and_then(|telegram| telegram.base_url.as_deref()),
+        settings
+            .telegram
+            .as_ref()
+            .and_then(|telegram| telegram.base_url.as_deref()),
         Some("http://127.0.0.1:8080")
     );
     settings.validate_for_run().expect("valid settings");

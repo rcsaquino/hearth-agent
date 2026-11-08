@@ -115,4 +115,3 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
     }
     Ok(())
 }
-

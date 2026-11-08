@@ -171,10 +171,19 @@ impl MessageTool {
         caption: Option<&str>,
     ) -> Result<i64, ToolError> {
         let result = match kind {
-            MediaKind::Photo => self.client.send_photo(self.chat_id, self.thread_id, path, caption),
-            MediaKind::Video => self.client.send_video(self.chat_id, self.thread_id, path, caption),
-            MediaKind::Voice => self.client.send_voice(self.chat_id, self.thread_id, path, caption),
-            MediaKind::Document => self.client.send_document(self.chat_id, self.thread_id, path, caption),
+            MediaKind::Photo => self
+                .client
+                .send_photo(self.chat_id, self.thread_id, path, caption),
+            MediaKind::Video => self
+                .client
+                .send_video(self.chat_id, self.thread_id, path, caption),
+            MediaKind::Voice => self
+                .client
+                .send_voice(self.chat_id, self.thread_id, path, caption),
+            MediaKind::Document => {
+                self.client
+                    .send_document(self.chat_id, self.thread_id, path, caption)
+            }
         };
         result.map_err(telegram_error)
     }

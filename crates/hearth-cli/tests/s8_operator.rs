@@ -77,7 +77,10 @@ fn init_daemon_home(home: &std::path::Path) {
     if let Some(object) = value.as_object_mut() {
         object.remove("telegram");
     }
-    write_settings(home, &serde_json::to_string_pretty(&value).expect("settings json"));
+    write_settings(
+        home,
+        &serde_json::to_string_pretty(&value).expect("settings json"),
+    );
 }
 
 fn write_settings(home: &std::path::Path, text: &str) {
