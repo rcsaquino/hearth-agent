@@ -779,21 +779,38 @@ impl Session {
                         report.woken += 1;
                     }
                 }
-                let expired: Vec<String> = writer.query(
-                    "SELECT id FROM tasks WHERE status = 'running' \
+                let expired: Vec<(String, i64)> = writer.query(
+                    "SELECT id, attempt FROM tasks WHERE status = 'running' \
                      AND (lease_until IS NULL OR lease_until <= ?)",
                     (now,),
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )?;
-                for id in expired {
-                    let changed = writer.execute(
-                        "UPDATE tasks SET status = 'pending', lease_owner = NULL, \
-                         lease_until = NULL, updated_at = ? \
-                         WHERE id = ? AND status = 'running'",
-                        (now, id.as_str()),
-                    )?;
-                    if changed == 1 {
-                        report.requeued += 1;
+                for (id, attempt) in expired {
+                    if attempt >= 2 {
+                        let result = serde_json::to_string(&serde_json::json!({
+                            "error": "poisoned"
+                        }))
+                        .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let changed = writer.execute(
+                            "UPDATE tasks SET status = 'failed', result_json = ?, \
+                             terminal_at = ?, lease_owner = NULL, lease_until = NULL, \
+                             next_wake_at = NULL, updated_at = ? \
+                             WHERE id = ? AND status = 'running'",
+                            (result, now, now, id.as_str()),
+                        )?;
+                        if changed == 1 {
+                            report.poisoned += 1;
+                        }
+                    } else {
+                        let changed = writer.execute(
+                            "UPDATE tasks SET status = 'pending', lease_owner = NULL, \
+                             lease_until = NULL, updated_at = ? \
+                             WHERE id = ? AND status = 'running'",
+                            (now, id.as_str()),
+                        )?;
+                        if changed == 1 {
+                            report.requeued += 1;
+                        }
                     }
                 }
                 Ok(report)
