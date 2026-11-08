@@ -81,3 +81,31 @@ fn a_new_task_is_pending_and_readable() {
         .expect("task exists");
     assert_eq!(read, task);
 }
+
+#[test]
+fn a_claim_marks_a_task_running_with_a_lease_and_attempt() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+
+    let claimed = session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("a task is runnable");
+    assert_eq!(claimed.id, task.id);
+    assert_eq!(claimed.phase, "start");
+    assert_eq!(claimed.attempt, 1);
+    assert_eq!(claimed.input["n"], 1);
+
+    let running = session
+        .task(&task.id)
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(running.status, TaskStatus::Running);
+    assert_eq!(running.lease_owner.as_deref(), Some("worker-a"));
+    assert_eq!(running.lease_until, Some(clock.now() + 60_000_000));
+    assert_eq!(running.attempt, 1);
+}
