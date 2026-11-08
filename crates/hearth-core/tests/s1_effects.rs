@@ -383,3 +383,32 @@ fn a_failed_save_leaves_no_effect_or_commit() {
         "a failed save must not leave an effect"
     );
 }
+
+#[test]
+fn pending_and_started_effects_are_listed_in_order() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+
+    let mut ids = Vec::new();
+    for key in ["a", "b", "c"] {
+        let commit = session
+            .save(
+                Save::new(&conversation_id)
+                    .effect(EffectIntent::new("file_write", key, json!({}))),
+            )
+            .expect("save");
+        ids.push(commit.effect_ids[0].clone());
+    }
+    session.begin_effect(&ids[1]).expect("begin b");
+
+    let pending = session.pending_effects(10).expect("pending effects");
+    assert_eq!(
+        pending.iter().map(|effect| effect.key.as_str()).collect::<Vec<_>>(),
+        vec!["a", "c"]
+    );
+    let started = session.started_effects().expect("started effects");
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0].id, ids[1]);
+    assert!(session.pending_effects(0).expect("zero limit").is_empty());
+}
