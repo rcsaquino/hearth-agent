@@ -616,13 +616,37 @@ impl Session {
     pub fn heartbeat_task(
         &self,
         task_id: &str,
-        _owner: &str,
-        _lease_micros: i64,
+        owner: &str,
+        lease_micros: i64,
     ) -> Result<(), CoreError> {
-        Err(CoreError::TaskNotRunning(
-            task_id.to_owned(),
-            "not implemented".to_owned(),
-        ))
+        if owner.trim().is_empty() {
+            return Err(CoreError::Invalid("task owner is empty".to_owned()));
+        }
+        if lease_micros <= 0 {
+            return Err(CoreError::Invalid("task lease must be positive".to_owned()));
+        }
+        let now = self.clock.now_micros();
+        let task_id = task_id.to_owned();
+        let owner = owner.to_owned();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            let changed = writer.execute(
+                "UPDATE tasks SET lease_until = ?, updated_at = ? \
+                 WHERE id = ? AND status = 'running' AND lease_owner = ?",
+                (now + lease_micros, now, task_id.as_str(), owner.as_str()),
+            )?;
+            if changed == 1 {
+                return Ok(());
+            }
+            let task = load_task(writer, &task_id)?
+                .ok_or_else(|| CoreError::TaskNotFound(task_id.clone()))?;
+            if task.status != TaskStatus::Running {
+                return Err(CoreError::TaskNotRunning(
+                    task_id,
+                    task.status.as_str().to_owned(),
+                ));
+            }
+            Err(CoreError::LeaseLost(task_id))
+        })
     }
 
     /// Apply one step outcome.
