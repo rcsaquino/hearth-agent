@@ -7,7 +7,7 @@ use serde_json::json;
 use thiserror::Error;
 
 use crate::api::{TelegramClient, TelegramError};
-use crate::types::{Message, Update};
+use crate::types::Message;
 
 /// A polling failure.
 #[derive(Debug, Error)]
@@ -57,11 +57,9 @@ impl TelegramPoller {
     /// Poll once and admit authorized text messages.
     pub fn poll_once(&self) -> Result<PollReport, PollError> {
         let offset = self.session.telegram_offset()?;
-        let updates = self.client.get_updates(
-            offset,
-            self.poll_timeout,
-            &["message", "callback_query"],
-        )?;
+        let updates =
+            self.client
+                .get_updates(offset, self.poll_timeout, &["message", "callback_query"])?;
         let mut report = PollReport {
             next_offset: offset,
             ..PollReport::default()
@@ -110,8 +108,7 @@ impl TelegramPoller {
                                 .and_then(|user| user.first_name.clone())
                         })
                         .unwrap_or_else(|| "Telegram".to_owned());
-                    self.session
-                        .create_conversation(&title, "telegram", &key)?
+                    self.session.create_conversation(&title, "telegram", &key)?
                 }
             };
 
@@ -133,11 +130,10 @@ impl TelegramPoller {
                 continue;
             }
             report.admitted += 1;
-            if let Err(error) = self.client.set_message_reaction(
-                message.chat.id,
-                message.message_id,
-                "👀",
-            ) {
+            if let Err(error) =
+                self.client
+                    .set_message_reaction(message.chat.id, message.message_id, "👀")
+            {
                 tracing::warn!(%error, "telegram reaction failed");
             }
         }

@@ -82,20 +82,19 @@ impl TelegramClient {
             .post(url)
             .json(&params)
             .send()
-            .map_err(|error| transport_error(error))?;
+            .map_err(transport_error)?;
         let status = response.status();
         let body = response
             .text()
             .map_err(|_| TelegramError::Transport("could not read the response".to_owned()))?;
-        let envelope: Envelope = serde_json::from_str(&body).map_err(|error| {
-            TelegramError::Protocol {
+        let envelope: Envelope =
+            serde_json::from_str(&body).map_err(|error| TelegramError::Protocol {
                 method: method.to_owned(),
                 detail: format!(
                     "status {status}, invalid JSON: {error}: {}",
                     body.chars().take(200).collect::<String>()
                 ),
-            }
-        })?;
+            })?;
         if !envelope.ok {
             return Err(TelegramError::Api {
                 method: method.to_owned(),
@@ -103,7 +102,9 @@ impl TelegramClient {
                 description: envelope
                     .description
                     .unwrap_or_else(|| "unknown Telegram error".to_owned()),
-                retry_after: envelope.parameters.and_then(|parameters| parameters.retry_after),
+                retry_after: envelope
+                    .parameters
+                    .and_then(|parameters| parameters.retry_after),
             });
         }
         Ok(envelope.result.unwrap_or(Value::Null))
