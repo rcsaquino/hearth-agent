@@ -695,3 +695,139 @@ fn doctor_reports_the_lock_state() {
         "unexpected output: {released_stdout}"
     );
 }
+
+fn base_settings() -> serde_json::Value {
+    serde_json::json!({
+        "identity": {"agent_name": "Hearth", "user_name": "User", "timezone": "UTC"},
+        "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
+        "models": {
+            "kind": "openai-compatible",
+            "base_url": "https://example.com/v1",
+            "api_key": "fake",
+            "model": "fake-model"
+        }
+    })
+}
+
+fn write_value(home: &Path, value: &serde_json::Value) {
+    write_settings(
+        home,
+        &serde_json::to_string_pretty(value).expect("settings JSON"),
+    );
+}
+
+fn expect_settings_failure(value: &serde_json::Value, needle: &str) {
+    let home = tempfile::TempDir::new().expect("temp home");
+    write_value(home.path(), value);
+    let output = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run hearth");
+    assert!(!output.status.success(), "doctor unexpectedly passed");
+    let text = String::from_utf8_lossy(&output.stderr);
+    let line = text.trim();
+    assert_eq!(line.lines().count(), 1, "expected one sentence: {text}");
+    assert!(line.contains(needle), "unexpected message: {line}");
+}
+
+#[test]
+fn telegram_requires_an_allowed_user() {
+    let mut value = base_settings();
+    value["telegram"]["allowed_user_ids"] = serde_json::json!([]);
+    expect_settings_failure(&value, "telegram.allowed_user_ids");
+}
+
+#[test]
+fn an_empty_settings_file_parses_but_cannot_run() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    write_settings(home.path(), "");
+    let output = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run hearth");
+    assert!(!output.status.success());
+    let text = String::from_utf8_lossy(&output.stderr);
+    let line = text.trim();
+    assert_eq!(line.lines().count(), 1, "expected one sentence: {text}");
+    assert!(line.contains("models"), "unexpected message: {line}");
+}
+
+#[test]
+fn media_image_requires_an_api_key() {
+    let mut value = base_settings();
+    value["media"] = serde_json::json!({
+        "image": {"kind": "openrouter-images", "model": "fake-image"}
+    });
+    expect_settings_failure(&value, "media.image.api_key");
+}
+
+#[test]
+fn media_tts_requires_a_voice_id() {
+    let mut value = base_settings();
+    value["media"] = serde_json::json!({
+        "tts": {"kind": "elevenlabs", "api_key": "fake", "model": "eleven_v4"}
+    });
+    expect_settings_failure(&value, "media.tts.voice_id");
+}
+
+#[test]
+fn media_base_url_must_use_https() {
+    let mut value = base_settings();
+    value["media"] = serde_json::json!({
+        "image": {
+            "kind": "openrouter-images",
+            "api_key": "fake",
+            "model": "fake-image",
+            "base_url": "http://example.com"
+        }
+    });
+    expect_settings_failure(&value, "must use https");
+}
+
+#[test]
+fn media_stt_requires_an_api_key() {
+    let mut value = base_settings();
+    value["media"] = serde_json::json!({
+        "stt": {"kind": "groq", "model": "fake-stt"}
+    });
+    expect_settings_failure(&value, "media.stt.api_key");
+}
+
+#[test]
+fn web_search_rejects_an_unknown_provider() {
+    let mut value = base_settings();
+    value["web"] = serde_json::json!({"search": {"order": ["nope"]}});
+    expect_settings_failure(&value, "unknown provider");
+}
+
+#[test]
+fn web_search_rejects_a_bad_range() {
+    let mut value = base_settings();
+    value["web"] = serde_json::json!({"search": {"order": ["exa"], "parallel": 0}});
+    expect_settings_failure(&value, "web.search.parallel");
+}
+
+#[test]
+fn tasks_rejects_a_bad_range() {
+    let mut value = base_settings();
+    value["tasks"] = serde_json::json!({"max_concurrent": 9});
+    expect_settings_failure(&value, "tasks.max_concurrent");
+}
+
+#[test]
+fn models_rejects_an_unknown_kind() {
+    let mut value = base_settings();
+    value["models"]["kind"] = serde_json::json!("other");
+    expect_settings_failure(&value, "models.kind");
+}
+
+#[test]
+fn logging_rejects_an_unknown_level() {
+    let mut value = base_settings();
+    value["logging"] = serde_json::json!({"level": "loud"});
+    expect_settings_failure(&value, "logging.level");
+}

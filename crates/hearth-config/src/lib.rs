@@ -51,6 +51,11 @@ pub fn load(home: &Path) -> Result<Settings, ConfigError> {
         }
     }
     let text = fs::read_to_string(&path)?;
+    let text = if text.trim().is_empty() {
+        "{}".to_owned()
+    } else {
+        text
+    };
     let mut value: Value = serde_json::from_str(&text)?;
     expand_value(&mut value);
     let settings: Settings = serde_json::from_value(value)?;
