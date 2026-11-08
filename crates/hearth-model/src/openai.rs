@@ -256,8 +256,15 @@ impl OpenAiStream {
             self.pending.extend(events);
             return;
         }
-        let Ok(value) = serde_json::from_str::<Value>(data) else {
-            return;
+        let value = match serde_json::from_str::<Value>(data) {
+            Ok(value) => value,
+            Err(error) => {
+                self.done = true;
+                self.pending.push_back(Err(ProviderError::Protocol(format!(
+                    "invalid SSE JSON: {error}"
+                ))));
+                return;
+            }
         };
         if !self.usage_sent && value.get("usage").is_some_and(|usage| !usage.is_null()) {
             self.pending
