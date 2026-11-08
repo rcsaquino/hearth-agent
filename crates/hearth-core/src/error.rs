@@ -22,6 +22,12 @@ pub enum CoreError {
     },
     #[error("submission {0} is already settled as {1}")]
     AlreadySettled(String, String),
+    #[error("task {0} not found")]
+    TaskNotFound(String),
+    #[error("task {0} is not running (status {1})")]
+    TaskNotRunning(String, String),
+    #[error("task {0} is leased by another worker")]
+    LeaseLost(String),
     #[error("invalid input: {0}")]
     Invalid(String),
     #[error("stored data is invalid: {0}")]

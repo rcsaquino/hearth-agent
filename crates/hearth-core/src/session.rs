@@ -12,6 +12,7 @@ use crate::model::{
     Commit, Conversation, Document, Entry, NewSubmission, Save, Submission, SubmissionStatus,
     SubmitResult,
 };
+use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
 
 const CONVERSATION_SELECT: &str = "SELECT id, parent_id, parent_entry_id, title, transport, \
      transport_key, created_at, updated_at, archived FROM conversations";
@@ -19,6 +20,9 @@ const ENTRY_SELECT: &str = "SELECT id, conversation_id, seq, kind, content_json,
      source, prompt_hash, created_at FROM entries";
 const SUBMISSION_SELECT: &str = "SELECT id, conversation_id, request_id, kind, content_json, \
      status, answer_entry_id, error_json, created_at, settled_at FROM submissions";
+const TASK_SELECT: &str = "SELECT id, conversation_id, parent_task_id, kind, version, status, \
+     phase, attempt, input_json, checkpoint_json, result_json, lease_owner, lease_until, \
+     next_wake_at, created_at, updated_at, terminal_at FROM tasks";
 
 /// Open the permanent record and run work.
 pub struct Harness {
@@ -452,6 +456,136 @@ impl Session {
         self.read_submission("id", id)
     }
 
+    /// Create a task in its first phase.
+    pub fn create_task(&self, new: NewTask) -> Result<Task, CoreError> {
+        if new.kind.trim().is_empty() {
+            return Err(CoreError::Invalid("task kind is empty".to_owned()));
+        }
+        if new.phase.trim().is_empty() {
+            return Err(CoreError::Invalid("task phase is empty".to_owned()));
+        }
+        if new.version < 1 {
+            return Err(CoreError::Invalid(
+                "task version must be positive".to_owned(),
+            ));
+        }
+
+        let now = self.clock.now_micros();
+        let id = self.ids.new_id();
+        let input = serde_json::to_string(&new.input)
+            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+        let task = Task {
+            id: id.clone(),
+            conversation_id: new.conversation_id,
+            parent_task_id: new.parent_task_id,
+            kind: new.kind,
+            version: new.version,
+            status: TaskStatus::Pending,
+            phase: new.phase,
+            attempt: 0,
+            input: new.input,
+            checkpoint: None,
+            result: None,
+            lease_owner: None,
+            lease_until: None,
+            next_wake_at: None,
+            created_at: now,
+            updated_at: now,
+            terminal_at: None,
+        };
+        let insert = task.clone();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            writer.execute(
+                "INSERT INTO tasks (id, conversation_id, parent_task_id, kind, version, status, \
+                 phase, attempt, input_json, checkpoint_json, result_json, lease_owner, \
+                 lease_until, next_wake_at, created_at, updated_at, terminal_at) \
+                 VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL)",
+                (
+                    insert.id.as_str(),
+                    insert.conversation_id.as_deref(),
+                    insert.parent_task_id.as_deref(),
+                    insert.kind.as_str(),
+                    insert.version,
+                    insert.phase.as_str(),
+                    input.as_str(),
+                    insert.created_at,
+                    insert.updated_at,
+                ),
+            )?;
+            Ok(())
+        })?;
+        Ok(task)
+    }
+
+    /// Read one task.
+    pub fn task(&self, id: &str) -> Result<Option<Task>, CoreError> {
+        let sql = format!("{TASK_SELECT} WHERE id = ?");
+        let raw: Option<RawTask> = self.storage.read(|reader| {
+            reader.query_optional(&sql, (id,), |row| {
+                Ok(RawTask {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    parent_task_id: row.get(2)?,
+                    kind: row.get(3)?,
+                    version: row.get(4)?,
+                    status: row.get(5)?,
+                    phase: row.get(6)?,
+                    attempt: row.get(7)?,
+                    input_json: row.get(8)?,
+                    checkpoint_json: row.get(9)?,
+                    result_json: row.get(10)?,
+                    lease_owner: row.get(11)?,
+                    lease_until: row.get(12)?,
+                    next_wake_at: row.get(13)?,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
+                    terminal_at: row.get(16)?,
+                })
+            })
+        })?;
+        raw.map(RawTask::into_task).transpose()
+    }
+
+    /// Claim the oldest runnable task.
+    pub fn claim_task(
+        &self,
+        _owner: &str,
+        _lease_micros: i64,
+    ) -> Result<Option<ClaimedTask>, CoreError> {
+        Ok(None)
+    }
+
+    /// Extend the lease on a running task.
+    pub fn heartbeat_task(
+        &self,
+        task_id: &str,
+        _owner: &str,
+        _lease_micros: i64,
+    ) -> Result<(), CoreError> {
+        Err(CoreError::TaskNotRunning(
+            task_id.to_owned(),
+            "not implemented".to_owned(),
+        ))
+    }
+
+    /// Apply one step outcome.
+    pub fn finish_task(
+        &self,
+        task_id: &str,
+        _owner: &str,
+        _output: StepOutput,
+    ) -> Result<Task, CoreError> {
+        Err(CoreError::TaskNotRunning(
+            task_id.to_owned(),
+            "not implemented".to_owned(),
+        ))
+    }
+
+    /// Requeue tasks whose leases or sleeps expired.
+    pub fn recover_tasks(&self) -> Result<RecoveryReport, CoreError> {
+        Ok(RecoveryReport::default())
+    }
+
     /// Fork a conversation at a chosen entry.
     pub fn fork(&self, conversation_id: &str, entry_id: &str) -> Result<Conversation, CoreError> {
         let now = self.clock.now_micros();
@@ -688,6 +822,64 @@ impl RawSubmission {
             error,
             created_at: self.created_at,
             settled_at: self.settled_at,
+        })
+    }
+}
+
+struct RawTask {
+    id: String,
+    conversation_id: Option<String>,
+    parent_task_id: Option<String>,
+    kind: String,
+    version: i64,
+    status: String,
+    phase: String,
+    attempt: i64,
+    input_json: String,
+    checkpoint_json: Option<String>,
+    result_json: Option<String>,
+    lease_owner: Option<String>,
+    lease_until: Option<i64>,
+    next_wake_at: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+    terminal_at: Option<i64>,
+}
+
+impl RawTask {
+    fn into_task(self) -> Result<Task, CoreError> {
+        let status = TaskStatus::parse(&self.status)
+            .ok_or_else(|| CoreError::Corrupt(format!("unknown task status: {}", self.status)))?;
+        let input = serde_json::from_str(&self.input_json)
+            .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+        let checkpoint = self
+            .checkpoint_json
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+        let result = self
+            .result_json
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+        Ok(Task {
+            id: self.id,
+            conversation_id: self.conversation_id,
+            parent_task_id: self.parent_task_id,
+            kind: self.kind,
+            version: self.version,
+            status,
+            phase: self.phase,
+            attempt: self.attempt,
+            input,
+            checkpoint,
+            result,
+            lease_owner: self.lease_owner,
+            lease_until: self.lease_until,
+            next_wake_at: self.next_wake_at,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            terminal_at: self.terminal_at,
         })
     }
 }

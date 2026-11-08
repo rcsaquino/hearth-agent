@@ -4,6 +4,7 @@ mod clock;
 mod error;
 mod model;
 mod session;
+mod task;
 
 pub use clock::{Clock, IdGen, SystemClock, UuidV7};
 pub use error::CoreError;
@@ -12,3 +13,6 @@ pub use model::{
     Submission, SubmissionStatus, SubmitResult,
 };
 pub use session::{Harness, Session};
+pub use task::{
+    ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus, TerminalOutcome,
+};

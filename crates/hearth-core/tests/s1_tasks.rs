@@ -17,6 +17,7 @@ impl TestClock {
         self.0.load(Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
     fn advance(&self, micros: i64) {
         self.0.fetch_add(micros, Ordering::SeqCst);
     }
