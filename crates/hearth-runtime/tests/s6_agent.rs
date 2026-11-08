@@ -5,10 +5,12 @@ use std::time::Duration;
 
 use hearth_core::{Harness, NewTask, Submission, SubmissionStatus, TaskStatus};
 use hearth_model::{
-    ChatRequest, Price, Pricing, Provider, ProviderError, ProviderStream, StreamEvent, Usage,
+    ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
+    StreamEvent, ToolCall, Usage,
 };
 use hearth_runtime::{Agent, AgentConfig, AgentError};
-use hearth_tools::ToolRegistry;
+use hearth_tools::{FileTool, ToolRegistry};
+use std::fs;
 use std::path::Path;
 use serde_json::json;
 use tempfile::TempDir;
@@ -75,11 +77,13 @@ fn submit_with(harness: &Harness, conversation: &str, request_id: &str) -> Submi
         .submission
 }
 
-fn agent<P: Provider + 'static>(
+fn agent_with(
     home: &Path,
     harness: &Harness,
-    provider: Arc<P>,
+    provider: Arc<dyn Provider>,
     pricing: Pricing,
+    max_turns: u32,
+    tools: ToolRegistry,
 ) -> Agent {
     Agent::new(
         harness.session().clone(),
@@ -90,10 +94,26 @@ fn agent<P: Provider + 'static>(
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
-            max_turns: 4,
-            tools: ToolRegistry::default(),
+            max_turns,
+            tools,
             spill_dir: home.join("spill"),
         },
+    )
+}
+
+fn agent<P: Provider + 'static>(
+    home: &Path,
+    harness: &Harness,
+    provider: Arc<P>,
+    pricing: Pricing,
+) -> Agent {
+    agent_with(
+        home,
+        harness,
+        provider,
+        pricing,
+        4,
+        ToolRegistry::default(),
     )
 }
 
@@ -401,4 +421,90 @@ fn two_concurrent_runs_cannot_enter_one_conversation() {
         .expect("read second submission")
         .expect("second submission exists");
     assert_eq!(after.status, SubmissionStatus::Queued);
+}
+
+#[test]
+fn a_files_tool_call_is_executed_and_paired() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let workspace = home.path().join("workspace");
+    fs::create_dir_all(workspace.join("notes")).expect("create notes");
+    fs::write(workspace.join("notes/a.txt"), "alpha").expect("write file");
+    let tools = ToolRegistry::new(vec![Arc::new(FileTool::new(
+        workspace,
+        home.path().join("spill"),
+    ))]);
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        Ok(vec![
+            Ok(StreamEvent::ToolCall(ToolCall {
+                id: "call-1".to_owned(),
+                name: "files".to_owned(),
+                arguments: json!({"action": "read", "path": "notes/a.txt"}),
+            })),
+            Ok(StreamEvent::Usage(Usage {
+                input_tokens: 8,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                output_tokens: 2,
+                reasoning_tokens: 0,
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned()),
+            }),
+        ]),
+        Ok(vec![
+            Ok(StreamEvent::TextDelta("read it".to_owned())),
+            Ok(StreamEvent::Usage(Usage {
+                input_tokens: 12,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                output_tokens: 3,
+                reasoning_tokens: 0,
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("stop".to_owned()),
+            }),
+        ]),
+    ]));
+
+    let outcome = agent_with(
+        home.path(),
+        &harness,
+        provider.clone(),
+        Pricing::default(),
+        4,
+        tools,
+    )
+    .run_submission(&submission.id)
+    .expect("run submission");
+
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+    assert_eq!(outcome.answer_text.as_deref(), Some("read it"));
+    let history = harness.session().history(&conversation).expect("history");
+    assert_eq!(history.len(), 4, "history: {history:#?}");
+    assert_eq!(history[0].kind, "user");
+    assert_eq!(history[1].kind, "assistant");
+    assert_eq!(history[2].kind, "tool_result");
+    assert_eq!(history[2].content[0]["call_id"], "call-1");
+    assert_eq!(history[2].content[0]["content"], "alpha");
+    assert_eq!(history[3].kind, "assistant");
+    assert_eq!(history[3].content[0]["text"], "read it");
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].messages.iter().any(|message| {
+        message.role == Role::Tool
+            && message.blocks.iter().any(|block| {
+                matches!(block, ContentBlock::ToolResult { call_id, .. } if call_id == "call-1")
+            })
+    }));
+
+    let usage = harness
+        .session()
+        .usage_for_task(&outcome.task_id)
+        .expect("usage");
+    assert_eq!(usage.len(), 2);
+    assert_eq!(usage[0].input_tokens, 8);
+    assert_eq!(usage[1].input_tokens, 12);
 }
