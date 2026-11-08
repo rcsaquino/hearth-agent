@@ -189,3 +189,14 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   `intent`, preserves attempts, payload, and task, and clears the settled time.
 - Effect execution, retry policies, workspace confinement, and the daemon worker
   are M1b-2b. Crash injection is M1c.
+
+## 2026-11-08: M1b-2b daemon recovery
+
+- The daemon opens the `Harness` and uses its single session-facing writer path.
+  The direct `hearth_storage::open` connection is removed.
+- After acquiring the lock, the daemon runs `recover_tasks` before logging that it
+  started and waiting for a signal. It logs the requeued, poisoned, and woken
+  counts.
+- The Harness is dropped before the lock, so the storage writer thread joins before
+  the lock is released.
+- No scheduler or effect worker runs yet. The daemon recovers and waits.
