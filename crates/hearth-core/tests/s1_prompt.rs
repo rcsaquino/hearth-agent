@@ -138,3 +138,36 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
         }]
     );
 }
+
+#[test]
+fn the_request_carries_the_model_tools_and_session() {
+    use hearth_model::ToolSpec;
+
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: vec![ToolSpec {
+                name: "read".to_owned(),
+                description: "Read a file".to_owned(),
+                parameters: serde_json::json!({"type": "object"}),
+            }],
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+
+    assert_eq!(prompt.request.model, "test-model");
+    assert_eq!(prompt.request.tools[0].name, "read");
+    assert_eq!(
+        prompt.request.session_id.as_deref(),
+        Some(conversation.id.as_str())
+    );
+    assert_eq!(prompt.request.temperature, None);
+    assert_eq!(prompt.request.max_tokens, None);
+}
