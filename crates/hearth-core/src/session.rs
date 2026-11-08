@@ -495,6 +495,26 @@ impl Session {
         };
         let insert = task.clone();
         self.storage.write(move |writer| -> Result<(), CoreError> {
+            if let Some(conversation_id) = insert.conversation_id.as_deref() {
+                let found: Option<i64> = writer.query_optional(
+                    "SELECT 1 FROM conversations WHERE id = ?",
+                    (conversation_id,),
+                    |row| row.get(0),
+                )?;
+                if found.is_none() {
+                    return Err(CoreError::ConversationNotFound(conversation_id.to_owned()));
+                }
+            }
+            if let Some(parent_id) = insert.parent_task_id.as_deref() {
+                let found: Option<i64> = writer.query_optional(
+                    "SELECT 1 FROM tasks WHERE id = ?",
+                    (parent_id,),
+                    |row| row.get(0),
+                )?;
+                if found.is_none() {
+                    return Err(CoreError::TaskNotFound(parent_id.to_owned()));
+                }
+            }
             writer.execute(
                 "INSERT INTO tasks (id, conversation_id, parent_task_id, kind, version, status, \
                  phase, attempt, input_json, checkpoint_json, result_json, lease_owner, \
@@ -769,11 +789,6 @@ impl Session {
                         if changed != 1 {
                             return Err(CoreError::LeaseLost(task_id));
                         }
-                    }
-                    _ => {
-                        return Err(CoreError::Invalid(
-                            "step outcome is not implemented".to_owned(),
-                        ));
                     }
                 }
 
