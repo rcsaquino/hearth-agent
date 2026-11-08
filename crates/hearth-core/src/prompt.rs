@@ -186,10 +186,7 @@ fn hash_part(text: &str) -> String {
 }
 
 /// Compare two prefix part maps and name the layers that changed.
-pub fn prefix_cause(
-    previous: Option<&Value>,
-    current: &BTreeMap<String, String>,
-) -> Vec<String> {
+pub fn prefix_cause(previous: Option<&Value>, current: &BTreeMap<String, String>) -> Vec<String> {
     let Some(previous) = previous.and_then(Value::as_object) else {
         return Vec::new();
     };
@@ -430,7 +427,9 @@ pub fn request_from_document(document: &Value) -> Option<ChatRequest> {
             Some(ChatMessage { role, blocks })
         })
         .collect();
-    let newest_user = parsed.iter().rposition(|message| message.role == Role::User);
+    let newest_user = parsed
+        .iter()
+        .rposition(|message| message.role == Role::User);
     for (index, message) in parsed.into_iter().enumerate() {
         if Some(index) == newest_user && !recall.trim().is_empty() {
             messages.push(ChatMessage {

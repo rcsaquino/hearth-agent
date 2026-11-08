@@ -1728,5 +1728,8 @@ fn stats_marks_a_priced_model() {
     assert!(output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("stats json");
     assert_eq!(report["rows"][0]["unpriced"], false);
-    assert_eq!(report["unpriced_models"].as_array().expect("array").len(), 0);
+    assert_eq!(
+        report["unpriced_models"].as_array().expect("array").len(),
+        0
+    );
 }

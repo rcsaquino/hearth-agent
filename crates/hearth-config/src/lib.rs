@@ -11,8 +11,8 @@ mod validate;
 
 pub use settings::{
     Agent, Compaction, FetchProvider, Identity, ImageService, Logging, Media, Memory, Models,
-    PriceConfig,
-    SearchProvider, Settings, SttService, Tasks, Telegram, TtsService, Web, WebFetch, WebSearch,
+    PriceConfig, SearchProvider, Settings, SttService, Tasks, Telegram, TtsService, Web, WebFetch,
+    WebSearch,
 };
 
 /// The name of the settings file inside the home folder.

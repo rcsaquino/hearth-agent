@@ -106,10 +106,7 @@ impl Agent {
             return (String::new(), String::new(), 0);
         };
         let (standing, standing_version) = match memory.standing() {
-            Ok(standing) => (
-                memory.render_standing(&standing.items),
-                standing.version,
-            ),
+            Ok(standing) => (memory.render_standing(&standing.items), standing.version),
             Err(error) => {
                 tracing::warn!(%error, "standing memory could not be read");
                 (String::new(), 0)

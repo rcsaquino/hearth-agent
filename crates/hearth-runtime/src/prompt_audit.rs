@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use hearth_config::{ConfigError, Settings};
-use hearth_core::{
-    CoreError, Entry, Harness, PromptInput, build_prompt, request_from_document,
-};
+use hearth_core::{CoreError, Entry, Harness, PromptInput, build_prompt, request_from_document};
 use hearth_memory::MemoryService;
 use hearth_model::OpenAiCompatibleProvider;
 use serde_json::{Value, json};
@@ -91,7 +89,8 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     }
 
     if let Some(text) = options.preview {
-        let (request, document) = preview_document(&settings, &session, &memory, &tools, &soul, &text)?;
+        let (request, document) =
+            preview_document(&settings, &session, &memory, &tools, &soul, &text)?;
         if options.wire {
             let body = wire_body(&settings, &request)?;
             let output = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
@@ -144,10 +143,7 @@ fn read_soul(home: &Path, settings: &Settings) -> String {
         None => home.join("SOUL.md"),
     };
     std::fs::read_to_string(path).unwrap_or_else(|_| {
-        hearth_core::default_soul(
-            &settings.identity.agent_name,
-            &settings.identity.user_name,
-        )
+        hearth_core::default_soul(&settings.identity.agent_name, &settings.identity.user_name)
     })
 }
 
@@ -180,7 +176,10 @@ fn system_document(
         .as_ref()
         .map(|standing| memory.render_standing(&standing.items))
         .unwrap_or_default();
-    let standing_version = standing.as_ref().map(|standing| standing.version).unwrap_or(0);
+    let standing_version = standing
+        .as_ref()
+        .map(|standing| standing.version)
+        .unwrap_or(0);
     let prompt = build_prompt(
         PromptInput {
             soul: soul.to_owned(),
@@ -231,7 +230,10 @@ fn preview_document(
         .as_ref()
         .map(|standing| memory.render_standing(&standing.items))
         .unwrap_or_default();
-    let standing_version = standing.as_ref().map(|standing| standing.version).unwrap_or(0);
+    let standing_version = standing
+        .as_ref()
+        .map(|standing| standing.version)
+        .unwrap_or(0);
     let recall = memory
         .recall_read(text)
         .map(|items| memory.render_recall(&items))

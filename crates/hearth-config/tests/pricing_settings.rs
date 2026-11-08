@@ -20,5 +20,8 @@ fn a_negative_price_is_rejected() {
     )
     .expect("settings");
     let error = settings.validate().expect_err("negative price");
-    assert!(error.to_string().contains("models.pricing.m.input"), "{error}");
+    assert!(
+        error.to_string().contains("models.pricing.m.input"),
+        "{error}"
+    );
 }

@@ -538,24 +538,21 @@ fn the_prefix_hash_tracks_only_the_stable_layers() {
         description: "Read files.".to_owned(),
         parameters: json!({"type": "object"}),
     };
-    let build = |soul: &str,
-                 tools: Vec<ToolSpec>,
-                 standing_version: u64,
-                 recall: &str,
-                 runtime: &str| {
-        session
-            .build_prompt(PromptInput {
-                soul: soul.to_owned(),
-                conversation_id: conversation.id.clone(),
-                model: "test-model".to_owned(),
-                tools,
-                standing: "S1".to_owned(),
-                standing_version,
-                recall: recall.to_owned(),
-                runtime_note: runtime.to_owned(),
-            })
-            .expect("build prompt")
-    };
+    let build =
+        |soul: &str, tools: Vec<ToolSpec>, standing_version: u64, recall: &str, runtime: &str| {
+            session
+                .build_prompt(PromptInput {
+                    soul: soul.to_owned(),
+                    conversation_id: conversation.id.clone(),
+                    model: "test-model".to_owned(),
+                    tools,
+                    standing: "S1".to_owned(),
+                    standing_version,
+                    recall: recall.to_owned(),
+                    runtime_note: runtime.to_owned(),
+                })
+                .expect("build prompt")
+        };
 
     let first = build("SOUL", Vec::new(), 0, "R1", "RUN");
     let same = build("SOUL", Vec::new(), 0, "R1", "RUN");
