@@ -617,6 +617,79 @@ impl FetchProvider for FirecrawlFetch {
     }
 }
 
+/// DeepSeek fetch, keyed.
+pub struct DeepSeekFetch {
+    base: String,
+    api_key: String,
+    max_bytes: usize,
+    client: Client,
+}
+
+impl DeepSeekFetch {
+    /// Build the DeepSeek provider with explicit limits.
+    pub fn new(
+        api_key: impl Into<String>,
+        base: impl Into<String>,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> Result<Self, FetchError> {
+        let client = Client::builder()
+            .timeout(timeout)
+            .user_agent("Hearth/0.1")
+            .build()
+            .map_err(|error| {
+                FetchError::permanent(format!("could not build the HTTP client: {error}"))
+            })?;
+        Ok(Self {
+            base: base.into(),
+            api_key: api_key.into(),
+            max_bytes,
+            client,
+        })
+    }
+
+    /// The production defaults.
+    pub fn production(api_key: impl Into<String>) -> Result<Self, FetchError> {
+        Self::new(
+            api_key,
+            "https://api.deepseek.com",
+            Duration::from_secs(60),
+            DEFAULT_MAX_BYTES,
+        )
+    }
+}
+
+impl FetchProvider for DeepSeekFetch {
+    fn name(&self) -> &'static str {
+        "deepseek"
+    }
+
+    fn fetch(&self, url: &str) -> Result<FetchResult, FetchError> {
+        let endpoint = format!("{}/v1/tools/fetch", self.base.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(endpoint)
+            .bearer_auth(&self.api_key)
+            .json(&json!({ "url": url }))
+            .send()
+            .map_err(|error| FetchError::temporary(format!("request failed: {error}")))?;
+        let value = json_response(response, "DeepSeek fetch")?;
+        let content = value["content"].as_str().unwrap_or_default();
+        if content.trim().is_empty() {
+            return Err(FetchError::permanent("DeepSeek returned no content"));
+        }
+        let title = value["title"]
+            .as_str()
+            .map(str::to_owned)
+            .filter(|title| !title.is_empty());
+        Ok(FetchResult {
+            text: cap_text(content.to_owned(), self.max_bytes),
+            final_url: url.to_owned(),
+            title,
+        })
+    }
+}
+
 fn json_response(
     response: reqwest::blocking::Response,
     label: &str,
