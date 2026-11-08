@@ -141,3 +141,32 @@ fn sends_a_rich_reply() {
     assert_eq!(requests[0].body["chat_id"], 42);
     assert_eq!(requests[0].body["rich_message"]["markdown"], "**hello**");
 }
+
+#[test]
+fn falls_back_to_entities_when_the_rich_message_is_rejected() {
+    let server = Server::start(vec![error(400, 400, "bad rich message", None), ok()]);
+    let (sender, _) = sender(&server.base);
+    let outcome = sender
+        .send_reply(42, "Hello **bold** and [link](https://example.com).")
+        .expect("send");
+    assert_eq!(outcome, SendOutcome::Fallback { parts: 1 });
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].method, "sendRichMessage");
+    assert_eq!(requests[1].method, "sendMessage");
+    assert_eq!(requests[1].body["text"], "Hello bold and link.");
+    let entities = requests[1].body["entities"].as_array().expect("entities");
+    let bold = entities
+        .iter()
+        .find(|entity| entity["type"] == "bold")
+        .expect("bold entity");
+    assert_eq!(bold["offset"], 6);
+    assert_eq!(bold["length"], 4);
+    let link = entities
+        .iter()
+        .find(|entity| entity["type"] == "text_link")
+        .expect("link entity");
+    assert_eq!(link["offset"], 15);
+    assert_eq!(link["length"], 4);
+    assert_eq!(link["url"], "https://example.com");
+}
