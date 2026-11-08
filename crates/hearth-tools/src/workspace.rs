@@ -118,6 +118,11 @@ impl Workspace {
         Ok(target)
     }
 
+    /// Resolve a readable path under the workspace or spill root.
+    pub fn resolve_read_path(&self, path: &str) -> Result<PathBuf, ToolError> {
+        self.resolve_read(path)
+    }
+
     fn resolve_read(&self, path: &str) -> Result<PathBuf, ToolError> {
         let (root, relative) = self.split_read(path)?;
         let root = fs::canonicalize(&root)

@@ -3,8 +3,8 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
 use reqwest::blocking::multipart::{Form, Part};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -53,13 +53,16 @@ struct Parameters {
 pub enum MediaKind {
     Photo,
     Video,
+    Document,
+    Voice,
 }
 
 impl MediaKind {
-    fn media_type(self) -> &'static str {
+    pub(crate) fn album_type(self) -> Option<&'static str> {
         match self {
-            Self::Photo => "photo",
-            Self::Video => "video",
+            Self::Photo => Some("photo"),
+            Self::Video => Some("video"),
+            Self::Document | Self::Voice => None,
         }
     }
 }
@@ -301,8 +304,12 @@ impl TelegramClient {
         }
         let mut media = Vec::with_capacity(items.len());
         for (index, (kind, _)) in items.iter().enumerate() {
+            let media_type = kind.album_type().ok_or_else(|| TelegramError::Protocol {
+                method: "sendMediaGroup".to_owned(),
+                detail: "only photos and videos can form an album".to_owned(),
+            })?;
             let mut entry = json!({
-                "type": kind.media_type(),
+                "type": media_type,
                 "media": format!("attach://file{index}"),
             });
             if index == 0
@@ -312,10 +319,11 @@ impl TelegramClient {
             }
             media.push(entry);
         }
-        let media_json = serde_json::to_string(&media).map_err(|error| TelegramError::Protocol {
-            method: "sendMediaGroup".to_owned(),
-            detail: format!("media list could not be serialized: {error}"),
-        })?;
+        let media_json =
+            serde_json::to_string(&media).map_err(|error| TelegramError::Protocol {
+                method: "sendMediaGroup".to_owned(),
+                detail: format!("media list could not be serialized: {error}"),
+            })?;
         let mut form = Form::new()
             .text("chat_id", chat_id.to_string())
             .text("media", media_json);
