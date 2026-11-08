@@ -609,3 +609,29 @@ fn beginning_a_settled_submission_is_rejected() {
         .expect_err("a settled submission cannot run");
     assert!(matches!(error, CoreError::AlreadySettled(..)));
 }
+
+#[test]
+fn settling_with_an_error_records_the_reason() {
+    use hearth_core::SubmissionStatus;
+
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let submission = session
+        .submit(&conversation.id, "req-1", "input", json!({"text": "hello"}))
+        .expect("submit");
+
+    let settled = session
+        .settle_with_error(
+            &submission.submission.id,
+            SubmissionStatus::Unanswered,
+            None,
+            Some(json!({"reason": "turn_limit"})),
+        )
+        .expect("settle");
+
+    assert_eq!(settled.status, SubmissionStatus::Unanswered);
+    assert_eq!(settled.error, Some(json!({"reason": "turn_limit"})));
+}
