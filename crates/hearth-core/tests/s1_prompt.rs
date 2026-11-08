@@ -44,7 +44,10 @@ fn the_prompt_starts_with_identity_and_operation_and_ends_with_runtime() {
     let first = prompt.request.messages.first().expect("first message");
     assert_eq!(first.role, Role::System);
     let first_text = text_of(first);
-    assert!(first_text.contains("SOUL TEXT"), "missing soul: {first_text}");
+    assert!(
+        first_text.contains("SOUL TEXT"),
+        "missing soul: {first_text}"
+    );
     assert!(
         first_text.contains("Operation"),
         "missing operation: {first_text}"
@@ -117,7 +120,11 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
             .all(|block| !matches!(block, ContentBlock::Thinking(_))),
         "thinking was replayed"
     );
-    assert!(assistant.blocks.contains(&ContentBlock::Text("calling".to_owned())));
+    assert!(
+        assistant
+            .blocks
+            .contains(&ContentBlock::Text("calling".to_owned()))
+    );
     assert!(assistant.blocks.contains(&ContentBlock::ToolCall(ToolCall {
         id: "call-1".to_owned(),
         name: "read".to_owned(),

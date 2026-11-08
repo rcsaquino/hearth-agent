@@ -151,7 +151,10 @@ fn parse_block(object: &serde_json::Map<String, Value>) -> Option<ContentBlock> 
         Some("tool_call") => Some(ContentBlock::ToolCall(hearth_model::ToolCall {
             id: object.get("id")?.as_str()?.to_owned(),
             name: object.get("name")?.as_str()?.to_owned(),
-            arguments: object.get("arguments").cloned().unwrap_or_else(|| json!({})),
+            arguments: object
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
         })),
         Some("tool_result") => Some(ContentBlock::ToolResult {
             call_id: object.get("call_id")?.as_str()?.to_owned(),
@@ -167,7 +170,10 @@ fn parse_block(object: &serde_json::Map<String, Value>) -> Option<ContentBlock> 
 }
 
 fn text_field(object: &serde_json::Map<String, Value>) -> Option<String> {
-    object.get("text").and_then(Value::as_str).map(str::to_owned)
+    object
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 /// Estimate the tokens an entry contributes.
