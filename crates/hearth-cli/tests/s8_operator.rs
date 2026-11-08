@@ -909,3 +909,88 @@ fn daemon_writes_a_structured_log() {
         "log is not JSON lines: {log}"
     );
 }
+
+struct DaemonGuard(Option<Child>);
+
+impl DaemonGuard {
+    fn new(child: Child) -> Self {
+        Self(Some(child))
+    }
+
+    fn child(&mut self) -> &mut Child {
+        self.0.as_mut().expect("daemon child")
+    }
+
+    fn stop(mut self) {
+        if let Some(child) = self.0.take() {
+            terminate(child);
+        }
+    }
+}
+
+impl Drop for DaemonGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+#[test]
+fn daemon_recovers_an_expired_task_lease() {
+    use hearth_core::{Harness, NewTask, TaskStatus};
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+
+    let task_id = {
+        let harness = Harness::open(home.path()).expect("open harness");
+        let session = harness.session();
+        let task = session
+            .create_task(NewTask::new(
+                "test.recovery",
+                1,
+                "start",
+                serde_json::json!({"step": 1}),
+            ))
+            .expect("create task");
+        let claimed = session
+            .claim_task("test-owner", 1)
+            .expect("claim task")
+            .expect("task is claimable");
+        assert_eq!(claimed.id, task.id);
+        std::thread::sleep(Duration::from_millis(5));
+        task.id
+    };
+
+    let mut daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    wait_for_log(home.path(), "task recovery complete");
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let task = harness
+        .session()
+        .task(&task_id)
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Pending);
+    assert!(task.lease_owner.is_none());
+    assert!(task.lease_until.is_none());
+    let commit = harness
+        .session()
+        .latest_commit()
+        .expect("latest commit")
+        .expect("a commit exists");
+    assert_eq!(commit.kind, "task.recover");
+}
