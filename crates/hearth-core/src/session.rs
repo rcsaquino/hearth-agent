@@ -709,6 +709,20 @@ impl Session {
                             return Err(CoreError::LeaseLost(task_id));
                         }
                     }
+                    StepOutput::Failed {
+                        retryable: true, ..
+                    } => {
+                        let changed = writer.execute(
+                            "UPDATE tasks SET status = 'pending', attempt = 0, \
+                             lease_owner = NULL, lease_until = NULL, next_wake_at = ?, \
+                             updated_at = ? WHERE id = ? AND status = 'running' \
+                             AND lease_owner = ?",
+                            (now + 1_000_000, now, task_id.as_str(), owner.as_str()),
+                        )?;
+                        if changed != 1 {
+                            return Err(CoreError::LeaseLost(task_id));
+                        }
+                    }
                     _ => {
                         return Err(CoreError::Invalid(
                             "step outcome is not implemented".to_owned(),
