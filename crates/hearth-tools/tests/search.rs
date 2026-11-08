@@ -221,3 +221,36 @@ fn deepseek_maps_results() {
     assert_eq!(body["query"], "rust");
     assert_eq!(body["count"], 5);
 }
+
+#[test]
+fn firecrawl_maps_web_results() {
+    let server = serve(json_reply(json!({
+        "success": true,
+        "data": {"web": [{
+            "title": "Firecrawl Example",
+            "url": "https://firecrawl.example/a",
+            "description": "Firecrawl snippet"
+        }]}
+    })));
+    let provider: Arc<dyn SearchProvider> =
+        Arc::new(FirecrawlSearch::new(server.base.clone(), "fc-key".to_owned()).expect("firecrawl provider"));
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("search call");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(value["results"][0]["title"], "Firecrawl Example");
+    assert_eq!(value["results"][0]["snippet"], "Firecrawl snippet");
+
+    let captured = server.thread.join().expect("server thread");
+    assert_eq!(captured.path, "/v2/search");
+    assert_eq!(
+        captured.headers.get("authorization").map(String::as_str),
+        Some("Bearer fc-key")
+    );
+    let body: Value = serde_json::from_str(&captured.body).expect("request body");
+    assert_eq!(body["query"], "rust");
+    assert_eq!(body["limit"], 5);
+    assert_eq!(body["sources"][0], "web");
+}
