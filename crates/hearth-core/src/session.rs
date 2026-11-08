@@ -384,6 +384,7 @@ impl Session {
 
     /// Mark an effect intent as started.
     pub fn begin_effect(&self, id: &str) -> Result<Effect, CoreError> {
+        let now = self.clock.now_micros();
         let effect_id = id.to_owned();
         self.storage
             .write(move |writer| -> Result<(), CoreError> {
@@ -399,6 +400,13 @@ impl Session {
                     "UPDATE effects SET status = 'started', attempts = attempts + 1, \
                      settled_at = NULL WHERE id = ?",
                     (effect_id.as_str(),),
+                )?;
+                record_commit(
+                    writer,
+                    now,
+                    None,
+                    effect.task_id.as_deref(),
+                    "effect.started",
                 )?;
                 Ok(())
             })?;
@@ -427,6 +435,7 @@ impl Session {
                      WHERE id = ?",
                     (result_json.as_str(), now, effect_id.as_str()),
                 )?;
+                record_commit(writer, now, None, effect.task_id.as_deref(), "effect.done")?;
                 Ok(())
             })?;
         self.effect(id)?
@@ -454,19 +463,22 @@ impl Session {
                 }
                 let error_json = serde_json::to_string(&error)
                     .map_err(|error| CoreError::Invalid(error.to_string()))?;
-                if retryable {
+                let kind = if retryable {
                     writer.execute(
                         "UPDATE effects SET status = 'intent', result_json = ?, \
                          settled_at = NULL WHERE id = ?",
                         (error_json.as_str(), effect_id.as_str()),
                     )?;
+                    "effect.retry"
                 } else {
                     writer.execute(
                         "UPDATE effects SET status = 'failed', result_json = ?, settled_at = ? \
                          WHERE id = ?",
                         (error_json.as_str(), now, effect_id.as_str()),
                     )?;
-                }
+                    "effect.failed"
+                };
+                record_commit(writer, now, None, effect.task_id.as_deref(), kind)?;
                 Ok(())
             })?;
         self.effect(id)?
@@ -474,10 +486,28 @@ impl Session {
     }
 
     /// Return a started effect to the intent state after a crash.
-    pub fn requeue_effect(&self, _id: &str) -> Result<Effect, CoreError> {
-        Err(CoreError::Invalid(
-            "effect lifecycle is not implemented".to_owned(),
-        ))
+    pub fn requeue_effect(&self, id: &str) -> Result<Effect, CoreError> {
+        let now = self.clock.now_micros();
+        let effect_id = id.to_owned();
+        self.storage
+            .write(move |writer| -> Result<(), CoreError> {
+                let effect = load_effect(writer, &effect_id)?
+                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+                if effect.status != EffectStatus::Started {
+                    return Err(CoreError::EffectNotReady {
+                        id: effect_id,
+                        status: effect.status.as_str().to_owned(),
+                    });
+                }
+                writer.execute(
+                    "UPDATE effects SET status = 'intent', settled_at = NULL WHERE id = ?",
+                    (effect_id.as_str(),),
+                )?;
+                record_commit(writer, now, None, effect.task_id.as_deref(), "effect.requeued")?;
+                Ok(())
+            })?;
+        self.effect(id)?
+            .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
 
     /// Hand in a message with a receipt.
