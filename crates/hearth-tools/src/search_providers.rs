@@ -417,3 +417,87 @@ impl SearchProvider for DeepSeekSearch {
         Ok(results)
     }
 }
+
+/// Firecrawl's v2 search endpoint.
+pub struct FirecrawlSearch {
+    base: String,
+    api_key: String,
+    client: Client,
+}
+
+impl FirecrawlSearch {
+    /// Build a Firecrawl provider.
+    pub fn new(base: impl Into<String>, api_key: impl Into<String>) -> Result<Self, SearchError> {
+        Ok(Self {
+            base: base.into(),
+            api_key: api_key.into(),
+            client: client()?,
+        })
+    }
+}
+
+impl SearchProvider for FirecrawlSearch {
+    fn name(&self) -> &'static str {
+        "firecrawl"
+    }
+
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
+        let url = format!("{}/v2/search", self.base.trim_end_matches('/'));
+        let body = json!({"query": query, "limit": limit, "sources": ["web"]});
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&body)
+            .send()
+            .map_err(|error| SearchError::temporary(format!("Firecrawl transport error: {error}")))?;
+        let text = response_text(response, "Firecrawl")?;
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|error| SearchError::permanent(format!("Firecrawl returned invalid JSON: {error}")))?;
+        if value.get("success").and_then(Value::as_bool) == Some(false) {
+            let message = value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
+            return Err(SearchError::permanent(format!("Firecrawl error: {message}")));
+        }
+        let data = value.get("data");
+        let items = data
+            .and_then(|data| data.get("web"))
+            .and_then(Value::as_array)
+            .or_else(|| data.and_then(Value::as_array));
+        let mut results = Vec::new();
+        if let Some(items) = items {
+            for item in items {
+                let url = item
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("metadata").and_then(|m| m.get("sourceURL")).and_then(Value::as_str))
+                    .or_else(|| item.get("metadata").and_then(|m| m.get("url")).and_then(Value::as_str));
+                let Some(url) = url else {
+                    continue;
+                };
+                let title = item
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("metadata").and_then(|m| m.get("title")).and_then(Value::as_str))
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or(url)
+                    .to_owned();
+                let snippet = item
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("snippet").and_then(Value::as_str))
+                    .or_else(|| item.get("metadata").and_then(|m| m.get("description")).and_then(Value::as_str))
+                    .unwrap_or_default();
+                results.push(SearchResult {
+                    title,
+                    url: url.to_owned(),
+                    snippet: truncate(snippet, SNIPPET_CHARS),
+                    date: None,
+                });
+            }
+        }
+        Ok(results)
+    }
+}
