@@ -1005,7 +1005,11 @@ fn text_script(answer: &str) -> Script {
     ])
 }
 
-fn memory_input(content: &str, kind: hearth_memory::MemoryKind, importance: i64) -> hearth_memory::NewMemoryInput {
+fn memory_input(
+    content: &str,
+    kind: hearth_memory::MemoryKind,
+    importance: i64,
+) -> hearth_memory::NewMemoryInput {
     hearth_memory::NewMemoryInput {
         content: content.to_owned(),
         kind,
@@ -1049,10 +1053,15 @@ fn the_agent_injects_standing_and_recall_memory() {
         .expect("submit")
         .submission;
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Dark roast.")]));
-    let outcome = agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
+    let outcome = agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_memory(Arc::clone(&memory))
+    .run_submission(&submission.id)
+    .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Dark roast."));
 
     let requests = provider.requests();
@@ -1093,10 +1102,15 @@ fn a_trivial_message_gets_standing_but_no_recall() {
         .expect("recall memory");
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
-    agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
-        .with_memory(memory)
-        .run_submission(&submission.id)
-        .expect("run");
+    agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_memory(memory)
+    .run_submission(&submission.id)
+    .expect("run");
 
     let requests = provider.requests();
     let request = requests.last().expect("request");
@@ -1109,4 +1123,43 @@ fn a_trivial_message_gets_standing_but_no_recall() {
         !texts.iter().any(|text| text.contains("Relevant memory")),
         "trivial message got recall: {texts:?}"
     );
+}
+
+#[test]
+fn a_memory_failure_does_not_stop_the_answer() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let memory = Arc::new(hearth_memory::MemoryService::new(harness.session().clone()));
+    memory
+        .save(memory_input(
+            "Sam prefers dark roast coffee",
+            hearth_memory::MemoryKind::Preference,
+            70,
+        ))
+        .expect("memory");
+    harness
+        .session()
+        .storage()
+        .write(|writer| -> Result<(), hearth_storage::StorageError> {
+            writer.execute("DROP TABLE memory_fts", [])?;
+            Ok(())
+        })
+        .expect("drop fts");
+    let submission = harness
+        .session()
+        .submit(
+            &conversation,
+            "req-memory-fail",
+            "input",
+            json!({"text": "what coffee do I like?"}),
+        )
+        .expect("submit")
+        .submission;
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Still here.")]));
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
+        .with_memory(memory)
+        .run_submission(&submission.id)
+        .expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("Still here."));
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 }
