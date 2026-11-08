@@ -3,12 +3,14 @@
 use std::path::Path;
 
 mod agent;
+mod chat;
 mod daemon;
 mod doctor;
 mod effect_worker;
 mod init;
 
 pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};
+pub use chat::{ChatError, chat};
 pub use daemon::{DaemonError, daemon};
 pub use doctor::{DoctorError, doctor};
 pub use effect_worker::EffectWorker;

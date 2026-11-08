@@ -19,6 +19,8 @@ enum Command {
     Init(InitArgs),
     /// Run the long-lived agent.
     Daemon,
+    /// Talk to the agent from this terminal.
+    Chat,
     /// Check settings, database, and lock without printing secrets.
     Doctor,
 }
@@ -83,6 +85,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             },
         )?,
         Command::Daemon => hearth_runtime::daemon(&home)?,
+        Command::Chat => hearth_runtime::chat(&home)?,
         Command::Doctor => hearth_runtime::doctor(&home)?,
     }
     Ok(())
