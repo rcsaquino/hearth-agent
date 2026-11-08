@@ -860,19 +860,26 @@ impl Session {
         self.storage
             .write(move |writer| -> Result<RecoveryReport, CoreError> {
                 let mut report = RecoveryReport::default();
-                let due: Vec<String> = writer.query(
-                    "SELECT id FROM tasks WHERE status = 'asleep' \
+                let due: Vec<(String, Option<String>)> = writer.query(
+                    "SELECT id, conversation_id FROM tasks WHERE status = 'asleep' \
                      AND next_wake_at IS NOT NULL AND next_wake_at <= ?",
                     (now,),
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )?;
-                for id in due {
+                for (id, conversation_id) in due {
                     let changed = writer.execute(
                         "UPDATE tasks SET status = 'pending', next_wake_at = NULL, updated_at = ? \
                          WHERE id = ? AND status = 'asleep'",
                         (now, id.as_str()),
                     )?;
                     if changed == 1 {
+                        record_commit(
+                            writer,
+                            now,
+                            conversation_id.as_deref(),
+                            Some(id.as_str()),
+                            "task.wake",
+                        )?;
                         report.woken += 1;
                     }
                 }
