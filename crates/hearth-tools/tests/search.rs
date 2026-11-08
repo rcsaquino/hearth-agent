@@ -4,7 +4,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use hearth_tools::{ExaSearch, SearchProvider, WebSearchTool};
+use hearth_tools::{ExaSearch, SearchProvider, Tool, WebSearchTool};
 use serde_json::{Value, json};
 
 struct Captured {
@@ -112,7 +112,7 @@ fn exa_mcp_payload() -> Value {
 fn exa_mcp_streams_and_maps_results() {
     let server = serve(sse(exa_mcp_payload()));
     let provider: Arc<dyn SearchProvider> =
-        Arc::new(ExaSearch::new(server.base.clone(), server.base.clone(), None));
+        Arc::new(ExaSearch::new(server.base.clone(), server.base.clone(), None).expect("exa provider"));
     let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
 
     let output = tool
