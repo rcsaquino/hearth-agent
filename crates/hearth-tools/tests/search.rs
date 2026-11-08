@@ -4,7 +4,10 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use hearth_tools::{BraveSearch, DeepSeekSearch, ExaSearch, FirecrawlSearch, SearchProvider, TinyFishSearch, Tool, WebSearchTool};
+use hearth_tools::{
+    BraveSearch, DeepSeekSearch, ExaSearch, FirecrawlSearch, SearchProvider, TinyFishSearch, Tool,
+    WebSearchTool,
+};
 use serde_json::{Value, json};
 
 struct Captured {
@@ -111,8 +114,9 @@ fn exa_mcp_payload() -> Value {
 #[test]
 fn exa_mcp_streams_and_maps_results() {
     let server = serve(sse(exa_mcp_payload()));
-    let provider: Arc<dyn SearchProvider> =
-        Arc::new(ExaSearch::new(server.base.clone(), server.base.clone(), None).expect("exa provider"));
+    let provider: Arc<dyn SearchProvider> = Arc::new(
+        ExaSearch::new(server.base.clone(), server.base.clone(), None).expect("exa provider"),
+    );
     let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
 
     let output = tool
@@ -143,8 +147,14 @@ fn exa_rest_uses_the_api_key_and_maps_results() {
             "text": "Rest snippet"
         }]
     })));
-    let provider: Arc<dyn SearchProvider> =
-        Arc::new(ExaSearch::new(server.base.clone(), server.base.clone(), Some("exa-key".to_owned())).expect("exa provider"));
+    let provider: Arc<dyn SearchProvider> = Arc::new(
+        ExaSearch::new(
+            server.base.clone(),
+            server.base.clone(),
+            Some("exa-key".to_owned()),
+        )
+        .expect("exa provider"),
+    );
     let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
 
     let output = tool
@@ -156,7 +166,10 @@ fn exa_rest_uses_the_api_key_and_maps_results() {
 
     let captured = server.thread.join().expect("server thread");
     assert_eq!(captured.path, "/search");
-    assert_eq!(captured.headers.get("x-api-key").map(String::as_str), Some("exa-key"));
+    assert_eq!(
+        captured.headers.get("x-api-key").map(String::as_str),
+        Some("exa-key")
+    );
 }
 
 #[test]
@@ -169,8 +182,9 @@ fn brave_maps_web_results() {
             "age": "2 days ago"
         }]}
     })));
-    let provider: Arc<dyn SearchProvider> =
-        Arc::new(BraveSearch::new(server.base.clone(), "brave-key".to_owned()).expect("brave provider"));
+    let provider: Arc<dyn SearchProvider> = Arc::new(
+        BraveSearch::new(server.base.clone(), "brave-key".to_owned()).expect("brave provider"),
+    );
     let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
 
     let output = tool
@@ -186,7 +200,10 @@ fn brave_maps_web_results() {
     assert!(captured.path.contains("q=rust"));
     assert!(captured.path.contains("count=5"));
     assert_eq!(
-        captured.headers.get("x-subscription-token").map(String::as_str),
+        captured
+            .headers
+            .get("x-subscription-token")
+            .map(String::as_str),
         Some("brave-key")
     );
 }
@@ -200,8 +217,9 @@ fn deepseek_maps_results() {
             "summary": "DeepSeek snippet"
         }]
     })));
-    let provider: Arc<dyn SearchProvider> =
-        Arc::new(DeepSeekSearch::new(server.base.clone(), "ds-key".to_owned()).expect("deepseek provider"));
+    let provider: Arc<dyn SearchProvider> = Arc::new(
+        DeepSeekSearch::new(server.base.clone(), "ds-key".to_owned()).expect("deepseek provider"),
+    );
     let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
 
     let output = tool
@@ -232,8 +250,9 @@ fn firecrawl_maps_web_results() {
             "description": "Firecrawl snippet"
         }]}
     })));
-    let provider: Arc<dyn SearchProvider> =
-        Arc::new(FirecrawlSearch::new(server.base.clone(), "fc-key".to_owned()).expect("firecrawl provider"));
+    let provider: Arc<dyn SearchProvider> = Arc::new(
+        FirecrawlSearch::new(server.base.clone(), "fc-key".to_owned()).expect("firecrawl provider"),
+    );
     let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
 
     let output = tool
@@ -265,8 +284,9 @@ fn tinyfish_maps_results() {
             "date": "2026-03-04"
         }]
     })));
-    let provider: Arc<dyn SearchProvider> =
-        Arc::new(TinyFishSearch::new(server.base.clone(), "tf-key".to_owned()).expect("tinyfish provider"));
+    let provider: Arc<dyn SearchProvider> = Arc::new(
+        TinyFishSearch::new(server.base.clone(), "tf-key".to_owned()).expect("tinyfish provider"),
+    );
     let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
 
     let output = tool
@@ -294,7 +314,11 @@ impl SearchProvider for ScriptedSearch {
         "scripted"
     }
 
-    fn search(&self, query: &str, _limit: usize) -> Result<Vec<hearth_tools::SearchResult>, hearth_tools::SearchError> {
+    fn search(
+        &self,
+        query: &str,
+        _limit: usize,
+    ) -> Result<Vec<hearth_tools::SearchResult>, hearth_tools::SearchError> {
         self.results
             .get(query)
             .cloned()
@@ -345,18 +369,22 @@ fn results_are_deduplicated_and_capped() {
     let mut results = HashMap::new();
     results.insert(
         "a".to_owned(),
-        Ok(vec![result("one", "https://one.example"), result("two", "https://two.example")]),
+        Ok(vec![
+            result("one", "https://one.example"),
+            result("two", "https://two.example"),
+        ]),
     );
     results.insert(
         "b".to_owned(),
-        Ok(vec![result("one again", "https://one.example"), result("three", "https://three.example")]),
+        Ok(vec![
+            result("one again", "https://one.example"),
+            result("three", "https://three.example"),
+        ]),
     );
     let provider: Arc<dyn SearchProvider> = Arc::new(ScriptedSearch { results });
     let tool = WebSearchTool::new(vec![provider], 3, 5, 2);
 
-    let output = tool
-        .call(&json!({"queries": ["a", "b"]}))
-        .expect("search");
+    let output = tool.call(&json!({"queries": ["a", "b"]})).expect("search");
     let value: Value = serde_json::from_str(&output.content).expect("json");
     assert_eq!(value["results"].as_array().expect("results").len(), 2);
     assert_eq!(value["results"][0]["url"], "https://one.example");
@@ -384,7 +412,10 @@ fn every_provider_failing_is_a_tool_error() {
 #[test]
 fn a_partial_failure_keeps_the_successful_results() {
     let mut results = HashMap::new();
-    results.insert("good".to_owned(), Ok(vec![result("Good", "https://good.example")]));
+    results.insert(
+        "good".to_owned(),
+        Ok(vec![result("Good", "https://good.example")]),
+    );
     results.insert(
         "bad".to_owned(),
         Err(hearth_tools::SearchError::permanent("bad query")),
@@ -417,4 +448,19 @@ fn invalid_query_arguments_are_rejected() {
         .call(&json!({"queries": eleven}))
         .expect_err("too many queries");
     assert_eq!(error.code, "invalid_arguments");
+}
+
+#[test]
+fn each_query_is_capped_to_the_requested_results() {
+    let mut results = HashMap::new();
+    results.insert(
+        "a".to_owned(),
+        Ok(vec![result("one", "https://one.example"), result("two", "https://two.example")]),
+    );
+    let provider: Arc<dyn SearchProvider> = Arc::new(ScriptedSearch { results });
+    let tool = WebSearchTool::new(vec![provider], 3, 1, 10);
+
+    let output = tool.call(&json!({"queries": ["a"]})).expect("search");
+    let value: Value = serde_json::from_str(&output.content).expect("json");
+    assert_eq!(value["results"].as_array().expect("results").len(), 1);
 }
