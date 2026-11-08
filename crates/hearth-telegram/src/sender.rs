@@ -76,6 +76,23 @@ impl TelegramSender {
                     }) if (400..500).contains(&code) => {
                         return self.send_fallback(chat_id, markdown);
                     }
+                    Err(TelegramError::Api {
+                        code: Some(500..=599), ..
+                    }) => {
+                        return Ok(SendOutcome::Uncertain {
+                            message: "the Telegram server failed after the request".to_owned(),
+                        });
+                    }
+                    Err(TelegramError::Transport(message)) => {
+                        return Ok(SendOutcome::Uncertain {
+                            message: format!("delivery is uncertain: {message}"),
+                        });
+                    }
+                    Err(TelegramError::Protocol { .. }) => {
+                        return Ok(SendOutcome::Uncertain {
+                            message: "delivery is uncertain: invalid Telegram response".to_owned(),
+                        });
+                    }
                     Err(error) => return Err(error),
                 }
             }
