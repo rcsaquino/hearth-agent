@@ -906,10 +906,7 @@ fn recovery_records_a_poison_commit() {
         .expect("first claim")
         .expect("task is runnable");
     clock.advance(2_000);
-    assert_eq!(
-        session.recover_tasks().expect("first recovery").requeued,
-        1
-    );
+    assert_eq!(session.recover_tasks().expect("first recovery").requeued, 1);
     session
         .claim_task("worker-a", 1_000)
         .expect("second claim")

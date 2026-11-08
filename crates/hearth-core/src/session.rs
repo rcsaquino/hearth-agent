@@ -896,6 +896,13 @@ impl Session {
                             (result, now, now, id.as_str()),
                         )?;
                         if changed == 1 {
+                            record_commit(
+                                writer,
+                                now,
+                                conversation_id.as_deref(),
+                                Some(id.as_str()),
+                                "task.poison",
+                            )?;
                             report.poisoned += 1;
                         }
                     } else {
