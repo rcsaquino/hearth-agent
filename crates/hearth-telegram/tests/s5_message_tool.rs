@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 
-use hearth_model::{SpeechClient, Speaker};
+use hearth_model::{Speaker, SpeechClient};
 use hearth_telegram::{MessageTool, TelegramClient};
 use hearth_tools::Tool;
 use serde_json::json;
@@ -103,10 +103,7 @@ fn single(id: i64) -> Reply {
 }
 
 fn album(ids: &[i64]) -> Reply {
-    let result: Vec<serde_json::Value> = ids
-        .iter()
-        .map(|id| json!({"message_id": id}))
-        .collect();
+    let result: Vec<serde_json::Value> = ids.iter().map(|id| json!({"message_id": id})).collect();
     Reply {
         body: json!({"ok": true, "result": result}),
     }
@@ -244,14 +241,8 @@ fn speech_is_written_and_sent_as_a_voice_note() {
     let audio = vec![0x4f, 0x67, 0x67, 0x53, 0x01, 0x02];
     let (speech_base, speech_server_handle) = speech_server(audio.clone());
     let speaker: Arc<dyn Speaker> = Arc::new(
-        SpeechClient::new(
-            &speech_base,
-            "key",
-            "voice",
-            "eleven_v4",
-            "opus_48000_64",
-        )
-        .expect("speech client"),
+        SpeechClient::new(&speech_base, "key", "voice", "eleven_v4", "opus_48000_64")
+            .expect("speech client"),
     );
     let (base, server) = bot_server(vec![single(601)]);
     let tool = MessageTool::new(
@@ -329,5 +320,8 @@ fn invalid_calls_are_rejected_before_any_send() {
     assert!(tool.call(&json!({"path": "../escape.png"})).is_err());
     let many: Vec<&str> = (0..11).map(|_| "one.png").collect();
     assert!(tool.call(&json!({"paths": many})).is_err());
-    assert!(tool.call(&json!({"path": "one.png", "paths": ["one.png"]})).is_err());
+    assert!(
+        tool.call(&json!({"path": "one.png", "paths": ["one.png"]}))
+            .is_err()
+    );
 }

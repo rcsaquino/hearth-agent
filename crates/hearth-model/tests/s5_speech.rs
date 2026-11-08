@@ -86,14 +86,8 @@ fn read_request(stream: &mut TcpStream) -> Captured {
 fn speech_posts_elevenlabs_and_returns_audio() {
     let audio = vec![0x4f, 0x67, 0x67, 0x53, 0x00, 0x02];
     let (base, captured, server) = fake_elevenlabs(200, audio.clone());
-    let client = SpeechClient::new(
-        &base,
-        "test-key",
-        "voice-1",
-        "eleven_v4",
-        "opus_48000_64",
-    )
-    .expect("client");
+    let client = SpeechClient::new(&base, "test-key", "voice-1", "eleven_v4", "opus_48000_64")
+        .expect("client");
 
     let returned = client.speak("hello there").expect("speak");
     assert_eq!(returned, audio);
@@ -105,10 +99,7 @@ fn speech_posts_elevenlabs_and_returns_audio() {
         "/v1/text-to-speech/voice-1?output_format=opus_48000_64"
     );
     assert_eq!(request.api_key.as_deref(), Some("test-key"));
-    assert_eq!(
-        request.content_type.as_deref(),
-        Some("application/json")
-    );
+    assert_eq!(request.content_type.as_deref(), Some("application/json"));
     let body: serde_json::Value = serde_json::from_slice(&request.body).expect("json body");
     assert_eq!(body["text"], "hello there");
     assert_eq!(body["model_id"], "eleven_v4");
@@ -117,8 +108,8 @@ fn speech_posts_elevenlabs_and_returns_audio() {
 #[test]
 fn a_speech_server_failure_is_retryable_for_429() {
     let (base, _captured, server) = fake_elevenlabs(429, b"slow down".to_vec());
-    let client = SpeechClient::new(&base, "key", "voice", "eleven_v4", "opus_48000_64")
-        .expect("client");
+    let client =
+        SpeechClient::new(&base, "key", "voice", "eleven_v4", "opus_48000_64").expect("client");
     let error = client.speak("hello").expect_err("must fail");
     server.join().expect("server");
     assert!(matches!(error, MediaError::Response { status: 429, .. }));

@@ -153,10 +153,7 @@ fn two_images_are_sent_as_one_album() {
     let ids = client
         .send_media_group(
             9,
-            &[
-                (MediaKind::Photo, first),
-                (MediaKind::Photo, second),
-            ],
+            &[(MediaKind::Photo, first), (MediaKind::Photo, second)],
             Some("album"),
         )
         .expect("send album");

@@ -207,7 +207,9 @@ impl Speaker for SpeechClient {
             .bytes()
             .map_err(|error| MediaError::Transport(format!("could not read audio: {error}")))?;
         if bytes.is_empty() {
-            return Err(MediaError::Empty("the speech response was empty".to_owned()));
+            return Err(MediaError::Empty(
+                "the speech response was empty".to_owned(),
+            ));
         }
         Ok(bytes.to_vec())
     }
