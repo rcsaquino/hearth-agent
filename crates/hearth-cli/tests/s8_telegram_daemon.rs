@@ -3,7 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -702,4 +702,152 @@ fn the_daemon_stops_an_active_run() {
             .expect("awaiting")
             .is_empty()
     );
+}
+
+fn wait_for_socket(home: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if home.join("hearth.sock").exists() {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("daemon socket did not appear");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn hearth_status_reads_a_running_daemon() {
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), "http://127.0.0.1:1/v1");
+    add_telegram_base(home.path(), &telegram_base);
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    wait_for_socket(home.path());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(home.path().join("hearth.sock"))
+            .expect("socket metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "socket mode was {mode:o}");
+    }
+
+    let output = hearth()
+        .args(["status", "--json"])
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run status");
+    assert!(
+        output.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let status: Value = serde_json::from_slice(&output.stdout).expect("status json");
+    assert_eq!(status["model"], "fake-model");
+    assert!(status["uptime_seconds"].as_u64().is_some());
+    assert_eq!(status["tasks_running"], 0);
+
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+}
+
+fn start_watch(home: &Path) -> (Child, mpsc::Receiver<String>) {
+    let mut child = hearth()
+        .args(["watch", "--json"])
+        .arg("--home")
+        .arg(home)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn watch");
+    let stdout = child.stdout.take().expect("watch stdout");
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    (child, receiver)
+}
+
+#[test]
+fn hearth_watch_receives_live_run_events() {
+    let (provider_base, provider_thread) = fake_provider_answers(vec!["Watch answer"]);
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script_with_delays(
+        vec![json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 10,
+                "date": 1_730_000_000,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "text": "hello"
+            }
+        })],
+        false,
+        vec![Duration::from_secs(2)],
+        None,
+    );
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    wait_for_socket(home.path());
+
+    let (mut watch, lines) = start_watch(home.path());
+    let ack = lines
+        .recv_timeout(Duration::from_secs(5))
+        .expect("watch ack");
+    assert!(ack.contains("\"ok\":true"), "ack was {ack}");
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut kinds = Vec::new();
+    while Instant::now() < deadline {
+        let Ok(line) = lines.recv_timeout(Duration::from_secs(5)) else {
+            break;
+        };
+        let value: Value = serde_json::from_str(&line).expect("watch event json");
+        let kind = value["kind"].as_str().unwrap_or_default().to_owned();
+        kinds.push(kind.clone());
+        if kind == "run_settled" {
+            break;
+        }
+    }
+    assert!(
+        kinds.iter().any(|kind| kind == "run_started"),
+        "kinds: {kinds:?}"
+    );
+    assert!(
+        kinds.iter().any(|kind| kind == "turn_started"),
+        "kinds: {kinds:?}"
+    );
+    assert!(
+        kinds.iter().any(|kind| kind == "text_delta"),
+        "kinds: {kinds:?}"
+    );
+    assert!(kinds.iter().any(|kind| kind == "usage"), "kinds: {kinds:?}");
+    assert!(
+        kinds.iter().any(|kind| kind == "run_settled"),
+        "kinds: {kinds:?}"
+    );
+
+    let _ = watch.kill();
+    let _ = watch.wait();
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
 }

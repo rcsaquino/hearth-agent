@@ -9,7 +9,7 @@ use hearth_model::{
     ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
     StreamEvent, ToolCall, Usage,
 };
-use hearth_runtime::{Agent, AgentConfig, AgentError};
+use hearth_runtime::{Agent, AgentConfig, AgentError, EventSink, RunEvent};
 use hearth_tools::{FileTool, Tool, ToolRegistry};
 use serde_json::json;
 use std::fs;
@@ -830,4 +830,150 @@ fn a_run_cancelled_during_the_stream_discards_the_answer_and_records_usage() {
         .expect("read task")
         .expect("task exists");
     assert_eq!(task.status, TaskStatus::Aborted);
+}
+
+#[derive(Default)]
+struct RecordingSink {
+    events: Mutex<Vec<RunEvent>>,
+}
+
+impl EventSink for RecordingSink {
+    fn emit(&self, event: RunEvent) {
+        self.events.lock().expect("event lock").push(event);
+    }
+}
+
+fn event_kinds(sink: &RecordingSink) -> Vec<String> {
+    sink.events
+        .lock()
+        .expect("event lock")
+        .iter()
+        .map(|event| event.kind.to_owned())
+        .collect()
+}
+
+#[test]
+fn a_text_run_emits_live_events_in_order() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("hello".to_owned())),
+        Ok(StreamEvent::Usage(Usage {
+            input_tokens: 10,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 5,
+            reasoning_tokens: 0,
+        })),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+        .run_submission_with_events(
+            &submission.id,
+            Arc::new(AtomicBool::new(false)),
+            sink.clone(),
+        )
+        .expect("run");
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+    let kinds = event_kinds(&sink);
+    let index = |kind: &str| kinds.iter().position(|value| value == kind);
+    assert!(index("run_started").is_some(), "kinds: {kinds:?}");
+    assert!(index("turn_started").is_some(), "kinds: {kinds:?}");
+    assert!(index("text_delta").is_some(), "kinds: {kinds:?}");
+    assert!(index("usage").is_some(), "kinds: {kinds:?}");
+    assert!(index("run_settled").is_some(), "kinds: {kinds:?}");
+    assert!(index("run_started") < index("turn_started"));
+    assert!(index("turn_started") < index("text_delta"));
+    assert!(index("text_delta") < index("usage"));
+    assert!(index("usage") < index("run_settled"));
+    let events = sink.events.lock().expect("event lock");
+    let settled = events
+        .iter()
+        .find(|event| event.kind == "run_settled")
+        .expect("settled");
+    assert_eq!(settled.data["status"], "done");
+}
+
+#[test]
+fn a_cancelled_run_emits_a_settled_event() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(Vec::new()));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+        .run_submission_with_events(
+            &submission.id,
+            Arc::new(AtomicBool::new(true)),
+            sink.clone(),
+        )
+        .expect("run");
+    assert_eq!(outcome.submission.status, SubmissionStatus::Cancelled);
+    let events = sink.events.lock().expect("event lock");
+    let settled = events
+        .iter()
+        .find(|event| event.kind == "run_settled")
+        .expect("settled event");
+    assert_eq!(settled.data["status"], "cancelled");
+}
+
+#[test]
+fn a_tool_run_emits_start_and_result_events() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let workspace = home.path().join("workspace");
+    fs::create_dir_all(workspace.join("notes")).expect("create notes");
+    fs::write(workspace.join("notes/a.txt"), "alpha").expect("write file");
+    let tools = ToolRegistry::new(vec![Arc::new(FileTool::new(
+        workspace,
+        home.path().join("spill"),
+    ))]);
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        Ok(vec![
+            Ok(StreamEvent::ToolCall(ToolCall {
+                id: "call-1".to_owned(),
+                name: "files".to_owned(),
+                arguments: json!({"action": "read", "path": "notes/a.txt"}),
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned()),
+            }),
+        ]),
+        Ok(vec![
+            Ok(StreamEvent::TextDelta("read it".to_owned())),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("stop".to_owned()),
+            }),
+        ]),
+    ]));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = agent_with(
+        home.path(),
+        &harness,
+        provider,
+        Pricing::default(),
+        4,
+        tools,
+    )
+    .run_submission_with_events(
+        &submission.id,
+        Arc::new(AtomicBool::new(false)),
+        sink.clone(),
+    )
+    .expect("run");
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+    let kinds = event_kinds(&sink);
+    assert!(
+        kinds.iter().any(|kind| kind == "tool_call_started"),
+        "kinds: {kinds:?}"
+    );
+    assert!(
+        kinds.iter().any(|kind| kind == "tool_result"),
+        "kinds: {kinds:?}"
+    );
 }
