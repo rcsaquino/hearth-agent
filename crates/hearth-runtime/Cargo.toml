@@ -6,5 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 
+[dependencies]
+hearth-config = { path = "../hearth-config" }
+
 [lints]
 workspace = true
