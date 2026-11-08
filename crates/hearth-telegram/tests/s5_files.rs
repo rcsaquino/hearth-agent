@@ -105,7 +105,7 @@ fn a_single_photo_is_sent_as_multipart_with_a_caption() {
     let client = TelegramClient::with_base_url("token", &base).expect("client");
 
     let id = client
-        .send_photo(42, &photo, Some("hello"))
+        .send_photo(42, None, &photo, Some("hello"))
         .expect("send photo");
     assert_eq!(id, 101);
 
@@ -130,7 +130,7 @@ fn a_document_omits_an_absent_caption() {
     let client = TelegramClient::with_base_url("token", &base).expect("client");
 
     let id = client
-        .send_document(7, &document, None)
+        .send_document(7, None, &document, None)
         .expect("send document");
     assert_eq!(id, 102);
 
@@ -153,6 +153,7 @@ fn two_images_are_sent_as_one_album() {
     let ids = client
         .send_media_group(
             9,
+            None,
             &[(MediaKind::Photo, first), (MediaKind::Photo, second)],
             Some("album"),
         )

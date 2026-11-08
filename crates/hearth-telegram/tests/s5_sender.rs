@@ -133,7 +133,7 @@ fn sender(base: &str) -> (TelegramSender, Arc<RecordingSleeper>) {
 fn sends_a_rich_reply() {
     let server = Server::start(vec![ok()]);
     let (sender, _) = sender(&server.base);
-    let outcome = sender.send_reply(42, "**hello**").expect("send");
+    let outcome = sender.send_reply(42, None, "**hello**").expect("send");
     assert_eq!(outcome, SendOutcome::Rich);
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
@@ -147,7 +147,7 @@ fn falls_back_to_entities_when_the_rich_message_is_rejected() {
     let server = Server::start(vec![error(400, 400, "bad rich message", None), ok()]);
     let (sender, _) = sender(&server.base);
     let outcome = sender
-        .send_reply(42, "Hello **bold** and [link](https://example.com).")
+        .send_reply(42, None, "Hello **bold** and [link](https://example.com).")
         .expect("send");
     assert_eq!(outcome, SendOutcome::Fallback { parts: 1 });
     let requests = server.finish();
@@ -181,7 +181,7 @@ fn splits_a_long_rejected_reply_into_marked_parts() {
         ok(),
     ]);
     let (sender, _) = sender(&server.base);
-    let outcome = sender.send_reply(42, &markdown).expect("send");
+    let outcome = sender.send_reply(42, None, &markdown).expect("send");
     assert_eq!(outcome, SendOutcome::Fallback { parts: 3 });
     let requests = server.finish();
     assert_eq!(requests.len(), 4);
@@ -208,7 +208,7 @@ fn splits_a_long_rejected_reply_into_marked_parts() {
 fn retries_a_429_with_the_requested_wait() {
     let server = Server::start(vec![error(429, 429, "slow down", Some(2)), ok()]);
     let (sender, sleeper) = sender(&server.base);
-    let outcome = sender.send_reply(42, "hi").expect("send");
+    let outcome = sender.send_reply(42, None, "hi").expect("send");
     assert_eq!(outcome, SendOutcome::Rich);
     let requests = server.finish();
     assert_eq!(requests.len(), 2);
@@ -231,7 +231,7 @@ fn a_transport_failure_is_uncertain_and_is_not_resent() {
     let base = format!("http://{}", listener.local_addr().expect("addr"));
     drop(listener);
     let (sender, _) = sender(&base);
-    let outcome = sender.send_reply(42, "hi").expect("send");
+    let outcome = sender.send_reply(42, None, "hi").expect("send");
     assert!(
         matches!(outcome, SendOutcome::Uncertain { .. }),
         "{outcome:?}"
@@ -242,7 +242,7 @@ fn a_transport_failure_is_uncertain_and_is_not_resent() {
 fn a_server_error_is_uncertain_and_does_not_fall_back() {
     let server = Server::start(vec![error(500, 500, "server exploded", None)]);
     let (sender, _) = sender(&server.base);
-    let outcome = sender.send_reply(42, "hi").expect("send");
+    let outcome = sender.send_reply(42, None, "hi").expect("send");
     assert!(
         matches!(outcome, SendOutcome::Uncertain { .. }),
         "{outcome:?}"
@@ -256,7 +256,7 @@ fn a_server_error_is_uncertain_and_does_not_fall_back() {
 fn sends_a_typing_action() {
     let server = Server::start(vec![ok()]);
     let (sender, _) = sender(&server.base);
-    sender.send_typing(42).expect("typing");
+    sender.send_typing(42, None).expect("typing");
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "sendChatAction");
@@ -268,8 +268,8 @@ fn sends_a_typing_action() {
 fn spaces_rapid_sends_by_at_least_one_interval() {
     let server = Server::start(vec![ok(), ok()]);
     let (sender, sleeper) = sender(&server.base);
-    sender.send_reply(42, "one").expect("first");
-    sender.send_reply(42, "two").expect("second");
+    sender.send_reply(42, None, "one").expect("first");
+    sender.send_reply(42, None, "two").expect("second");
     let requests = server.finish();
     assert_eq!(requests.len(), 2);
     let sleeps = sleeper.sleeps.lock().expect("sleeps");
@@ -290,7 +290,7 @@ fn retries_a_fallback_429_on_the_same_part() {
         ok(),
     ]);
     let (sender, sleeper) = sender(&server.base);
-    let outcome = sender.send_reply(42, "**hi**").expect("send");
+    let outcome = sender.send_reply(42, None, "**hi**").expect("send");
     assert_eq!(outcome, SendOutcome::Fallback { parts: 1 });
     let requests = server.finish();
     assert_eq!(requests.len(), 3);
@@ -306,7 +306,7 @@ fn oversized_markdown_skips_the_rich_path() {
     let replies = (0..9).map(|_| ok()).collect();
     let server = Server::start(replies);
     let (sender, _) = sender(&server.base);
-    let outcome = sender.send_reply(42, &markdown).expect("send");
+    let outcome = sender.send_reply(42, None, &markdown).expect("send");
     assert!(
         matches!(outcome, SendOutcome::Fallback { parts } if parts >= 8),
         "{outcome:?}"
@@ -324,7 +324,7 @@ fn too_many_blocks_skips_the_rich_path() {
     let markdown = "x\n".repeat(501);
     let server = Server::start(vec![ok()]);
     let (sender, _) = sender(&server.base);
-    let outcome = sender.send_reply(42, &markdown).expect("send");
+    let outcome = sender.send_reply(42, None, &markdown).expect("send");
     assert_eq!(outcome, SendOutcome::Fallback { parts: 1 });
     let requests = server.finish();
     assert_eq!(requests.len(), 1);

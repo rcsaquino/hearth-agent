@@ -68,6 +68,7 @@ impl MediaKind {
 }
 
 /// A blocking Telegram Bot API client.
+#[derive(Clone)]
 pub struct TelegramClient {
     token: String,
     base_url: String,
@@ -184,23 +185,35 @@ impl TelegramClient {
     }
 
     /// Show a chat action such as typing.
-    pub fn send_chat_action(&self, chat_id: i64, action: &str) -> Result<(), TelegramError> {
-        self.call(
-            "sendChatAction",
-            json!({"chat_id": chat_id, "action": action}),
-        )?;
+    pub fn send_chat_action(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        action: &str,
+    ) -> Result<(), TelegramError> {
+        let mut params = json!({"chat_id": chat_id, "action": action});
+        if let Some(thread_id) = thread_id {
+            params["message_thread_id"] = json!(thread_id);
+        }
+        self.call("sendChatAction", params)?;
         Ok(())
     }
 
     /// Send one native rich message with Markdown.
-    pub fn send_rich_message(&self, chat_id: i64, markdown: &str) -> Result<(), TelegramError> {
-        self.call(
-            "sendRichMessage",
-            json!({
-                "chat_id": chat_id,
-                "rich_message": {"markdown": markdown},
-            }),
-        )?;
+    pub fn send_rich_message(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        markdown: &str,
+    ) -> Result<(), TelegramError> {
+        let mut params = json!({
+            "chat_id": chat_id,
+            "rich_message": {"markdown": markdown},
+        });
+        if let Some(thread_id) = thread_id {
+            params["message_thread_id"] = json!(thread_id);
+        }
+        self.call("sendRichMessage", params)?;
         Ok(())
     }
 
@@ -208,10 +221,14 @@ impl TelegramClient {
     pub fn send_message(
         &self,
         chat_id: i64,
+        thread_id: Option<i64>,
         text: &str,
         entities: &[Entity],
     ) -> Result<(), TelegramError> {
         let mut params = json!({"chat_id": chat_id, "text": text});
+        if let Some(thread_id) = thread_id {
+            params["message_thread_id"] = json!(thread_id);
+        }
         if !entities.is_empty() {
             params["entities"] =
                 serde_json::to_value(entities).map_err(|error| TelegramError::Protocol {
@@ -227,40 +244,44 @@ impl TelegramClient {
     pub fn send_photo(
         &self,
         chat_id: i64,
+        thread_id: Option<i64>,
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
-        self.send_file("sendPhoto", "photo", chat_id, path, caption)
+        self.send_file("sendPhoto", "photo", chat_id, thread_id, path, caption)
     }
 
     /// Send one document and return its message id.
     pub fn send_document(
         &self,
         chat_id: i64,
+        thread_id: Option<i64>,
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
-        self.send_file("sendDocument", "document", chat_id, path, caption)
+        self.send_file("sendDocument", "document", chat_id, thread_id, path, caption)
     }
 
     /// Send one video and return its message id.
     pub fn send_video(
         &self,
         chat_id: i64,
+        thread_id: Option<i64>,
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
-        self.send_file("sendVideo", "video", chat_id, path, caption)
+        self.send_file("sendVideo", "video", chat_id, thread_id, path, caption)
     }
 
     /// Send one voice note and return its message id.
     pub fn send_voice(
         &self,
         chat_id: i64,
+        thread_id: Option<i64>,
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
-        self.send_file("sendVoice", "voice", chat_id, path, caption)
+        self.send_file("sendVoice", "voice", chat_id, thread_id, path, caption)
     }
 
     fn send_file(
@@ -268,10 +289,14 @@ impl TelegramClient {
         method: &str,
         field: &str,
         chat_id: i64,
+        thread_id: Option<i64>,
         path: &Path,
         caption: Option<&str>,
     ) -> Result<i64, TelegramError> {
         let mut form = Form::new().text("chat_id", chat_id.to_string());
+        if let Some(thread_id) = thread_id {
+            form = form.text("message_thread_id", thread_id.to_string());
+        }
         if let Some(caption) = caption.filter(|value| !value.is_empty()) {
             form = form.text("caption", caption.to_owned());
         }
@@ -293,6 +318,7 @@ impl TelegramClient {
     pub fn send_media_group(
         &self,
         chat_id: i64,
+        thread_id: Option<i64>,
         items: &[(MediaKind, PathBuf)],
         caption: Option<&str>,
     ) -> Result<Vec<i64>, TelegramError> {
@@ -327,6 +353,9 @@ impl TelegramClient {
         let mut form = Form::new()
             .text("chat_id", chat_id.to_string())
             .text("media", media_json);
+        if let Some(thread_id) = thread_id {
+            form = form.text("message_thread_id", thread_id.to_string());
+        }
         for (index, (_, path)) in items.iter().enumerate() {
             let part = Part::file(path).map_err(|error| TelegramError::Protocol {
                 method: "sendMediaGroup".to_owned(),

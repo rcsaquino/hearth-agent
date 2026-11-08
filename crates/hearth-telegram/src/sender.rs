@@ -33,6 +33,7 @@ pub enum SendOutcome {
 }
 
 /// Sends final answers, rich first.
+#[derive(Clone)]
 pub struct TelegramSender {
     client: TelegramClient,
     limiter: RateLimiter,
@@ -50,12 +51,17 @@ impl TelegramSender {
     }
 
     /// Deliver one final answer.
-    pub fn send_reply(&self, chat_id: i64, markdown: &str) -> Result<SendOutcome, TelegramError> {
+    pub fn send_reply(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        markdown: &str,
+    ) -> Result<SendOutcome, TelegramError> {
         if rich_fits(markdown) {
             let mut attempts = 0;
             loop {
                 self.limiter.wait(&*self.sleeper);
-                match self.client.send_rich_message(chat_id, markdown) {
+                match self.client.send_rich_message(chat_id, thread_id, markdown) {
                     Ok(()) => return Ok(SendOutcome::Rich),
                     Err(
                         error @ TelegramError::Api {
@@ -74,7 +80,7 @@ impl TelegramSender {
                     Err(TelegramError::Api {
                         code: Some(code), ..
                     }) if (400..500).contains(&code) => {
-                        return self.send_fallback(chat_id, markdown);
+                        return self.send_fallback(chat_id, thread_id, markdown);
                     }
                     Err(TelegramError::Api {
                         code: Some(500..=599),
@@ -98,16 +104,21 @@ impl TelegramSender {
                 }
             }
         }
-        self.send_fallback(chat_id, markdown)
+        self.send_fallback(chat_id, thread_id, markdown)
     }
 
     /// Show the typing indicator.
-    pub fn send_typing(&self, chat_id: i64) -> Result<(), TelegramError> {
+    pub fn send_typing(&self, chat_id: i64, thread_id: Option<i64>) -> Result<(), TelegramError> {
         self.limiter.wait(&*self.sleeper);
-        self.client.send_chat_action(chat_id, "typing")
+        self.client.send_chat_action(chat_id, thread_id, "typing")
     }
 
-    fn send_fallback(&self, chat_id: i64, markdown: &str) -> Result<SendOutcome, TelegramError> {
+    fn send_fallback(
+        &self,
+        chat_id: i64,
+        thread_id: Option<i64>,
+        markdown: &str,
+    ) -> Result<SendOutcome, TelegramError> {
         let formatted = format_markdown(markdown);
         let parts = split_formatted(&formatted, 4096);
         let mut sent = 0;
@@ -120,7 +131,7 @@ impl TelegramSender {
                 self.limiter.wait(&*self.sleeper);
                 match self
                     .client
-                    .send_message(chat_id, &part.text, &part.entities)
+                    .send_message(chat_id, thread_id, &part.text, &part.entities)
                 {
                     Ok(()) => {
                         sent += 1;
@@ -175,14 +186,15 @@ fn rich_fits(markdown: &str) -> bool {
             <= RICH_BLOCK_LIMIT
 }
 
+#[derive(Clone)]
 struct RateLimiter {
-    next: Mutex<Instant>,
+    next: Arc<Mutex<Instant>>,
 }
 
 impl RateLimiter {
     fn new() -> Self {
         Self {
-            next: Mutex::new(Instant::now()),
+            next: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
