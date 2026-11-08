@@ -225,6 +225,19 @@ impl Session {
             }
 
             for settle in &save.settles {
+                if let Some(answer_entry_id) = settle.answer_entry_id.as_deref() {
+                    let found: Option<i64> = writer.query_optional(
+                        "SELECT 1 FROM entries WHERE id = ? AND conversation_id = ?",
+                        (answer_entry_id, conversation_id.as_str()),
+                        |row| row.get(0),
+                    )?;
+                    if found.is_none() {
+                        return Err(CoreError::EntryNotFound(
+                            answer_entry_id.to_owned(),
+                            conversation_id.clone(),
+                        ));
+                    }
+                }
                 let changed = writer.execute(
                     "UPDATE submissions SET status = ?, answer_entry_id = ?, settled_at = ? \
                      WHERE id = ? AND conversation_id = ? AND settled_at IS NULL",
