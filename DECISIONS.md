@@ -200,3 +200,23 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - The Harness is dropped before the lock, so the storage writer thread joins before
   the lock is released.
 - No scheduler or effect worker runs yet. The daemon recovers and waits.
+
+## 2026-11-08: M1b-2c effect execution
+
+- `file_write` is an idempotent effect. Its payload is `{ path, content }`, the path
+  is relative to the workspace root, and the write is confined after canonicalizing
+  the root, the parent, and any existing target. `..`, absolute paths, and symlink
+  escapes are rejected before anything is written. The file is written with mode
+  `0600`.
+- The effect worker polls every 100 ms, takes at most 10 pending effects per batch,
+  and allows at most 3 attempts. A retryable failure returns the effect to `intent`;
+  a non-retryable failure settles it as `failed`. The final attempt is
+  non-retryable.
+- On startup the worker requeues a started `file_write` effect because overwriting
+  the same file is safe. A started effect of an unknown kind fails non-retryably so
+  it cannot stay stuck.
+- The daemon runs task recovery and effect recovery before starting the worker
+  thread. The worker stops when the shutdown flag is set on SIGTERM or SIGINT, and
+  the daemon joins it before dropping the Harness and releasing the lock.
+- The workspace root is `agent.workspace` when configured, resolved relative to the
+  home, otherwise `$HEARTH_HOME/workspace`.
