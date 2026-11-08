@@ -801,3 +801,12 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   support instead of adding a column without a tool call path.
 - The stats command opens the database read-only. The prompt audit uses the harness
   and may perform normal migration on first open; it does not write records.
+
+## 2026-11-09: M5d-1 lazy tool groups and steering
+
+- `tool_search` is a core tool. The core schema budget of 1200 tokens is covered by a unit test that includes files, shell, web search, web fetch, memory, message, and tool_search. Optional group schemas are added only after selection and appear in the same prompt tool segment and audit document.
+- The group registry defines browser, documents, and media. None of them ships a callable tool in this slice, so `tool_search` lists them as unavailable and a selection returns `group_unavailable` rather than advertising a tool that does not exist.
+- A selected group is recorded in the generation task checkpoint as `selected_groups`, loaded at the start of a claimed run, and shared with the `tool_search` tool. The agent exposes only the selected group's specs and only the selected group's tools are callable.
+- Steering absorbs queued submissions for the same conversation at each turn boundary before a provider request. Their user entries are already in the transcript. The active run settles every absorbed submission with the same terminal outcome and answer entry, so the worker cannot pick up a duplicate. A run never changes a request already in flight.
+- The existing daemon uncertain-delivery test now delays its second update by 500 ms. Without the delay the second update is correctly absorbed into the first run, which leaves no later interaction to exercise recovered delivery. The concurrency test now expects the queued second submission to be absorbed and done rather than left queued.
+- Known limits for review: the optional groups are placeholders until the optional tools are built; the checkpoint selection is loaded on a claimed checkpoint, but cross-process task resume remains M7 work; absorbed submissions share the active answer entry by design.

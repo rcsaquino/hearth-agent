@@ -95,7 +95,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         let memory_source = session
             .latest_user_entry_id(&conversation.id)?
             .map(MemorySource::user);
-        let tools = build_tools(
+        let built = build_tools(
             &settings,
             &workspace,
             &spill,
@@ -113,11 +113,12 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
                 provider_name: models.kind.clone(),
                 owner: format!("chat:{}", std::process::id()),
                 max_turns: settings.agent.max_turns,
-                tools,
+                tools: built.core,
                 spill_dir: spill.clone(),
             },
         )
         .with_memory(Arc::clone(&memory))
+        .with_groups(built.groups, built.selection)
         .with_budget(ContextBudget::new(
             models.context_window,
             models.max_output_tokens,

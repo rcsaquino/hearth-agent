@@ -429,7 +429,12 @@ fn two_concurrent_runs_cannot_enter_one_conversation() {
         .submission_by_id(&second.id)
         .expect("read second submission")
         .expect("second submission exists");
-    assert_eq!(after.status, SubmissionStatus::Queued);
+    assert_eq!(
+        after.status,
+        SubmissionStatus::Done,
+        "the active run absorbs a queued submission and settles it"
+    );
+    assert_eq!(after.answer_entry_id, first_outcome.answer_entry_id);
 }
 
 #[test]

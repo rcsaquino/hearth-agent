@@ -12,7 +12,9 @@ use hearth_core::{
     plan_compaction, prefix_cause,
 };
 use hearth_memory::MemoryService;
-use hearth_model::{ContentBlock, Pricing, Provider, ProviderError, StreamEvent, ToolCall, Usage};
+use hearth_model::{
+    ContentBlock, Pricing, Provider, ProviderError, StreamEvent, ToolCall, ToolSpec, Usage,
+};
 use hearth_tools::{ToolError, ToolRegistry};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -23,6 +25,7 @@ use time::format_description::well_known::Rfc3339;
 use crate::compaction::Compactor;
 use crate::events::{EventSink, NoopSink, RunEvent};
 use crate::memory_extract::MemoryExtractor;
+use crate::tool_groups::ToolGroups;
 
 /// Everything an agent needs beyond the record and the provider.
 #[derive(Debug, Clone)]
@@ -68,6 +71,8 @@ pub struct Agent {
     memory: Option<Arc<MemoryService>>,
     reservations: Mutex<HashSet<String>>,
     budget: ContextBudget,
+    groups: Option<Arc<ToolGroups>>,
+    selection: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Agent {
@@ -86,6 +91,8 @@ impl Agent {
             memory: None,
             reservations: Mutex::new(HashSet::new()),
             budget: ContextBudget::default(),
+            groups: None,
+            selection: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -99,6 +106,95 @@ impl Agent {
     pub fn with_memory(mut self, memory: Arc<MemoryService>) -> Self {
         self.memory = Some(memory);
         self
+    }
+
+    /// Attach the optional tool groups and the selection shared with tool_search.
+    pub fn with_groups(
+        mut self,
+        groups: Arc<ToolGroups>,
+        selection: Arc<Mutex<HashSet<String>>>,
+    ) -> Self {
+        self.groups = Some(groups);
+        self.selection = selection;
+        self
+    }
+
+    fn selected_groups(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .selection
+            .lock()
+            .map(|selection| selection.iter().cloned().collect())
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    fn tool_specs(&self) -> Vec<ToolSpec> {
+        let mut specs = self.config.tools.specs();
+        if let Some(groups) = &self.groups
+            && let Ok(selection) = self.selection.lock()
+        {
+            specs.extend(groups.selected_specs(&selection));
+        }
+        specs
+    }
+
+    fn load_selection(&self, checkpoint: Option<&Value>) {
+        let Ok(mut selection) = self.selection.lock() else {
+            return;
+        };
+        selection.clear();
+        if let Some(items) = checkpoint
+            .and_then(|checkpoint| checkpoint.get("selected_groups"))
+            .and_then(Value::as_array)
+        {
+            for item in items {
+                if let Some(name) = item.as_str() {
+                    selection.insert(name.to_owned());
+                }
+            }
+        }
+    }
+
+    fn absorb_queued(
+        &self,
+        conversation_id: &str,
+        active_id: &str,
+        absorbed: &mut Vec<String>,
+    ) -> Result<(), CoreError> {
+        for queued in self.session.queued_submissions(conversation_id)? {
+            if queued.id != active_id && !absorbed.iter().any(|id| id == &queued.id) {
+                absorbed.push(queued.id);
+            }
+        }
+        Ok(())
+    }
+
+    fn settle_absorbed(
+        &self,
+        absorbed: &[String],
+        status: SubmissionStatus,
+        answer_entry_id: Option<&str>,
+        reason: Option<&str>,
+    ) -> Result<(), CoreError> {
+        for id in absorbed {
+            let result = match status {
+                SubmissionStatus::Done => self.session.settle(id, status, answer_entry_id),
+                SubmissionStatus::Cancelled => self.session.settle(id, status, None),
+                _ => self.session.settle_with_error(
+                    id,
+                    status,
+                    None,
+                    Some(json!({"reason": reason.unwrap_or("absorbed")})),
+                ),
+            };
+            match result {
+                Ok(_) => {}
+                Err(CoreError::AlreadySettled(..)) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
     }
 
     fn memory_context(&self, query: Option<&str>) -> (String, String, u64) {
@@ -173,7 +269,7 @@ impl Agent {
                 soul: self.config.soul.clone(),
                 conversation_id: conversation_id.to_owned(),
                 model: self.config.model.clone(),
-                tools: self.config.tools.specs(),
+                tools: self.tool_specs(),
                 standing,
                 standing_version,
                 recall,
@@ -288,8 +384,10 @@ impl Agent {
             "run_started",
             json!({"submission_id": submission.id}),
         );
+        self.load_selection(claimed.checkpoint.as_ref());
+        let mut absorbed: Vec<String> = Vec::new();
         if cancel.load(Ordering::Relaxed) {
-            return self.settle_cancelled(&submission, &claimed.id, events);
+            return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
         }
 
         let mut turn = claimed
@@ -306,8 +404,11 @@ impl Agent {
         if !pending.is_empty() {
             self.execute_calls(&submission, &claimed.id, &pending, events)?;
             turn += 1;
-            self.session
-                .checkpoint_task(&claimed.id, &self.config.owner, json!({"turn": turn}))?;
+            self.session.checkpoint_task(
+                &claimed.id,
+                &self.config.owner,
+                json!({"turn": turn, "selected_groups": self.selected_groups()}),
+            )?;
             emit(
                 events,
                 &claimed.id,
@@ -321,11 +422,13 @@ impl Agent {
         let mut overflow_attempted = false;
         let mut previous_prefix: Option<Value> = None;
         'turn: loop {
+            self.absorb_queued(&submission.conversation_id, &submission.id, &mut absorbed)?;
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id, events);
+                return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
             }
             if turn >= self.config.max_turns {
                 return self.settle_failure(
+                    &absorbed,
                     &submission,
                     &claimed.id,
                     "The turn limit was reached before a final answer.",
@@ -352,7 +455,7 @@ impl Agent {
                 .history_for_prompt(&submission.conversation_id)?;
             let (standing, recall, standing_version) =
                 self.memory_context(latest_user_text(&history).as_deref());
-            let tools = self.config.tools.specs();
+            let tools = self.tool_specs();
             let make_input = |recall: String| PromptInput {
                 soul: self.config.soul.clone(),
                 conversation_id: submission.conversation_id.clone(),
@@ -390,6 +493,7 @@ impl Agent {
             }
             if prompt.tokens.total > self.budget.usable {
                 return self.settle_failure(
+                    &absorbed,
                     &submission,
                     &claimed.id,
                     "The conversation is too large for the model window even after shrinking. Start a new chat or let compaction run.",
@@ -420,6 +524,7 @@ impl Agent {
                     "prefix_hash": prompt.prefix_hash.clone(),
                     "prefix_parts": prompt.prefix_parts.clone(),
                     "prefix_cause": causes,
+                    "selected_groups": self.selected_groups(),
                 }),
             )?;
             previous_prefix = Some(json!(prompt.prefix_parts.clone()));
@@ -431,7 +536,7 @@ impl Agent {
                 json!({"phase": "request", "turn": turn}),
             );
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id, events);
+                return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
             }
 
             let started = Instant::now();
@@ -445,6 +550,7 @@ impl Agent {
                         }
                     }
                     return self.settle_failure(
+                        &absorbed,
                         &submission,
                         &claimed.id,
                         &format!("Provider error: {error}"),
@@ -506,6 +612,7 @@ impl Agent {
                             }
                         }
                         return self.settle_failure(
+                            &absorbed,
                             &submission,
                             &claimed.id,
                             &format!("Provider error: {error}"),
@@ -528,20 +635,20 @@ impl Agent {
             self.session
                 .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id, events);
+                return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
             }
 
             if !calls.is_empty() {
                 self.save_assistant(&submission, &prompt_hash, &thinking, &text, &calls)?;
                 self.execute_calls(&submission, &claimed.id, &calls, events)?;
                 if cancel.load(Ordering::Relaxed) {
-                    return self.settle_cancelled(&submission, &claimed.id, events);
+                    return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
                 }
                 turn += 1;
                 self.session.checkpoint_task(
                     &claimed.id,
                     &self.config.owner,
-                    json!({"turn": turn}),
+                    json!({"turn": turn, "selected_groups": self.selected_groups()}),
                 )?;
                 emit(
                     events,
@@ -554,6 +661,7 @@ impl Agent {
             }
             if text.is_empty() {
                 return self.settle_failure(
+                    &absorbed,
                     &submission,
                     &claimed.id,
                     "The model returned no answer.",
@@ -568,6 +676,12 @@ impl Agent {
                 &submission.id,
                 SubmissionStatus::Done,
                 Some(&answer_entry_id),
+            )?;
+            self.settle_absorbed(
+                &absorbed,
+                SubmissionStatus::Done,
+                Some(&answer_entry_id),
+                None,
             )?;
             self.session.finish_task(
                 &claimed.id,
@@ -687,7 +801,17 @@ impl Agent {
                     "arguments": preview(&call.arguments.to_string()),
                 }),
             );
-            let (content, is_error) = match self.config.tools.call(&call.name, &call.arguments) {
+            let selected = self.groups.as_ref().and_then(|groups| {
+                self.selection.lock().ok().and_then(|selection| {
+                    groups.call_selected(&call.name, &call.arguments, &selection)
+                })
+            });
+            let outcome = self
+                .config
+                .tools
+                .call(&call.name, &call.arguments)
+                .or(selected);
+            let (content, is_error) = match outcome {
                 Some(Ok(output)) => {
                     let (content, spill_failed) = self.spill_output(&call.id, &output.content);
                     (content, output.is_error || spill_failed)
@@ -788,6 +912,7 @@ impl Agent {
         &self,
         submission: &Submission,
         task_id: &str,
+        absorbed: &[String],
         events: &dyn EventSink,
     ) -> Result<RunOutcome, AgentError> {
         let notice = "Stopped.";
@@ -797,6 +922,7 @@ impl Agent {
         let settled = self
             .session
             .settle(&submission.id, SubmissionStatus::Cancelled, None)?;
+        self.settle_absorbed(absorbed, SubmissionStatus::Cancelled, None, None)?;
         self.session.finish_task(
             task_id,
             &self.config.owner,
@@ -823,6 +949,7 @@ impl Agent {
 
     fn settle_failure(
         &self,
+        absorbed: &[String],
         submission: &Submission,
         task_id: &str,
         message: &str,
@@ -839,6 +966,7 @@ impl Agent {
             None,
             Some(json!({"reason": reason})),
         )?;
+        self.settle_absorbed(absorbed, SubmissionStatus::Unanswered, None, Some(reason))?;
         self.session.finish_task(
             task_id,
             &self.config.owner,

@@ -1,7 +1,8 @@
 //! Shared runtime tool construction.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hearth_config::Settings;
@@ -15,6 +16,8 @@ use hearth_tools::{
 };
 use thiserror::Error;
 
+use crate::tool_groups::{ToolGroups, ToolSearchTool};
+
 /// The Telegram values needed for the message tool.
 pub struct MessageTarget {
     pub sender: TelegramSender,
@@ -22,6 +25,13 @@ pub struct MessageTarget {
     pub thread_id: Option<i64>,
     pub outbound: PathBuf,
     pub speaker: Option<Arc<dyn Speaker>>,
+}
+
+/// The core tools plus the lazy group registry.
+pub struct BuiltTools {
+    pub core: ToolRegistry,
+    pub groups: Arc<ToolGroups>,
+    pub selection: Arc<Mutex<HashSet<String>>>,
 }
 
 /// A tool could not be built from settings.
@@ -70,12 +80,18 @@ pub fn build_tools(
     message: Option<MessageTarget>,
     memory: Option<Arc<MemoryService>>,
     memory_source: Option<MemorySource>,
-) -> Result<ToolRegistry, ToolBuildError> {
+) -> Result<BuiltTools, ToolBuildError> {
+    let groups = Arc::new(ToolGroups::default_groups());
+    let selection = Arc::new(Mutex::new(HashSet::new()));
     let mut tools: Vec<Arc<dyn hearth_tools::Tool>> = vec![
         Arc::new(FileTool::new(workspace, spill)),
         Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
         Arc::new(build_web_search(settings)?),
         Arc::new(build_web_fetch(settings)?),
+        Arc::new(ToolSearchTool::new(
+            Arc::clone(&groups),
+            Arc::clone(&selection),
+        )),
     ];
     if let Some(memory) = memory {
         let tool = match memory_source {
@@ -95,7 +111,11 @@ pub fn build_tools(
             target.speaker,
         )));
     }
-    Ok(ToolRegistry::new(tools))
+    Ok(BuiltTools {
+        core: ToolRegistry::new(tools),
+        groups,
+        selection,
+    })
 }
 
 fn build_web_search(settings: &Settings) -> Result<WebSearchTool, SearchError> {
@@ -251,5 +271,71 @@ mod tests {
         let chain = build_fetch_providers(&fetch).expect("fetch chain");
         let names: Vec<&str> = chain.iter().map(|provider| provider.name()).collect();
         assert_eq!(names, vec!["http"]);
+    }
+}
+
+#[cfg(test)]
+mod core_budget_tests {
+    use super::*;
+    use hearth_core::Harness;
+    use hearth_memory::MemoryService;
+    use hearth_telegram::{SystemSleeper, TelegramClient};
+    use serde_json::json;
+
+    fn settings() -> Settings {
+        serde_json::from_value(json!({})).expect("empty settings")
+    }
+
+    #[test]
+    fn the_core_tool_schemas_fit_the_budget() {
+        let home = tempfile::TempDir::new().expect("temp home");
+        let harness = Harness::open(home.path()).expect("harness");
+        let memory = Arc::new(MemoryService::new(harness.session().clone()));
+        let sender = TelegramSender::new(
+            TelegramClient::with_base_url("test-token", "http://127.0.0.1:1")
+                .expect("telegram client"),
+            Arc::new(SystemSleeper),
+        );
+        let target = MessageTarget {
+            sender,
+            chat_id: 1,
+            thread_id: None,
+            outbound: home.path().join("outbound"),
+            speaker: None,
+        };
+        let spill = home.path().join("spill");
+        let built = build_tools(
+            &settings(),
+            home.path(),
+            &spill,
+            Some(target),
+            Some(memory),
+            None,
+        )
+        .expect("tools");
+
+        let names: Vec<String> = built
+            .core
+            .specs()
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect();
+        for expected in [
+            "files",
+            "shell",
+            "web_search",
+            "web_fetch",
+            "memory",
+            "message",
+            "tool_search",
+        ] {
+            assert!(
+                names.iter().any(|name| name == expected),
+                "missing {expected}"
+            );
+        }
+
+        let tokens = ToolGroups::schema_tokens(&built.core.specs());
+        assert!(tokens <= 1200, "core tool schemas use {tokens} tokens");
     }
 }

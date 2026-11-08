@@ -123,16 +123,8 @@ fn done() -> Vec<Result<StreamEvent, ProviderError>> {
 fn tool_search_loads_a_group_for_the_next_request() {
     let (home, harness, submission) = setup();
     let groups = Arc::new(ToolGroups::new(vec![
-        ToolGroup::new(
-            "test",
-            "A test group.",
-            vec![Arc::new(Echo)],
-        ),
-        ToolGroup::new(
-            "other",
-            "Another group.",
-            vec![Arc::new(Other)],
-        ),
+        ToolGroup::new("test", "A test group.", vec![Arc::new(Echo)]),
+        ToolGroup::new("other", "Another group.", vec![Arc::new(Other)]),
     ]));
     let selection = Arc::new(Mutex::new(HashSet::new()));
     let core = ToolRegistry::new(vec![Arc::new(ToolSearchTool::new(

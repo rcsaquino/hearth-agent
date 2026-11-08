@@ -385,7 +385,7 @@ fn the_daemon_recovers_an_uncertain_telegram_answer() {
 
     let (provider_base, provider_thread) =
         fake_provider_answers(vec!["First answer", "Second answer"]);
-    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script_with_delays(
         vec![
             json!({
                 "update_id": 1,
@@ -409,6 +409,8 @@ fn the_daemon_recovers_an_uncertain_telegram_answer() {
             }),
         ],
         true,
+        vec![Duration::ZERO, Duration::from_millis(500)],
+        None,
     );
     let home = tempfile::TempDir::new().expect("temp home");
     init_home(home.path(), &provider_base);

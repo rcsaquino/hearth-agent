@@ -492,7 +492,7 @@ impl TelegramWorker {
             .ok()
             .flatten()
             .map(MemorySource::user);
-        let tools = match build_tools(
+        let built = match build_tools(
             &self.settings,
             &self.workspace,
             &self.spill,
@@ -516,11 +516,12 @@ impl TelegramWorker {
                 provider_name: self.provider_name.clone(),
                 owner: format!("daemon:{}:{}", self.pid, submission.id),
                 max_turns: self.max_turns,
-                tools,
+                tools: built.core,
                 spill_dir: self.spill.clone(),
             },
         )
         .with_memory(Arc::clone(&self.memory))
+        .with_groups(built.groups, built.selection)
         .with_budget(self.budget);
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();

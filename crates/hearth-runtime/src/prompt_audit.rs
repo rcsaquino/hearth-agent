@@ -67,7 +67,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     let secrets = secret_values(&settings);
     let soul = read_soul(home, &settings);
     let (workspace, spill) = workspace_paths(home, &settings);
-    let tools = build_tools(
+    let built = build_tools(
         &settings,
         &workspace,
         &spill,
@@ -78,7 +78,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     .map_err(|error| PromptError::Invalid(error.to_string()))?;
 
     if options.system {
-        let document = system_document(&settings, &session, &memory, &tools, &soul)?;
+        let document = system_document(&settings, &session, &memory, &built.core, &soul)?;
         let output = if options.json {
             serde_json::to_string_pretty(&document).unwrap_or_else(|_| document.to_string())
         } else {
@@ -90,7 +90,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
 
     if let Some(text) = options.preview {
         let (request, document) =
-            preview_document(&settings, &session, &memory, &tools, &soul, &text)?;
+            preview_document(&settings, &session, &memory, &built.core, &soul, &text)?;
         if options.wire {
             let body = wire_body(&settings, &request)?;
             let output = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
