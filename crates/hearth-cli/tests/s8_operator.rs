@@ -1443,4 +1443,14 @@ fn chat_runs_one_line_through_the_real_provider_adapter() {
         request.to_string().contains("hello"),
         "request did not carry the user text: {request}"
     );
+    let tool_names: Vec<&str> = request["tools"]
+        .as_array()
+        .expect("request tools")
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .collect();
+    assert!(
+        tool_names.contains(&"web_search"),
+        "chat tools were: {tool_names:?}"
+    );
 }
