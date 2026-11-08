@@ -1519,6 +1519,7 @@ fn seed_prompt_home(soul: &str) -> (tempfile::TempDir, String) {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
             runtime_note: "RUNTIME".to_owned(),
         })
         .expect("build prompt");

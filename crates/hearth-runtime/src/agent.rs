@@ -69,6 +69,7 @@ pub struct Agent {
     pricing: Pricing,
     config: AgentConfig,
     memory: Option<Arc<MemoryService>>,
+    skills: Option<Arc<crate::skills::SkillLibrary>>,
     extract: bool,
     reservations: Mutex<HashSet<String>>,
     budget: ContextBudget,
@@ -90,6 +91,7 @@ impl Agent {
             pricing,
             config,
             memory: None,
+            skills: None,
             extract: true,
             reservations: Mutex::new(HashSet::new()),
             budget: ContextBudget::default(),
@@ -108,6 +110,26 @@ impl Agent {
     pub fn with_memory(mut self, memory: Arc<MemoryService>) -> Self {
         self.memory = Some(memory);
         self
+    }
+
+    /// Attach the skill library used for the L4 prompt index.
+    pub fn with_skills(mut self, skills: Arc<crate::skills::SkillLibrary>) -> Self {
+        self.skills = Some(skills);
+        self
+    }
+
+    /// The active skill index, or an empty string on a library error.
+    fn skills_index(&self) -> String {
+        match &self.skills {
+            Some(skills) => match skills.index() {
+                Ok(index) => index,
+                Err(error) => {
+                    tracing::warn!(%error, "skill index could not be built");
+                    String::new()
+                }
+            },
+            None => String::new(),
+        }
     }
 
     /// Do not extract memory after this agent's runs.
@@ -281,6 +303,7 @@ impl Agent {
                 standing,
                 standing_version,
                 recall,
+                skills_index: self.skills_index(),
                 runtime_note,
             },
             &history,
@@ -472,6 +495,7 @@ impl Agent {
                 standing: standing.clone(),
                 standing_version,
                 recall,
+                skills_index: self.skills_index(),
                 runtime_note: runtime_note.clone(),
             };
             let mut recall_text = recall;

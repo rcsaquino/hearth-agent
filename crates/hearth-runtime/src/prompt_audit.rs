@@ -190,6 +190,7 @@ fn system_document(
             standing: standing_text,
             standing_version,
             recall: String::new(),
+            skills_index: String::new(),
             runtime_note: "system prefix".to_owned(),
         },
         &[],
@@ -248,6 +249,7 @@ fn preview_document(
             standing: standing_text,
             standing_version,
             recall,
+            skills_index: String::new(),
             runtime_note: "preview".to_owned(),
         },
         &history,
@@ -288,7 +290,7 @@ fn system_text(document: &Value) -> String {
         document["operation"].as_str().unwrap_or_default(),
         tools,
         document["standing_memory"].as_str().unwrap_or_default(),
-        ""
+        document["skills_index"].as_str().unwrap_or_default()
     )
 }
 

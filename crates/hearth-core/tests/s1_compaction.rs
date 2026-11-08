@@ -88,6 +88,7 @@ fn prompt_input(conversation_id: &str) -> PromptInput {
         standing: String::new(),
         standing_version: 0,
         recall: String::new(),
+            skills_index: String::new(),
         runtime_note: "Runtime note.".to_owned(),
     }
 }

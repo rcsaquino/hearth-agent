@@ -28,6 +28,7 @@ pub struct PromptInput {
     pub standing: String,
     pub standing_version: u64,
     pub recall: String,
+    pub skills_index: String,
     pub runtime_note: String,
 }
 
@@ -57,6 +58,15 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             blocks: vec![ContentBlock::Text(format!(
                 "## Standing memory\n\n{}",
                 input.standing
+            ))],
+        });
+    }
+    if !input.skills_index.trim().is_empty() {
+        messages.push(ChatMessage {
+            role: Role::System,
+            blocks: vec![ContentBlock::Text(format!(
+                "## Skills\n\n{}",
+                input.skills_index
             ))],
         });
     }
@@ -115,12 +125,12 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         tokens_for(OPERATION),
         tokens_for(&tools_text),
         tokens_for(&input.standing),
-        0,
+        tokens_for(&input.skills_index),
         tokens_for(&transcript_text),
         tokens_for(&input.recall),
         tokens_for(&input.runtime_note),
     );
-    let skills_text = String::new();
+    let skills_text = input.skills_index.clone();
     let mut prefix_parts = BTreeMap::new();
     prefix_parts.insert("identity".to_owned(), hash_part(&input.soul));
     prefix_parts.insert("operation".to_owned(), hash_part(OPERATION));
@@ -142,6 +152,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "operation": OPERATION,
         "tools": tools,
         "standing_memory": input.standing,
+        "skills_index": input.skills_index,
         "recall": input.recall,
         "transcript": transcript,
         "runtime": input.runtime_note,
@@ -404,6 +415,18 @@ pub fn request_from_document(document: &Value) -> Option<ChatRequest> {
             role: Role::System,
             blocks: vec![ContentBlock::Text(format!(
                 "## Standing memory\n\n{standing}"
+            ))],
+        });
+    }
+    let skills_index = document
+        .get("skills_index")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !skills_index.trim().is_empty() {
+        messages.push(ChatMessage {
+            role: Role::System,
+            blocks: vec![ContentBlock::Text(format!(
+                "## Skills\n\n{skills_index}"
             ))],
         });
     }

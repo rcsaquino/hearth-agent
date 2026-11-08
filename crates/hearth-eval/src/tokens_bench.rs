@@ -225,6 +225,7 @@ pub fn run() -> Result<TokensReport> {
                 standing: standing_text,
                 standing_version: standing.version,
                 recall: recall_text,
+                skills_index: String::new(),
                 runtime_note,
             },
             &history,

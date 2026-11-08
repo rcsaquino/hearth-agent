@@ -41,6 +41,7 @@ fn the_prompt_starts_with_identity_and_operation_and_ends_with_runtime() {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
         })
         .expect("build prompt");
 
@@ -110,6 +111,7 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
         })
         .expect("build prompt");
 
@@ -175,6 +177,7 @@ fn the_request_carries_the_model_tools_and_session() {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
         })
         .expect("build prompt");
 
@@ -208,6 +211,7 @@ fn the_audit_document_has_five_segments() {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
         })
         .expect("build prompt");
 
@@ -247,6 +251,7 @@ fn saving_the_same_prompt_twice_reuses_the_hash() {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
         })
         .expect("build prompt");
     let text = serde_json::to_string(&prompt.document).expect("serialize prompt");
@@ -325,6 +330,7 @@ fn image_and_file_blocks_survive_the_prompt_and_audit() {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
         })
         .expect("build prompt");
 
@@ -375,6 +381,7 @@ fn the_operation_carries_the_message_and_voice_rules() {
             standing: String::new(),
             standing_version: 0,
             recall: String::new(),
+            skills_index: String::new(),
         })
         .expect("build prompt");
     let operation = prompt.document["operation"]
@@ -415,6 +422,7 @@ fn standing_and_recall_are_placed_in_their_layers() {
             standing: "S1\nS2".to_owned(),
             standing_version: 0,
             recall: "R1".to_owned(),
+            skills_index: String::new(),
             runtime_note: "RUNTIME".to_owned(),
         })
         .expect("build prompt");
@@ -473,6 +481,7 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
             standing: "S1".to_owned(),
             standing_version: 0,
             recall: "R1".to_owned(),
+            skills_index: String::new(),
             runtime_note: "RUNTIME".to_owned(),
         })
         .expect("build prompt");
@@ -549,6 +558,7 @@ fn the_prefix_hash_tracks_only_the_stable_layers() {
                     standing: "S1".to_owned(),
                     standing_version,
                     recall: recall.to_owned(),
+                    skills_index: String::new(),
                     runtime_note: runtime.to_owned(),
                 })
                 .expect("build prompt")
