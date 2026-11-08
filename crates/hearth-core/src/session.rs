@@ -699,16 +699,17 @@ impl Session {
     /// Write memory changes without a conversation. The save still has one commit.
     pub fn save_memory(&self, writes: Vec<MemoryWrite>) -> Result<Commit, CoreError> {
         let now = self.clock.now_micros();
-        self.storage.write(move |writer| -> Result<Commit, CoreError> {
-            let seq = next_sequence(writer)?;
-            apply_memory(writer, &writes, now)?;
-            insert_commit(writer, seq, now, None, None, "memory")?;
-            Ok(Commit {
-                seq,
-                entry_ids: Vec::new(),
-                effect_ids: Vec::new(),
+        self.storage
+            .write(move |writer| -> Result<Commit, CoreError> {
+                let seq = next_sequence(writer)?;
+                apply_memory(writer, &writes, now)?;
+                insert_commit(writer, seq, now, None, None, "memory")?;
+                Ok(Commit {
+                    seq,
+                    entry_ids: Vec::new(),
+                    effect_ids: Vec::new(),
+                })
             })
-        })
     }
 
     /// Save one prompt text and return its stable hash.
@@ -2328,8 +2329,8 @@ fn add_memory(
     actor: &str,
     now: i64,
 ) -> Result<(), CoreError> {
-    let tags = serde_json::to_string(&item.tags)
-        .map_err(|error| CoreError::Invalid(error.to_string()))?;
+    let tags =
+        serde_json::to_string(&item.tags).map_err(|error| CoreError::Invalid(error.to_string()))?;
     writer.execute(
         "INSERT INTO memory_items (id, kind, content, tags, fingerprint, importance, status, \
          valid_from, valid_to, supersedes_id, source_kind, source_ref, standing, created_at, \
@@ -2363,52 +2364,71 @@ fn add_memory(
     )
 }
 
+struct OldMemory {
+    content: String,
+    tags: String,
+    fingerprint: String,
+    importance: i64,
+    status: String,
+    valid_to: Option<i64>,
+    standing: String,
+    last_used_at: Option<i64>,
+}
+
 fn update_memory(
     writer: &Writer<'_>,
     update: &MemoryUpdate,
     actor: &str,
     now: i64,
 ) -> Result<(), CoreError> {
-    let old: Option<(String, String, String, i64, String, Option<i64>, String, Option<i64>)> =
-        writer.query_optional(
-            "SELECT content, tags, fingerprint, importance, status, valid_to, standing, \
+    let old: Option<OldMemory> = writer.query_optional(
+        "SELECT content, tags, fingerprint, importance, status, valid_to, standing, \
              last_used_at FROM memory_items WHERE id = ?",
-            (update.id.as_str(),),
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                ))
-            },
-        )?;
-    let Some((old_content, old_tags, old_fingerprint, old_importance, old_status, old_valid_to, old_standing, old_used)) = old else {
+        (update.id.as_str(),),
+        |row| {
+            Ok(OldMemory {
+                content: row.get(0)?,
+                tags: row.get(1)?,
+                fingerprint: row.get(2)?,
+                importance: row.get(3)?,
+                status: row.get(4)?,
+                valid_to: row.get(5)?,
+                standing: row.get(6)?,
+                last_used_at: row.get(7)?,
+            })
+        },
+    )?;
+    let Some(old) = old else {
         return Err(CoreError::Invalid(format!(
             "memory {} not found",
             update.id
         )));
     };
-    let content = update.content.clone().unwrap_or_else(|| old_content.clone());
+    let old_content = old.content;
+    let old_tags = old.tags;
+    let old_fingerprint = old.fingerprint;
+    let old_importance = old.importance;
+    let old_status = old.status;
+    let old_valid_to = old.valid_to;
+    let old_standing = old.standing;
+    let old_used = old.last_used_at;
+    let content = update
+        .content
+        .clone()
+        .unwrap_or_else(|| old_content.clone());
     let tags = match &update.tags {
-        Some(tags) => serde_json::to_string(tags)
-            .map_err(|error| CoreError::Invalid(error.to_string()))?,
+        Some(tags) => {
+            serde_json::to_string(tags).map_err(|error| CoreError::Invalid(error.to_string()))?
+        }
         None => old_tags.clone(),
     };
-    let fingerprint = update
-        .fingerprint
-        .clone()
-        .unwrap_or_else(|| {
-            if update.content.is_some() {
-                hash_content(&content)
-            } else {
-                old_fingerprint.clone()
-            }
-        });
+    let fingerprint = update.fingerprint.clone().unwrap_or_else(|| {
+        if update.content.is_some() {
+            hash_content(&content)
+        } else {
+            old_fingerprint.clone()
+        }
+    });
     let importance = update.importance.unwrap_or(old_importance);
     let status = update.status.clone().unwrap_or(old_status);
     let valid_to = update.valid_to.or(old_valid_to);
@@ -2440,12 +2460,7 @@ fn update_memory(
     )
 }
 
-fn forget_memory(
-    writer: &Writer<'_>,
-    id: &str,
-    actor: &str,
-    now: i64,
-) -> Result<(), CoreError> {
+fn forget_memory(writer: &Writer<'_>, id: &str, actor: &str, now: i64) -> Result<(), CoreError> {
     let old: Option<(i64, String, String)> = writer.query_optional(
         "SELECT rowid, content, tags FROM memory_items WHERE id = ?",
         (id,),

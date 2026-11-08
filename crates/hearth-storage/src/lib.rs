@@ -5,6 +5,7 @@ mod storage;
 
 use std::path::Path;
 
+pub use rusqlite;
 use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 

@@ -1,6 +1,4 @@
-use hearth_core::{
-    Harness, MemoryChange, MemoryWrite, NewMemory, Save,
-};
+use hearth_core::{Harness, MemoryChange, MemoryWrite, NewMemory, Save};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -50,10 +48,7 @@ fn a_memory_add_and_an_entry_share_one_save() {
         .save(
             Save::new(&conversation.id)
                 .entry("user", json!({"text": "remember coffee"}))
-                .memory(MemoryWrite::new(
-                    MemoryChange::Add(item.clone()),
-                    "agent",
-                )),
+                .memory(MemoryWrite::new(MemoryChange::Add(item.clone()), "agent")),
         )
         .expect("save");
 

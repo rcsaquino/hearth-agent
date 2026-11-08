@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use hearth_core::{Harness, Session};
-use hearth_tools::Tool;
 use hearth_memory::{
     MemoryError, MemoryKind, MemoryPatch, MemoryService, MemoryStatus, MemoryTool, NewMemoryInput,
     SourceKind,
 };
+use hearth_tools::Tool;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -42,7 +42,10 @@ fn count(session: &Session, sql: &str) -> i64 {
 fn a_memory_can_be_saved_and_read_back() {
     let (_home, _session, service) = setup();
     let saved = service
-        .save(input("Sam prefers dark roast coffee", MemoryKind::Preference))
+        .save(input(
+            "Sam prefers dark roast coffee",
+            MemoryKind::Preference,
+        ))
         .expect("save");
     assert_eq!(saved.content, "Sam prefers dark roast coffee");
     assert_eq!(saved.kind, MemoryKind::Preference);
@@ -58,7 +61,10 @@ fn a_memory_can_be_saved_and_read_back() {
 fn an_exact_duplicate_merges_instead_of_adding_a_row() {
     let (_home, _session, service) = setup();
     let first = service
-        .save(input("Sam prefers dark roast coffee", MemoryKind::Preference))
+        .save(input(
+            "Sam prefers dark roast coffee",
+            MemoryKind::Preference,
+        ))
         .expect("first");
     let mut second_input = input("Sam prefers dark roast coffee", MemoryKind::Preference);
     second_input.importance = 80;
@@ -75,7 +81,10 @@ fn an_exact_duplicate_merges_instead_of_adding_a_row() {
 fn a_near_duplicate_merges() {
     let (_home, _session, service) = setup();
     let first = service
-        .save(input("The patient prefers dark roast coffee", MemoryKind::Preference))
+        .save(input(
+            "The patient prefers dark roast coffee",
+            MemoryKind::Preference,
+        ))
         .expect("first");
     let second = service
         .save(input(
@@ -123,8 +132,20 @@ fn an_update_changes_content_and_reindexes_search() {
         .expect("update");
     assert_eq!(updated.content, "Sam likes coffee");
     assert_eq!(updated.importance, 90);
-    assert!(service.search("coffee", 10).expect("search").iter().any(|item| item.id == saved.id));
-    assert!(!service.search("tea", 10).expect("search").iter().any(|item| item.id == saved.id));
+    assert!(
+        service
+            .search("coffee", 10)
+            .expect("search")
+            .iter()
+            .any(|item| item.id == saved.id)
+    );
+    assert!(
+        !service
+            .search("tea", 10)
+            .expect("search")
+            .iter()
+            .any(|item| item.id == saved.id)
+    );
 }
 
 #[test]
@@ -137,13 +158,7 @@ fn forget_keeps_a_tombstone_and_removes_search() {
     let item = service.get(&saved.id).expect("get").expect("tombstone");
     assert_eq!(item.status, MemoryStatus::Deleted);
     assert!(service.search("coffee", 10).expect("search").is_empty());
-    assert_eq!(
-        _session
-            .storage()
-            .read(|reader| reader.query_row("SELECT COUNT(*) FROM memory_items", [], |row| row.get(0)))
-            .expect("count"),
-        1
-    );
+    assert_eq!(count(&_session, "SELECT COUNT(*) FROM memory_items"), 1);
 }
 
 #[test]
@@ -184,9 +199,7 @@ fn as_of_reads_the_state_at_a_time() {
     next.valid_from = Some(session.now_micros());
     service.save(next).expect("new");
 
-    let past = service
-        .as_of(None, between)
-        .expect("as of past");
+    let past = service.as_of(None, between).expect("as of past");
     assert_eq!(past.len(), 1);
     assert_eq!(past[0].content, "Sam lives in Manila");
 }
@@ -225,9 +238,11 @@ fn memory_events_record_the_actor_and_actions() {
     let actions: Vec<String> = session
         .storage()
         .read(|reader| {
-            reader.query("SELECT action FROM memory_events ORDER BY created_at, id", [], |row| {
-                row.get(0)
-            })
+            reader.query(
+                "SELECT action FROM memory_events ORDER BY created_at, id",
+                [],
+                |row| row.get(0),
+            )
         })
         .expect("events");
     assert_eq!(actions, vec!["add", "update", "forget"]);
@@ -248,9 +263,7 @@ fn the_memory_tool_covers_every_action() {
         .expect("search");
     assert!(search.content.contains("Sam likes coffee"));
 
-    let get = tool
-        .call(&json!({"action": "get", "id": id}))
-        .expect("get");
+    let get = tool.call(&json!({"action": "get", "id": id})).expect("get");
     assert!(get.content.contains("Sam likes coffee"));
 
     let update = tool
@@ -258,14 +271,10 @@ fn the_memory_tool_covers_every_action() {
         .expect("update");
     assert!(update.content.contains("updated"));
 
-    let pin = tool
-        .call(&json!({"action": "pin", "id": id}))
-        .expect("pin");
+    let pin = tool.call(&json!({"action": "pin", "id": id})).expect("pin");
     assert!(pin.content.contains("pinned"));
 
-    let stats = tool
-        .call(&json!({"action": "stats"}))
-        .expect("stats");
+    let stats = tool.call(&json!({"action": "stats"})).expect("stats");
     assert!(stats.content.contains("\"total\""));
 
     let as_of = tool
