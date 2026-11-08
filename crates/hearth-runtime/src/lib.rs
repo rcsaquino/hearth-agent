@@ -28,11 +28,11 @@ pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};
 pub use chat::{ChatError, chat};
 pub use compaction::{CompactionError, Compactor};
 pub use daemon::{DaemonError, daemon};
-pub use doctor::{DoctorError, doctor};
+pub use doctor::{DoctorError, doctor, doctor_with};
 pub use effect_worker::EffectWorker;
 pub use events::{EventBus, EventSink, NoopSink, RunEvent};
 pub use helpers::{HelperConfig, HelperControls, HelperPool, TaskTool};
-pub use init::{InitError, InitOptions, init};
+pub use init::{InitError, InitOptions, init, init_with_io};
 pub use ipc::{IpcError, StatusContext, serve, status, watch};
 pub use prompt_audit::{PromptError, PromptOptions, prompt};
 pub use scheduler::{

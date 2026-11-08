@@ -1,11 +1,12 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use hearth_config::SETTINGS_FILE;
+use serde_json::{Value, json};
 use thiserror::Error;
 
-/// Inputs for a non-interactive `hearth init`.
+/// Inputs for `hearth init`.
 #[derive(Debug, Default)]
 pub struct InitOptions {
     pub non_interactive: bool,
@@ -21,10 +22,10 @@ pub struct InitOptions {
 
 #[derive(Debug, Error)]
 pub enum InitError {
-    #[error("interactive setup is not implemented; use --non-interactive")]
-    Interactive,
     #[error("{0} is required; pass {1}")]
     Missing(&'static str, &'static str),
+    #[error("{0}")]
+    Invalid(String),
     #[error("settings.json already exists at {0}; refusing to overwrite")]
     Exists(PathBuf),
     #[error(transparent)]
@@ -37,8 +38,70 @@ pub enum InitError {
 
 /// Create a home folder, settings file, directory layout, and database.
 pub fn init(home: &Path, options: InitOptions) -> Result<(), InitError> {
+    let mut reader = std::io::stdin().lock();
+    let mut writer = std::io::stdout().lock();
+    init_with_io(home, options, &mut reader, &mut writer)
+}
+
+/// Create a home folder using an injected reader and writer.
+pub fn init_with_io<R: BufRead, W: Write>(
+    home: &Path,
+    mut options: InitOptions,
+    reader: &mut R,
+    writer: &mut W,
+) -> Result<(), InitError> {
+    let mut media: Option<Value> = None;
     if !options.non_interactive {
-        return Err(InitError::Interactive);
+        if options
+            .telegram_token
+            .as_deref()
+            .is_none_or(|value| value.is_empty())
+        {
+            options.telegram_token = Some(prompt(reader, writer, "Telegram bot token: ")?);
+        }
+        if options.allowed_user_ids.is_empty() {
+            let value = prompt(reader, writer, "Allowed Telegram user id: ")?;
+            let id = value.parse::<i64>().map_err(|_| {
+                InitError::Invalid(format!("allowed user id must be a number: {value}"))
+            })?;
+            options.allowed_user_ids = vec![id];
+        }
+        if options
+            .base_url
+            .as_deref()
+            .is_none_or(|value| value.is_empty())
+        {
+            options.base_url = Some(prompt(reader, writer, "Provider base URL: ")?);
+        }
+        if options
+            .api_key
+            .as_deref()
+            .is_none_or(|value| value.is_empty())
+        {
+            options.api_key = Some(prompt(reader, writer, "Provider API key: ")?);
+        }
+        if options.model.as_deref().is_none_or(|value| value.is_empty()) {
+            options.model = Some(prompt(reader, writer, "Model: ")?);
+        }
+        if options.agent_name.is_none() {
+            let value = prompt(reader, writer, "Agent name [Hearth]: ")?;
+            if !value.is_empty() {
+                options.agent_name = Some(value);
+            }
+        }
+        if options.user_name.is_none() {
+            let value = prompt(reader, writer, "User name [User]: ")?;
+            if !value.is_empty() {
+                options.user_name = Some(value);
+            }
+        }
+        if options.timezone.is_none() {
+            let value = prompt(reader, writer, "Timezone [system]: ")?;
+            if !value.is_empty() {
+                options.timezone = Some(value);
+            }
+        }
+        media = prompt_media(reader, writer)?;
     }
 
     let token = required(options.telegram_token, "telegram token", "--telegram-token")?;
@@ -81,16 +144,16 @@ pub fn init(home: &Path, options: InitOptions) -> Result<(), InitError> {
         soul.flush()?;
     }
 
-    let mut models = serde_json::json!({
+    let mut models = json!({
         "kind": "openai-compatible",
         "base_url": base_url,
         "api_key": api_key,
         "model": model,
     });
     if base_url.contains("opencode-go") || base_url.contains("opencode.ai/inference/go") {
-        models["session_header"] = serde_json::json!("x-opencode-session");
+        models["session_header"] = json!("x-opencode-session");
     }
-    let value = serde_json::json!({
+    let mut value = json!({
         "identity": {
             "agent_name": agent_name,
             "user_name": user_name,
@@ -102,6 +165,9 @@ pub fn init(home: &Path, options: InitOptions) -> Result<(), InitError> {
         },
         "models": models,
     });
+    if let Some(media) = media {
+        value["media"] = media;
+    }
     let text = serde_json::to_string_pretty(&value).expect("settings are JSON values");
 
     let mut file = open_settings(&settings_path)?;
@@ -115,15 +181,111 @@ pub fn init(home: &Path, options: InitOptions) -> Result<(), InitError> {
     let database = home.join("hearth.db");
     hearth_storage::open(&database)?;
 
-    println!("created {}", home.display());
-    println!("settings: {} (mode 0600)", settings_path.display());
-    println!(
+    writeln!(writer, "created {}", home.display())?;
+    writeln!(
+        writer,
+        "settings: {} (mode 0600)",
+        settings_path.display()
+    )?;
+    writeln!(
+        writer,
         "database: {} (schema {})",
         database.display(),
         hearth_storage::SCHEMA_VERSION
-    );
-    println!("next: hearth doctor --home {}", home.display());
+    )?;
+    writeln!(
+        writer,
+        "next: hearth doctor --live --home {}",
+        home.display()
+    )?;
     Ok(())
+}
+
+fn prompt<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    label: &str,
+) -> Result<String, InitError> {
+    write!(writer, "{label}")?;
+    writer.flush()?;
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    Ok(line.trim().to_owned())
+}
+
+fn yes<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    label: &str,
+) -> Result<bool, InitError> {
+    let answer = prompt(reader, writer, label)?;
+    Ok(matches!(answer.to_ascii_lowercase().as_str(), "y" | "yes"))
+}
+
+fn prompt_media<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+) -> Result<Option<Value>, InitError> {
+    let mut media = serde_json::Map::new();
+    if yes(reader, writer, "Configure image generation? [y/N] ")? {
+        let api_key = prompt(reader, writer, "Image API key: ")?;
+        let model = prompt(
+            reader,
+            writer,
+            "Image model [openai/gpt-image-2.6-sunburst]: ",
+        )?;
+        let model = if model.is_empty() {
+            "openai/gpt-image-2.6-sunburst".to_owned()
+        } else {
+            model
+        };
+        media.insert(
+            "image".to_owned(),
+            json!({"kind": "openrouter-images", "api_key": api_key, "model": model}),
+        );
+    }
+    if yes(reader, writer, "Configure transcription? [y/N] ")? {
+        let api_key = prompt(reader, writer, "Transcription API key: ")?;
+        let model = prompt(
+            reader,
+            writer,
+            "Transcription model [whisper-large-v3-turbo]: ",
+        )?;
+        let model = if model.is_empty() {
+            "whisper-large-v3-turbo".to_owned()
+        } else {
+            model
+        };
+        media.insert(
+            "stt".to_owned(),
+            json!({"kind": "groq", "api_key": api_key, "model": model}),
+        );
+    }
+    if yes(reader, writer, "Configure speech? [y/N] ")? {
+        let api_key = prompt(reader, writer, "Speech API key: ")?;
+        let voice_id = prompt(reader, writer, "Speech voice id: ")?;
+        let model = prompt(reader, writer, "Speech model [eleven_v4]: ")?;
+        let model = if model.is_empty() {
+            "eleven_v4".to_owned()
+        } else {
+            model
+        };
+        media.insert(
+            "tts".to_owned(),
+            json!({
+                "kind": "elevenlabs",
+                "api_key": api_key,
+                "voice_id": voice_id,
+                "model": model,
+                "output_format": "opus_48000_64",
+            }),
+        );
+    }
+    Ok(if media.is_empty() {
+        None
+    } else {
+        Some(Value::Object(media))
+    })
 }
 
 fn required(
