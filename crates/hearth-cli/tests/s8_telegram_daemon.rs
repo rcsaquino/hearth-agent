@@ -124,6 +124,14 @@ fn fake_telegram_script(
     updates: Vec<Value>,
     fail_first_rich: bool,
 ) -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
+    fake_telegram_script_with_delays(updates, fail_first_rich, Vec::new())
+}
+
+fn fake_telegram_script_with_delays(
+    updates: Vec<Value>,
+    fail_first_rich: bool,
+    delays: Vec<Duration>,
+) -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind telegram");
     listener
         .set_nonblocking(true)
@@ -142,6 +150,9 @@ fn fake_telegram_script(
                     let body = match method {
                         "getUpdates" => {
                             let index = next_update.fetch_add(1, Ordering::SeqCst);
+                            if let Some(delay) = delays.get(index) {
+                                thread::sleep(*delay);
+                            }
                             if let Some(update) = updates.get(index) {
                                 json!({"ok": true, "result": [update.clone()]})
                             } else {
@@ -472,6 +483,134 @@ fn the_daemon_recovers_an_uncertain_telegram_answer() {
         .expect("read second effect")
         .expect("second effect");
     assert_eq!(second_effect.status, EffectStatus::Done);
+    assert!(
+        session
+            .effects_awaiting_delivery("telegram.send")
+            .expect("awaiting")
+            .is_empty()
+    );
+}
+
+fn fake_provider_slow(answer: &str, delay: Duration) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider");
+    let base = format!("http://{}", listener.local_addr().expect("provider addr"));
+    let answer = answer.to_owned();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("provider accept");
+        let _ = read_request(&mut stream);
+        let delta = json!({"choices": [{"delta": {"content": answer}}]});
+        let finish = json!({"choices": [{"delta": {}, "finish_reason": "stop"}]});
+        let usage = json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}});
+        let first = format!("data: {}\n\n", delta);
+        let rest = format!("data: {}\n\ndata: {}\n\ndata: [DONE]\n\n", finish, usage);
+        let total = first.len() + rest.len();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
+        )
+        .expect("provider headers");
+        stream
+            .write_all(first.as_bytes())
+            .expect("provider first chunk");
+        stream.flush().expect("provider flush");
+        thread::sleep(delay);
+        stream
+            .write_all(rest.as_bytes())
+            .expect("provider rest");
+        stream.flush().expect("provider flush rest");
+    });
+    (format!("{base}/v1"), handle)
+}
+
+#[test]
+fn the_daemon_stops_an_active_run() {
+    use hearth_core::{EffectStatus, Harness, SubmissionStatus};
+
+    let (provider_base, provider_thread) =
+        fake_provider_slow("Partial answer", Duration::from_millis(300));
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script_with_delays(
+        vec![
+            json!({
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    "date": 1_730_000_000,
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "text": "hello"
+                }
+            }),
+            json!({
+                "update_id": 2,
+                "message": {
+                    "message_id": 11,
+                    "date": 1_730_000_001,
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "text": "stop"
+                }
+            }),
+        ],
+        false,
+        vec![Duration::ZERO, Duration::from_millis(100)],
+    );
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let rich = wait_for_rich_count(&telegram_state, 1);
+    assert!(
+        rich[0].contains("Stopped."),
+        "the daemon did not stop the run: {rich:?}"
+    );
+    assert!(telegram_state.typing.load(Ordering::SeqCst) > 0);
+    assert_eq!(telegram_state.reactions.load(Ordering::SeqCst), 1);
+
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let session = harness.session();
+    let conversation = session
+        .conversation_by_transport("telegram", "42:0")
+        .expect("lookup")
+        .expect("telegram conversation");
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(history.len(), 2, "history was {history:?}");
+    assert_eq!(history[0].kind, "user");
+    assert_eq!(history[0].content[0]["text"], "hello");
+    assert_eq!(history[1].kind, "notice");
+    assert_eq!(history[1].content["text"], "Stopped.");
+    assert!(
+        !history.iter().any(|entry| entry.kind == "assistant"),
+        "a cancelled run saved an assistant entry: {history:?}"
+    );
+    let submission = session
+        .submission_by_request_id("tg:42:10")
+        .expect("submission lookup")
+        .expect("submission");
+    assert_eq!(submission.status, SubmissionStatus::Cancelled);
+    assert!(submission.answer_entry_id.is_none());
+    assert!(
+        session
+            .submission_by_request_id("tg:42:11")
+            .expect("stop submission lookup")
+            .is_none(),
+        "the stop message must not create a submission"
+    );
+    let usage = session
+        .latest_usage()
+        .expect("usage")
+        .expect("usage row from the provider call");
+    assert_eq!(usage.input_tokens, 10);
+    let effect = session
+        .effect_by_key("telegram.send", &format!("tg:{}", submission.id))
+        .expect("read effect")
+        .expect("delivery effect");
+    assert_eq!(effect.status, EffectStatus::Done);
     assert!(
         session
             .effects_awaiting_delivery("telegram.send")
