@@ -758,3 +758,23 @@ fn a_save_records_the_latest_commit() {
     );
     assert!(latest.task_id.is_none());
 }
+
+#[test]
+fn creating_a_task_records_a_task_commit() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+
+    let latest = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("creating a task records a commit");
+    assert_eq!(latest.seq, 1);
+    assert_eq!(latest.kind, "task.create");
+    assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
+    assert!(latest.conversation_id.is_none());
+    assert_eq!(latest.created_at, clock.now());
+}
