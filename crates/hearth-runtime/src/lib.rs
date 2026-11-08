@@ -3,6 +3,7 @@
 use std::path::Path;
 
 mod agent;
+pub mod backup;
 mod chat;
 mod compaction;
 mod daemon;
