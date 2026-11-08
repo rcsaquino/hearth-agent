@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
-use hearth_core::{Clock, Harness, IdGen, NewTask, StepOutput, TaskStatus};
+use hearth_core::{Clock, Harness, IdGen, NewTask, StepOutput, TaskStatus, TerminalOutcome};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -241,4 +241,57 @@ fn sleep_sets_the_wake_time_and_recovery_requeues_it_when_due() {
         .expect("the task is runnable");
     assert_eq!(claimed.phase, "wait");
     assert_eq!(claimed.checkpoint, Some(json!({"step": 2})));
+}
+
+#[test]
+fn a_terminal_outcome_settles_the_task_once() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    let claimed = session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("a task is runnable");
+    let finished = session
+        .finish_task(
+            &claimed.id,
+            "worker-a",
+            StepOutput::Terminal {
+                outcome: TerminalOutcome::Done,
+                result: json!({"ok": true}),
+            },
+        )
+        .expect("terminal step");
+    assert_eq!(finished.status, TaskStatus::Done);
+    assert_eq!(finished.result, Some(json!({"ok": true})));
+    assert_eq!(finished.terminal_at, Some(clock.now()));
+    assert!(finished.lease_owner.is_none());
+    assert!(finished.lease_until.is_none());
+    assert!(finished.next_wake_at.is_none());
+
+    let second = session.finish_task(
+        &claimed.id,
+        "worker-a",
+        StepOutput::Terminal {
+            outcome: TerminalOutcome::Done,
+            result: json!({"again": true}),
+        },
+    );
+    assert!(matches!(
+        second,
+        Err(hearth_core::CoreError::TaskNotRunning(_, _))
+    ));
+    let report = session.recover_tasks().expect("recovery");
+    assert_eq!(report.requeued, 0);
+    assert_eq!(
+        session
+            .task(&task.id)
+            .expect("read")
+            .expect("exists")
+            .status,
+        TaskStatus::Done
+    );
 }
