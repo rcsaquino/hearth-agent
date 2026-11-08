@@ -8,7 +8,10 @@ use std::time::Duration;
 use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
-use hearth_tools::{FileTool, ShellTool, ToolRegistry};
+use hearth_tools::{
+    BraveSearch, DeepSeekSearch, ExaSearch, FileTool, FirecrawlSearch, SearchError, SearchProvider,
+    ShellTool, TinyFishSearch, ToolRegistry, WebSearchTool,
+};
 use serde_json::json;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -24,6 +27,8 @@ pub enum ChatError {
     Core(#[from] CoreError),
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    #[error(transparent)]
+    Search(#[from] SearchError),
     #[error("chat input failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -64,9 +69,11 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         None => home.join("workspace"),
     };
     let spill = home.join("spill");
+    let web_search = Arc::new(build_web_search(&settings)?);
     let tools = ToolRegistry::new(vec![
         Arc::new(FileTool::new(workspace.clone(), spill.clone())),
         Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
+        web_search,
     ]);
 
     let harness = Harness::open(home)?;
@@ -116,4 +123,66 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         }
     }
     Ok(())
+}
+
+fn build_web_search(settings: &hearth_config::Settings) -> Result<WebSearchTool, SearchError> {
+    let search = settings
+        .web
+        .as_ref()
+        .map(|web| web.search.clone())
+        .unwrap_or_default();
+    let mut providers: Vec<Arc<dyn SearchProvider>> = Vec::new();
+    for name in &search.order {
+        let key = search
+            .providers
+            .get(name)
+            .and_then(|provider| provider.api_key.clone())
+            .filter(|key| !key.is_empty());
+        match name.as_str() {
+            "exa" => providers.push(Arc::new(ExaSearch::new(
+                "https://mcp.exa.ai",
+                "https://api.exa.ai",
+                key,
+            )?)),
+            "brave" => {
+                if let Some(key) = key {
+                    providers.push(Arc::new(BraveSearch::new(
+                        "https://api.search.brave.com/res/v1",
+                        key,
+                    )?));
+                }
+            }
+            "deepseek" => {
+                if let Some(key) = key {
+                    providers.push(Arc::new(DeepSeekSearch::new(
+                        "https://api.deepseek.com",
+                        key,
+                    )?));
+                }
+            }
+            "firecrawl" => {
+                if let Some(key) = key {
+                    providers.push(Arc::new(FirecrawlSearch::new(
+                        "https://api.firecrawl.dev",
+                        key,
+                    )?));
+                }
+            }
+            "tinyfish" => {
+                if let Some(key) = key {
+                    providers.push(Arc::new(TinyFishSearch::new(
+                        "https://api.search.tinyfish.ai",
+                        key,
+                    )?));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(WebSearchTool::new(
+        providers,
+        search.parallel as usize,
+        search.results as usize,
+        search.max_results as usize,
+    ))
 }
