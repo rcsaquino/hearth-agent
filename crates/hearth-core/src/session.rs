@@ -436,13 +436,38 @@ impl Session {
     /// Record an effect failure, retryable or terminal.
     pub fn fail_effect(
         &self,
-        _id: &str,
-        _error: Value,
-        _retryable: bool,
+        id: &str,
+        error: Value,
+        retryable: bool,
     ) -> Result<Effect, CoreError> {
-        Err(CoreError::Invalid(
-            "effect lifecycle is not implemented".to_owned(),
-        ))
+        let effect_id = id.to_owned();
+        self.storage
+            .write(move |writer| -> Result<(), CoreError> {
+                let effect = load_effect(writer, &effect_id)?
+                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+                if effect.status != EffectStatus::Started {
+                    return Err(CoreError::EffectNotReady {
+                        id: effect_id,
+                        status: effect.status.as_str().to_owned(),
+                    });
+                }
+                let error_json = serde_json::to_string(&error)
+                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                if retryable {
+                    writer.execute(
+                        "UPDATE effects SET status = 'intent', result_json = ?, \
+                         settled_at = NULL WHERE id = ?",
+                        (error_json.as_str(), effect_id.as_str()),
+                    )?;
+                } else {
+                    return Err(CoreError::Invalid(
+                        "non-retryable effect failure is not implemented".to_owned(),
+                    ));
+                }
+                Ok(())
+            })?;
+        self.effect(id)?
+            .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
 
     /// Return a started effect to the intent state after a crash.
