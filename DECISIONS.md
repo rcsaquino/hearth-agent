@@ -837,3 +837,30 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Recurring reminders re-sleep to now plus the repeat interval, coalescing missed runs into one send. One-shot reminders finish done.
 - The `schedule` tool is registered only on the Telegram path, where a notification transport exists. Local chat has no schedule tool.
 - The reminder effect payload carries `reminder: true` so answer-recovery does not resend it as a recovered reply.
+
+## 2026-11-08: M7b helpers
+
+- A helper is a durable task of kind `helper` attached to its own child conversation
+  (`transport = helper`, `parent_id` set). The brief is submitted as the helper's
+  only user input; the parent transcript never enters the helper prompt.
+- Helpers run in a pool with `tasks.max_concurrent` workers (4 by default). Spawn is
+  rejected beyond that or beyond `tasks.max_depth` (2). The task tool is present
+  only while the current depth is below the maximum, so a depth-2 helper cannot
+  spawn another.
+- The report is the helper's final text. It is written to
+  `spill/helper-<task-id>.txt` at mode `0600` and saved as an assistant entry in the
+  parent conversation with source `helper:<task-id>`. One settle notice carries the
+  outcome and report path.
+- The settle notice and the ETA reminder are `telegram.send` effects keyed
+  `helper.notice:<task-id>` and `helper.eta:<task-id>`, so each is at most once
+  across retries and restarts.
+- A kill cancels the helper's provider work at the next boundary, aborts the task,
+  and sends no settle notice. It never deletes the parent record.
+- Retention keeps helper runs newer than `retention_days` or within the newest
+  `retention_runs` (30 days, 25 runs by default); older helper conversations are
+  archived, not deleted, and the tasks remain readable.
+- `token_budget` is enforced as the helper's context-window cap (never above the
+  configured model window); `wall_seconds` (3600 default) cancels the run at the
+  next agent boundary. There is no separate hard total-token meter in v1.
+- Helper agents skip post-run memory extraction; their working clutter must not
+  become long-term memory.
