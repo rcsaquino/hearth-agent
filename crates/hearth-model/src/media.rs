@@ -214,3 +214,108 @@ impl Speaker for SpeechClient {
         Ok(bytes.to_vec())
     }
 }
+
+/// Generates images through an OpenRouter Images-compatible endpoint.
+pub struct ImageClient {
+    base_url: String,
+    api_key: String,
+    model: String,
+    client: reqwest::blocking::Client,
+}
+
+impl ImageClient {
+    /// Build a client. The endpoint is `{base}/images/generations`.
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<Self, MediaError> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .map_err(|error| MediaError::Transport(format!("client build failed: {error}")))?;
+        Ok(Self {
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            client,
+        })
+    }
+
+    /// Build a client for the public OpenRouter Images API.
+    pub fn openrouter(
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<Self, MediaError> {
+        Self::new("https://openrouter.ai/api/v1", api_key, model)
+    }
+
+    /// Generate one image and return its encoded bytes.
+    pub fn generate(&self, prompt: &str, size: Option<&str>) -> Result<Vec<u8>, MediaError> {
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "prompt": prompt,
+        });
+        if let Some(size) = size {
+            body["size"] = serde_json::json!(size);
+        }
+        let url = format!("{}/images/generations", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .map_err(|error| MediaError::Transport(format!("request failed: {error}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let mut body = String::new();
+            let _ = response.take(400).read_to_string(&mut body);
+            return Err(MediaError::Response {
+                status: status.as_u16(),
+                message: body.chars().take(200).collect(),
+            });
+        }
+        let value: Value = response
+            .json()
+            .map_err(|error| MediaError::Protocol(format!("invalid JSON: {error}")))?;
+        let data = value["data"]
+            .as_array()
+            .and_then(|items| items.first())
+            .ok_or_else(|| MediaError::Empty("the image response had no data".to_owned()))?;
+        if let Some(encoded) = data["b64_json"].as_str() {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|error| MediaError::Protocol(format!("invalid image base64: {error}")))?;
+            if bytes.is_empty() {
+                return Err(MediaError::Empty("the image was empty".to_owned()));
+            }
+            return Ok(bytes);
+        }
+        if let Some(url) = data["url"].as_str() {
+            let response = self.client.get(url).send().map_err(|error| {
+                MediaError::Transport(format!("image download failed: {error}"))
+            })?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(MediaError::Response {
+                    status: status.as_u16(),
+                    message: "image download was rejected".to_owned(),
+                });
+            }
+            let bytes = response.bytes().map_err(|error| {
+                MediaError::Transport(format!("could not read the image: {error}"))
+            })?;
+            if bytes.is_empty() {
+                return Err(MediaError::Empty(
+                    "the downloaded image was empty".to_owned(),
+                ));
+            }
+            return Ok(bytes.to_vec());
+        }
+        Err(MediaError::Protocol(
+            "the image response had neither b64_json nor url".to_owned(),
+        ))
+    }
+}

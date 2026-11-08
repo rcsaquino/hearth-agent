@@ -5,10 +5,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use hearth_model::{ImageClient, SpeechClient, TranscriptionClient};
+use hearth_model::{ImageClient, MediaError, SpeechClient, Transcriber, TranscriptionClient};
 use hearth_tools::{MediaTool, Tool};
 use serde_json::{Value, json};
 use tempfile::TempDir;
+
+struct EchoTranscriber;
+
+impl Transcriber for EchoTranscriber {
+    fn transcribe(&self, _path: &Path) -> Result<String, MediaError> {
+        Ok("transcribed".to_owned())
+    }
+}
 
 const TINY_PNG_B64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl7S4sAAAAASUVORK5CYII=";
@@ -214,11 +222,17 @@ fn missing_configuration_is_a_clear_tool_error() {
 #[test]
 fn media_paths_stay_confined() {
     let (_directory, workspace, spill, media, outbound) = roots();
-    let tool = MediaTool::new(None, None, None, &workspace, &spill, &media, &outbound);
+    let tool = MediaTool::new(
+        None,
+        Some(Arc::new(EchoTranscriber)),
+        None,
+        &workspace,
+        &spill,
+        &media,
+        &outbound,
+    );
     let error = tool
         .call(&json!({"action": "transcribe", "path": "../outside.ogg"}))
         .expect_err("escape");
     assert_eq!(error.code, "invalid_path");
 }
-
-fn _assert_path(_: &Path) {}
