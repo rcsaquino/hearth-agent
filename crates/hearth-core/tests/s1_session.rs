@@ -1,4 +1,4 @@
-use hearth_core::{Harness, Save};
+use hearth_core::{CoreError, Harness, Save, SubmissionStatus};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -479,4 +479,40 @@ fn the_clock_and_ids_are_injected_and_saves_touch_the_conversation() {
         .expect("read conversation")
         .expect("conversation exists");
     assert_eq!(updated.updated_at, 2_000);
+}
+
+#[test]
+fn a_settlement_cannot_use_an_answer_entry_from_another_conversation() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let first = session
+        .create_conversation("First", "local", "local:1")
+        .expect("create first conversation");
+    let second = session
+        .create_conversation("Second", "local", "local:2")
+        .expect("create second conversation");
+
+    let foreign = session
+        .save(Save::new(&second.id).entry("assistant", json!({"text": "other"})))
+        .expect("save foreign entry");
+    let submission = session
+        .submit(&first.id, "req-1", "input", json!({"text": "hello"}))
+        .expect("submit");
+    assert!(submission.created);
+
+    let error = session
+        .settle(
+            &submission.submission.id,
+            SubmissionStatus::Done,
+            Some(&foreign.entry_ids[0]),
+        )
+        .expect_err("a foreign answer entry must be rejected");
+    assert!(matches!(error, CoreError::EntryNotFound(..)));
+
+    let after = session
+        .submission_by_id(&submission.submission.id)
+        .expect("read submission")
+        .expect("submission exists");
+    assert!(after.settled_at.is_none());
+    assert_eq!(after.status, SubmissionStatus::Queued);
 }
