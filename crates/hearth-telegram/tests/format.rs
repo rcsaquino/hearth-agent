@@ -70,3 +70,16 @@ fn keeps_split_code_inside_pre_entities() {
         );
     }
 }
+
+#[test]
+fn formats_italic_strikethrough_spoiler_and_underline() {
+    let value = format_markdown("*it* ~~gone~~ ||secret|| __under__");
+    assert_eq!(value.text, "it gone secret under");
+    assert_eq!((entity(&value, "italic").offset, entity(&value, "italic").length), (0, 2));
+    assert_eq!(
+        (entity(&value, "strikethrough").offset, entity(&value, "strikethrough").length),
+        (3, 4)
+    );
+    assert_eq!((entity(&value, "spoiler").offset, entity(&value, "spoiler").length), (8, 6));
+    assert_eq!((entity(&value, "underline").offset, entity(&value, "underline").length), (15, 5));
+}
