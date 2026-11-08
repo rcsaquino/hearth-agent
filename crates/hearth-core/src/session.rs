@@ -244,12 +244,19 @@ impl Session {
                         ));
                     }
                 }
+                let error_json = settle
+                    .error
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
                 let changed = writer.execute(
-                    "UPDATE submissions SET status = ?, answer_entry_id = ?, settled_at = ? \
-                     WHERE id = ? AND conversation_id = ? AND settled_at IS NULL",
+                    "UPDATE submissions SET status = ?, answer_entry_id = ?, error_json = ?, \
+                     settled_at = ? WHERE id = ? AND conversation_id = ? AND settled_at IS NULL",
                     (
                         settle.status.as_str(),
                         settle.answer_entry_id.as_deref(),
+                        error_json.as_deref(),
                         now,
                         settle.submission_id.as_str(),
                         conversation_id.as_str(),
@@ -719,6 +726,17 @@ impl Session {
         status: SubmissionStatus,
         answer_entry_id: Option<&str>,
     ) -> Result<Submission, CoreError> {
+        self.settle_with_error(submission_id, status, answer_entry_id, None)
+    }
+
+    /// Settle a submission and record an optional structured reason.
+    pub fn settle_with_error(
+        &self,
+        submission_id: &str,
+        status: SubmissionStatus,
+        answer_entry_id: Option<&str>,
+        error: Option<Value>,
+    ) -> Result<Submission, CoreError> {
         if !matches!(
             status,
             SubmissionStatus::Done | SubmissionStatus::Unanswered | SubmissionStatus::Cancelled
@@ -739,10 +757,11 @@ impl Session {
             ));
         }
 
-        let save = Save::new(&existing.conversation_id).settle(
+        let save = Save::new(&existing.conversation_id).settle_with_error(
             submission_id,
             status,
             answer_entry_id.map(str::to_owned),
+            error,
         );
         self.save(save)?;
         self.submission_by_id(submission_id)?

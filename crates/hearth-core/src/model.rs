@@ -275,6 +275,7 @@ pub struct Settle {
     pub submission_id: String,
     pub status: SubmissionStatus,
     pub answer_entry_id: Option<String>,
+    pub error: Option<Value>,
 }
 
 /// Everything that belongs to one change.
@@ -336,15 +337,27 @@ impl Save {
 
     /// Settle an existing submission.
     pub fn settle(
+        self,
+        submission_id: impl Into<String>,
+        status: SubmissionStatus,
+        answer_entry_id: Option<String>,
+    ) -> Self {
+        self.settle_with_error(submission_id, status, answer_entry_id, None)
+    }
+
+    /// Settle a submission and record an optional structured reason.
+    pub fn settle_with_error(
         mut self,
         submission_id: impl Into<String>,
         status: SubmissionStatus,
         answer_entry_id: Option<String>,
+        error: Option<Value>,
     ) -> Self {
         self.settles.push(Settle {
             submission_id: submission_id.into(),
             status,
             answer_entry_id,
+            error,
         });
         self
     }
