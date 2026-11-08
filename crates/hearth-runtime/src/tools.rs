@@ -384,4 +384,66 @@ mod core_budget_tests {
         let tokens = ToolGroups::schema_tokens(&built.core.specs());
         assert!(tokens <= 1200, "core tool schemas use {tokens} tokens");
     }
+
+    #[test]
+    fn real_documents_and_media_groups_load_lazily() {
+        let home = tempfile::TempDir::new().expect("temp home");
+        let workspace = home.path().join("workspace");
+        let spill = home.path().join("spill");
+        let inbound = home.path().join("media/inbound");
+        let outbound = home.path().join("media/outbound");
+        std::fs::create_dir_all(&workspace).expect("workspace");
+        std::fs::create_dir_all(&spill).expect("spill");
+        std::fs::create_dir_all(&inbound).expect("inbound");
+        std::fs::create_dir_all(&outbound).expect("outbound");
+        let settings: Settings = serde_json::from_value(json!({
+            "media": {
+                "image": {"kind": "openrouter-images", "api_key": "fake", "model": "image-model"},
+                "stt": {"kind": "groq", "api_key": "fake", "model": "whisper-large-v3-turbo"},
+                "tts": {"kind": "elevenlabs", "api_key": "fake", "model": "eleven_v4", "voice_id": "voice-id"}
+            }
+        }))
+        .expect("settings");
+        let media = ToolMediaRoots { inbound, outbound };
+        let built = build_tools(
+            &settings, &workspace, &spill, None, None, None, None, None, &media,
+        )
+        .expect("tools");
+
+        let documents = built.groups.get("documents").expect("documents group");
+        assert!(documents.available());
+        assert_eq!(documents.specs()[0].name, "documents");
+        let media_group = built.groups.get("media").expect("media group");
+        assert!(media_group.available());
+        assert_eq!(media_group.specs()[0].name, "media");
+        let browser = built.groups.get("browser").expect("browser group");
+        assert!(!browser.available());
+
+        let empty = HashSet::new();
+        assert!(built.groups.selected_specs(&empty).is_empty());
+        let core_names: Vec<String> = built
+            .core
+            .specs()
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect();
+        assert!(
+            !core_names
+                .iter()
+                .any(|name| name == "documents" || name == "media"),
+            "{core_names:?}"
+        );
+
+        let mut selected = HashSet::new();
+        selected.insert("documents".to_owned());
+        let specs = built.groups.selected_specs(&selected);
+        assert!(specs.iter().any(|spec| spec.name == "documents"));
+        let outcome =
+            built
+                .groups
+                .call_selected("documents", &json!({"path": "missing.pdf"}), &selected);
+        assert!(outcome.is_some(), "the selected documents tool is callable");
+        assert!(outcome.unwrap().is_err());
+        assert!(ToolGroups::schema_tokens(&built.core.specs()) <= 1200);
+    }
 }
