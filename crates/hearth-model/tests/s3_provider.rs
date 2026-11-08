@@ -503,3 +503,56 @@ fn the_token_estimator_uses_a_ten_percent_margin() {
     assert_eq!(hearth_model::estimate_tokens("hello"), 2);
     assert_eq!(hearth_model::estimate_tokens(&"a".repeat(100)), 28);
 }
+
+
+#[test]
+fn an_image_block_is_encoded_and_downscaled() {
+    use base64::Engine;
+    use std::io::Write as _;
+
+    let directory = tempfile::TempDir::new().expect("temp image dir");
+    let path = directory.path().join("big.png");
+    let image = image::RgbImage::from_pixel(2000, 1000, image::Rgb([255, 0, 0]));
+    image.save(&path).expect("save test image");
+
+    let server = FakeServer::start(vec![TestResponse::sse(&[
+        r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#,
+    ])]);
+    let sleeper = Arc::new(NoopSleeper::default());
+    let provider = provider(&server, sleeper);
+    let mut request = request();
+    request.messages[1].blocks = vec![
+        ContentBlock::Text("look".to_owned()),
+        ContentBlock::Image {
+            path: path.to_string_lossy().to_string(),
+            mime: "image/png".to_owned(),
+        },
+    ];
+    let events: Vec<StreamEvent> = provider
+        .stream(request)
+        .expect("stream")
+        .collect::<Result<_, _>>()
+        .expect("events");
+    assert_eq!(events.len(), 2);
+
+    let captured = server.request();
+    let content = &captured.body["messages"][1]["content"];
+    assert!(content.is_array(), "content: {content}");
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[0]["text"], "look");
+    assert_eq!(content[1]["type"], "image_url");
+    let url = content[1]["image_url"]["url"]
+        .as_str()
+        .expect("image data url");
+    let encoded = url
+        .strip_prefix("data:image/png;base64,")
+        .expect("png data url");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .expect("base64 image");
+    let image = image::load_from_memory(&bytes).expect("decoded image");
+    assert!(image.width() <= 1568, "width {}", image.width());
+    assert!(image.height() <= 1568, "height {}", image.height());
+    assert!(image.width() == 1568 || image.height() == 1568);
+    server.finish();
+}

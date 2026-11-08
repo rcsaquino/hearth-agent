@@ -279,3 +279,63 @@ fn saved_entries_get_token_estimates() {
     );
     assert_eq!(history[2].tokens_est, 0);
 }
+
+#[test]
+fn image_and_file_blocks_survive_the_prompt_and_audit() {
+    use hearth_model::ContentBlock;
+
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(Save::new(&conversation.id).entry(
+            "user",
+            json!([
+                {"type": "text", "text": "look"},
+                {"type": "image", "path": "/tmp/a.png", "mime": "image/png"},
+                {"type": "file", "path": "/tmp/report.pdf", "name": "report.pdf", "mime": "application/pdf"}
+            ]),
+        ))
+        .expect("save entry");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+
+    let user = prompt
+        .request
+        .messages
+        .iter()
+        .find(|message| message.role == Role::User)
+        .expect("user message");
+    assert!(user.blocks.contains(&ContentBlock::Image {
+        path: "/tmp/a.png".to_owned(),
+        mime: "image/png".to_owned(),
+    }));
+    assert!(user.blocks.contains(&ContentBlock::File {
+        path: "/tmp/report.pdf".to_owned(),
+        name: "report.pdf".to_owned(),
+        mime: "application/pdf".to_owned(),
+    }));
+    assert_eq!(
+        prompt.document["transcript"][0]["blocks"][1],
+        json!({"type": "image", "path": "/tmp/a.png", "mime": "image/png"})
+    );
+    assert_eq!(
+        prompt.document["transcript"][0]["blocks"][2],
+        json!({
+            "type": "file",
+            "path": "/tmp/report.pdf",
+            "name": "report.pdf",
+            "mime": "application/pdf"
+        })
+    );
+}
