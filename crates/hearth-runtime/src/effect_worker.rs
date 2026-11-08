@@ -39,6 +39,7 @@ impl EffectWorker {
             };
             match self.execute(&started) {
                 Ok(result) => {
+                    hearth_storage::crash_if("during_effect");
                     self.session.finish_effect(&started.id, result)?;
                     tracing::info!(effect = %started.id, kind = %started.kind, "effect done");
                 }
