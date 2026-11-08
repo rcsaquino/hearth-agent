@@ -1,5 +1,5 @@
 use crate::settings::{
-    ImageService, Media, Models, SttService, Tasks, Telegram, TtsService, WebSearch,
+    ImageService, Media, Models, SttService, Tasks, Telegram, TtsService, WebFetch, WebSearch,
 };
 use crate::{ConfigError, Settings, unresolved};
 
@@ -64,6 +64,7 @@ impl Settings {
         }
         if let Some(web) = &self.web {
             web.search.validate()?;
+            web.fetch.validate()?;
         }
         self.tasks.validate()?;
 
@@ -182,6 +183,33 @@ impl SttService {
         }
         Ok(())
     }
+}
+
+impl WebFetch {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.order.is_empty() {
+            return Err(invalid("web.fetch.order must not be empty"));
+        }
+        for name in &self.order {
+            if !is_fetch_provider(name) {
+                return Err(invalid(format!(
+                    "web.fetch.order contains unknown provider `{name}`"
+                )));
+            }
+        }
+        for name in self.providers.keys() {
+            if !is_fetch_provider(name) {
+                return Err(invalid(format!(
+                    "web.fetch.providers contains unknown provider `{name}`"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_fetch_provider(name: &str) -> bool {
+    matches!(name, "jina" | "http" | "https" | "tinyfish" | "firecrawl" | "deepseek")
 }
 
 impl WebSearch {

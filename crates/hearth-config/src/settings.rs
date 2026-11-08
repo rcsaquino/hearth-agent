@@ -163,6 +163,33 @@ impl Default for Tasks {
 pub struct Web {
     #[serde(default)]
     pub search: WebSearch,
+    #[serde(default)]
+    pub fetch: WebFetch,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebFetch {
+    #[serde(default = "default_fetch_order")]
+    pub order: Vec<String>,
+    #[serde(default)]
+    pub providers: BTreeMap<String, FetchProvider>,
+}
+
+impl Default for WebFetch {
+    fn default() -> Self {
+        Self {
+            order: default_fetch_order(),
+            providers: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FetchProvider {
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -298,6 +325,10 @@ fn default_retention_runs() -> u32 {
 
 fn default_eta_reminder_minutes() -> u32 {
     10
+}
+
+fn default_fetch_order() -> Vec<String> {
+    vec!["jina".to_owned(), "http".to_owned()]
 }
 
 fn default_search_order() -> Vec<String> {
