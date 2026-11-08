@@ -546,3 +546,23 @@ local fake-server and fixture tests.
 - The message tool now holds a `TelegramSender`, and all of its photo, document,
   video, voice, and album sends go through the sender's shared 33 millisecond
   limiter. Replies, typing, and media sends therefore share one send budget.
+
+## 2026-11-08: Live watch and daemon status (M3d)
+
+- The daemon serves `$HEARTH_HOME/hearth.sock`, mode `0600`, with versioned JSON
+  lines. A stale socket is removed at bind and the file is removed on shutdown.
+- Protocol version 1: `{"v":1,"cmd":"status"}` returns one status object;
+  `{"v":1,"cmd":"watch","task_id":null}` acknowledges with
+  `{"v":1,"ok":true}` and then streams event lines. A task id filters events. A
+  disconnect removes the subscriber; detaching never cancels a run.
+- Event lines are `{v,ts,kind,task_id,conversation_id,data}`. Kinds: run_started,
+  turn_started, thinking_delta, text_delta, tool_call_started, tool_result,
+  task_step, usage, run_settled.
+- The bus redacts configured secret values before fan-out. Tool arguments and
+  results are previewed at 2000 characters in the event stream.
+- No event history is kept. A watcher attaching late sees only later events.
+  Thinking is live only and never replayed from storage.
+- Status fields: model, uptime_seconds, tasks_running, tasks_asleep,
+  today_cost_micros, cache_read_tokens, input_tokens, cache_hit_rate,
+  memory_items, standing_memory_version, last_skill_review. Memory and skill
+  values stay zero until their milestones.
