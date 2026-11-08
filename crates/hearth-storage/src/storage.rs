@@ -1,7 +1,7 @@
 //! Session-facing storage boundary: one writer thread and a read pool.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
@@ -16,6 +16,7 @@ type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 pub struct Storage {
     sender: Mutex<Option<Sender<Job>>>,
     readers: Mutex<Vec<Connection>>,
+    reader_ready: Condvar,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -35,6 +36,7 @@ impl Storage {
         Ok(Self {
             sender: Mutex::new(Some(sender)),
             readers: Mutex::new(readers),
+            reader_ready: Condvar::new(),
             thread: Mutex::new(Some(thread)),
         })
     }
@@ -73,15 +75,21 @@ impl Storage {
     where
         F: FnOnce(&Reader<'_>) -> Result<T, StorageError>,
     {
-        let connection = {
-            let mut readers = self.readers.lock().map_err(|_| StorageError::Poisoned)?;
-            readers.pop().ok_or(StorageError::Closed)?
-        };
+        let mut readers = self.readers.lock().map_err(|_| StorageError::Poisoned)?;
+        while readers.is_empty() {
+            readers = self
+                .reader_ready
+                .wait(readers)
+                .map_err(|_| StorageError::Poisoned)?;
+        }
+        let connection = readers.pop().expect("the pool is non-empty");
+        drop(readers);
         let outcome = run(&Reader {
             connection: &connection,
         });
         if let Ok(mut readers) = self.readers.lock() {
             readers.push(connection);
+            self.reader_ready.notify_one();
         }
         outcome
     }
