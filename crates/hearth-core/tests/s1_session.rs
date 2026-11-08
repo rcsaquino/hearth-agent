@@ -516,3 +516,42 @@ fn a_settlement_cannot_use_an_answer_entry_from_another_conversation() {
     assert!(after.settled_at.is_none());
     assert_eq!(after.status, SubmissionStatus::Queued);
 }
+
+#[test]
+fn a_fork_copies_the_current_documents() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(Save::new(&conversation.id).document("agent", None, json!({"model": "one"})))
+        .expect("create document");
+    session
+        .save(Save::new(&conversation.id).document("agent", Some(1), json!({"model": "two"})))
+        .expect("update document");
+    session
+        .save(Save::new(&conversation.id).entry("user", json!({"text": "fork here"})))
+        .expect("save entry");
+    let entry = session
+        .history(&conversation.id)
+        .expect("history")
+        .pop()
+        .expect("entry");
+
+    let fork = session
+        .fork(&conversation.id, &entry.id)
+        .expect("fork conversation");
+
+    let document = session
+        .document(&fork.id, "agent")
+        .expect("read fork document")
+        .expect("fork document exists");
+    assert_eq!(document.version, 2);
+    assert_eq!(document.json["model"], "two");
+    let source = session
+        .document(&conversation.id, "agent")
+        .expect("read source document")
+        .expect("source document exists");
+    assert_eq!(source.version, 2);
+}
