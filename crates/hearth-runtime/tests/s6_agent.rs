@@ -977,3 +977,136 @@ fn a_tool_run_emits_start_and_result_events() {
         "kinds: {kinds:?}"
     );
 }
+
+fn message_text(message: &hearth_model::ChatMessage) -> String {
+    message
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn text_script(answer: &str) -> Script {
+    Ok(vec![
+        Ok(StreamEvent::TextDelta(answer.to_owned())),
+        Ok(StreamEvent::Usage(Usage {
+            input_tokens: 10,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 3,
+            reasoning_tokens: 0,
+        })),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])
+}
+
+fn memory_input(content: &str, kind: hearth_memory::MemoryKind, importance: i64) -> hearth_memory::NewMemoryInput {
+    hearth_memory::NewMemoryInput {
+        content: content.to_owned(),
+        kind,
+        tags: Vec::new(),
+        importance,
+        source_kind: hearth_memory::SourceKind::User,
+        source_ref: None,
+        supersedes: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn the_agent_injects_standing_and_recall_memory() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let memory = Arc::new(hearth_memory::MemoryService::new(harness.session().clone()));
+    memory
+        .save(memory_input(
+            "Use metric units",
+            hearth_memory::MemoryKind::Rule,
+            90,
+        ))
+        .expect("standing rule");
+    memory
+        .save(memory_input(
+            "Sam prefers dark roast coffee",
+            hearth_memory::MemoryKind::Preference,
+            70,
+        ))
+        .expect("recall memory");
+    let submission = harness
+        .session()
+        .submit(
+            &conversation,
+            "req-memory",
+            "input",
+            json!({"text": "what coffee do I like?"}),
+        )
+        .expect("submit")
+        .submission;
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Dark roast.")]));
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("Dark roast."));
+
+    let requests = provider.requests();
+    let request = requests.last().expect("request");
+    let texts: Vec<String> = request.messages.iter().map(message_text).collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.contains("Standing memory") && text.contains("Use metric units")),
+        "missing standing: {texts:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.contains("Relevant memory") && text.contains("dark roast coffee")),
+        "missing recall: {texts:?}"
+    );
+}
+
+#[test]
+fn a_trivial_message_gets_standing_but_no_recall() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let memory = Arc::new(hearth_memory::MemoryService::new(harness.session().clone()));
+    memory
+        .save(memory_input(
+            "Use metric units",
+            hearth_memory::MemoryKind::Rule,
+            90,
+        ))
+        .expect("standing rule");
+    memory
+        .save(memory_input(
+            "Sam prefers dark roast coffee",
+            hearth_memory::MemoryKind::Preference,
+            70,
+        ))
+        .expect("recall memory");
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
+    agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
+        .with_memory(memory)
+        .run_submission(&submission.id)
+        .expect("run");
+
+    let requests = provider.requests();
+    let request = requests.last().expect("request");
+    let texts: Vec<String> = request.messages.iter().map(message_text).collect();
+    assert!(
+        texts.iter().any(|text| text.contains("Standing memory")),
+        "missing standing: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.contains("Relevant memory")),
+        "trivial message got recall: {texts:?}"
+    );
+}
