@@ -97,7 +97,7 @@ impl Tool for MessageTool {
             let speaker = self.speaker.as_ref().ok_or_else(|| {
                 ToolError::invalid("speech_not_configured", "speech is not configured")
             })?;
-            let audio = speaker.speak(speech).map_err(|error| media_error(error))?;
+            let audio = speaker.speak(speech).map_err(media_error)?;
             let voice = self.write_voice(&audio)?;
             let id = self
                 .client
