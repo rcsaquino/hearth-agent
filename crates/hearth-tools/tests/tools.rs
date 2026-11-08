@@ -103,3 +103,66 @@ fn reads_spill_paths() {
         .expect("read spill");
     assert_eq!(output.content, "full output");
 }
+
+#[test]
+fn runs_a_shell_command_and_captures_streams() {
+    use std::time::Duration;
+    use hearth_tools::ShellTool;
+
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let tool = ShellTool::new(&workspace, Duration::from_secs(2));
+    let output = tool
+        .call(&json!({"command": "printf hello; printf oops >&2"}))
+        .expect("run shell");
+    assert!(!output.is_error);
+    assert!(output.content.contains("hello"), "{}", output.content);
+    assert!(output.content.contains("oops"), "{}", output.content);
+    assert!(output.content.contains("exit code: 0"), "{}", output.content);
+}
+
+#[test]
+fn returns_a_nonzero_exit_as_a_result() {
+    use std::time::Duration;
+    use hearth_tools::ShellTool;
+
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let tool = ShellTool::new(&workspace, Duration::from_secs(2));
+    let output = tool
+        .call(&json!({"command": "printf fail >&2; exit 3"}))
+        .expect("run shell");
+    assert!(output.is_error);
+    assert!(output.content.contains("exit code: 3"), "{}", output.content);
+    assert!(output.content.contains("fail"), "{}", output.content);
+}
+
+#[test]
+fn times_out_a_long_command() {
+    use std::time::{Duration, Instant};
+    use hearth_tools::ShellTool;
+
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let tool = ShellTool::new(&workspace, Duration::from_millis(100));
+    let started = Instant::now();
+    let error = tool
+        .call(&json!({"command": "sleep 5"}))
+        .expect_err("the command must time out");
+    assert_eq!(error.code, "timeout");
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn rejects_a_shell_cwd_escape() {
+    use std::time::Duration;
+    use hearth_tools::ShellTool;
+
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let tool = ShellTool::new(&workspace, Duration::from_secs(2));
+    let error = tool
+        .call(&json!({"command": "pwd", "cwd": ".."}))
+        .expect_err("a cwd escape must fail");
+    assert_eq!(error.code, "invalid_path");
+}
