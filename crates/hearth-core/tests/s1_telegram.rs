@@ -1,4 +1,5 @@
-use hearth_core::Harness;
+use hearth_core::{Harness, SubmissionStatus, TelegramUpdate};
+use serde_json::json;
 use tempfile::TempDir;
 
 #[test]
@@ -43,4 +44,41 @@ fn the_telegram_offset_defaults_to_zero_and_upserts() {
     assert_eq!(session.telegram_offset().expect("offset"), 5);
     session.set_telegram_offset(6).expect("set offset");
     assert_eq!(session.telegram_offset().expect("offset"), 6);
+}
+
+#[test]
+fn a_telegram_submission_saves_the_update_entry_submission_and_offset() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Chat", "telegram", "1:0")
+        .expect("create conversation");
+
+    let admission = session
+        .submit_telegram(
+            &conversation.id,
+            "tg:1:10",
+            json!({"text": "hello"}),
+            TelegramUpdate {
+                update_id: 42,
+                chat_id: 1,
+                message_id: 10,
+            },
+            43,
+        )
+        .expect("submit telegram");
+
+    assert!(!admission.duplicate);
+    assert_eq!(admission.submission.request_id, "tg:1:10");
+    assert_eq!(admission.submission.status, SubmissionStatus::Queued);
+
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].kind, "user");
+    assert_eq!(history[0].source.as_deref(), Some("10"));
+    assert_eq!(history[0].content["text"], "hello");
+    assert_eq!(session.telegram_offset().expect("offset"), 43);
+    assert!(session.telegram_update_seen(42).expect("seen"));
+    assert!(!session.telegram_update_seen(41).expect("seen"));
 }
