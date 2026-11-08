@@ -108,11 +108,7 @@ impl ToolRegistry {
     }
 
     /// Call a tool, or return None when the name is unknown.
-    pub fn call(
-        &self,
-        name: &str,
-        arguments: &Value,
-    ) -> Option<Result<ToolOutput, ToolError>> {
+    pub fn call(&self, name: &str, arguments: &Value) -> Option<Result<ToolOutput, ToolError>> {
         self.tools.get(name).map(|tool| tool.call(arguments))
     }
 

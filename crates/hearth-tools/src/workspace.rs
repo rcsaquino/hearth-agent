@@ -155,8 +155,7 @@ impl Workspace {
         }
         match fs::symlink_metadata(&target) {
             Ok(_) => {
-                let canonical_target =
-                    fs::canonicalize(&target).map_err(|_| escape(path))?;
+                let canonical_target = fs::canonicalize(&target).map_err(|_| escape(path))?;
                 if !canonical_target.starts_with(&root) {
                     return Err(escape(path));
                 }
@@ -227,8 +226,5 @@ fn validate_relative(path: &str) -> Result<PathBuf, ToolError> {
 }
 
 fn escape(path: &str) -> ToolError {
-    ToolError::invalid(
-        "path_escape",
-        format!("path escapes the workspace: {path}"),
-    )
+    ToolError::invalid("path_escape", format!("path escapes the workspace: {path}"))
 }

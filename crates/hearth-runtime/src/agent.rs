@@ -11,8 +11,8 @@ use hearth_core::{
 };
 use hearth_model::{ContentBlock, Pricing, Provider, StreamEvent, ToolCall, Usage};
 use hearth_tools::{ToolError, ToolRegistry};
-use std::path::PathBuf;
 use serde_json::{Value, json};
+use std::path::PathBuf;
 use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -145,11 +145,8 @@ impl Agent {
         if !pending.is_empty() {
             self.execute_calls(&submission, &claimed.id, &pending)?;
             turn += 1;
-            self.session.checkpoint_task(
-                &claimed.id,
-                &self.config.owner,
-                json!({"turn": turn}),
-            )?;
+            self.session
+                .checkpoint_task(&claimed.id, &self.config.owner, json!({"turn": turn}))?;
         }
 
         loop {
@@ -330,10 +327,8 @@ impl Agent {
                 }
                 Some(Err(error)) => (error.to_json().to_string(), true),
                 None => {
-                    let error = ToolError::invalid(
-                        "unknown_tool",
-                        format!("unknown tool: {}", call.name),
-                    );
+                    let error =
+                        ToolError::invalid("unknown_tool", format!("unknown tool: {}", call.name));
                     (error.to_json().to_string(), true)
                 }
             };
@@ -345,8 +340,7 @@ impl Agent {
             }));
         }
         self.session.save(
-            Save::new(&submission.conversation_id)
-                .entry("tool_result", Value::Array(blocks)),
+            Save::new(&submission.conversation_id).entry("tool_result", Value::Array(blocks)),
         )?;
         self.session
             .heartbeat_task(task_id, &self.config.owner, 60_000_000)?;

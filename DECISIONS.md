@@ -325,3 +325,20 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   cost until a price is added.
 - The assistant entry, submission ending, and task terminal transition remain
   separate saves. The M2 gate should review whether to combine them.
+
+## 2026-11-08: M2b-3 tools, spill, and the tool loop
+
+- Files and shell are inline tools. Shell commands start in the workspace, run
+  without approval, and are not sandboxed.
+- The files tool reads, writes, edits, and lists only inside the workspace. Reads
+  may use the `spill/` prefix under the spill root. Absolute paths, `..`, and
+  symlink escapes are rejected.
+- Tool output above 4000 estimated tokens is written to
+  `spill/<call-id>.txt` at mode 0600 and replaced with a head, tail, size, and
+  path summary. The model reads the full output with `files read spill/...`.
+- Assistant tool calls and their results are paired by call id. Pending calls
+  with no result are replayed before the next provider request.
+- The agent turn limit counts provider requests. Reaching it saves a notice,
+  settles the submission unanswered with reason `turn_limit`, and fails the task.
+- The shell timeout kills the shell process; a process group kill is deferred.
+- Web search, web fetch, and the message tool are deferred.

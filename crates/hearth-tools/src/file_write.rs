@@ -26,10 +26,9 @@ impl FileWrite {
         let object = payload
             .as_object()
             .ok_or_else(|| ToolError::invalid("invalid_arguments", "payload must be an object"))?;
-        let path = object
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ToolError::invalid("invalid_arguments", "payload.path must be a string"))?;
+        let path = object.get("path").and_then(Value::as_str).ok_or_else(|| {
+            ToolError::invalid("invalid_arguments", "payload.path must be a string")
+        })?;
         let content = object
             .get("content")
             .and_then(Value::as_str)

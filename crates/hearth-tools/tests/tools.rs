@@ -106,8 +106,8 @@ fn reads_spill_paths() {
 
 #[test]
 fn runs_a_shell_command_and_captures_streams() {
-    use std::time::Duration;
     use hearth_tools::ShellTool;
+    use std::time::Duration;
 
     let home = TempDir::new().expect("temp home");
     let workspace = home.path().join("workspace");
@@ -118,13 +118,17 @@ fn runs_a_shell_command_and_captures_streams() {
     assert!(!output.is_error);
     assert!(output.content.contains("hello"), "{}", output.content);
     assert!(output.content.contains("oops"), "{}", output.content);
-    assert!(output.content.contains("exit code: 0"), "{}", output.content);
+    assert!(
+        output.content.contains("exit code: 0"),
+        "{}",
+        output.content
+    );
 }
 
 #[test]
 fn returns_a_nonzero_exit_as_a_result() {
-    use std::time::Duration;
     use hearth_tools::ShellTool;
+    use std::time::Duration;
 
     let home = TempDir::new().expect("temp home");
     let workspace = home.path().join("workspace");
@@ -133,14 +137,18 @@ fn returns_a_nonzero_exit_as_a_result() {
         .call(&json!({"command": "printf fail >&2; exit 3"}))
         .expect("run shell");
     assert!(output.is_error);
-    assert!(output.content.contains("exit code: 3"), "{}", output.content);
+    assert!(
+        output.content.contains("exit code: 3"),
+        "{}",
+        output.content
+    );
     assert!(output.content.contains("fail"), "{}", output.content);
 }
 
 #[test]
 fn times_out_a_long_command() {
-    use std::time::{Duration, Instant};
     use hearth_tools::ShellTool;
+    use std::time::{Duration, Instant};
 
     let home = TempDir::new().expect("temp home");
     let workspace = home.path().join("workspace");
@@ -155,8 +163,8 @@ fn times_out_a_long_command() {
 
 #[test]
 fn rejects_a_shell_cwd_escape() {
-    use std::time::Duration;
     use hearth_tools::ShellTool;
+    use std::time::Duration;
 
     let home = TempDir::new().expect("temp home");
     let workspace = home.path().join("workspace");

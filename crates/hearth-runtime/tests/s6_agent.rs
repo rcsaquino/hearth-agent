@@ -10,9 +10,9 @@ use hearth_model::{
 };
 use hearth_runtime::{Agent, AgentConfig, AgentError};
 use hearth_tools::{FileTool, Tool, ToolRegistry};
+use serde_json::json;
 use std::fs;
 use std::path::Path;
-use serde_json::json;
 use tempfile::TempDir;
 
 type Script = Result<Vec<Result<StreamEvent, ProviderError>>, ProviderError>;
@@ -107,14 +107,7 @@ fn agent<P: Provider + 'static>(
     provider: Arc<P>,
     pricing: Pricing,
 ) -> Agent {
-    agent_with(
-        home,
-        harness,
-        provider,
-        pricing,
-        4,
-        ToolRegistry::default(),
-    )
+    agent_with(home, harness, provider, pricing, 4, ToolRegistry::default())
 }
 
 #[test]

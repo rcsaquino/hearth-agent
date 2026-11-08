@@ -77,12 +77,18 @@ impl Tool for FileTool {
             }
             "edit" => {
                 let path = required_path(arguments)?;
-                let old = arguments.get("old").and_then(Value::as_str).ok_or_else(|| {
-                    ToolError::invalid("invalid_arguments", "old is required for edit")
-                })?;
-                let new = arguments.get("new").and_then(Value::as_str).ok_or_else(|| {
-                    ToolError::invalid("invalid_arguments", "new is required for edit")
-                })?;
+                let old = arguments
+                    .get("old")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        ToolError::invalid("invalid_arguments", "old is required for edit")
+                    })?;
+                let new = arguments
+                    .get("new")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        ToolError::invalid("invalid_arguments", "new is required for edit")
+                    })?;
                 let text = self.workspace.read_text(path)?;
                 if !text.contains(old) {
                     return Err(ToolError::invalid(
@@ -102,10 +108,7 @@ impl Tool for FileTool {
                 let entries = self.workspace.read_dir(path)?;
                 let mut content = String::new();
                 for entry in entries {
-                    content.push_str(&format!(
-                        "{}\t{}\t{}\n",
-                        entry.kind, entry.name, entry.size
-                    ));
+                    content.push_str(&format!("{}\t{}\t{}\n", entry.kind, entry.name, entry.size));
                 }
                 Ok(ToolOutput {
                     content,
