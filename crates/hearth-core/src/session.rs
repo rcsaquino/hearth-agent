@@ -731,6 +731,18 @@ impl Session {
                     return Err(CoreError::LeaseLost(task_id.clone()));
                 }
 
+                let kind = match &output {
+                    StepOutput::Next { .. } => "task.next",
+                    StepOutput::Sleep { .. } => "task.sleep",
+                    StepOutput::Terminal { .. } => "task.terminal",
+                    StepOutput::Failed {
+                        retryable: true, ..
+                    } => "task.retry",
+                    StepOutput::Failed {
+                        retryable: false, ..
+                    } => "task.fail",
+                };
+
                 match output {
                     StepOutput::Next { phase, checkpoint } => {
                         let checkpoint = serde_json::to_string(&checkpoint)
@@ -829,6 +841,14 @@ impl Session {
                         }
                     }
                 }
+
+                record_commit(
+                    writer,
+                    now,
+                    task.conversation_id.as_deref(),
+                    Some(task_id.as_str()),
+                    kind,
+                )?;
 
                 load_task(writer, &task_id)?.ok_or(CoreError::TaskNotFound(task_id))
             })
