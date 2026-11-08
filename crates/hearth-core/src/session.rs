@@ -422,6 +422,54 @@ impl Session {
         self.effects_with_status("started", 100)
     }
 
+    /// Read one effect by its kind and stable key.
+    pub fn effect_by_key(&self, kind: &str, key: &str) -> Result<Option<Effect>, CoreError> {
+        let sql =
+            format!("{EFFECT_SELECT} WHERE kind = ? AND key = ? ORDER BY created_at DESC LIMIT 1");
+        let raw: Option<RawEffect> = self.storage.read(|reader| {
+            reader.query_optional(&sql, (kind, key), |row| {
+                Ok(RawEffect {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    kind: row.get(2)?,
+                    key: row.get(3)?,
+                    payload_json: row.get(4)?,
+                    status: row.get(5)?,
+                    result_json: row.get(6)?,
+                    attempts: row.get(7)?,
+                    created_at: row.get(8)?,
+                    settled_at: row.get(9)?,
+                })
+            })
+        })?;
+        raw.map(RawEffect::into_effect).transpose()
+    }
+
+    /// List effects awaiting delivery of one kind: intent or unknown, oldest first.
+    pub fn effects_awaiting_delivery(&self, kind: &str) -> Result<Vec<Effect>, CoreError> {
+        let sql = format!(
+            "{EFFECT_SELECT} WHERE kind = ? AND status IN ('intent','unknown') \
+             ORDER BY created_at, id"
+        );
+        let raw: Vec<RawEffect> = self.storage.read(|reader| {
+            reader.query(&sql, (kind,), |row| {
+                Ok(RawEffect {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    kind: row.get(2)?,
+                    key: row.get(3)?,
+                    payload_json: row.get(4)?,
+                    status: row.get(5)?,
+                    result_json: row.get(6)?,
+                    attempts: row.get(7)?,
+                    created_at: row.get(8)?,
+                    settled_at: row.get(9)?,
+                })
+            })
+        })?;
+        raw.into_iter().map(RawEffect::into_effect).collect()
+    }
+
     fn effects_with_status(&self, status: &str, limit: i64) -> Result<Vec<Effect>, CoreError> {
         let sql = format!("{EFFECT_SELECT} WHERE status = ? ORDER BY created_at, id LIMIT ?");
         let raw: Vec<RawEffect> = self.storage.read(|reader| {
@@ -567,6 +615,64 @@ impl Session {
                 effect.task_id.as_deref(),
                 "effect.requeued",
             )?;
+            Ok(())
+        })?;
+        self.effect(id)?
+            .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
+    }
+
+    /// Mark an effect done, whether it was an intent, started, or unknown.
+    pub fn mark_effect_done(&self, id: &str, result: Value) -> Result<Effect, CoreError> {
+        self.set_effect_status(id, EffectStatus::Done, result, "effect.done")
+    }
+
+    /// Mark an effect failed, whether it was an intent, started, or unknown.
+    pub fn mark_effect_failed(&self, id: &str, error: Value) -> Result<Effect, CoreError> {
+        self.set_effect_status(id, EffectStatus::Failed, error, "effect.failed")
+    }
+
+    /// Mark an effect unknown, keeping its payload for a later recovery.
+    pub fn mark_effect_unknown(&self, id: &str, result: Value) -> Result<Effect, CoreError> {
+        let effect = self
+            .effect(id)?
+            .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))?;
+        if effect.status == EffectStatus::Unknown {
+            return Ok(effect);
+        }
+        self.set_effect_status(id, EffectStatus::Unknown, result, "effect.unknown")
+    }
+
+    fn set_effect_status(
+        &self,
+        id: &str,
+        status: EffectStatus,
+        result: Value,
+        commit_kind: &str,
+    ) -> Result<Effect, CoreError> {
+        let now = self.clock.now_micros();
+        let effect_id = id.to_owned();
+        let commit_kind = commit_kind.to_owned();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            let effect = load_effect(writer, &effect_id)?
+                .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+            if matches!(effect.status, EffectStatus::Done | EffectStatus::Failed) {
+                return Err(CoreError::EffectNotReady {
+                    id: effect_id,
+                    status: effect.status.as_str().to_owned(),
+                });
+            }
+            let result_json = serde_json::to_string(&result)
+                .map_err(|error| CoreError::Invalid(error.to_string()))?;
+            writer.execute(
+                "UPDATE effects SET status = ?, result_json = ?, settled_at = ? WHERE id = ?",
+                (
+                    status.as_str(),
+                    result_json.as_str(),
+                    now,
+                    effect_id.as_str(),
+                ),
+            )?;
+            record_commit(writer, now, None, effect.task_id.as_deref(), &commit_kind)?;
             Ok(())
         })?;
         self.effect(id)?
