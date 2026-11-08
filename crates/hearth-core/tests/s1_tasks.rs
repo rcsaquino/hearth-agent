@@ -295,3 +295,48 @@ fn a_terminal_outcome_settles_the_task_once() {
         TaskStatus::Done
     );
 }
+
+#[test]
+fn a_retryable_failure_requeues_with_a_delay_and_resets_attempt() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    let claimed = session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("a task is runnable");
+    let retry_at = clock.now() + 1_000_000;
+
+    let retried = session
+        .finish_task(
+            &claimed.id,
+            "worker-a",
+            StepOutput::Failed {
+                error: json!({"code": "temporary"}),
+                retryable: true,
+            },
+        )
+        .expect("retryable failure");
+    assert_eq!(retried.status, TaskStatus::Pending);
+    assert_eq!(retried.next_wake_at, Some(retry_at));
+    assert_eq!(retried.attempt, 0);
+    assert!(retried.result.is_none());
+    assert!(retried.lease_owner.is_none());
+
+    assert!(
+        session
+            .claim_task("worker-b", 60_000_000)
+            .expect("early claim")
+            .is_none()
+    );
+    clock.advance(1_000_000);
+    let claimed = session
+        .claim_task("worker-b", 60_000_000)
+        .expect("claim after delay")
+        .expect("the task is runnable again");
+    assert_eq!(claimed.id, task.id);
+    assert_eq!(claimed.attempt, 1);
+}
