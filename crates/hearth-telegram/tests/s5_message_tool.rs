@@ -129,6 +129,7 @@ fn one_image_is_sent_with_the_message_tool() {
     let tool = MessageTool::new(
         client(&base),
         42,
+        None,
         workspace.path(),
         spill.path(),
         outbound.path(),
@@ -160,6 +161,7 @@ fn one_document_is_sent_without_a_caption() {
     let tool = MessageTool::new(
         client(&base),
         7,
+        None,
         workspace.path(),
         spill.path(),
         outbound.path(),
@@ -185,6 +187,7 @@ fn two_images_are_sent_as_one_album() {
     let tool = MessageTool::new(
         client(&base),
         9,
+        None,
         workspace.path(),
         spill.path(),
         outbound.path(),
@@ -219,6 +222,7 @@ fn a_mixed_group_is_sent_individually() {
     let tool = MessageTool::new(
         client(&base),
         3,
+        None,
         workspace.path(),
         spill.path(),
         outbound.path(),
@@ -248,6 +252,7 @@ fn speech_is_written_and_sent_as_a_voice_note() {
     let tool = MessageTool::new(
         client(&base),
         11,
+        None,
         workspace.path(),
         spill.path(),
         outbound.path(),
@@ -289,6 +294,7 @@ fn speech_without_a_speaker_is_an_error() {
     let tool = MessageTool::new(
         client(&base),
         1,
+        None,
         workspace.path(),
         spill.path(),
         outbound.path(),
@@ -310,6 +316,7 @@ fn invalid_calls_are_rejected_before_any_send() {
     let tool = MessageTool::new(
         client(&base),
         1,
+        None,
         workspace.path(),
         spill.path(),
         outbound.path(),
@@ -324,4 +331,32 @@ fn invalid_calls_are_rejected_before_any_send() {
         tool.call(&json!({"path": "one.png", "paths": ["one.png"]}))
             .is_err()
     );
+}
+
+#[test]
+fn the_message_tool_carries_a_thread_id() {
+    let workspace = TempDir::new().expect("workspace");
+    let spill = TempDir::new().expect("spill");
+    let outbound = TempDir::new().expect("outbound");
+    file(workspace.path(), "image.png", b"IMAGEDATA");
+    let (base, server) = bot_server(vec![single(401)]);
+    let tool = MessageTool::new(
+        client(&base),
+        42,
+        Some(9),
+        workspace.path(),
+        spill.path(),
+        outbound.path(),
+        None,
+    );
+
+    tool.call(&json!({"path": "image.png"}))
+        .expect("send image");
+
+    let requests = server.join().expect("server");
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].path.ends_with("/sendPhoto"));
+    let body = text(&requests[0].body);
+    assert!(body.contains("name=\"message_thread_id\""));
+    assert!(body.contains("9"));
 }
