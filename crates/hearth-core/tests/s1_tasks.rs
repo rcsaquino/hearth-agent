@@ -521,3 +521,43 @@ fn a_heartbeat_extends_the_lease_and_a_stale_owner_is_rejected() {
         )
         .expect("the owner finishes");
 }
+
+#[test]
+fn a_recovered_claim_continues_from_the_saved_checkpoint_and_phase() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    let claimed = session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim")
+        .expect("runnable");
+    session
+        .finish_task(
+            &claimed.id,
+            "worker-a",
+            StepOutput::Next {
+                phase: "second".to_owned(),
+                checkpoint: json!({"step": 1}),
+            },
+        )
+        .expect("next step");
+
+    session
+        .claim_task("worker-b", 1_000_000)
+        .expect("claim second phase")
+        .expect("runnable");
+    clock.advance(2_000_000);
+    session.recover_tasks().expect("recovery");
+
+    let resumed = session
+        .claim_task("worker-c", 60_000_000)
+        .expect("claim after recovery")
+        .expect("runnable");
+    assert_eq!(resumed.id, task.id);
+    assert_eq!(resumed.phase, "second");
+    assert_eq!(resumed.checkpoint, Some(json!({"step": 1})));
+    assert_eq!(resumed.attempt, 2);
+}
