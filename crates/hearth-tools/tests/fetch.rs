@@ -7,13 +7,15 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hearth_tools::{
-    FetchError, FetchProvider, FetchResult, HttpFetch, JinaFetch, Tool, WebFetchTool,
+    FetchError, FetchProvider, FetchResult, HttpFetch, JinaFetch, TinyFishFetch, Tool,
+    WebFetchTool,
 };
 use serde_json::json;
 
 struct Captured {
     path: String,
     headers: HashMap<String, String>,
+    body: Vec<u8>,
 }
 
 struct Reply {
@@ -96,7 +98,11 @@ fn serve(replies: Vec<Reply>) -> Server {
                 .write_all(response.as_bytes())
                 .expect("write headers");
             stream.write_all(&reply.body).expect("write body");
-            captured.push(Captured { path, headers });
+            captured.push(Captured {
+                path,
+                headers,
+                body,
+            });
         }
         captured
     });
@@ -354,4 +360,43 @@ fn a_large_error_body_is_shortened() {
         error.message.len()
     );
     direct.thread.join().expect("direct thread");
+}
+
+#[test]
+fn tinyfish_maps_its_fetch_response() {
+    let server = serve(vec![reply(
+        200,
+        "application/json",
+        r##"{"results":[{"url":"https://93.184.216.34/page","final_url":"https://93.184.216.34/page","title":"Tiny Page","text":"# Tiny\n\nContent"}],"errors":[]}"##,
+    )]);
+    let provider = Arc::new(
+        TinyFishFetch::new(
+            "tiny-key",
+            server.base.clone(),
+            Duration::from_secs(5),
+            2 * 1024 * 1024,
+        )
+        .expect("tinyfish"),
+    );
+    let tool = WebFetchTool::new(vec![provider], false);
+    let output = tool
+        .call(&json!({"url": "https://93.184.216.34/page"}))
+        .expect("fetch");
+    assert!(output.content.contains("Provider: tinyfish"));
+    assert!(output.content.contains("Title: Tiny Page"));
+    assert!(output.content.contains("# Tiny"));
+    assert!(output.content.contains("Content"));
+
+    let captured = server.thread.join().expect("server thread");
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].path, "/");
+    assert_eq!(
+        captured[0].headers.get("x-api-key").map(String::as_str),
+        Some("tiny-key")
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&captured[0].body).expect("request body is JSON");
+    assert_eq!(body["urls"], json!(["https://93.184.216.34/page"]));
+    assert_eq!(body["format"], "markdown");
+    assert_eq!(body["per_url_timeout_ms"], 30000);
 }
