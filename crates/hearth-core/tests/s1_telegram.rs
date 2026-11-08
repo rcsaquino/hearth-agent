@@ -186,3 +186,51 @@ fn a_failed_telegram_save_leaves_no_entry_and_no_offset() {
     assert_eq!(session.telegram_offset().expect("offset"), 0);
     assert!(!session.telegram_update_seen(42).expect("seen"));
 }
+
+#[test]
+fn the_next_queued_telegram_submission_skips_local_submissions() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+
+    let local = session
+        .create_conversation("Local", "local", "local:1")
+        .expect("create local conversation");
+    session
+        .submit(&local.id, "local:1", "input", json!({"text": "local"}))
+        .expect("submit local");
+
+    let telegram = session
+        .create_conversation("Telegram", "telegram", "1:0")
+        .expect("create telegram conversation");
+    let admission = session
+        .submit_telegram(
+            &telegram.id,
+            "tg:1:10",
+            json!({"text": "hello"}),
+            TelegramUpdate {
+                update_id: 42,
+                chat_id: 1,
+                message_id: 10,
+            },
+            43,
+        )
+        .expect("submit telegram");
+
+    let next = session
+        .next_queued_telegram_submission()
+        .expect("next queued")
+        .expect("a telegram submission is queued");
+    assert_eq!(next.id, admission.submission.id);
+
+    session
+        .settle(&admission.submission.id, SubmissionStatus::Done, None)
+        .expect("settle");
+    assert!(
+        session
+            .next_queued_telegram_submission()
+            .expect("next queued")
+            .is_none(),
+        "a settled telegram submission must not be returned"
+    );
+}
