@@ -137,6 +137,7 @@ where
     transaction
         .commit()
         .map_err(|error| E::from(StorageError::from(error)))?;
+    crate::crash_if("after_commit");
     Ok(value)
 }
 
