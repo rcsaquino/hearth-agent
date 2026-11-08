@@ -107,10 +107,86 @@ fn blocks(writer: &mut Writer, markdown: &str) {
             writer.mark("pre", extra, |writer| writer.append(&code));
             continue;
         }
+        if let Some(text) = heading(line) {
+            if !first {
+                writer.append("\n\n");
+            }
+            first = false;
+            writer.mark("bold", None, |writer| inline(writer, text));
+            index += 1;
+            continue;
+        }
+        if is_list_item(line) {
+            if !first {
+                writer.append("\n\n");
+            }
+            first = false;
+            let mut item = 0;
+            while index < lines.len() && is_list_item(lines[index]) {
+                if item > 0 {
+                    writer.append("\n");
+                }
+                let (prefix, text) = list_prefix(lines[index], item);
+                writer.append(&prefix);
+                inline(writer, text);
+                index += 1;
+                item += 1;
+            }
+            continue;
+        }
+        if is_quote(line) {
+            if !first {
+                writer.append("\n\n");
+            }
+            first = false;
+            let mut quoted = 0;
+            while index < lines.len() && is_quote(lines[index]) {
+                if quoted > 0 {
+                    writer.append("\n");
+                }
+                writer.append("› ");
+                inline(writer, strip_quote(lines[index]));
+                index += 1;
+                quoted += 1;
+            }
+            continue;
+        }
+        if let Some((header, rows, next)) = table_start(&lines, index) {
+            if !first {
+                writer.append("\n\n");
+            }
+            first = false;
+            for (row_index, row) in rows.iter().enumerate() {
+                if row_index > 0 {
+                    writer.append("\n\n");
+                }
+                for (column, cell) in row.iter().enumerate() {
+                    if column > 0 {
+                        writer.append("\n");
+                    }
+                    let label = header.get(column).copied().unwrap_or("Column");
+                    writer.mark("bold", None, |writer| {
+                        writer.append(&format!("{label}: "))
+                    });
+                    inline(writer, cell);
+                }
+            }
+            if rows.is_empty() {
+                writer.append(&header.join(" | "));
+            }
+            index = next;
+            continue;
+        }
         let mut paragraph = Vec::new();
         while index < lines.len() {
             let candidate = lines[index];
-            if candidate.trim().is_empty() || fence_start(candidate).is_some() {
+            if candidate.trim().is_empty()
+                || fence_start(candidate).is_some()
+                || heading(candidate).is_some()
+                || is_list_item(candidate)
+                || is_quote(candidate)
+                || table_start(&lines, index).is_some()
+            {
                 break;
             }
             paragraph.push(candidate);
@@ -126,6 +202,91 @@ fn blocks(writer: &mut Writer, markdown: &str) {
         first = false;
         inline(writer, &paragraph.join("\n"));
     }
+}
+
+fn heading(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+    if !(1..=6).contains(&hashes) {
+        return None;
+    }
+    let rest = &trimmed[hashes..];
+    rest.strip_prefix(' ').map(|text| text.trim_start())
+}
+
+fn is_list_item(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if ["- ", "* ", "+ "]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+    {
+        return true;
+    }
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits > 0 && trimmed[digits..].starts_with(". ")
+}
+
+fn list_prefix(line: &str, fallback: usize) -> (String, &str) {
+    let trimmed = line.trim_start();
+    for prefix in ["- ", "* ", "+ "] {
+        if let Some(text) = trimmed.strip_prefix(prefix) {
+            return ("• ".to_owned(), text);
+        }
+    }
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 && trimmed[digits..].starts_with(". ") {
+        let number = trimmed[..digits].parse::<usize>().unwrap_or(fallback + 1);
+        return (format!("{number}. "), &trimmed[digits + 2..]);
+    }
+    (String::new(), trimmed)
+}
+
+fn is_quote(line: &str) -> bool {
+    line.trim_start().starts_with('>')
+}
+
+fn strip_quote(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    trimmed
+        .strip_prefix('>')
+        .unwrap_or(trimmed)
+        .strip_prefix(' ')
+        .unwrap_or_else(|| trimmed.strip_prefix('>').unwrap_or(trimmed))
+}
+
+fn split_table(line: &str) -> Vec<&str> {
+    let trimmed = line.trim().trim_matches('|');
+    trimmed.split('|').map(str::trim).collect()
+}
+
+fn is_table_separator(line: &str) -> bool {
+    let cells = split_table(line);
+    !cells.is_empty()
+        && cells.iter().all(|cell| {
+            let cell = cell.trim();
+            !cell.is_empty()
+                && cell.chars().all(|c| c == '-' || c == ':' || c == ' ')
+                && cell.contains('-')
+        })
+}
+
+fn table_start<'a>(lines: &'a [&'a str], index: usize) -> Option<(Vec<&'a str>, Vec<Vec<&'a str>>, usize)> {
+    let header = lines.get(index)?;
+    let separator = lines.get(index + 1)?;
+    if !header.contains('|') || !is_table_separator(separator) {
+        return None;
+    }
+    let labels = split_table(header);
+    let mut rows = Vec::new();
+    let mut next = index + 2;
+    while let Some(line) = lines.get(next) {
+        if line.trim().is_empty() || !line.contains('|') {
+            break;
+        }
+        rows.push(split_table(line));
+        next += 1;
+    }
+    Some((labels, rows, next))
 }
 
 fn fence_start(line: &str) -> Option<(String, String)> {
