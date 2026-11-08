@@ -3,9 +3,11 @@
 mod api;
 mod format;
 mod poller;
+mod sender;
 mod types;
 
 pub use api::{TelegramClient, TelegramError};
 pub use format::{Entity, FormattedText, format_markdown, split_formatted};
 pub use poller::{PollError, PollReport, TelegramPoller};
+pub use sender::{SendOutcome, Sleeper, SystemSleeper, TelegramSender};
 pub use types::{Chat, Message, Update, User};

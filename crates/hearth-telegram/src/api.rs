@@ -131,6 +131,18 @@ impl TelegramClient {
         })
     }
 
+    /// Send one native rich message with Markdown.
+    pub fn send_rich_message(&self, chat_id: i64, markdown: &str) -> Result<(), TelegramError> {
+        self.call(
+            "sendRichMessage",
+            json!({
+                "chat_id": chat_id,
+                "rich_message": {"markdown": markdown},
+            }),
+        )?;
+        Ok(())
+    }
+
     /// Acknowledge one message with an emoji reaction.
     pub fn set_message_reaction(
         &self,
