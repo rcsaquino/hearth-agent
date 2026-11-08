@@ -1,0 +1,10 @@
+/target
+.devhome/
+.env
+*.db
+*.db-wal
+*.db-shm
+logs/
+media/
+spill/
+backups/
