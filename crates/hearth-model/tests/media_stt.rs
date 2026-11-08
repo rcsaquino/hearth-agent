@@ -12,7 +12,9 @@ struct Captured {
     body: Vec<u8>,
 }
 
-fn fake_groq(response: serde_json::Value) -> (String, mpsc::Receiver<Captured>, thread::JoinHandle<()>) {
+fn fake_groq(
+    response: serde_json::Value,
+) -> (String, mpsc::Receiver<Captured>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake groq");
     let address = listener.local_addr().expect("address");
     let (sender, receiver) = mpsc::channel();
@@ -36,7 +38,11 @@ fn read_request(stream: &mut TcpStream) -> Captured {
     let mut reader = BufReader::new(stream.try_clone().expect("clone"));
     let mut line = String::new();
     reader.read_line(&mut line).expect("request line");
-    let path = line.split_whitespace().nth(1).unwrap_or_default().to_owned();
+    let path = line
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or_default()
+        .to_owned();
     let mut content_length = 0usize;
     let mut authorization = None;
     loop {
@@ -53,7 +59,9 @@ fn read_request(stream: &mut TcpStream) -> Captured {
                 .unwrap_or(0);
         }
         if header.to_ascii_lowercase().starts_with("authorization:") {
-            authorization = header.split_once(':').map(|(_, value)| value.trim().to_owned());
+            authorization = header
+                .split_once(':')
+                .map(|(_, value)| value.trim().to_owned());
         }
     }
     let mut body = vec![0u8; content_length];

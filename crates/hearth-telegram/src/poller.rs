@@ -178,12 +178,7 @@ impl TelegramPoller {
             .iter()
             .max_by_key(|photo| photo.width.saturating_mul(photo.height))
         {
-            match self.save_attachment(
-                message,
-                &photo.file_id,
-                photo.file_size,
-                "photo.jpg",
-            ) {
+            match self.save_attachment(message, &photo.file_id, photo.file_size, "photo.jpg") {
                 Ok(path) => blocks.push(json!({
                     "type": "image",
                     "path": path.to_string_lossy(),

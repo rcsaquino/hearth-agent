@@ -196,11 +196,10 @@ impl TelegramClient {
             self.base_url.trim_end_matches('/'),
             self.token
         );
-        let mut url =
-            reqwest::Url::parse(&base).map_err(|error| TelegramError::Protocol {
-                method: "download".to_owned(),
-                detail: format!("invalid file base URL: {error}"),
-            })?;
+        let mut url = reqwest::Url::parse(&base).map_err(|error| TelegramError::Protocol {
+            method: "download".to_owned(),
+            detail: format!("invalid file base URL: {error}"),
+        })?;
         {
             let mut segments = url
                 .path_segments_mut()

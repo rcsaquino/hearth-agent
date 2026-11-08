@@ -119,6 +119,7 @@ fn get_file_and_download_follow_the_bot_api_paths() {
 fn a_download_over_the_cap_is_refused() {
     let api = FakeFileApi::start("photos/a b.jpg", vec![1, 2, 3, 4, 5]);
     let client = client(&api);
+    client.get_file("file-1").expect("get file");
     let error = client
         .download_file("photos/a b.jpg", 4)
         .expect_err("over the cap");

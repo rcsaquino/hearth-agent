@@ -194,7 +194,15 @@ fn setup(
     let client =
         TelegramClient::with_base_url("123:fake", api.base_url.clone()).expect("telegram client");
     let media = InboundMedia::new(home.path().join("media/inbound"));
-    let poller = TelegramPoller::new(client, session, allowed_users, allowed_chats, 0, media, None);
+    let poller = TelegramPoller::new(
+        client,
+        session,
+        allowed_users,
+        allowed_chats,
+        0,
+        media,
+        None,
+    );
     (home, harness, poller)
 }
 

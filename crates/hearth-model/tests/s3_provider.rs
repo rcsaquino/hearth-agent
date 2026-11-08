@@ -504,12 +504,9 @@ fn the_token_estimator_uses_a_ten_percent_margin() {
     assert_eq!(hearth_model::estimate_tokens(&"a".repeat(100)), 28);
 }
 
-
 #[test]
 fn an_image_block_is_encoded_and_downscaled() {
     use base64::Engine;
-    use std::io::Write as _;
-
     let directory = tempfile::TempDir::new().expect("temp image dir");
     let path = directory.path().join("big.png");
     let image = image::RgbImage::from_pixel(2000, 1000, image::Rgb([255, 0, 0]));

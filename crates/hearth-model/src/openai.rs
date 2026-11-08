@@ -477,12 +477,10 @@ fn file_note(name: &str, path: &str) -> String {
 }
 
 fn image_data_url(path: &str) -> Result<String, ProviderError> {
-    let bytes = std::fs::read(path).map_err(|error| {
-        ProviderError::Protocol(format!("image could not be read: {error}"))
-    })?;
-    let image = image::load_from_memory(&bytes).map_err(|error| {
-        ProviderError::Protocol(format!("image could not be decoded: {error}"))
-    })?;
+    let bytes = std::fs::read(path)
+        .map_err(|error| ProviderError::Protocol(format!("image could not be read: {error}")))?;
+    let image = image::load_from_memory(&bytes)
+        .map_err(|error| ProviderError::Protocol(format!("image could not be decoded: {error}")))?;
     let image = if image.width().max(image.height()) > 1568 {
         image.thumbnail(1568, 1568)
     } else {
@@ -491,9 +489,7 @@ fn image_data_url(path: &str) -> Result<String, ProviderError> {
     let mut encoded = Cursor::new(Vec::new());
     image
         .write_to(&mut encoded, image::ImageFormat::Png)
-        .map_err(|error| {
-            ProviderError::Protocol(format!("image could not be encoded: {error}"))
-        })?;
+        .map_err(|error| ProviderError::Protocol(format!("image could not be encoded: {error}")))?;
     let base64 = base64::engine::general_purpose::STANDARD.encode(encoded.into_inner());
     Ok(format!("data:image/png;base64,{base64}"))
 }

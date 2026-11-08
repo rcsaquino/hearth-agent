@@ -16,7 +16,6 @@ use tempfile::TempDir;
 #[derive(Debug, Clone)]
 struct Request {
     method: String,
-    path: String,
     body: Value,
 }
 
@@ -135,7 +134,6 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<State>>) {
         let bytes = bytes.unwrap_or_default();
         state.lock().expect("state").requests.push(Request {
             method: "download".to_owned(),
-            path,
             body: Value::Null,
         });
         write_bytes(&mut stream, &bytes, "application/octet-stream");
@@ -148,7 +146,6 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<State>>) {
         let mut state = state.lock().expect("state");
         state.requests.push(Request {
             method: method.clone(),
-            path,
             body: body.clone(),
         });
         match method.as_str() {
@@ -170,7 +167,9 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<State>>) {
                     None => json!({"ok": false, "error_code": 404, "description": "missing file"}),
                 }
             }
-            "getFile" => json!({"ok": false, "error_code": 500, "description": "synthetic getFile failure"}),
+            "getFile" => {
+                json!({"ok": false, "error_code": 500, "description": "synthetic getFile failure"})
+            }
             "setMessageReaction" => json!({"ok": true, "result": true}),
             _ => json!({"ok": true, "result": true}),
         }
@@ -222,8 +221,7 @@ fn setup(
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("open harness");
     let session = harness.session().clone();
-    let client =
-        TelegramClient::with_base_url("123:fake", bot.base_url.clone()).expect("client");
+    let client = TelegramClient::with_base_url("123:fake", bot.base_url.clone()).expect("client");
     let media = InboundMedia::new(home.path().join("media/inbound"));
     let poller = TelegramPoller::new(client, session, vec![42], vec![], 0, media, transcriber);
     (home, harness, poller)
@@ -260,7 +258,12 @@ fn a_photo_is_saved_and_admitted_as_an_image() {
                 ]
             }),
         )],
-        vec![("large".to_owned(), "photos/large.jpg".to_owned(), vec![1, 2, 3], 3)],
+        vec![(
+            "large".to_owned(),
+            "photos/large.jpg".to_owned(),
+            vec![1, 2, 3],
+            3,
+        )],
     );
     let (home, _harness, poller) = setup(&bot, None);
     let report = poller.poll_once().expect("poll");
@@ -273,12 +276,19 @@ fn a_photo_is_saved_and_admitted_as_an_image() {
     assert_eq!(blocks[0]["mime"], "image/jpeg");
     let path = Path::new(blocks[0]["path"].as_str().expect("image path"));
     assert!(path.starts_with(home.path().join("media/inbound/2023-11-14")));
-    assert_eq!(path.file_name().and_then(|name| name.to_str()), Some("5-photo.jpg"));
+    assert_eq!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some("5-photo.jpg")
+    );
     assert_eq!(std::fs::read(path).expect("saved image"), vec![1, 2, 3]);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+        let mode = std::fs::metadata(path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600);
     }
     let requests = bot.requests();
@@ -308,7 +318,12 @@ fn a_document_is_admitted_as_a_file_block() {
                 }
             }),
         )],
-        vec![("doc".to_owned(), "documents/report.pdf".to_owned(), vec![4, 5, 6], 3)],
+        vec![(
+            "doc".to_owned(),
+            "documents/report.pdf".to_owned(),
+            vec![4, 5, 6],
+            3,
+        )],
     );
     let (_home, _harness, poller) = setup(&bot, None);
     poller.poll_once().expect("poll");
@@ -330,7 +345,12 @@ fn a_voice_note_is_transcribed_and_admitted() {
                 "voice": {"file_id": "voice", "file_unique_id": "v", "mime_type": "audio/ogg", "file_size": 3}
             }),
         )],
-        vec![("voice".to_owned(), "voice/file.oga".to_owned(), vec![7, 8, 9], 3)],
+        vec![(
+            "voice".to_owned(),
+            "voice/file.oga".to_owned(),
+            vec![7, 8, 9],
+            3,
+        )],
     );
     let transcriber = Arc::new(FakeTranscriber {
         text: "hello from voice".to_owned(),
@@ -357,7 +377,12 @@ fn a_voice_without_a_transcriber_is_admitted_with_a_note() {
                 "voice": {"file_id": "voice", "file_unique_id": "v", "mime_type": "audio/ogg", "file_size": 3}
             }),
         )],
-        vec![("voice".to_owned(), "voice/file.oga".to_owned(), vec![7, 8, 9], 3)],
+        vec![(
+            "voice".to_owned(),
+            "voice/file.oga".to_owned(),
+            vec![7, 8, 9],
+            3,
+        )],
     );
     let (_home, _harness, poller) = setup(&bot, None);
     poller.poll_once().expect("poll");
@@ -405,8 +430,16 @@ fn an_attachment_over_twenty_megabytes_is_not_downloaded() {
             .to_lowercase()
             .contains("too large")
     );
-    assert!(!bot.requests().iter().any(|request| request.method == "download"));
-    assert!(!bot.requests().iter().any(|request| request.method == "getFile"));
+    assert!(
+        !bot.requests()
+            .iter()
+            .any(|request| request.method == "download")
+    );
+    assert!(
+        !bot.requests()
+            .iter()
+            .any(|request| request.method == "getFile")
+    );
     bot.stop();
 }
 
@@ -422,7 +455,12 @@ fn a_replayed_update_downloads_nothing_and_creates_no_second_submission() {
                 ]
             }),
         )],
-        vec![("large".to_owned(), "photos/large.jpg".to_owned(), vec![1, 2, 3], 3)],
+        vec![(
+            "large".to_owned(),
+            "photos/large.jpg".to_owned(),
+            vec![1, 2, 3],
+            3,
+        )],
     );
     let (_home, _harness, poller) = setup(&bot, None);
     poller.poll_once().expect("first poll");
@@ -459,7 +497,12 @@ fn a_get_file_failure_still_admits_a_note() {
                 }
             }),
         )],
-        vec![("doc".to_owned(), "documents/report.pdf".to_owned(), vec![4, 5, 6], 3)],
+        vec![(
+            "doc".to_owned(),
+            "documents/report.pdf".to_owned(),
+            vec![4, 5, 6],
+            3,
+        )],
     );
     bot.fail_get_file();
     let (_home, _harness, poller) = setup(&bot, None);
@@ -474,7 +517,11 @@ fn a_get_file_failure_still_admits_a_note() {
             .to_lowercase()
             .contains("could not")
     );
-    assert!(!bot.requests().iter().any(|request| request.method == "download"));
+    assert!(
+        !bot.requests()
+            .iter()
+            .any(|request| request.method == "download")
+    );
     bot.stop();
 }
 
@@ -491,7 +538,12 @@ fn text_and_an_attachment_both_appear_in_the_content() {
                 ]
             }),
         )],
-        vec![("large".to_owned(), "photos/large.jpg".to_owned(), vec![1, 2, 3], 3)],
+        vec![(
+            "large".to_owned(),
+            "photos/large.jpg".to_owned(),
+            vec![1, 2, 3],
+            3,
+        )],
     );
     let (_home, _harness, poller) = setup(&bot, None);
     poller.poll_once().expect("poll");
