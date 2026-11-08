@@ -261,3 +261,28 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - Models without a known price record tokens with zero cost; the usage ledger and
   pricing registry arrive with M2b.
 - `mid_stream` remains deferred to M2b.
+
+## 2026-11-08: M2b-1 prompt and usage foundation
+
+- `hearth init` writes `SOUL.md` at mode 0600 from `default_soul` when it does not
+  exist. It never overwrites an existing identity file.
+- Prompt assembly lives in `hearth-core::prompt`. The request order is one system
+  message with the soul and operation text, the transcript in order, and a final
+  system message with the runtime note. The audit document keeps five segments:
+  identity, operation, tools, transcript, and runtime. The transcript segment
+  excludes the identity and runtime system messages.
+- Entry content is parsed permissively: strings and `{text: ...}` objects are text;
+  typed blocks support text, thinking, tool_call, and tool_result. Thinking is
+  stored but filtered out of provider requests.
+- Prompt blobs use a UUIDv5 hash of the audit document. `INSERT OR IGNORE` dedupes
+  by hash; `latest_prompt` returns the newest text.
+- Entry `tokens_est` uses the model estimator over the entry's text, thinking, tool
+  names and arguments, or tool result content. It replaces the M1 default of zero.
+- `fork` copies the source conversation's current documents with their versions and
+  JSON, and leaves the source untouched. Documents are not historical, so the fork
+  gets the state at fork time.
+- `usage_events` rows are metering records, not conversation saves; they do not
+  insert a commit. The ledger records input, cache read, cache write, output,
+  reasoning, cost, and latency.
+- `Price` and `Pricing` live in `hearth-model`. Prices are micros per million tokens
+  and the default registry is empty, so unknown models record tokens with zero cost.
