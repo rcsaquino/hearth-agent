@@ -221,3 +221,48 @@ fn build_web_fetch(settings: &hearth_config::Settings) -> Result<WebFetchTool, F
     }
     Ok(WebFetchTool::new(providers, false))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hearth_config::{FetchProvider as FetchProviderConfig, WebFetch};
+    use std::collections::BTreeMap;
+
+    fn configured(order: &[&str], keys: &[(&str, &str)]) -> WebFetch {
+        let mut providers = BTreeMap::new();
+        for (name, key) in keys {
+            providers.insert(
+                (*name).to_owned(),
+                FetchProviderConfig {
+                    api_key: Some((*key).to_owned()),
+                },
+            );
+        }
+        WebFetch {
+            order: order.iter().map(|name| (*name).to_owned()).collect(),
+            providers,
+        }
+    }
+
+    #[test]
+    fn the_fetch_chain_follows_the_order_and_keeps_direct_once() {
+        let fetch = configured(
+            &["jina", "tinyfish", "http", "firecrawl", "https", "deepseek"],
+            &[("tinyfish", "t"), ("firecrawl", "f"), ("deepseek", "d")],
+        );
+        let chain = build_fetch_providers(&fetch).expect("fetch chain");
+        let names: Vec<&str> = chain.iter().map(|provider| provider.name()).collect();
+        assert_eq!(
+            names,
+            vec!["jina", "tinyfish", "http", "firecrawl", "deepseek"]
+        );
+    }
+
+    #[test]
+    fn a_keyed_provider_without_a_key_is_skipped() {
+        let fetch = configured(&["tinyfish", "http"], &[]);
+        let chain = build_fetch_providers(&fetch).expect("fetch chain");
+        let names: Vec<&str> = chain.iter().map(|provider| provider.name()).collect();
+        assert_eq!(names, vec!["http"]);
+    }
+}

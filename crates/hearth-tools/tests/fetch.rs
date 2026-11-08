@@ -478,3 +478,84 @@ fn deepseek_maps_its_fetch_response() {
         serde_json::from_slice(&captured[0].body).expect("request body is JSON");
     assert_eq!(body["url"], "https://93.184.216.34/page");
 }
+
+#[test]
+fn a_keyed_provider_is_used_after_jina_fails() {
+    let jina = serve(vec![reply(500, "text/plain", "down")]);
+    let tiny = serve(vec![reply(
+        200,
+        "application/json",
+        r##"{"results":[{"url":"https://93.184.216.34/page","title":"Tiny","text":"from tinyfish"}],"errors":[]}"##,
+    )]);
+    let providers: Vec<Arc<dyn FetchProvider>> = vec![
+        Arc::new(JinaFetch::new(jina.base.clone(), None).expect("jina")),
+        Arc::new(
+            TinyFishFetch::new(
+                "tiny-key",
+                tiny.base.clone(),
+                Duration::from_secs(5),
+                2 * 1024 * 1024,
+            )
+            .expect("tinyfish"),
+        ),
+    ];
+    let tool = WebFetchTool::new(providers, false);
+    let output = tool
+        .call(&json!({"url": "https://93.184.216.34/page"}))
+        .expect("fetch");
+    assert!(output.content.contains("Provider: tinyfish"));
+    assert!(output.content.contains("from tinyfish"));
+    jina.thread.join().expect("jina thread");
+    tiny.thread.join().expect("tinyfish thread");
+}
+
+#[test]
+fn a_keyed_provider_401_is_not_retryable() {
+    let server = serve(vec![reply(401, "text/plain", "unauthorized")]);
+    let provider = TinyFishFetch::new(
+        "tiny-key",
+        server.base.clone(),
+        Duration::from_secs(5),
+        2 * 1024 * 1024,
+    )
+    .expect("tinyfish");
+    let error = provider
+        .fetch("https://93.184.216.34/page")
+        .expect_err("unauthorized");
+    assert!(!error.retryable, "401 was marked retryable");
+    assert!(error.message.contains("401"), "{}", error.message);
+    server.thread.join().expect("server thread");
+}
+
+#[test]
+fn keyed_providers_failing_together_return_the_first_error() {
+    let tiny = serve(vec![reply(500, "text/plain", "tiny down")]);
+    let fire = serve(vec![reply(500, "text/plain", "fire down")]);
+    let providers: Vec<Arc<dyn FetchProvider>> = vec![
+        Arc::new(
+            TinyFishFetch::new(
+                "tiny-key",
+                tiny.base.clone(),
+                Duration::from_secs(5),
+                2 * 1024 * 1024,
+            )
+            .expect("tinyfish"),
+        ),
+        Arc::new(
+            FirecrawlFetch::new(
+                "fire-key",
+                fire.base.clone(),
+                Duration::from_secs(5),
+                2 * 1024 * 1024,
+            )
+            .expect("firecrawl"),
+        ),
+    ];
+    let tool = WebFetchTool::new(providers, false);
+    let error = tool
+        .call(&json!({"url": "https://93.184.216.34/page"}))
+        .expect_err("all fail");
+    assert!(error.message.contains("500"), "{}", error.message);
+    tiny.thread.join().expect("tinyfish thread");
+    fire.thread.join().expect("firecrawl thread");
+}
