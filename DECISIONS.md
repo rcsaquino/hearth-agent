@@ -152,3 +152,18 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   owner cannot heartbeat or finish.
 - Recovery requeues expired running leases below attempt 2, wakes due sleeps, and
   leaves pending and terminal tasks alone. It is idempotent.
+
+## 2026-11-08: M1b-1.1 task commits
+
+- Task creation, claim, finish, and each recovery transition are saves. They
+  insert a `commits` row with the task id and a kind (`task.create`, `task.claim`,
+  `task.next`, `task.sleep`, `task.terminal`, `task.retry`, `task.fail`,
+  `task.recover`, `task.poison`, `task.wake`) and advance the save sequence in the
+  same transaction as the task update.
+- A heartbeat is lease metadata, not task progress. It does not insert a commit or
+  advance the sequence.
+- Conversation creation remains metadata outside the save log. The first save in a
+  conversation follows the global sequence.
+- A claim clears `next_wake_at`, because a running task is no longer asleep.
+- `Session::latest_commit` exposes the newest line in the save log for diagnostics
+  and tests.
