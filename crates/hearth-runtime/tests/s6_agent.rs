@@ -3,13 +3,13 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use hearth_core::{Harness, NewTask, Submission, SubmissionStatus, TaskStatus};
+use hearth_core::{Harness, NewTask, Save, Submission, SubmissionStatus, TaskStatus};
 use hearth_model::{
     ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
     StreamEvent, ToolCall, Usage,
 };
 use hearth_runtime::{Agent, AgentConfig, AgentError};
-use hearth_tools::{FileTool, ToolRegistry};
+use hearth_tools::{FileTool, Tool, ToolRegistry};
 use std::fs;
 use std::path::Path;
 use serde_json::json;
@@ -517,4 +517,198 @@ fn a_files_tool_call_is_executed_and_paired() {
     assert_eq!(usage.len(), 2);
     assert_eq!(usage[0].input_tokens, 8);
     assert_eq!(usage[1].input_tokens, 12);
+}
+
+#[test]
+fn a_large_file_read_spills_and_can_be_read_back() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let workspace = home.path().join("workspace");
+    fs::create_dir_all(workspace.join("notes")).expect("create notes");
+    let full = format!("{}{}", "a".repeat(20_000), "TAIL");
+    fs::write(workspace.join("notes/large.txt"), &full).expect("write file");
+    let tools = ToolRegistry::new(vec![Arc::new(FileTool::new(
+        workspace.clone(),
+        home.path().join("spill"),
+    ))]);
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        Ok(vec![
+            Ok(StreamEvent::ToolCall(ToolCall {
+                id: "call-1".to_owned(),
+                name: "files".to_owned(),
+                arguments: json!({"action": "read", "path": "notes/large.txt"}),
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned()),
+            }),
+        ]),
+        Ok(vec![
+            Ok(StreamEvent::TextDelta("done".to_owned())),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("stop".to_owned()),
+            }),
+        ]),
+    ]));
+
+    let outcome = agent_with(
+        home.path(),
+        &harness,
+        provider,
+        Pricing::default(),
+        4,
+        tools,
+    )
+    .run_submission(&submission.id)
+    .expect("run submission");
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+
+    let history = harness.session().history(&conversation).expect("history");
+    let summary = history[2].content[0]["content"]
+        .as_str()
+        .expect("tool result content");
+    assert!(summary.contains("tool output truncated"), "{summary}");
+    assert!(summary.contains("spill/call-1.txt"), "{summary}");
+
+    let spill_path = home.path().join("spill/call-1.txt");
+    assert!(spill_path.exists(), "spill file missing");
+    assert_eq!(fs::read_to_string(&spill_path).expect("read spill"), full);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&spill_path)
+            .expect("spill metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "spill mode was {mode:o}");
+    }
+
+    let reader = FileTool::new(workspace, home.path().join("spill"));
+    let read_back = reader
+        .call(&json!({"action": "read", "path": "spill/call-1.txt"}))
+        .expect("read spill through the tool");
+    assert_eq!(read_back.content, full);
+}
+
+#[test]
+fn the_turn_limit_stops_a_tool_loop() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let workspace = home.path().join("workspace");
+    fs::create_dir_all(workspace.join("notes")).expect("create notes");
+    fs::write(workspace.join("notes/a.txt"), "alpha").expect("write file");
+    let tools = ToolRegistry::new(vec![Arc::new(FileTool::new(
+        workspace,
+        home.path().join("spill"),
+    ))]);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::ToolCall(ToolCall {
+            id: "call-1".to_owned(),
+            name: "files".to_owned(),
+            arguments: json!({"action": "read", "path": "notes/a.txt"}),
+        })),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("tool_calls".to_owned()),
+        }),
+    ])]));
+
+    let outcome = agent_with(
+        home.path(),
+        &harness,
+        provider.clone(),
+        Pricing::default(),
+        1,
+        tools,
+    )
+    .run_submission(&submission.id)
+    .expect("run submission");
+
+    assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
+    assert_eq!(
+        outcome.submission.error,
+        Some(json!({"reason": "turn_limit"}))
+    );
+    assert!(
+        outcome
+            .notice
+            .as_deref()
+            .expect("notice")
+            .to_lowercase()
+            .contains("turn limit")
+    );
+    assert_eq!(provider.requests().len(), 1);
+    let task = harness
+        .session()
+        .task(&outcome.task_id)
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Failed);
+    let history = harness.session().history(&conversation).expect("history");
+    assert_eq!(history.len(), 4);
+    assert_eq!(history[1].kind, "assistant");
+    assert_eq!(history[2].kind, "tool_result");
+    assert_eq!(history[3].kind, "notice");
+}
+
+#[test]
+fn a_pending_tool_call_is_replayed_before_the_next_request() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let workspace = home.path().join("workspace");
+    fs::create_dir_all(workspace.join("notes")).expect("create notes");
+    fs::write(workspace.join("notes/a.txt"), "alpha").expect("write file");
+    harness
+        .session()
+        .save(Save::new(&conversation).entry(
+            "assistant",
+            json!([{
+                "type": "tool_call",
+                "id": "call-1",
+                "name": "files",
+                "arguments": {"action": "read", "path": "notes/a.txt"}
+            }]),
+        ))
+        .expect("seed assistant call");
+    let tools = ToolRegistry::new(vec![Arc::new(FileTool::new(
+        workspace,
+        home.path().join("spill"),
+    ))]);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("recovered".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+
+    let outcome = agent_with(
+        home.path(),
+        &harness,
+        provider.clone(),
+        Pricing::default(),
+        4,
+        tools,
+    )
+    .run_submission(&submission.id)
+    .expect("run submission");
+
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+    assert_eq!(outcome.answer_text.as_deref(), Some("recovered"));
+    let history = harness.session().history(&conversation).expect("history");
+    assert_eq!(history.len(), 4);
+    assert_eq!(history[1].kind, "assistant");
+    assert_eq!(history[2].kind, "tool_result");
+    assert_eq!(history[2].content[0]["call_id"], "call-1");
+    assert_eq!(history[2].content[0]["content"], "alpha");
+    assert_eq!(history[3].content[0]["text"], "recovered");
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].messages.iter().any(|message| {
+        message.role == Role::Tool
+            && message.blocks.iter().any(|block| {
+                matches!(block, ContentBlock::ToolResult { call_id, .. } if call_id == "call-1")
+            })
+    }));
 }
