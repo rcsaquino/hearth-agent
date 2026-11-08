@@ -1320,6 +1320,19 @@ impl Session {
                     )?;
                 }
 
+                let documents: Vec<(String, i64, String)> = writer.query(
+                    "SELECT kind, version, json FROM documents WHERE conversation_id = ?",
+                    (source_id.as_str(),),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                for (kind, version, json) in documents {
+                    writer.execute(
+                        "INSERT INTO documents (conversation_id, kind, version, json, updated_at) \
+                         VALUES (?, ?, ?, ?, ?)",
+                        (fork.id.as_str(), kind.as_str(), version, json.as_str(), now),
+                    )?;
+                }
+
                 Ok(fork)
             })
     }
