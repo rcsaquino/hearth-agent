@@ -3,7 +3,10 @@ fn the_token_benchmark_runs_100_turns_and_reports_the_targets() {
     let report = hearth_eval::tokens_bench::run().expect("run the token benchmark");
     assert_eq!(report.turns, 100);
     assert!(report.compactions >= 1, "no compaction happened");
-    assert!(report.prefix_stable, "the stable prefix changed during the run");
+    assert!(
+        report.prefix_stable,
+        "the stable prefix changed during the run"
+    );
     assert!(
         report.fixed_overhead_p95 <= 4_500,
         "fixed overhead p95 was {}",
