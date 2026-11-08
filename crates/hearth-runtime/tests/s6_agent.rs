@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use hearth_core::{Harness, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus};
+use hearth_core::{
+    ContextBudget, Harness, NewEntry, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus,
+};
 use hearth_memory::{
     MemoryKind, MemoryService, MemorySource, MemoryStatus, MemoryTool, SourceKind,
 };
@@ -1610,4 +1612,186 @@ fn a_memory_tool_call_uses_the_run_source() {
         })
         .expect("event");
     assert_eq!(action, "add");
+}
+
+fn tool_result_text(message: &hearth_model::ChatMessage) -> String {
+    message
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn recall_is_shrunk_to_fit_the_context_budget() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    for index in 0..10 {
+        memory
+            .save(memory_input(
+                &format!("project fact {index} about Atlas"),
+                MemoryKind::Fact,
+                50,
+            ))
+            .expect("memory");
+    }
+    let submission = harness
+        .session()
+        .submit(
+            &conversation,
+            "req-budget-recall",
+            "input",
+            json!({"text": "what do you know about project?"}),
+        )
+        .expect("submit")
+        .submission;
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Short."),
+        noop_script(),
+    ]));
+    let budget = ContextBudget::new(5_320, 4_096, 0.65, 0.85, 1_000);
+    let outcome = agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_memory(Arc::clone(&memory))
+    .with_budget(budget)
+    .run_submission(&submission.id)
+    .expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("Short."));
+
+    let requests = provider.requests();
+    let request = requests.first().expect("request");
+    let recall = request
+        .messages
+        .iter()
+        .filter(|message| message.role == Role::System)
+        .map(message_text)
+        .find(|text| text.contains("Relevant memory"))
+        .expect("recall message");
+    let lines = recall
+        .lines()
+        .filter(|line| line.trim_start().starts_with('['))
+        .count();
+    assert!(
+        lines > 0 && lines < 6,
+        "expected a shrunken recall, got {lines} lines: {recall}"
+    );
+}
+
+#[test]
+fn oversized_tool_results_are_shrunk_to_fit_the_context_budget() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let huge = "x".repeat(20_000);
+    harness
+        .session()
+        .save(Save::new(&conversation).entry_with(NewEntry {
+            kind: "tool_result".to_owned(),
+            content: json!([{
+                "type": "tool_result",
+                "call_id": "call-budget",
+                "content": huge,
+            }]),
+            source: None,
+            prompt_hash: None,
+        }))
+        .expect("tool result");
+    let submission = harness
+        .session()
+        .submit(
+            &conversation,
+            "req-budget-tool",
+            "input",
+            json!({"text": "hello"}),
+        )
+        .expect("submit")
+        .submission;
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Done.")]));
+    let budget = ContextBudget::new(7_120, 4_096, 0.65, 0.85, 1_000);
+    let outcome = agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_budget(budget)
+    .run_submission(&submission.id)
+    .expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("Done."));
+
+    let requests = provider.requests();
+    let request = requests.first().expect("request");
+    let tool_texts: Vec<String> = request
+        .messages
+        .iter()
+        .filter(|message| message.role == Role::Tool)
+        .map(tool_result_text)
+        .collect();
+    assert!(
+        tool_texts
+            .iter()
+            .any(|text| text.len() < 20_000 && text.contains("truncated")),
+        "tool result was not shrunk: {tool_texts:?}"
+    );
+}
+
+#[test]
+fn an_oversized_prompt_settles_with_a_budget_notice() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let huge = "y".repeat(50_000);
+    let submission = harness
+        .session()
+        .submit(
+            &conversation,
+            "req-budget-error",
+            "input",
+            json!({"text": huge}),
+        )
+        .expect("submit")
+        .submission;
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let budget = ContextBudget::new(5_420, 4_096, 0.65, 0.85, 1_000);
+    let outcome = agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_budget(budget)
+    .run_submission(&submission.id)
+    .expect("run");
+    assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
+    assert!(
+        outcome
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("too large")),
+        "missing budget notice: {:?}",
+        outcome.notice
+    );
+    assert!(
+        provider.requests().is_empty(),
+        "the provider must not be called for an over-budget prompt"
+    );
+    let task = harness
+        .session()
+        .task(&outcome.task_id)
+        .expect("task lookup")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Failed);
+    assert!(
+        task.result
+            .as_ref()
+            .is_some_and(|result| result["reason"] == "budget"),
+        "task result: {:?}",
+        task.result
+    );
 }
