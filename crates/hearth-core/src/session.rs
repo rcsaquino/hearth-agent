@@ -140,17 +140,7 @@ impl Session {
                 }
             }
 
-            let seq: i64 = writer.query_row(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM commits",
-                [],
-                |row| row.get(0),
-            )?;
-            writer.execute(
-                "INSERT INTO commits (seq, created_at, conversation_id, kind) \
-                 VALUES (?, ?, ?, 'save')",
-                (seq, now, conversation_id.as_str()),
-            )?;
-
+            let seq = record_commit(writer, now, Some(conversation_id.as_str()), None, "save")?;
             for (entry, id) in save.entries.iter().zip(entry_ids.iter()) {
                 let content = serde_json::to_string(&entry.content)
                     .map_err(|error| CoreError::Invalid(error.to_string()))?;
@@ -562,6 +552,13 @@ impl Session {
                     insert.updated_at,
                 ),
             )?;
+            record_commit(
+                writer,
+                insert.created_at,
+                insert.conversation_id.as_deref(),
+                Some(insert.id.as_str()),
+                "task.create",
+            )?;
             Ok(())
         })?;
         Ok(task)
@@ -969,17 +966,7 @@ impl Session {
                     ),
                 )?;
 
-                let seq: i64 = writer.query_row(
-                    "SELECT COALESCE(MAX(seq), 0) + 1 FROM commits",
-                    [],
-                    |row| row.get(0),
-                )?;
-                writer.execute(
-                    "INSERT INTO commits (seq, created_at, conversation_id, kind) \
-                 VALUES (?, ?, ?, 'fork')",
-                    (seq, now, fork.id.as_str()),
-                )?;
-
+                let seq = record_commit(writer, now, Some(fork.id.as_str()), None, "fork")?;
                 for entry in &copied {
                     let id = ids.new_id();
                     let content = serde_json::to_string(&entry.content)
@@ -1193,6 +1180,25 @@ struct RawClaim {
     attempt: i64,
     input_json: String,
     checkpoint_json: Option<String>,
+}
+
+fn record_commit(
+    writer: &Writer<'_>,
+    now: i64,
+    conversation_id: Option<&str>,
+    task_id: Option<&str>,
+    kind: &str,
+) -> Result<i64, CoreError> {
+    let seq: i64 =
+        writer.query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM commits", [], |row| {
+            row.get(0)
+        })?;
+    writer.execute(
+        "INSERT INTO commits (seq, created_at, conversation_id, task_id, kind) \
+         VALUES (?, ?, ?, ?, ?)",
+        (seq, now, conversation_id, task_id, kind),
+    )?;
+    Ok(seq)
 }
 
 fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {
