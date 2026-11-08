@@ -24,6 +24,8 @@ const TASK_SELECT: &str = "SELECT id, conversation_id, parent_task_id, kind, ver
      phase, attempt, input_json, checkpoint_json, result_json, lease_owner, lease_until, \
      next_wake_at, created_at, updated_at, terminal_at FROM tasks";
 
+type RawCommitRow = (i64, i64, Option<String>, Option<String>, String);
+
 /// Open the permanent record and run work.
 pub struct Harness {
     session: Session,
@@ -281,23 +283,22 @@ impl Session {
 
     /// Read the newest line in the save log.
     pub fn latest_commit(&self) -> Result<Option<CommitRecord>, CoreError> {
-        let raw: Option<(i64, i64, Option<String>, Option<String>, String)> =
-            self.storage.read(|reader| {
-                reader.query_optional(
-                    "SELECT seq, created_at, conversation_id, task_id, kind FROM commits \
+        let raw: Option<RawCommitRow> = self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT seq, created_at, conversation_id, task_id, kind FROM commits \
                      ORDER BY seq DESC LIMIT 1",
-                    [],
-                    |row| {
-                        Ok((
-                            row.get(0)?,
-                            row.get(1)?,
-                            row.get(2)?,
-                            row.get(3)?,
-                            row.get(4)?,
-                        ))
-                    },
-                )
-            })?;
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+        })?;
         Ok(raw.map(
             |(seq, created_at, conversation_id, task_id, kind)| CommitRecord {
                 seq,
