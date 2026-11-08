@@ -256,3 +256,72 @@ fn the_read_pool_serves_four_concurrent_reads() {
             .expect("four readers arrived");
     }
 }
+
+#[test]
+fn a_fifth_concurrent_read_waits_for_a_free_connection() {
+    use std::sync::{Arc, Barrier, Condvar, Mutex, mpsc};
+    use std::thread;
+    use std::time::Duration;
+
+    let (_directory, path) = database();
+    let storage = Arc::new(Storage::open(&path).expect("open storage"));
+    let start = Arc::new(Barrier::new(5));
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (done_tx, done_rx) = mpsc::channel();
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+
+    let mut handles = Vec::new();
+    for _ in 0..5 {
+        let storage = Arc::clone(&storage);
+        let start = Arc::clone(&start);
+        let entered_tx = entered_tx.clone();
+        let done_tx = done_tx.clone();
+        let release = Arc::clone(&release);
+        handles.push(thread::spawn(move || {
+            start.wait();
+            let result = storage.read(|_reader| {
+                entered_tx.send(()).expect("signal entered read");
+                let (lock, ready) = &*release;
+                let mut released = lock.lock().expect("release lock");
+                while !*released {
+                    released = ready.wait(released).expect("release wait");
+                }
+                Ok(())
+            });
+            done_tx.send(result).expect("signal read done");
+        }));
+    }
+    drop(entered_tx);
+    drop(done_tx);
+
+    for _ in 0..4 {
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("four readers entered");
+    }
+
+    match done_rx.recv_timeout(Duration::from_millis(200)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Ok(result) => panic!("a read completed while all four connections were busy: {result:?}"),
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("reader channel closed early"),
+    }
+
+    {
+        let (lock, ready) = &*release;
+        *lock.lock().expect("release lock") = true;
+        ready.notify_all();
+    }
+
+    let mut completed = 0;
+    while completed < 5 {
+        let result = done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("all five reads completed");
+        result.expect("read succeeded");
+        completed += 1;
+    }
+
+    for handle in handles {
+        handle.join().expect("reader thread");
+    }
+}
