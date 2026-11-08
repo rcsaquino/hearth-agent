@@ -28,6 +28,11 @@ fn memory_scale_queries_match_fixture_memories() {
         "2k retrieval p95 was {} ms; {report:#?}",
         report.retrieval_ms_p95
     );
+    assert!(
+        report.real_recall_ms_p95 <= 80.0,
+        "2k real recall p95 was {} ms; {report:#?}",
+        report.real_recall_ms_p95
+    );
     println!("{report:#?}");
 }
 
@@ -47,6 +52,11 @@ fn memory_scale_200k() {
         report.retrieval_ms_p95 <= 80.0,
         "200k retrieval p95 was {} ms; {report:#?}",
         report.retrieval_ms_p95
+    );
+    assert!(
+        report.real_recall_ms_p95 <= 80.0,
+        "200k real recall p95 was {} ms; {report:#?}",
+        report.real_recall_ms_p95
     );
     println!("{report:#?}");
 }

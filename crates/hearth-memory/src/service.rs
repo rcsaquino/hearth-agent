@@ -89,6 +89,16 @@ impl MemoryService {
         }
     }
 
+    fn touch_standing_cache(&self, id: &str, last_used: i64) {
+        if let Ok(mut cache) = self.standing_cache.lock()
+            && let Some(cached) = cache.as_mut()
+            && let Some(item) = cached.items.iter_mut().find(|item| item.id == id)
+        {
+            item.last_used_at = Some(last_used);
+            cached.items.sort_by(standing_order);
+        }
+    }
+
     /// Save one memory. Exact and near duplicates merge into the existing row.
     pub fn save(&self, input: NewMemoryInput) -> Result<MemoryItem, MemoryError> {
         self.save_with_actor(input, "agent")
@@ -164,7 +174,7 @@ impl MemoryService {
             last_used_at: None,
         };
         writes.push(MemoryWrite::new(MemoryChange::Add(item.clone()), actor));
-        self.commit(writes, bump)?;
+        self.commit(writes, bump, bump)?;
         self.get(&item.id)?
             .ok_or_else(|| MemoryError::NotFound(item.id))
     }
@@ -247,11 +257,32 @@ impl MemoryService {
         if existing.standing != Standing::None && status_changed {
             bump = true;
         }
+        if existing.standing != Standing::None && update.valid_to.is_some() {
+            bump = true;
+        }
+        let touch_last_used = update.last_used_at.filter(|_| {
+            existing.standing != Standing::None
+                && update.content.is_none()
+                && update.importance.is_none()
+                && update.status.is_none()
+                && update.valid_to.is_none()
+                && update.standing.is_none()
+        });
+        let standing_dirty = bump
+            || (existing.standing != Standing::None
+                && (content_changed
+                    || importance_changed
+                    || status_changed
+                    || update.valid_to.is_some()));
         if changed {
             self.commit(
                 vec![MemoryWrite::new(MemoryChange::Update(update), "agent")],
                 bump,
+                standing_dirty,
             )?;
+        }
+        if let Some(last_used) = touch_last_used {
+            self.touch_standing_cache(id, last_used);
         }
         self.get(id)?
             .ok_or_else(|| MemoryError::NotFound(id.to_owned()))
@@ -269,6 +300,7 @@ impl MemoryService {
                 "agent",
             )],
             bump,
+            true,
         )?;
         self.get(id)?
             .ok_or_else(|| MemoryError::NotFound(id.to_owned()))
@@ -294,6 +326,7 @@ impl MemoryService {
                 "agent",
             )],
             bump,
+            true,
         )?;
         self.get(id)?
             .ok_or_else(|| MemoryError::NotFound(id.to_owned()))
@@ -351,7 +384,7 @@ impl MemoryService {
             })
             .collect();
         if !writes.is_empty() {
-            self.commit(writes, false)?;
+            self.commit(writes, false, true)?;
         }
         Ok(ArchiveReport {
             archived: items.len(),
@@ -574,7 +607,7 @@ impl MemoryService {
         }
         let bump = before_map != final_map;
         if !writes.is_empty() {
-            self.commit(writes, bump)?;
+            self.commit(writes, bump, true)?;
         }
         let version = self.standing_version()?;
         Ok(StandingMemory { items, version })
@@ -804,6 +837,7 @@ impl MemoryService {
                         MemoryWrite::new(MemoryChange::Update(duplicate), "system"),
                     ],
                     bump,
+                    true,
                 )?;
                 rows[i].tags = tags;
                 rows[i].importance = importance;
@@ -948,8 +982,15 @@ impl MemoryService {
         Ok(items)
     }
 
-    fn commit(&self, writes: Vec<MemoryWrite>, bump: bool) -> Result<(), MemoryError> {
-        self.invalidate_standing();
+    fn commit(
+        &self,
+        writes: Vec<MemoryWrite>,
+        bump: bool,
+        standing_dirty: bool,
+    ) -> Result<(), MemoryError> {
+        if standing_dirty {
+            self.invalidate_standing();
+        }
         if !bump {
             self.session.save_memory(writes)?;
             return Ok(());
@@ -1053,6 +1094,7 @@ impl MemoryService {
         self.commit(
             vec![MemoryWrite::new(MemoryChange::Update(update), actor)],
             bump,
+            true,
         )?;
         self.get(&existing.id)?
             .ok_or_else(|| MemoryError::NotFound(existing.id.clone()))
@@ -1276,6 +1318,21 @@ fn tokens(content: &str) -> BTreeSet<String> {
         .collect()
 }
 
+fn standing_order(left: &MemoryItem, right: &MemoryItem) -> std::cmp::Ordering {
+    let left_pinned = left.standing == Standing::Pinned;
+    let right_pinned = right.standing == Standing::Pinned;
+    right_pinned
+        .cmp(&left_pinned)
+        .then_with(|| right.importance.cmp(&left.importance))
+        .then_with(|| {
+            right
+                .last_used_at
+                .unwrap_or(0)
+                .cmp(&left.last_used_at.unwrap_or(0))
+        })
+        .then_with(|| left.created_at.cmp(&right.created_at))
+}
+
 fn jaccard(left: &BTreeSet<String>, right: &BTreeSet<String>) -> f64 {
     if left.is_empty() && right.is_empty() {
         return 0.0;
@@ -1337,4 +1394,267 @@ fn reject_secret(content: &str) -> Result<(), MemoryError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use crate::types::{MemoryItem, MemoryKind, SourceKind};
+    use hearth_core::Harness;
+    use tempfile::TempDir;
+
+    fn service() -> (TempDir, MemoryService) {
+        let dir = TempDir::new().expect("temp dir");
+        let harness = Harness::open(dir.path()).expect("harness");
+        let service = MemoryService::new(harness.session().clone());
+        (dir, service)
+    }
+
+    fn preference(service: &MemoryService, content: &str, importance: i64) -> MemoryItem {
+        service
+            .save(NewMemoryInput {
+                content: content.to_owned(),
+                kind: MemoryKind::Preference,
+                tags: Vec::new(),
+                importance,
+                source_kind: SourceKind::User,
+                source_ref: None,
+                supersedes: None,
+                valid_from: None,
+                valid_to: None,
+            })
+            .expect("save preference")
+    }
+
+    fn fact(service: &MemoryService, content: &str, importance: i64) -> MemoryItem {
+        service
+            .save(NewMemoryInput {
+                content: content.to_owned(),
+                kind: MemoryKind::Fact,
+                tags: Vec::new(),
+                importance,
+                source_kind: SourceKind::User,
+                source_ref: None,
+                supersedes: None,
+                valid_from: None,
+                valid_to: None,
+            })
+            .expect("save fact")
+    }
+
+    #[test]
+    fn a_last_used_only_update_keeps_the_standing_cache_warm() {
+        let (_dir, service) = service();
+        let item = preference(&service, "Sam prefers short replies", 90);
+        let standing = service.standing().expect("standing");
+        assert!(
+            standing
+                .items
+                .iter()
+                .any(|candidate| candidate.id == item.id)
+        );
+        assert!(service.standing_cache.lock().expect("cache").is_some());
+
+        service
+            .update(
+                &item.id,
+                MemoryPatch {
+                    last_used_at: Some(service.session.now_micros()),
+                    ..MemoryPatch::default()
+                },
+            )
+            .expect("touch");
+        assert!(
+            service.standing_cache.lock().expect("cache").is_some(),
+            "a last_used-only update rebuilt the standing cache"
+        );
+        let cached = service.standing().expect("standing");
+        assert_eq!(cached.version, standing.version);
+        let touched = cached
+            .items
+            .iter()
+            .find(|candidate| candidate.id == item.id)
+            .expect("cached standing item");
+        assert!(
+            touched.last_used_at.is_some(),
+            "the cached standing item missed the touch"
+        );
+    }
+
+    #[test]
+    fn an_importance_change_invalidates_the_standing_cache() {
+        let (_dir, service) = service();
+        let item = preference(&service, "Sam prefers metric units", 90);
+        service.standing().expect("standing");
+        assert!(service.standing_cache.lock().expect("cache").is_some());
+
+        service
+            .update(
+                &item.id,
+                MemoryPatch {
+                    importance: Some(91),
+                    ..MemoryPatch::default()
+                },
+            )
+            .expect("update importance");
+        assert!(
+            service.standing_cache.lock().expect("cache").is_none(),
+            "an importance change kept the standing cache"
+        );
+        let refreshed = service.standing().expect("standing");
+        assert!(
+            refreshed
+                .items
+                .iter()
+                .any(|candidate| candidate.id == item.id && candidate.importance == 91),
+            "the standing selection did not refresh"
+        );
+    }
+
+    #[test]
+    fn the_fts_trigger_only_reindexes_content_and_tags() {
+        let (_dir, service) = service();
+        let sql: String = service
+            .session
+            .storage()
+            .read(|reader| {
+                reader.query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'memory_items_au'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .expect("trigger sql");
+        assert!(
+            sql.contains("UPDATE OF content, tags"),
+            "the FTS trigger still reindexes every update: {sql}"
+        );
+    }
+
+    #[test]
+    fn the_real_recall_path_keeps_the_standing_cache_warm() {
+        let (_dir, service) = service();
+        let _standing = preference(&service, "Sam prefers short replies", 90);
+        let fact = service
+            .save(NewMemoryInput {
+                content: "The primary project is Project Atlas.".to_owned(),
+                kind: MemoryKind::Fact,
+                tags: Vec::new(),
+                importance: 80,
+                source_kind: SourceKind::User,
+                source_ref: None,
+                supersedes: None,
+                valid_from: None,
+                valid_to: None,
+            })
+            .expect("save fact");
+        service.standing().expect("standing");
+        let recalled = service
+            .recall("What is the primary project?")
+            .expect("recall");
+        assert!(recalled.iter().any(|item| item.id == fact.id));
+        assert!(
+            service.standing_cache.lock().expect("cache").is_some(),
+            "the real recall path invalidated the standing cache"
+        );
+    }
+
+    #[test]
+    fn a_low_importance_save_keeps_the_standing_cache_warm() {
+        let (_dir, service) = service();
+        let _standing = preference(&service, "Sam prefers short replies", 90);
+        service.standing().expect("standing");
+        assert!(service.standing_cache.lock().expect("cache").is_some());
+
+        fact(&service, "A low-importance fact", 50);
+        assert!(
+            service.standing_cache.lock().expect("cache").is_some(),
+            "a low-importance save rebuilt standing"
+        );
+    }
+
+    #[test]
+    fn a_content_update_of_a_non_standing_memory_keeps_the_cache_warm() {
+        let (_dir, service) = service();
+        let _standing = preference(&service, "Sam prefers short replies", 90);
+        let item = fact(&service, "The primary project is Project Atlas.", 50);
+        service.standing().expect("standing");
+        assert!(service.standing_cache.lock().expect("cache").is_some());
+
+        service
+            .update(
+                &item.id,
+                MemoryPatch {
+                    content: Some("The primary project is Project Beacon.".to_owned()),
+                    ..MemoryPatch::default()
+                },
+            )
+            .expect("update content");
+        assert!(
+            service.standing_cache.lock().expect("cache").is_some(),
+            "a non-standing content update rebuilt standing"
+        );
+    }
+
+    #[test]
+    fn a_content_update_of_a_standing_memory_invalidates_the_cache() {
+        let (_dir, service) = service();
+        let item = preference(&service, "Sam prefers short replies", 90);
+        service.standing().expect("standing");
+        assert!(service.standing_cache.lock().expect("cache").is_some());
+
+        service
+            .update(
+                &item.id,
+                MemoryPatch {
+                    content: Some("Sam prefers very short replies.".to_owned()),
+                    ..MemoryPatch::default()
+                },
+            )
+            .expect("update content");
+        assert!(
+            service.standing_cache.lock().expect("cache").is_none(),
+            "a standing content update kept the cache"
+        );
+        let refreshed = service.standing().expect("standing");
+        assert!(refreshed.items.iter().any(|candidate| {
+            candidate.id == item.id && candidate.content.contains("very short")
+        }));
+    }
+
+    #[test]
+    fn a_tags_update_of_a_standing_memory_keeps_the_cache_warm() {
+        let (_dir, service) = service();
+        let item = preference(&service, "Sam prefers short replies", 90);
+        service.standing().expect("standing");
+        assert!(service.standing_cache.lock().expect("cache").is_some());
+
+        service
+            .update(
+                &item.id,
+                MemoryPatch {
+                    tags: Some(vec!["style".to_owned()]),
+                    ..MemoryPatch::default()
+                },
+            )
+            .expect("update tags");
+        assert!(
+            service.standing_cache.lock().expect("cache").is_some(),
+            "a tags update rebuilt standing"
+        );
+    }
+
+    #[test]
+    fn a_high_importance_save_invalidates_the_cache() {
+        let (_dir, service) = service();
+        let _standing = preference(&service, "Sam prefers short replies", 90);
+        service.standing().expect("standing");
+        assert!(service.standing_cache.lock().expect("cache").is_some());
+
+        preference(&service, "Sam prefers metric units", 90);
+        assert!(
+            service.standing_cache.lock().expect("cache").is_none(),
+            "a standing save kept the cache"
+        );
+    }
 }

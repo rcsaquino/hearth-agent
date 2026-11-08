@@ -128,6 +128,7 @@ pub struct ScaleReport {
     pub search_ms_p95: f64,
     pub standing_ms_p95: f64,
     pub retrieval_ms_p95: f64,
+    pub real_recall_ms_p95: f64,
     pub target_ms: f64,
 }
 
@@ -466,6 +467,14 @@ pub fn run_scale(items: usize) -> Result<ScaleReport> {
             .with_context(|| format!("scale recall {}", question.key))?;
         latencies.push(started.elapsed().as_secs_f64() * 1000.0);
     }
+    let mut real_latencies = Vec::with_capacity(queries.len());
+    for question in &queries {
+        let started = Instant::now();
+        let _ = service
+            .recall(&question.question)
+            .with_context(|| format!("scale real recall {}", question.key))?;
+        real_latencies.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
     Ok(ScaleReport {
         items,
         fixture_rows: loaded.stored_rows,
@@ -475,6 +484,7 @@ pub fn run_scale(items: usize) -> Result<ScaleReport> {
         search_ms_p95: p95_f64(&search_latencies),
         standing_ms_p95: p95_f64(&standing_latencies),
         retrieval_ms_p95: p95_f64(&latencies),
+        real_recall_ms_p95: p95_f64(&real_latencies),
         target_ms: TARGET_RETRIEVAL_MS,
     })
 }

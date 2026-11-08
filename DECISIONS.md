@@ -730,3 +730,28 @@ recorded for the M6 gate.
 The 2,000-item harness regression test and the ignored 200k test both assert
 the 20 fixture matches, so a future no-match false pass fails. The small-set
 benchmark results are unchanged.
+
+## 2026-11-08: M6d standing cache and the real recall path
+
+The M6c premise was partly wrong. The real `recall` writes last_used through
+`session.save_memory`, which never invalidated the standing cache. The
+`update` path and every `commit` did. The cache is now invalidated only when a
+write can change the standing set, order, or rendered block: an add that
+auto-promotes, an update of standing, importance, status, valid_to, or content,
+a pin, a forget, an archive, a consolidation merge, or a standing refresh. A
+low-importance add, a tags-only update, a non-standing content update, and a
+last_used-only update keep the cache. A last_used-only update of a standing item
+updates the cached item in place and re-sorts the cached selection.
+
+Migration 0004 limits the FTS update trigger to changes of `content` and `tags`.
+Last-used, importance, standing, and status updates no longer reindex a row.
+
+`run_scale` now measures the real `recall` path with its last_used write as well
+as `recall_read`. At 200,000 items the matching real recall p95 is 5.27 ms and
+recall_read is 2.78 ms against the 80 ms target. A genuine standing change still
+invalidates the cache; the next standing query is a cold 353 ms at 200k. That is
+a rare-path residual, not the normal path. Paraphrase recall remains 0.650.
+
+The S2 schema tests were updated to version 4. The small-set benchmark is
+unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
+15/15, 195 stored rows, 0 secret leaks.

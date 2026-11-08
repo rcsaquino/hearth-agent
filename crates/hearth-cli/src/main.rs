@@ -216,13 +216,14 @@ fn print_memory_report(report: &hearth_eval::memory_bench::BenchReport) {
     println!("secret leaks: {}", report.secret_leaks);
     if let Some(scale) = &report.scale {
         println!(
-            "scale: {} items ({} fixture + {} noise), {} queries, {} matched, p95 {:.1} ms (target {:.1} ms)",
+            "scale: {} items ({} fixture + {} noise), {} queries, {} matched, recall_read p95 {:.1} ms, real recall p95 {:.1} ms (target {:.1} ms)",
             scale.items,
             scale.fixture_rows,
             scale.noise_rows,
             scale.queries,
             scale.matched,
             scale.retrieval_ms_p95,
+            scale.real_recall_ms_p95,
             scale.target_ms
         );
     }

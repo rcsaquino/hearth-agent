@@ -7,3 +7,6 @@ pub const MIGRATION_0002: &str = include_str!("../migrations/0002.sql");
 
 /// Migration 0003 indexes standing selection and promotable candidates.
 pub const MIGRATION_0003: &str = include_str!("../migrations/0003.sql");
+
+/// Migration 0004 limits FTS reindexing to content and tags updates.
+pub const MIGRATION_0004: &str = include_str!("../migrations/0004.sql");
