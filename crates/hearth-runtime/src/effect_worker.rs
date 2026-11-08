@@ -30,6 +30,9 @@ impl EffectWorker {
         let effects = self.session.pending_effects(BATCH)?;
         let mut processed = 0;
         for effect in effects {
+            if effect.kind == "telegram.send" {
+                continue;
+            }
             let started = match self.session.begin_effect(&effect.id) {
                 Ok(effect) => effect,
                 Err(error) => {
@@ -72,6 +75,14 @@ impl EffectWorker {
             if effect.kind == "file_write" {
                 self.session.requeue_effect(&effect.id)?;
                 tracing::info!(effect = %effect.id, "effect requeued");
+            } else if effect.kind == "telegram.send" {
+                self.session
+                    .mark_effect_unknown(&effect.id, json!({"error": "delivery interrupted"}))?;
+                tracing::warn!(
+                    effect = %effect.id,
+                    kind = %effect.kind,
+                    "telegram delivery interrupted"
+                );
             } else {
                 let payload = json!({
                     "error": "unsupported effect kind during recovery",
