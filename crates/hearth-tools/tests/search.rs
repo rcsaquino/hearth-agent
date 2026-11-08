@@ -284,3 +284,137 @@ fn tinyfish_maps_results() {
         Some("tf-key")
     );
 }
+
+struct ScriptedSearch {
+    results: HashMap<String, Result<Vec<hearth_tools::SearchResult>, hearth_tools::SearchError>>,
+}
+
+impl SearchProvider for ScriptedSearch {
+    fn name(&self) -> &'static str {
+        "scripted"
+    }
+
+    fn search(&self, query: &str, _limit: usize) -> Result<Vec<hearth_tools::SearchResult>, hearth_tools::SearchError> {
+        self.results
+            .get(query)
+            .cloned()
+            .unwrap_or_else(|| Ok(Vec::new()))
+    }
+}
+
+fn result(title: &str, url: &str) -> hearth_tools::SearchResult {
+    hearth_tools::SearchResult {
+        title: title.to_owned(),
+        url: url.to_owned(),
+        snippet: String::new(),
+        date: None,
+    }
+}
+
+#[test]
+fn a_failed_provider_falls_through_to_the_next() {
+    let failing = serve(Reply {
+        status: 503,
+        content_type: "text/plain",
+        body: "down".to_owned(),
+    });
+    let healthy = serve(json_reply(json!({
+        "web": {"results": [{
+            "title": "Fallback",
+            "url": "https://fallback.example",
+            "description": "from brave"
+        }]}
+    })));
+    let exa: Arc<dyn SearchProvider> =
+        Arc::new(ExaSearch::new(failing.base.clone(), failing.base.clone(), None).expect("exa"));
+    let brave: Arc<dyn SearchProvider> =
+        Arc::new(BraveSearch::new(healthy.base.clone(), "brave-key".to_owned()).expect("brave"));
+    let tool = WebSearchTool::new(vec![exa, brave], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("fallback search");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(value["results"][0]["url"], "https://fallback.example");
+    let _ = failing.thread.join().expect("failing server");
+    let _ = healthy.thread.join().expect("healthy server");
+}
+
+#[test]
+fn results_are_deduplicated_and_capped() {
+    let mut results = HashMap::new();
+    results.insert(
+        "a".to_owned(),
+        Ok(vec![result("one", "https://one.example"), result("two", "https://two.example")]),
+    );
+    results.insert(
+        "b".to_owned(),
+        Ok(vec![result("one again", "https://one.example"), result("three", "https://three.example")]),
+    );
+    let provider: Arc<dyn SearchProvider> = Arc::new(ScriptedSearch { results });
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 2);
+
+    let output = tool
+        .call(&json!({"queries": ["a", "b"]}))
+        .expect("search");
+    let value: Value = serde_json::from_str(&output.content).expect("json");
+    assert_eq!(value["results"].as_array().expect("results").len(), 2);
+    assert_eq!(value["results"][0]["url"], "https://one.example");
+    assert_eq!(value["results"][1]["url"], "https://two.example");
+}
+
+#[test]
+fn every_provider_failing_is_a_tool_error() {
+    let mut results = HashMap::new();
+    results.insert(
+        "a".to_owned(),
+        Err(hearth_tools::SearchError::temporary("provider down")),
+    );
+    let provider: Arc<dyn SearchProvider> = Arc::new(ScriptedSearch { results });
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let error = tool
+        .call(&json!({"queries": ["a"]}))
+        .expect_err("all failed");
+    assert_eq!(error.code, "search_failed");
+    assert!(error.message.contains("provider down"));
+    assert!(error.retryable);
+}
+
+#[test]
+fn a_partial_failure_keeps_the_successful_results() {
+    let mut results = HashMap::new();
+    results.insert("good".to_owned(), Ok(vec![result("Good", "https://good.example")]));
+    results.insert(
+        "bad".to_owned(),
+        Err(hearth_tools::SearchError::permanent("bad query")),
+    );
+    let provider: Arc<dyn SearchProvider> = Arc::new(ScriptedSearch { results });
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["good", "bad"]}))
+        .expect("partial search");
+    let value: Value = serde_json::from_str(&output.content).expect("json");
+    assert_eq!(value["results"][0]["url"], "https://good.example");
+    assert_eq!(value["errors"][0]["query"], "bad");
+}
+
+#[test]
+fn invalid_query_arguments_are_rejected() {
+    let provider: Arc<dyn SearchProvider> = Arc::new(ScriptedSearch {
+        results: HashMap::new(),
+    });
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    for arguments in [json!({}), json!({"queries": []}), json!({"queries": [""]})] {
+        let error = tool.call(&arguments).expect_err("invalid queries");
+        assert_eq!(error.code, "invalid_arguments");
+    }
+
+    let eleven: Vec<String> = (0..11).map(|index| format!("q{index}")).collect();
+    let error = tool
+        .call(&json!({"queries": eleven}))
+        .expect_err("too many queries");
+    assert_eq!(error.code, "invalid_arguments");
+}
