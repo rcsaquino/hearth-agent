@@ -251,3 +251,103 @@ fn truncate(text: &str, limit: usize) -> String {
         shortened
     }
 }
+
+/// Brave Search: GET with an X-Subscription-Token.
+pub struct BraveSearch {
+    base: String,
+    api_key: String,
+    client: Client,
+}
+
+impl BraveSearch {
+    /// Build a Brave provider.
+    pub fn new(base: impl Into<String>, api_key: impl Into<String>) -> Result<Self, SearchError> {
+        Ok(Self {
+            base: base.into(),
+            api_key: api_key.into(),
+            client: client()?,
+        })
+    }
+}
+
+impl SearchProvider for BraveSearch {
+    fn name(&self) -> &'static str {
+        "brave"
+    }
+
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
+        let mut url = reqwest::Url::parse(&format!(
+            "{}/web/search",
+            self.base.trim_end_matches('/')
+        ))
+        .map_err(|error| SearchError::permanent(format!("invalid Brave base URL: {error}")))?;
+        url.query_pairs_mut()
+            .append_pair("q", query)
+            .append_pair("count", &limit.to_string());
+        let response = self
+            .client
+            .get(url)
+            .header("X-Subscription-Token", &self.api_key)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|error| SearchError::temporary(format!("Brave transport error: {error}")))?;
+        let text = response_text(response, "Brave")?;
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|error| SearchError::permanent(format!("Brave returned invalid JSON: {error}")))?;
+        let mut results = Vec::new();
+        if let Some(items) = value
+            .get("web")
+            .and_then(|web| web.get("results"))
+            .and_then(Value::as_array)
+        {
+            for item in items {
+                let Some(url) = item.get("url").and_then(Value::as_str) else {
+                    continue;
+                };
+                let title = item
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(strip_html)
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or_else(|| url.to_owned());
+                let snippet = item
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(strip_html)
+                    .unwrap_or_default();
+                let date = item
+                    .get("age")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("page_age").and_then(Value::as_str))
+                    .map(str::to_owned);
+                results.push(SearchResult {
+                    title,
+                    url: url.to_owned(),
+                    snippet: truncate(&snippet, SNIPPET_CHARS),
+                    date,
+                });
+            }
+        }
+        Ok(results)
+    }
+}
+
+fn strip_html(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut inside = false;
+    for character in value.chars() {
+        match character {
+            '<' => inside = true,
+            '>' => inside = false,
+            _ if !inside => out.push(character),
+            _ => {}
+        }
+    }
+    out.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .trim()
+        .to_owned()
+}
