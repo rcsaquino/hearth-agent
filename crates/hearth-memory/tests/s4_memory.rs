@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use hearth_core::{Harness, MemoryChange, MemoryWrite, NewMemory, Session};
+use hearth_core::{Harness, MemoryChange, MemoryWrite, NewMemory, Save, Session};
 use hearth_memory::{
     MemoryError, MemoryKind, MemoryPatch, MemoryService, MemoryStatus, MemoryTool, NewMemoryInput,
     SourceKind,
@@ -934,4 +934,210 @@ fn inflected_words_match_with_stemming() {
         found.iter().any(|item| item.id == saved.id),
         "an inflected word did not match: {found:#?}"
     );
+}
+
+
+#[test]
+fn importance_decays_without_use_and_has_a_floor() {
+    let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let saved = service
+        .save(input_imp("The old project fact", MemoryKind::Fact, 100))
+        .expect("save");
+    let now = clock.now_micros();
+    let item = service.get(&saved.id).expect("get").expect("exists");
+    assert_eq!(MemoryService::effective_importance(&item, now), 100);
+    clock.advance_days(90);
+    let item = service.get(&saved.id).expect("get").expect("exists");
+    assert_eq!(
+        MemoryService::effective_importance(&item, clock.now_micros()),
+        95
+    );
+    clock.advance_days(90);
+    let item = service.get(&saved.id).expect("get").expect("exists");
+    assert_eq!(
+        MemoryService::effective_importance(&item, clock.now_micros()),
+        90
+    );
+    clock.advance_days(4_000);
+    let item = service.get(&saved.id).expect("get").expect("exists");
+    assert_eq!(
+        MemoryService::effective_importance(&item, clock.now_micros()),
+        15,
+        "decay did not reach the floor"
+    );
+
+    let rule = service
+        .save(input_imp("Always use metric units", MemoryKind::Rule, 100))
+        .expect("save rule");
+    clock.advance_days(900);
+    let rule = service.get(&rule.id).expect("get").expect("exists");
+    assert_eq!(
+        MemoryService::effective_importance(&rule, clock.now_micros()),
+        100,
+        "a user-stated rule decayed"
+    );
+
+    service.pin(&saved.id, true).expect("pin");
+    let pinned = service.get(&saved.id).expect("get").expect("exists");
+    assert_eq!(
+        MemoryService::effective_importance(&pinned, clock.now_micros()),
+        100,
+        "a pinned memory decayed"
+    );
+}
+
+#[test]
+fn archived_memories_are_hidden_by_default_and_kept() {
+    let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let old = service
+        .save(input_imp("The archiveonly fact about cobalt", MemoryKind::Fact, 10))
+        .expect("save old fact");
+    let pinned = service
+        .save(input_imp("The pinned fact about cobalt", MemoryKind::Fact, 10))
+        .expect("save pinned fact");
+    service.pin(&pinned.id, true).expect("pin");
+    let rule = service
+        .save(input_imp("The cobalt rule", MemoryKind::Rule, 10))
+        .expect("save rule");
+    clock.advance_days(4 * 365);
+
+    let report = service.archive_stale().expect("archive");
+    assert_eq!(report.archived, 1, "only the old unpinned fact should archive");
+    assert_eq!(
+        service.get(&old.id).expect("get").expect("exists").status,
+        MemoryStatus::Archived
+    );
+    assert_eq!(
+        service.get(&pinned.id).expect("get").expect("exists").status,
+        MemoryStatus::Active
+    );
+    assert_eq!(
+        service.get(&rule.id).expect("get").expect("exists").status,
+        MemoryStatus::Active
+    );
+
+    assert!(
+        service.search("archiveonly", 10).expect("search").is_empty(),
+        "archived memory appeared in the default search"
+    );
+    assert!(
+        service
+            .search_with("archiveonly", 10, true)
+            .expect("search")
+            .iter()
+            .any(|item| item.id == old.id),
+        "archived memory was not searchable with include_archived"
+    );
+    let now = clock.now_micros();
+    assert!(
+        service.as_of(Some("archiveonly"), now).expect("as_of").is_empty(),
+        "archived memory appeared in the default as_of"
+    );
+    assert!(
+        service
+            .as_of_with(Some("archiveonly"), now, true)
+            .expect("as_of")
+            .iter()
+            .any(|item| item.id == old.id),
+        "archived memory was not readable with include_archived"
+    );
+    let stats = service.stats().expect("stats");
+    assert_eq!(stats.by_status.get("archived").copied().unwrap_or(0), 1);
+    assert!(
+        service.get(&old.id).expect("get").is_some(),
+        "archived memory was deleted"
+    );
+}
+
+#[test]
+fn episodes_are_written_once_per_conversation_and_searchable() {
+    let (_home, _clock, session, service) = setup_clock(MemoryPolicy::default());
+    let conversation = session
+        .create_conversation("Chat", "local", "local:episode")
+        .expect("conversation");
+    let commit = session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "The Atlas project is due Friday."}))
+                .entry("assistant", json!({"text": "I will remind you Friday."})),
+        )
+        .expect("save entries");
+    let last_entry = commit.entry_ids.last().cloned().expect("last entry");
+
+    let first = service.consolidate_episodes().expect("episodes");
+    assert_eq!(first.written, 1);
+    let found = service.search("Atlas", 10).expect("search");
+    let episode = found
+        .iter()
+        .find(|item| item.kind == MemoryKind::Episode)
+        .expect("episode");
+    assert_eq!(episode.source_ref.as_deref(), Some(conversation.id.as_str()));
+    assert!(episode.tags.iter().any(|tag| tag == "episode"));
+    assert!(
+        episode
+            .tags
+            .iter()
+            .any(|tag| tag == &format!("covered:{last_entry}")),
+        "episode did not record the covered entry: {:?}",
+        episode.tags
+    );
+
+    let second = service.consolidate_episodes().expect("episodes");
+    assert_eq!(second.written, 0);
+    assert!(second.skipped >= 1);
+    let episodes = service
+        .search("Atlas", 10)
+        .expect("search")
+        .into_iter()
+        .filter(|item| item.kind == MemoryKind::Episode)
+        .count();
+    assert_eq!(episodes, 1, "the same conversation got a second episode");
+
+    let second_conversation = session
+        .create_conversation("Other", "local", "local:episode-2")
+        .expect("conversation");
+    session
+        .save(
+            Save::new(&second_conversation.id)
+                .entry("user", json!({"text": "The Borealis project starts Monday."})),
+        )
+        .expect("save entries");
+    let third = service.consolidate_episodes().expect("episodes");
+    assert_eq!(third.written, 1);
+    let total = service
+        .search("project", 10)
+        .expect("search")
+        .into_iter()
+        .filter(|item| item.kind == MemoryKind::Episode)
+        .count();
+    assert_eq!(total, 2);
+}
+
+
+#[test]
+fn the_memory_tool_can_read_archived_memories() {
+    let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let old = service
+        .save(input_imp("The toolarchive fact about cobalt", MemoryKind::Fact, 10))
+        .expect("save");
+    clock.advance_days(4 * 365);
+    service.archive_stale().expect("archive");
+    let tool = MemoryTool::new(Arc::new(service));
+    let default = tool
+        .call(&json!({"action": "search", "query": "toolarchive"}))
+        .expect("search");
+    assert!(!default.content.contains(&old.id));
+    let included = tool
+        .call(&json!({"action": "search", "query": "toolarchive", "include_archived": true}))
+        .expect("search archived");
+    assert!(included.content.contains(&old.id));
+    let as_of = tool
+        .call(&json!({
+            "action": "as_of",
+            "query": "toolarchive",
+            "at": "2030-01-01",
+            "include_archived": true
+        }))
+        .expect("as_of archived");
+    assert!(as_of.content.contains(&old.id));
 }
