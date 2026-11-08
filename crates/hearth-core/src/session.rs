@@ -407,10 +407,30 @@ impl Session {
     }
 
     /// Settle a started effect.
-    pub fn finish_effect(&self, _id: &str, _result: Value) -> Result<Effect, CoreError> {
-        Err(CoreError::Invalid(
-            "effect lifecycle is not implemented".to_owned(),
-        ))
+    pub fn finish_effect(&self, id: &str, result: Value) -> Result<Effect, CoreError> {
+        let now = self.clock.now_micros();
+        let effect_id = id.to_owned();
+        self.storage
+            .write(move |writer| -> Result<(), CoreError> {
+                let effect = load_effect(writer, &effect_id)?
+                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+                if effect.status != EffectStatus::Started {
+                    return Err(CoreError::EffectNotReady {
+                        id: effect_id,
+                        status: effect.status.as_str().to_owned(),
+                    });
+                }
+                let result_json = serde_json::to_string(&result)
+                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                writer.execute(
+                    "UPDATE effects SET status = 'done', result_json = ?, settled_at = ? \
+                     WHERE id = ?",
+                    (result_json.as_str(), now, effect_id.as_str()),
+                )?;
+                Ok(())
+            })?;
+        self.effect(id)?
+            .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
 
     /// Record an effect failure, retryable or terminal.
