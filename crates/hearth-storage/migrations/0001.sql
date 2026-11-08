@@ -127,6 +127,7 @@ CREATE TABLE usage_events (
     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
     cost_micros INTEGER NOT NULL DEFAULT 0,
     latency_ms INTEGER,
     FOREIGN KEY (task_id) REFERENCES tasks(id),

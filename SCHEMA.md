@@ -119,7 +119,8 @@ keys.
 - `submissions`: messages handed in and their endings.
 - `tasks`: resumable work.
 - `effects`: outside actions and their outcomes.
-- `usage_events`: every model call, its tokens, latency, and cost.
+- `usage_events`: every model call, its input, cache read, cache write, output, and
+  reasoning tokens, latency, and cost.
 - `telegram_updates`: deduplication of incoming updates.
 - `memory_items`, `memory_fts`, `memory_events`:
   the memory library.
