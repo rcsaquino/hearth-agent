@@ -9,8 +9,9 @@ use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
 use hearth_tools::{
-    BraveSearch, DeepSeekSearch, ExaSearch, FileTool, FirecrawlSearch, SearchError, SearchProvider,
-    ShellTool, TinyFishSearch, ToolRegistry, WebSearchTool,
+    BraveSearch, DeepSeekSearch, ExaSearch, FetchError, FetchProvider, FileTool, FirecrawlSearch,
+    HttpFetch, JinaFetch, SearchError, SearchProvider, ShellTool, TinyFishSearch, ToolRegistry,
+    WebFetchTool, WebSearchTool,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -29,6 +30,8 @@ pub enum ChatError {
     Provider(#[from] ProviderError),
     #[error(transparent)]
     Search(#[from] SearchError),
+    #[error(transparent)]
+    Fetch(#[from] FetchError),
     #[error("chat input failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -70,10 +73,12 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
     };
     let spill = home.join("spill");
     let web_search = Arc::new(build_web_search(&settings)?);
+    let web_fetch = Arc::new(build_web_fetch(&settings)?);
     let tools = ToolRegistry::new(vec![
         Arc::new(FileTool::new(workspace.clone(), spill.clone())),
         Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
         web_search,
+        web_fetch,
     ]);
 
     let harness = Harness::open(home)?;
@@ -185,4 +190,35 @@ fn build_web_search(settings: &hearth_config::Settings) -> Result<WebSearchTool,
         search.results as usize,
         search.max_results as usize,
     ))
+}
+
+
+fn build_web_fetch(settings: &hearth_config::Settings) -> Result<WebFetchTool, FetchError> {
+    let fetch = settings
+        .web
+        .as_ref()
+        .map(|web| web.fetch.clone())
+        .unwrap_or_default();
+    let mut providers: Vec<Arc<dyn FetchProvider>> = Vec::new();
+    let mut direct_added = false;
+    for name in &fetch.order {
+        let key = fetch
+            .providers
+            .get(name)
+            .and_then(|provider| provider.api_key.clone())
+            .filter(|key| !key.is_empty());
+        match name.as_str() {
+            "jina" => providers.push(Arc::new(JinaFetch::new("https://r.jina.ai", key)?)),
+            "http" | "https" => {
+                if !direct_added {
+                    providers.push(Arc::new(HttpFetch::production("http")?));
+                    direct_added = true;
+                }
+            }
+            // These providers arrive in M2c-2b. The settings accept them now.
+            "tinyfish" | "firecrawl" | "deepseek" => {}
+            _ => {}
+        }
+    }
+    Ok(WebFetchTool::new(providers, false))
 }
