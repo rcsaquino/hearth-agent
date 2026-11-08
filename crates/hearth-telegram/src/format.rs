@@ -233,3 +233,99 @@ fn is_safe_url(url: &str) -> bool {
         .iter()
         .any(|scheme| lower.starts_with(scheme))
 }
+
+/// Split formatted text into parts that fit Telegram's message limit.
+pub fn split_formatted(value: &FormattedText, limit: usize) -> Vec<FormattedText> {
+    let units: Vec<u16> = value.text.encode_utf16().collect();
+    if units.len() <= limit {
+        return vec![FormattedText {
+            text: value.text.clone(),
+            entities: clip_entities(&value.entities, 0, units.len()),
+        }];
+    }
+    const MARKER_RESERVE: usize = 16;
+    let content_limit = limit.saturating_sub(MARKER_RESERVE).max(1);
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < units.len() {
+        let mut end = (start + content_limit).min(units.len());
+        if end < units.len() && is_high_surrogate(units[end - 1]) && is_low_surrogate(units[end]) {
+            end -= 1;
+        }
+        if end < units.len() && end > start + content_limit / 2 {
+            if let Some(position) = rfind_pair(&units, start, end, b'\n', b'\n') {
+                end = position + 2;
+            } else if let Some(position) = rfind(&units, start, end, b'\n' as u16) {
+                end = position + 1;
+            } else if let Some(position) = rfind(&units, start, end, b' ' as u16) {
+                end = position + 1;
+            }
+        }
+        if end <= start {
+            end = (start + content_limit).min(units.len());
+        }
+        chunks.push((start, end));
+        start = end;
+    }
+    let total = chunks.len();
+    chunks
+        .into_iter()
+        .enumerate()
+        .map(|(index, (start, end))| {
+            let mut text = String::from_utf16_lossy(&units[start..end]);
+            text.push_str(&format!("\n\n({}/{})", index + 1, total));
+            FormattedText {
+                text,
+                entities: clip_entities(&value.entities, start, end),
+            }
+        })
+        .collect()
+}
+
+fn is_high_surrogate(unit: u16) -> bool {
+    (0xd800..=0xdbff).contains(&unit)
+}
+
+fn is_low_surrogate(unit: u16) -> bool {
+    (0xdc00..=0xdfff).contains(&unit)
+}
+
+fn rfind(units: &[u16], start: usize, end: usize, needle: u16) -> Option<usize> {
+    (start..end).rev().find(|index| units[*index] == needle)
+}
+
+fn rfind_pair(units: &[u16], start: usize, end: usize, first: u8, second: u8) -> Option<usize> {
+    if end < 2 {
+        return None;
+    }
+    (start..end - 1)
+        .rev()
+        .find(|index| units[*index] == first as u16 && units[index + 1] == second as u16)
+}
+
+fn clip_entities(entities: &[Entity], start: usize, end: usize) -> Vec<Entity> {
+    let mut clipped: Vec<Entity> = entities
+        .iter()
+        .filter_map(|entity| {
+            let entity_start = entity.offset.max(start);
+            let entity_end = (entity.offset + entity.length).min(end);
+            if entity_end <= entity_start {
+                return None;
+            }
+            Some(Entity {
+                kind: entity.kind.clone(),
+                offset: entity_start - start,
+                length: entity_end - entity_start,
+                url: entity.url.clone(),
+                language: entity.language.clone(),
+            })
+        })
+        .collect();
+    clipped.sort_by(|left, right| {
+        left.offset
+            .cmp(&right.offset)
+            .then_with(|| right.length.cmp(&left.length))
+    });
+    clipped.truncate(100);
+    clipped
+}
