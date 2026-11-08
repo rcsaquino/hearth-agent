@@ -217,3 +217,24 @@ fn retries_a_429_with_the_requested_wait() {
         *sleeps
     );
 }
+
+#[test]
+fn a_transport_failure_is_uncertain_and_is_not_resent() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let base = format!("http://{}", listener.local_addr().expect("addr"));
+    drop(listener);
+    let (sender, _) = sender(&base);
+    let outcome = sender.send_reply(42, "hi").expect("send");
+    assert!(matches!(outcome, SendOutcome::Uncertain { .. }), "{outcome:?}");
+}
+
+#[test]
+fn a_server_error_is_uncertain_and_does_not_fall_back() {
+    let server = Server::start(vec![error(500, 500, "server exploded", None)]);
+    let (sender, _) = sender(&server.base);
+    let outcome = sender.send_reply(42, "hi").expect("send");
+    assert!(matches!(outcome, SendOutcome::Uncertain { .. }), "{outcome:?}");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sendRichMessage");
+}
