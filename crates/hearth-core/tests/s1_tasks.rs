@@ -801,3 +801,68 @@ fn claiming_a_task_records_a_claim_commit() {
     assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
     assert_eq!(latest.created_at, clock.now());
 }
+
+#[test]
+fn finishing_a_task_records_the_transition_commit() {
+    let cases = vec![
+        (
+            StepOutput::Next {
+                phase: "next".to_owned(),
+                checkpoint: json!({"step": 2}),
+            },
+            "task.next",
+        ),
+        (
+            StepOutput::Sleep {
+                until_micros: 9_000_000,
+                phase: "sleep".to_owned(),
+                checkpoint: json!({"step": 2}),
+            },
+            "task.sleep",
+        ),
+        (
+            StepOutput::Terminal {
+                outcome: TerminalOutcome::Done,
+                result: json!({"ok": true}),
+            },
+            "task.terminal",
+        ),
+        (
+            StepOutput::Failed {
+                error: json!({"message": "again"}),
+                retryable: true,
+            },
+            "task.retry",
+        ),
+        (
+            StepOutput::Failed {
+                error: json!({"message": "stop"}),
+                retryable: false,
+            },
+            "task.fail",
+        ),
+    ];
+
+    for (output, expected_kind) in cases {
+        let (_home, harness, _clock) = harness();
+        let session = harness.session();
+        let task = session
+            .create_task(NewTask::new("test", 1, "start", json!({})))
+            .expect("create task");
+        session
+            .claim_task("worker-a", 60_000_000)
+            .expect("claim task")
+            .expect("task is runnable");
+        session
+            .finish_task(&task.id, "worker-a", output)
+            .expect("finish task");
+
+        let latest = session
+            .latest_commit()
+            .expect("latest commit")
+            .expect("a finish records a commit");
+        assert_eq!(latest.seq, 3, "case {expected_kind}");
+        assert_eq!(latest.kind, expected_kind);
+        assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
+    }
+}
