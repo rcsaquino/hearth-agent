@@ -382,6 +382,40 @@ impl Session {
         raw.map(RawEffect::into_effect).transpose()
     }
 
+    /// List effect intents that are ready to run, oldest first.
+    pub fn pending_effects(&self, limit: usize) -> Result<Vec<Effect>, CoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.effects_with_status("intent", limit.min(100) as i64)
+    }
+
+    /// List effects that were started but not settled.
+    pub fn started_effects(&self) -> Result<Vec<Effect>, CoreError> {
+        self.effects_with_status("started", 100)
+    }
+
+    fn effects_with_status(&self, status: &str, limit: i64) -> Result<Vec<Effect>, CoreError> {
+        let sql = format!("{EFFECT_SELECT} WHERE status = ? ORDER BY created_at, id LIMIT ?");
+        let raw: Vec<RawEffect> = self.storage.read(|reader| {
+            reader.query(&sql, (status, limit), |row| {
+                Ok(RawEffect {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    kind: row.get(2)?,
+                    key: row.get(3)?,
+                    payload_json: row.get(4)?,
+                    status: row.get(5)?,
+                    result_json: row.get(6)?,
+                    attempts: row.get(7)?,
+                    created_at: row.get(8)?,
+                    settled_at: row.get(9)?,
+                })
+            })
+        })?;
+        raw.into_iter().map(RawEffect::into_effect).collect()
+    }
+
     /// Mark an effect intent as started.
     pub fn begin_effect(&self, id: &str) -> Result<Effect, CoreError> {
         let now = self.clock.now_micros();
