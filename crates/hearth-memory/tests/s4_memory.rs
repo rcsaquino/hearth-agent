@@ -908,3 +908,19 @@ fn unrelated_standing_preferences_do_not_crowd_a_query_specific_one() {
         "query-specific preference was crowded out: {recalled:#?}"
     );
 }
+
+#[test]
+fn inflected_words_match_with_stemming() {
+    let (_home, _session, service) = setup();
+    let saved = service
+        .save(input(
+            "The user enjoys walking after lunch",
+            MemoryKind::Preference,
+        ))
+        .expect("save");
+    let found = service.search("walked", 10).expect("search");
+    assert!(
+        found.iter().any(|item| item.id == saved.id),
+        "an inflected word did not match: {found:#?}"
+    );
+}
