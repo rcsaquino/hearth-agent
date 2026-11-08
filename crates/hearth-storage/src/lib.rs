@@ -42,6 +42,16 @@ impl StorageError {
     }
 }
 
+/// Abort at a named crash point when `HEARTH_CRASH_AT` matches.
+///
+/// This is the test hook used by the S7 crash suite. It is inert unless the
+/// environment variable names the point.
+pub fn crash_if(point: &str) {
+    if std::env::var("HEARTH_CRASH_AT").ok().as_deref() == Some(point) {
+        std::process::abort();
+    }
+}
+
 /// Open a database for writing, apply connection settings, and migrate it.
 pub fn open(path: &Path) -> Result<Connection, StorageError> {
     let mut connection = Connection::open(path)?;

@@ -133,6 +133,7 @@ where
         };
         run(&writer)?
     };
+    crate::crash_if("before_commit");
     transaction
         .commit()
         .map_err(|error| E::from(StorageError::from(error)))?;
