@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use hearth_storage::Storage;
+use hearth_storage::{Storage, Writer};
 use serde_json::Value;
 
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
@@ -629,13 +629,49 @@ impl Session {
     pub fn finish_task(
         &self,
         task_id: &str,
-        _owner: &str,
-        _output: StepOutput,
+        owner: &str,
+        output: StepOutput,
     ) -> Result<Task, CoreError> {
-        Err(CoreError::TaskNotRunning(
-            task_id.to_owned(),
-            "not implemented".to_owned(),
-        ))
+        let now = self.clock.now_micros();
+        let task_id = task_id.to_owned();
+        let owner = owner.to_owned();
+        self.storage
+            .write(move |writer| -> Result<Task, CoreError> {
+                let task = load_task(writer, &task_id)?
+                    .ok_or_else(|| CoreError::TaskNotFound(task_id.clone()))?;
+                if task.status != TaskStatus::Running {
+                    return Err(CoreError::TaskNotRunning(
+                        task_id.clone(),
+                        task.status.as_str().to_owned(),
+                    ));
+                }
+                if task.lease_owner.as_deref() != Some(owner.as_str()) {
+                    return Err(CoreError::LeaseLost(task_id.clone()));
+                }
+
+                match output {
+                    StepOutput::Next { phase, checkpoint } => {
+                        let checkpoint = serde_json::to_string(&checkpoint)
+                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let changed = writer.execute(
+                            "UPDATE tasks SET status = 'pending', phase = ?, checkpoint_json = ?, \
+                         attempt = 0, lease_owner = NULL, lease_until = NULL, next_wake_at = NULL, \
+                         updated_at = ? WHERE id = ? AND status = 'running' AND lease_owner = ?",
+                            (phase, checkpoint, now, task_id.as_str(), owner.as_str()),
+                        )?;
+                        if changed != 1 {
+                            return Err(CoreError::LeaseLost(task_id));
+                        }
+                    }
+                    _ => {
+                        return Err(CoreError::Invalid(
+                            "step outcome is not implemented".to_owned(),
+                        ));
+                    }
+                }
+
+                load_task(writer, &task_id)?.ok_or(CoreError::TaskNotFound(task_id))
+            })
     }
 
     /// Requeue tasks whose leases or sleeps expired.
@@ -948,4 +984,30 @@ struct RawClaim {
     attempt: i64,
     input_json: String,
     checkpoint_json: Option<String>,
+}
+
+fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {
+    let sql = format!("{TASK_SELECT} WHERE id = ?");
+    let raw: Option<RawTask> = writer.query_optional(&sql, (id,), |row| {
+        Ok(RawTask {
+            id: row.get(0)?,
+            conversation_id: row.get(1)?,
+            parent_task_id: row.get(2)?,
+            kind: row.get(3)?,
+            version: row.get(4)?,
+            status: row.get(5)?,
+            phase: row.get(6)?,
+            attempt: row.get(7)?,
+            input_json: row.get(8)?,
+            checkpoint_json: row.get(9)?,
+            result_json: row.get(10)?,
+            lease_owner: row.get(11)?,
+            lease_until: row.get(12)?,
+            next_wake_at: row.get(13)?,
+            created_at: row.get(14)?,
+            updated_at: row.get(15)?,
+            terminal_at: row.get(16)?,
+        })
+    })?;
+    raw.map(RawTask::into_task).transpose()
 }
