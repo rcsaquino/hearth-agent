@@ -386,30 +386,29 @@ impl Session {
     pub fn begin_effect(&self, id: &str) -> Result<Effect, CoreError> {
         let now = self.clock.now_micros();
         let effect_id = id.to_owned();
-        self.storage
-            .write(move |writer| -> Result<(), CoreError> {
-                let effect = load_effect(writer, &effect_id)?
-                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
-                if effect.status != EffectStatus::Intent {
-                    return Err(CoreError::EffectNotReady {
-                        id: effect_id,
-                        status: effect.status.as_str().to_owned(),
-                    });
-                }
-                writer.execute(
-                    "UPDATE effects SET status = 'started', attempts = attempts + 1, \
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            let effect = load_effect(writer, &effect_id)?
+                .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+            if effect.status != EffectStatus::Intent {
+                return Err(CoreError::EffectNotReady {
+                    id: effect_id,
+                    status: effect.status.as_str().to_owned(),
+                });
+            }
+            writer.execute(
+                "UPDATE effects SET status = 'started', attempts = attempts + 1, \
                      settled_at = NULL WHERE id = ?",
-                    (effect_id.as_str(),),
-                )?;
-                record_commit(
-                    writer,
-                    now,
-                    None,
-                    effect.task_id.as_deref(),
-                    "effect.started",
-                )?;
-                Ok(())
-            })?;
+                (effect_id.as_str(),),
+            )?;
+            record_commit(
+                writer,
+                now,
+                None,
+                effect.task_id.as_deref(),
+                "effect.started",
+            )?;
+            Ok(())
+        })?;
         self.effect(id)?
             .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
@@ -418,26 +417,25 @@ impl Session {
     pub fn finish_effect(&self, id: &str, result: Value) -> Result<Effect, CoreError> {
         let now = self.clock.now_micros();
         let effect_id = id.to_owned();
-        self.storage
-            .write(move |writer| -> Result<(), CoreError> {
-                let effect = load_effect(writer, &effect_id)?
-                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
-                if effect.status != EffectStatus::Started {
-                    return Err(CoreError::EffectNotReady {
-                        id: effect_id,
-                        status: effect.status.as_str().to_owned(),
-                    });
-                }
-                let result_json = serde_json::to_string(&result)
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
-                writer.execute(
-                    "UPDATE effects SET status = 'done', result_json = ?, settled_at = ? \
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            let effect = load_effect(writer, &effect_id)?
+                .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+            if effect.status != EffectStatus::Started {
+                return Err(CoreError::EffectNotReady {
+                    id: effect_id,
+                    status: effect.status.as_str().to_owned(),
+                });
+            }
+            let result_json = serde_json::to_string(&result)
+                .map_err(|error| CoreError::Invalid(error.to_string()))?;
+            writer.execute(
+                "UPDATE effects SET status = 'done', result_json = ?, settled_at = ? \
                      WHERE id = ?",
-                    (result_json.as_str(), now, effect_id.as_str()),
-                )?;
-                record_commit(writer, now, None, effect.task_id.as_deref(), "effect.done")?;
-                Ok(())
-            })?;
+                (result_json.as_str(), now, effect_id.as_str()),
+            )?;
+            record_commit(writer, now, None, effect.task_id.as_deref(), "effect.done")?;
+            Ok(())
+        })?;
         self.effect(id)?
             .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
@@ -451,36 +449,35 @@ impl Session {
     ) -> Result<Effect, CoreError> {
         let now = self.clock.now_micros();
         let effect_id = id.to_owned();
-        self.storage
-            .write(move |writer| -> Result<(), CoreError> {
-                let effect = load_effect(writer, &effect_id)?
-                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
-                if effect.status != EffectStatus::Started {
-                    return Err(CoreError::EffectNotReady {
-                        id: effect_id,
-                        status: effect.status.as_str().to_owned(),
-                    });
-                }
-                let error_json = serde_json::to_string(&error)
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
-                let kind = if retryable {
-                    writer.execute(
-                        "UPDATE effects SET status = 'intent', result_json = ?, \
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            let effect = load_effect(writer, &effect_id)?
+                .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+            if effect.status != EffectStatus::Started {
+                return Err(CoreError::EffectNotReady {
+                    id: effect_id,
+                    status: effect.status.as_str().to_owned(),
+                });
+            }
+            let error_json = serde_json::to_string(&error)
+                .map_err(|error| CoreError::Invalid(error.to_string()))?;
+            let kind = if retryable {
+                writer.execute(
+                    "UPDATE effects SET status = 'intent', result_json = ?, \
                          settled_at = NULL WHERE id = ?",
-                        (error_json.as_str(), effect_id.as_str()),
-                    )?;
-                    "effect.retry"
-                } else {
-                    writer.execute(
-                        "UPDATE effects SET status = 'failed', result_json = ?, settled_at = ? \
+                    (error_json.as_str(), effect_id.as_str()),
+                )?;
+                "effect.retry"
+            } else {
+                writer.execute(
+                    "UPDATE effects SET status = 'failed', result_json = ?, settled_at = ? \
                          WHERE id = ?",
-                        (error_json.as_str(), now, effect_id.as_str()),
-                    )?;
-                    "effect.failed"
-                };
-                record_commit(writer, now, None, effect.task_id.as_deref(), kind)?;
-                Ok(())
-            })?;
+                    (error_json.as_str(), now, effect_id.as_str()),
+                )?;
+                "effect.failed"
+            };
+            record_commit(writer, now, None, effect.task_id.as_deref(), kind)?;
+            Ok(())
+        })?;
         self.effect(id)?
             .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
@@ -489,23 +486,28 @@ impl Session {
     pub fn requeue_effect(&self, id: &str) -> Result<Effect, CoreError> {
         let now = self.clock.now_micros();
         let effect_id = id.to_owned();
-        self.storage
-            .write(move |writer| -> Result<(), CoreError> {
-                let effect = load_effect(writer, &effect_id)?
-                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
-                if effect.status != EffectStatus::Started {
-                    return Err(CoreError::EffectNotReady {
-                        id: effect_id,
-                        status: effect.status.as_str().to_owned(),
-                    });
-                }
-                writer.execute(
-                    "UPDATE effects SET status = 'intent', settled_at = NULL WHERE id = ?",
-                    (effect_id.as_str(),),
-                )?;
-                record_commit(writer, now, None, effect.task_id.as_deref(), "effect.requeued")?;
-                Ok(())
-            })?;
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            let effect = load_effect(writer, &effect_id)?
+                .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+            if effect.status != EffectStatus::Started {
+                return Err(CoreError::EffectNotReady {
+                    id: effect_id,
+                    status: effect.status.as_str().to_owned(),
+                });
+            }
+            writer.execute(
+                "UPDATE effects SET status = 'intent', settled_at = NULL WHERE id = ?",
+                (effect_id.as_str(),),
+            )?;
+            record_commit(
+                writer,
+                now,
+                None,
+                effect.task_id.as_deref(),
+                "effect.requeued",
+            )?;
+            Ok(())
+        })?;
         self.effect(id)?
             .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
@@ -1475,11 +1477,11 @@ struct RawClaim {
 }
 
 fn next_sequence(writer: &Writer<'_>) -> Result<i64, CoreError> {
-    Ok(writer.query_row(
-        "SELECT COALESCE(MAX(seq), 0) + 1 FROM commits",
-        [],
-        |row| row.get(0),
-    )?)
+    Ok(
+        writer.query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM commits", [], |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 fn insert_commit(
@@ -1535,7 +1537,6 @@ fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {
     })?;
     raw.map(RawTask::into_task).transpose()
 }
-
 
 fn load_effect(writer: &Writer<'_>, id: &str) -> Result<Option<Effect>, CoreError> {
     let sql = format!("{EFFECT_SELECT} WHERE id = ?");

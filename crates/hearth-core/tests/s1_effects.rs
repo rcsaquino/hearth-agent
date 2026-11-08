@@ -1,9 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
-use hearth_core::{
-    Clock, CoreError, EffectIntent, EffectStatus, Harness, IdGen, NewTask, Save,
-};
+use hearth_core::{Clock, CoreError, EffectIntent, EffectStatus, Harness, IdGen, NewTask, Save};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -74,16 +72,18 @@ fn a_duplicate_effect_key_reuses_the_existing_effect() {
     let conversation_id = conversation(session);
 
     let first = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"n": 1}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"n": 1}),
+        )))
         .expect("first save");
     let second = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"n": 2}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"n": 2}),
+        )))
         .expect("second save");
 
     assert_eq!(first.effect_ids, vec!["id-2".to_owned()]);
@@ -102,10 +102,11 @@ fn beginning_an_effect_marks_it_started_and_counts_an_attempt() {
     let session = harness.session();
     let conversation_id = conversation(session);
     let commit = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"path": "a"}),
+        )))
         .expect("save");
     let id = commit.effect_ids[0].clone();
 
@@ -126,10 +127,11 @@ fn finishing_a_started_effect_settles_it_as_done() {
     let session = harness.session();
     let conversation_id = conversation(session);
     let commit = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"path": "a"}),
+        )))
         .expect("save");
     let id = commit.effect_ids[0].clone();
     session.begin_effect(&id).expect("begin effect");
@@ -153,10 +155,11 @@ fn a_retryable_effect_failure_returns_it_to_intent() {
     let session = harness.session();
     let conversation_id = conversation(session);
     let commit = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"path": "a"}),
+        )))
         .expect("save");
     let id = commit.effect_ids[0].clone();
     session.begin_effect(&id).expect("begin effect");
@@ -181,10 +184,11 @@ fn a_non_retryable_effect_failure_settles_it_as_failed() {
     let session = harness.session();
     let conversation_id = conversation(session);
     let commit = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"path": "a"}),
+        )))
         .expect("save");
     let id = commit.effect_ids[0].clone();
     session.begin_effect(&id).expect("begin effect");
@@ -208,10 +212,11 @@ fn a_started_effect_can_be_requeued_after_a_crash() {
     let session = harness.session();
     let conversation_id = conversation(session);
     let commit = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"path": "a"}),
+        )))
         .expect("save");
     let id = commit.effect_ids[0].clone();
     session.begin_effect(&id).expect("begin effect");
@@ -234,10 +239,11 @@ fn invalid_effect_transitions_are_rejected() {
     let session = harness.session();
     let conversation_id = conversation(session);
     let commit = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-1",
+            json!({"path": "a"}),
+        )))
         .expect("save");
     let id = commit.effect_ids[0].clone();
 
@@ -256,9 +262,7 @@ fn invalid_effect_transitions_are_rejected() {
     assert!(matches!(unknown, CoreError::EffectNotFound(ref id) if id == "missing"));
 
     session.begin_effect(&id).expect("begin effect");
-    let begin_again = session
-        .begin_effect(&id)
-        .expect_err("begin twice");
+    let begin_again = session.begin_effect(&id).expect_err("begin twice");
     assert!(matches!(begin_again, CoreError::EffectNotReady { .. }));
 
     session
@@ -314,10 +318,11 @@ fn effect_transitions_advance_the_save_sequence() {
     assert_eq!(done.seq, started.seq + 1);
 
     let retry = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-2", json!({}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-2",
+            json!({}),
+        )))
         .expect("save");
     let retry_id = retry.effect_ids[0].clone();
     session.begin_effect(&retry_id).expect("begin retry");
@@ -338,10 +343,11 @@ fn effect_transitions_advance_the_save_sequence() {
     assert_eq!(requeued.kind, "effect.requeued");
 
     let failed = session
-        .save(
-            Save::new(&conversation_id)
-                .effect(EffectIntent::new("file_write", "write-3", json!({}))),
-        )
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "write-3",
+            json!({}),
+        )))
         .expect("save");
     let failed_id = failed.effect_ids[0].clone();
     session.begin_effect(&failed_id).expect("begin failed");
@@ -361,11 +367,11 @@ fn a_failed_save_leaves_no_effect_or_commit() {
     let session = harness.session();
     let conversation_id = conversation(session);
 
-    let result = session.save(
-        Save::new(&conversation_id).effect(
-            EffectIntent::new("file_write", "write-1", json!({})).task("missing-task"),
-        ),
-    );
+    let result =
+        session
+            .save(Save::new(&conversation_id).effect(
+                EffectIntent::new("file_write", "write-1", json!({})).task("missing-task"),
+            ));
 
     assert!(result.is_err(), "the missing task must fail the save");
     assert!(
