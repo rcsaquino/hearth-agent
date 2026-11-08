@@ -453,3 +453,71 @@ fn a_task_that_expires_twice_is_failed_as_poisoned() {
             .is_none()
     );
 }
+
+#[test]
+fn a_heartbeat_extends_the_lease_and_a_stale_owner_is_rejected() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("a task is runnable");
+    let first_lease = session
+        .task(&task.id)
+        .expect("read")
+        .expect("exists")
+        .lease_until
+        .expect("leased");
+
+    clock.advance(30_000_000);
+    session
+        .heartbeat_task(&task.id, "worker-a", 60_000_000)
+        .expect("heartbeat");
+    let extended = session
+        .task(&task.id)
+        .expect("read")
+        .expect("exists")
+        .lease_until
+        .expect("leased");
+    assert_eq!(extended, clock.now() + 60_000_000);
+    assert!(extended > first_lease);
+
+    let stale = session.heartbeat_task(&task.id, "worker-b", 60_000_000);
+    assert!(matches!(stale, Err(hearth_core::CoreError::LeaseLost(_))));
+    let stale_finish = session.finish_task(
+        &task.id,
+        "worker-b",
+        StepOutput::Next {
+            phase: "other".to_owned(),
+            checkpoint: json!({}),
+        },
+    );
+    assert!(matches!(
+        stale_finish,
+        Err(hearth_core::CoreError::LeaseLost(_))
+    ));
+    assert_eq!(
+        session
+            .task(&task.id)
+            .expect("read")
+            .expect("exists")
+            .lease_owner
+            .as_deref(),
+        Some("worker-a")
+    );
+
+    session
+        .finish_task(
+            &task.id,
+            "worker-a",
+            StepOutput::Next {
+                phase: "done".to_owned(),
+                checkpoint: json!({}),
+            },
+        )
+        .expect("the owner finishes");
+}
