@@ -1,6 +1,6 @@
 //! The OpenAI-compatible chat completions adapter.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{Value, json};
 
 use crate::provider::{Provider, ProviderError, ProviderStream, Sleeper, SystemSleeper};
-use crate::types::{ChatRequest, ContentBlock, Role, StreamEvent};
+use crate::types::{ChatRequest, ContentBlock, Role, StreamEvent, ToolCall};
 
 /// A synchronous OpenAI-compatible provider.
 pub struct OpenAiCompatibleProvider {
@@ -176,6 +176,36 @@ struct OpenAiStream {
     pending: VecDeque<Result<StreamEvent, ProviderError>>,
     done: bool,
     finish_reason: Option<String>,
+    tool_calls: BTreeMap<usize, PartialToolCall>,
+}
+
+#[derive(Default)]
+struct PartialToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl PartialToolCall {
+    fn into_tool_call(self) -> Result<ToolCall, ProviderError> {
+        if self.id.is_empty() || self.name.is_empty() {
+            return Err(ProviderError::Protocol(
+                "tool call is missing its id or name".to_owned(),
+            ));
+        }
+        let arguments = if self.arguments.trim().is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(&self.arguments).map_err(|error| {
+                ProviderError::Protocol(format!("tool call arguments are not JSON: {error}"))
+            })?
+        };
+        Ok(ToolCall {
+            id: self.id,
+            name: self.name,
+            arguments,
+        })
+    }
 }
 
 impl OpenAiStream {
@@ -185,15 +215,15 @@ impl OpenAiStream {
             pending: VecDeque::new(),
             done: false,
             finish_reason: None,
+            tool_calls: BTreeMap::new(),
         }
     }
 
     fn handle_data(&mut self, data: &str) {
         if data == "[DONE]" {
             self.done = true;
-            self.pending.push_back(Ok(StreamEvent::Done {
-                finish_reason: self.finish_reason.take(),
-            }));
+            let events = self.finish();
+            self.pending.extend(events);
             return;
         }
         let Ok(value) = serde_json::from_str::<Value>(data) else {
@@ -210,7 +240,40 @@ impl OpenAiStream {
                 self.pending
                     .push_back(Ok(StreamEvent::TextDelta(content.to_owned())));
             }
+            if let Some(calls) = choice["delta"]["tool_calls"].as_array() {
+                for call in calls {
+                    let index = call["index"].as_u64().unwrap_or(0) as usize;
+                    let partial = self.tool_calls.entry(index).or_default();
+                    if let Some(id) = call["id"].as_str() {
+                        partial.id = id.to_owned();
+                    }
+                    if let Some(name) = call["function"]["name"].as_str() {
+                        partial.name.push_str(name);
+                    }
+                    if let Some(arguments) = call["function"]["arguments"].as_str() {
+                        partial.arguments.push_str(arguments);
+                    }
+                }
+            }
         }
+    }
+
+    fn finish(&mut self) -> Vec<Result<StreamEvent, ProviderError>> {
+        let mut events = Vec::new();
+        for (_, partial) in std::mem::take(&mut self.tool_calls) {
+            match partial.into_tool_call() {
+                Ok(call) => events.push(Ok(StreamEvent::ToolCall(call))),
+                Err(error) => {
+                    events.push(Err(error));
+                    self.done = true;
+                    return events;
+                }
+            }
+        }
+        events.push(Ok(StreamEvent::Done {
+            finish_reason: self.finish_reason.take(),
+        }));
+        events
     }
 }
 
@@ -229,9 +292,8 @@ impl Iterator for OpenAiStream {
             match self.reader.read_line(&mut line) {
                 Ok(0) => {
                     self.done = true;
-                    self.pending.push_back(Ok(StreamEvent::Done {
-                        finish_reason: self.finish_reason.take(),
-                    }));
+                    let events = self.finish();
+                    self.pending.extend(events);
                 }
                 Ok(_) => {
                     let line = line.trim_end_matches(['\r', '\n']);
