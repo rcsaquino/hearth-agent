@@ -1156,10 +1156,15 @@ fn a_memory_failure_does_not_stop_the_answer() {
         .expect("submit")
         .submission;
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Still here.")]));
-    let outcome = agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
-        .with_memory(memory)
-        .run_submission(&submission.id)
-        .expect("run");
+    let outcome = agent(
+        home.path(),
+        &harness,
+        Arc::clone(&provider),
+        Pricing::default(),
+    )
+    .with_memory(memory)
+    .run_submission(&submission.id)
+    .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Still here."));
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 }

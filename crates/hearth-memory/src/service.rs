@@ -210,10 +210,7 @@ impl MemoryService {
         }
 
         let new_importance = update.importance.unwrap_or(existing.importance);
-        let new_status = update
-            .status
-            .as_deref()
-            .unwrap_or(existing.status.as_str());
+        let new_status = update.status.as_deref().unwrap_or(existing.status.as_str());
         let explicit = update.standing.as_deref().and_then(Standing::parse);
         let standing_after = if let Some(explicit) = explicit {
             explicit
@@ -223,8 +220,8 @@ impl MemoryService {
             auto_standing(existing.kind.as_str(), new_importance, existing.standing)
         };
         if update.standing.is_none() {
-            update.standing = (standing_after != existing.standing)
-                .then(|| standing_after.as_str().to_owned());
+            update.standing =
+                (standing_after != existing.standing).then(|| standing_after.as_str().to_owned());
         }
 
         let mut bump = standing_after != existing.standing;
@@ -385,9 +382,8 @@ impl MemoryService {
                       WHEN 'promoted' THEN 1 ELSE 2 END, \
                       importance DESC, COALESCE(last_used_at, 0) DESC, created_at"
         );
-        let raw: Vec<RawMemory> = self.read(|reader| {
-            reader.query(&sql, (now, now), |row| Ok(RawMemory::from_row(row)))
-        })?;
+        let raw: Vec<RawMemory> =
+            self.read(|reader| reader.query(&sql, (now, now), |row| Ok(RawMemory::from_row(row))))?;
         let mut candidates = Vec::new();
         for row in raw {
             candidates.push(row.into_item()?);
@@ -586,13 +582,13 @@ impl MemoryService {
             clauses.join(" OR ")
         );
         let raw: Vec<RawMemory> = self.read(|reader| {
-            let values: Vec<&dyn rusqlite::ToSql> =
-                params.iter().map(|value| value as &dyn rusqlite::ToSql).collect();
-            reader.query(
-                &sql,
-                rusqlite::params_from_iter(values),
-                |row| Ok(RawMemory::from_row(row)),
-            )
+            let values: Vec<&dyn rusqlite::ToSql> = params
+                .iter()
+                .map(|value| value as &dyn rusqlite::ToSql)
+                .collect();
+            reader.query(&sql, rusqlite::params_from_iter(values), |row| {
+                Ok(RawMemory::from_row(row))
+            })
         })?;
         raw.into_iter().map(RawMemory::into_item).collect()
     }
@@ -632,10 +628,10 @@ impl MemoryService {
     }
 
     fn memory_state(&self) -> Result<(Conversation, Option<Document>), MemoryError> {
-        let conversation = match self.session.conversation_by_transport(
-            MEMORY_STATE_TRANSPORT,
-            MEMORY_STATE_KEY,
-        )? {
+        let conversation = match self
+            .session
+            .conversation_by_transport(MEMORY_STATE_TRANSPORT, MEMORY_STATE_KEY)?
+        {
             Some(conversation) => conversation,
             None => self.session.create_conversation(
                 "Memory state",
@@ -718,9 +714,7 @@ fn auto_standing(kind: &str, importance: i64, current: Standing) -> Standing {
     if current == Standing::Pinned {
         return Standing::Pinned;
     }
-    if importance >= PROMOTE_IMPORTANCE
-        && matches!(kind, "rule" | "preference" | "person")
-    {
+    if importance >= PROMOTE_IMPORTANCE && matches!(kind, "rule" | "preference" | "person") {
         Standing::Promoted
     } else {
         Standing::None

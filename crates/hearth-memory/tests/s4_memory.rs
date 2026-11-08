@@ -302,8 +302,7 @@ impl StepClock {
     }
 
     fn advance_days(&self, days: i64) {
-        self.0
-            .fetch_add(days * 86_400_000_000, Ordering::Relaxed);
+        self.0.fetch_add(days * 86_400_000_000, Ordering::Relaxed);
     }
 }
 
@@ -470,11 +469,19 @@ fn the_standing_version_changes_only_when_the_set_changes() {
 fn recall_ranks_a_recent_important_match_above_an_old_weak_one() {
     let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
     let old = service
-        .save(input_imp("coffee preference old", MemoryKind::Preference, 20))
+        .save(input_imp(
+            "coffee preference old",
+            MemoryKind::Preference,
+            20,
+        ))
         .expect("old");
     clock.advance_days(365);
     let recent = service
-        .save(input_imp("coffee preference recent", MemoryKind::Preference, 90))
+        .save(input_imp(
+            "coffee preference recent",
+            MemoryKind::Preference,
+            90,
+        ))
         .expect("recent");
     let recalled = service.recall("coffee").expect("recall");
     assert_eq!(recalled[0].id, recent.id);
@@ -516,7 +523,11 @@ fn recall_keeps_at_most_two_per_kind() {
     let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
     for word in ["alpha", "bravo", "charlie", "delta"] {
         service
-            .save(input_imp(&format!("coffee fact {word}"), MemoryKind::Fact, 60))
+            .save(input_imp(
+                &format!("coffee fact {word}"),
+                MemoryKind::Fact,
+                60,
+            ))
             .expect("fact");
         service
             .save(input_imp(

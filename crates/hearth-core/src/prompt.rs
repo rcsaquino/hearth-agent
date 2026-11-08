@@ -52,11 +52,9 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             ))],
         });
     }
-    let newest_user = history
-        .iter()
-        .rposition(|entry| {
-            message_for_entry(entry).is_some_and(|message| message.role == Role::User)
-        });
+    let newest_user = history.iter().rposition(|entry| {
+        message_for_entry(entry).is_some_and(|message| message.role == Role::User)
+    });
     for (index, entry) in history.iter().enumerate() {
         if Some(index) == newest_user && !input.recall.trim().is_empty() {
             messages.push(ChatMessage {
