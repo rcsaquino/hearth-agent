@@ -474,3 +474,12 @@ fn assistant_tool_calls_and_tool_results_translate() {
     assert_eq!(messages[1]["content"], "result");
     server.finish();
 }
+
+#[test]
+fn the_token_estimator_uses_a_ten_percent_margin() {
+    assert_eq!(hearth_model::estimate_tokens(""), 0);
+    assert_eq!(hearth_model::estimate_tokens("a"), 1);
+    assert_eq!(hearth_model::estimate_tokens("abcd"), 2);
+    assert_eq!(hearth_model::estimate_tokens("hello"), 2);
+    assert_eq!(hearth_model::estimate_tokens(&"a".repeat(100)), 28);
+}
