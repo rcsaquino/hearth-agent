@@ -1,9 +1,11 @@
 //! Provider-neutral chat types and the OpenAI-compatible adapter.
 
+mod estimate;
 mod openai;
 mod provider;
 mod types;
 
+pub use estimate::estimate_tokens;
 pub use openai::OpenAiCompatibleProvider;
 pub use provider::{Provider, ProviderError, ProviderStream, Sleeper, SystemSleeper};
 pub use types::{
