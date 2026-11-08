@@ -13,7 +13,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::agent::{Agent, AgentConfig};
-use crate::tools::{ToolBuildError, build_tools};
+use crate::tools::{ToolBuildError, build_tools, memory_policy};
 
 /// A failure that stopped local chat.
 #[derive(Debug, Error)]
@@ -69,8 +69,17 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
 
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
-    let memory = Arc::new(MemoryService::new(session.clone()));
-    let tools = build_tools(&settings, &workspace, &spill, None, Some(memory))?;
+    let memory = Arc::new(MemoryService::with_policy(
+        session.clone(),
+        memory_policy(&settings),
+    ));
+    let tools = build_tools(
+        &settings,
+        &workspace,
+        &spill,
+        None,
+        Some(Arc::clone(&memory)),
+    )?;
     let transport_key = format!("local:{}", OffsetDateTime::now_utc().unix_timestamp_nanos());
     let conversation = session.create_conversation("Chat", "local", transport_key.as_str())?;
     let agent = Agent::new(
@@ -86,7 +95,8 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
             tools,
             spill_dir: spill,
         },
-    );
+    )
+    .with_memory(memory);
 
     let stdin = std::io::stdin();
     let mut count: u64 = 0;

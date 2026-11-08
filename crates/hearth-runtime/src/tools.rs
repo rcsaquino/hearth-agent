@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hearth_config::Settings;
-use hearth_memory::{MemoryService, MemoryTool};
+use hearth_memory::{MemoryPolicy, MemoryService, MemoryTool};
 use hearth_model::Speaker;
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
@@ -31,6 +31,15 @@ pub enum ToolBuildError {
     Search(#[from] SearchError),
     #[error(transparent)]
     Fetch(#[from] FetchError),
+}
+
+/// Read the memory budgets from settings.
+pub fn memory_policy(settings: &Settings) -> MemoryPolicy {
+    MemoryPolicy {
+        standing_max_tokens: settings.memory.standing_max_tokens as usize,
+        recall_max_tokens: settings.memory.recall_max_tokens as usize,
+        recall_max_items: MemoryPolicy::default().recall_max_items,
+    }
 }
 
 /// Build the tools for one run.

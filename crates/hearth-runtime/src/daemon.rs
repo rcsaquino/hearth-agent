@@ -26,7 +26,7 @@ use crate::agent::{Agent, AgentConfig, AgentError, RunOutcome};
 use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::ipc::{self, StatusContext};
-use crate::tools::{MessageTarget, build_tools};
+use crate::tools::{MessageTarget, build_tools, memory_policy};
 use hearth_memory::MemoryService;
 
 #[derive(Debug, Error)]
@@ -241,7 +241,10 @@ impl TelegramRuntime {
             Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
-        let memory = Arc::new(MemoryService::new(session.clone()));
+        let memory = Arc::new(MemoryService::with_policy(
+            session.clone(),
+            memory_policy(&settings),
+        ));
         let worker = TelegramWorker {
             settings: Arc::clone(&settings),
             session,
@@ -418,7 +421,8 @@ impl TelegramWorker {
                 tools,
                 spill_dir: self.spill.clone(),
             },
-        );
+        )
+        .with_memory(Arc::clone(&self.memory));
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let typing_sender = self.sender.clone();

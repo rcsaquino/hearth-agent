@@ -10,6 +10,7 @@ use hearth_core::{
     CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session, StepOutput,
     Submission, SubmissionStatus, TerminalOutcome, parse_blocks,
 };
+use hearth_memory::MemoryService;
 use hearth_model::{ContentBlock, Pricing, Provider, StreamEvent, ToolCall, Usage};
 use hearth_tools::{ToolError, ToolRegistry};
 use serde_json::{Value, json};
@@ -59,6 +60,7 @@ pub struct Agent {
     provider: Arc<dyn Provider>,
     pricing: Pricing,
     config: AgentConfig,
+    memory: Option<Arc<MemoryService>>,
     reservations: Mutex<HashSet<String>>,
 }
 
@@ -75,8 +77,38 @@ impl Agent {
             provider,
             pricing,
             config,
+            memory: None,
             reservations: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Attach the memory library to this agent.
+    pub fn with_memory(mut self, memory: Arc<MemoryService>) -> Self {
+        self.memory = Some(memory);
+        self
+    }
+
+    fn memory_context(&self, query: Option<&str>) -> (String, String) {
+        let Some(memory) = &self.memory else {
+            return (String::new(), String::new());
+        };
+        let standing = match memory.standing() {
+            Ok(standing) => memory.render_standing(&standing.items),
+            Err(error) => {
+                tracing::warn!(%error, "standing memory could not be read");
+                String::new()
+            }
+        };
+        let recall = query
+            .and_then(|query| match memory.recall(query) {
+                Ok(items) => Some(memory.render_recall(&items)),
+                Err(error) => {
+                    tracing::warn!(%error, "memory recall failed");
+                    None
+                }
+            })
+            .unwrap_or_default();
+        (standing, recall)
     }
 
     fn reserve(&self, conversation_id: &str) -> Result<Reservation<'_>, AgentError> {
@@ -228,13 +260,14 @@ impl Agent {
                 "Current time: {now}. Conversation: {}. Model: {}.",
                 submission.conversation_id, self.config.model
             );
+            let (standing, recall) = self.memory_context(latest_user_text(&history).as_deref());
             let prompt = self.session.build_prompt(PromptInput {
                 soul: self.config.soul.clone(),
                 conversation_id: submission.conversation_id.clone(),
                 model: self.config.model.clone(),
                 tools: self.config.tools.specs(),
-                standing: String::new(),
-                recall: String::new(),
+                standing,
+                recall,
                 runtime_note,
             })?;
             let prompt_text = serde_json::to_string(&prompt.document)
@@ -717,6 +750,19 @@ fn write_private(path: &std::path::Path, content: &str) -> std::io::Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
+}
+
+fn latest_user_text(history: &[Entry]) -> Option<String> {
+    let entry = history.iter().rev().find(|entry| entry.kind == "user")?;
+    let text = parse_blocks(&entry.content)
+        .into_iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.trim().is_empty()).then_some(text)
 }
 
 fn has_usage(usage: Usage) -> bool {
