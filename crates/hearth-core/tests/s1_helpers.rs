@@ -101,3 +101,57 @@ fn helper_tasks_can_be_listed_newest_first() {
     assert_eq!(tasks[0].id, second.id);
     assert_eq!(tasks[1].id, first.id);
 }
+
+#[test]
+fn helper_retention_archives_runs_beyond_the_newest_limit() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let parent = session
+        .create_conversation("Parent", "telegram", "42:0")
+        .expect("parent");
+    let now = session.now_micros();
+    for index in 0..30 {
+        let helper = session
+            .create_conversation_with_parent(
+                "Helper",
+                "helper",
+                format!("helper:{index}:{now}"),
+                &parent.id,
+            )
+            .expect("helper conversation");
+        session
+            .create_task(
+                NewTask::new(
+                    "helper",
+                    1,
+                    "run",
+                    json!({"parent_conversation_id": parent.id, "brief": format!("job {index}")}),
+                )
+                .conversation(&helper.id),
+            )
+            .expect("helper task");
+    }
+    let future = now.saturating_add(100_i64 * 86_400_000_000);
+    let pruned = session
+        .prune_helpers(30, 25, future)
+        .expect("prune helpers");
+    assert_eq!(pruned, 5);
+    let tasks = session.tasks_by_kind("helper").expect("tasks");
+    assert_eq!(tasks.len(), 30);
+    let archived = tasks
+        .iter()
+        .filter(|task| {
+            task.conversation_id
+                .as_deref()
+                .and_then(|id| session.conversation(id).ok().flatten())
+                .map(|conversation| conversation.archived)
+                .unwrap_or(false)
+        })
+        .count();
+    assert_eq!(archived, 5);
+    let parent = session
+        .conversation(&parent.id)
+        .expect("parent lookup")
+        .expect("parent exists");
+    assert!(!parent.archived);
+}
