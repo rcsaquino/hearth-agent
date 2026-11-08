@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
-use hearth_memory::MemoryService;
+use hearth_memory::{MemoryService, MemorySource};
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
 use serde_json::json;
 use thiserror::Error;
@@ -73,30 +73,8 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         session.clone(),
         memory_policy(&settings),
     ));
-    let tools = build_tools(
-        &settings,
-        &workspace,
-        &spill,
-        None,
-        Some(Arc::clone(&memory)),
-    )?;
     let transport_key = format!("local:{}", OffsetDateTime::now_utc().unix_timestamp_nanos());
     let conversation = session.create_conversation("Chat", "local", transport_key.as_str())?;
-    let agent = Agent::new(
-        session.clone(),
-        provider,
-        Pricing::default(),
-        AgentConfig {
-            soul,
-            model: models.model.clone(),
-            provider_name: models.kind.clone(),
-            owner: format!("chat:{}", std::process::id()),
-            max_turns: settings.agent.max_turns,
-            tools,
-            spill_dir: spill,
-        },
-    )
-    .with_memory(memory);
 
     let stdin = std::io::stdin();
     let mut count: u64 = 0;
@@ -114,6 +92,32 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
             "input",
             json!({"text": text}),
         )?;
+        let memory_source = session
+            .latest_user_entry_id(&conversation.id)?
+            .map(MemorySource::user);
+        let tools = build_tools(
+            &settings,
+            &workspace,
+            &spill,
+            None,
+            Some(Arc::clone(&memory)),
+            memory_source,
+        )?;
+        let agent = Agent::new(
+            session.clone(),
+            Arc::clone(&provider),
+            Pricing::default(),
+            AgentConfig {
+                soul: soul.clone(),
+                model: models.model.clone(),
+                provider_name: models.kind.clone(),
+                owner: format!("chat:{}", std::process::id()),
+                max_turns: settings.agent.max_turns,
+                tools,
+                spill_dir: spill.clone(),
+            },
+        )
+        .with_memory(Arc::clone(&memory));
         match agent.run_submission(&submitted.submission.id) {
             Ok(outcome) => {
                 if let Some(answer) = outcome.answer_text {

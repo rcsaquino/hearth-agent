@@ -27,7 +27,7 @@ use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::ipc::{self, StatusContext};
 use crate::tools::{MessageTarget, build_tools, memory_policy};
-use hearth_memory::MemoryService;
+use hearth_memory::{MemoryService, MemorySource};
 
 #[derive(Debug, Error)]
 pub enum DaemonError {
@@ -398,12 +398,19 @@ impl TelegramWorker {
             outbound: self.outbound.clone(),
             speaker: self.speaker.clone(),
         };
+        let memory_source = self
+            .session
+            .latest_user_entry_id(&submission.conversation_id)
+            .ok()
+            .flatten()
+            .map(MemorySource::user);
         let tools = match build_tools(
             &self.settings,
             &self.workspace,
             &self.spill,
             Some(target),
             Some(Arc::clone(&self.memory)),
+            memory_source,
         ) {
             Ok(tools) => tools,
             Err(error) => {
