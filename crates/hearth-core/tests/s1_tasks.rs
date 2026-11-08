@@ -961,3 +961,32 @@ fn recovery_records_a_wake_commit() {
     assert_eq!(latest.kind, "task.wake");
     assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
 }
+
+#[test]
+fn a_heartbeat_does_not_advance_the_save_sequence() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("task is runnable");
+
+    let before = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("claim commit");
+
+    session
+        .heartbeat_task(&task.id, "worker-a", 60_000_000)
+        .expect("heartbeat");
+
+    let after = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("claim commit");
+    assert_eq!(after, before);
+}
