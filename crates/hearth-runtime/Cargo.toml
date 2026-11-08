@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 hearth-config = { path = "../hearth-config" }
 hearth-core = { path = "../hearth-core" }
+hearth-memory = { path = "../hearth-memory" }
 hearth-model = { path = "../hearth-model" }
 hearth-storage = { version = "0.1.0", path = "../hearth-storage" }
 hearth-telegram = { path = "../hearth-telegram" }

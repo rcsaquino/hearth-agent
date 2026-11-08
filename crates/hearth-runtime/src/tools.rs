@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hearth_config::Settings;
+use hearth_memory::{MemoryService, MemoryTool};
 use hearth_model::Speaker;
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
@@ -38,6 +39,7 @@ pub fn build_tools(
     workspace: &Path,
     spill: &Path,
     message: Option<MessageTarget>,
+    memory: Option<Arc<MemoryService>>,
 ) -> Result<ToolRegistry, ToolBuildError> {
     let mut tools: Vec<Arc<dyn hearth_tools::Tool>> = vec![
         Arc::new(FileTool::new(workspace, spill)),
@@ -45,6 +47,9 @@ pub fn build_tools(
         Arc::new(build_web_search(settings)?),
         Arc::new(build_web_fetch(settings)?),
     ];
+    if let Some(memory) = memory {
+        tools.push(Arc::new(MemoryTool::new(memory)));
+    }
     if let Some(target) = message {
         tools.push(Arc::new(MessageTool::new(
             target.sender,

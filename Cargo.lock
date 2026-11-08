@@ -654,6 +654,16 @@ dependencies = [
 [[package]]
 name = "hearth-memory"
 version = "0.1.0"
+dependencies = [
+ "hearth-core",
+ "hearth-model",
+ "hearth-storage",
+ "hearth-tools",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
 
 [[package]]
 name = "hearth-model"
@@ -673,6 +683,7 @@ version = "0.1.0"
 dependencies = [
  "hearth-config",
  "hearth-core",
+ "hearth-memory",
  "hearth-model",
  "hearth-storage",
  "hearth-telegram",

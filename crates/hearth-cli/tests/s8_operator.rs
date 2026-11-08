@@ -1472,4 +1472,8 @@ fn chat_runs_one_line_through_the_real_provider_adapter() {
         tool_names.contains(&"web_fetch"),
         "chat tools were: {tool_names:?}"
     );
+    assert!(
+        tool_names.contains(&"memory"),
+        "chat tools were: {tool_names:?}"
+    );
 }

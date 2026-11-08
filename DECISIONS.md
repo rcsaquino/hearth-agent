@@ -566,3 +566,27 @@ local fake-server and fixture tests.
   today_cost_micros, cache_read_tokens, input_tokens, cache_hit_rate,
   memory_items, standing_memory_version, last_skill_review. Memory and skill
   values stay zero until their milestones.
+
+## 2026-11-08: Memory store and tool (M4a)
+
+- Memory writes go through the save path. A conversation save can mix entries and
+  memory changes; the memory service uses a conversation-free `save_memory` that
+  still writes one commit (kind `memory`).
+- Each memory change writes a `memory_events` row with the actor and the old and
+  new content hashes. The hash is UUIDv5 of the content.
+- The exact-duplicate fingerprint is UUIDv5 of the cleaned, lowercased content.
+  Near duplicates merge when token Jaccard similarity is at least 0.85. A merge
+  takes the maximum importance and the union of tags.
+- A superseding memory inserts the new row and marks the old row `superseded`
+  with `valid_to` set to the save time, in the same save.
+- Forget keeps the row as a `deleted` tombstone, explicitly removes its FTS5 entry
+  after the update trigger reindexes, and writes a forget event.
+- Pin sets `standing` to `pinned`; unpin returns it to `none`.
+- Secret rejection is hand-coded: common key prefixes, bot-token-shaped strings,
+  and key=value pairs for api_key, apikey, token, password, or secret with an
+  eight-character or longer value that is not an environment reference.
+- The memory tool actions are search, get, save, update, forget, pin, stats, and
+  as_of. Search returns compact lines; get returns provenance; as_of accepts
+  RFC3339 or YYYY-MM-DD and reads the state valid at that instant.
+- The memory tool is in the local chat and daemon registries. Standing-memory
+  prompt injection and automatic recall are M4b; extraction is M4c.

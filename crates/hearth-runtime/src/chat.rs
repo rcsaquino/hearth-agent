@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
+use hearth_memory::MemoryService;
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
 use serde_json::json;
 use thiserror::Error;
@@ -65,10 +66,11 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         None => home.join("workspace"),
     };
     let spill = home.join("spill");
-    let tools = build_tools(&settings, &workspace, &spill, None)?;
 
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
+    let memory = Arc::new(MemoryService::new(session.clone()));
+    let tools = build_tools(&settings, &workspace, &spill, None, Some(memory))?;
     let transport_key = format!("local:{}", OffsetDateTime::now_utc().unix_timestamp_nanos());
     let conversation = session.create_conversation("Chat", "local", transport_key.as_str())?;
     let agent = Agent::new(

@@ -27,6 +27,7 @@ use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::ipc::{self, StatusContext};
 use crate::tools::{MessageTarget, build_tools};
+use hearth_memory::MemoryService;
 
 #[derive(Debug, Error)]
 pub enum DaemonError {
@@ -240,9 +241,11 @@ impl TelegramRuntime {
             Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
+        let memory = Arc::new(MemoryService::new(session.clone()));
         let worker = TelegramWorker {
             settings: Arc::clone(&settings),
             session,
+            memory,
             provider,
             sender,
             speaker,
@@ -264,6 +267,7 @@ impl TelegramRuntime {
 struct TelegramWorker {
     settings: Arc<Settings>,
     session: Session,
+    memory: Arc<MemoryService>,
     provider: Arc<dyn Provider>,
     sender: TelegramSender,
     speaker: Option<Arc<dyn Speaker>>,
@@ -388,7 +392,13 @@ impl TelegramWorker {
             outbound: self.outbound.clone(),
             speaker: self.speaker.clone(),
         };
-        let tools = match build_tools(&self.settings, &self.workspace, &self.spill, Some(target)) {
+        let tools = match build_tools(
+            &self.settings,
+            &self.workspace,
+            &self.spill,
+            Some(target),
+            Some(Arc::clone(&self.memory)),
+        ) {
             Ok(tools) => tools,
             Err(error) => {
                 tracing::warn!(%error, "telegram tools could not be built");
