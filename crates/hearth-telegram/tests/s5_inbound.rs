@@ -223,7 +223,16 @@ fn setup(
     let session = harness.session().clone();
     let client = TelegramClient::with_base_url("123:fake", bot.base_url.clone()).expect("client");
     let media = InboundMedia::new(home.path().join("media/inbound"));
-    let poller = TelegramPoller::new(client, session, vec![42], vec![], 0, media, transcriber);
+    let poller = TelegramPoller::new(
+        client,
+        session,
+        vec![42],
+        vec![],
+        0,
+        media,
+        transcriber,
+        None,
+    );
     (home, harness, poller)
 }
 

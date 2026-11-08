@@ -202,6 +202,7 @@ fn setup(
         0,
         media,
         None,
+        None,
     );
     (home, harness, poller)
 }

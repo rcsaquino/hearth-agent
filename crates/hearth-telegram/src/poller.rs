@@ -25,12 +25,18 @@ pub enum PollError {
     Core(#[from] CoreError),
 }
 
+/// A handler asked to stop the active run in a chat.
+pub trait StopHandler: Send + Sync {
+    fn stop(&self, chat_id: i64) -> bool;
+}
+
 /// What one poll changed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PollReport {
     pub admitted: usize,
     pub duplicates: usize,
     pub ignored: usize,
+    pub stopped: usize,
     pub next_offset: i64,
 }
 
@@ -43,6 +49,7 @@ pub struct TelegramPoller {
     poll_timeout: u32,
     media: InboundMedia,
     transcriber: Option<Arc<dyn Transcriber>>,
+    stop: Option<Arc<dyn StopHandler>>,
 }
 
 impl TelegramPoller {
@@ -56,6 +63,7 @@ impl TelegramPoller {
         poll_timeout: u32,
         media: InboundMedia,
         transcriber: Option<Arc<dyn Transcriber>>,
+        stop: Option<Arc<dyn StopHandler>>,
     ) -> Self {
         Self {
             client,
@@ -65,6 +73,7 @@ impl TelegramPoller {
             poll_timeout,
             media,
             transcriber,
+            stop,
         }
     }
 
@@ -98,6 +107,32 @@ impl TelegramPoller {
                 );
                 self.session.set_telegram_offset(next_offset)?;
                 report.ignored += 1;
+                continue;
+            }
+            if message
+                .text
+                .as_deref()
+                .is_some_and(|text| text.trim().eq_ignore_ascii_case("stop"))
+            {
+                let recorded = self.session.record_telegram_update(
+                    TelegramUpdate {
+                        update_id: update.update_id,
+                        chat_id: message.chat.id,
+                        message_id: message.message_id,
+                    },
+                    next_offset,
+                )?;
+                if !recorded {
+                    self.session.set_telegram_offset(next_offset)?;
+                    report.duplicates += 1;
+                    continue;
+                }
+                let active = self
+                    .stop
+                    .as_ref()
+                    .is_some_and(|handler| handler.stop(message.chat.id));
+                tracing::info!(chat_id = message.chat.id, active, "telegram stop");
+                report.stopped += 1;
                 continue;
             }
             if self.session.telegram_update_seen(update.update_id)? {

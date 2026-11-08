@@ -207,6 +207,7 @@ impl TelegramRuntime {
             30,
             InboundMedia::new(home.join("media/inbound")),
             transcriber,
+            None,
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
         let worker = TelegramWorker {
