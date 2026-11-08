@@ -210,3 +210,33 @@ fn the_audit_document_has_five_segments() {
     );
     assert_eq!(prompt.document["runtime"], "RUNTIME NOTE");
 }
+
+#[test]
+fn saving_the_same_prompt_twice_reuses_the_hash() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+    let text = serde_json::to_string(&prompt.document).expect("serialize prompt");
+
+    let first = session.save_prompt_blob(&text).expect("save prompt");
+    let second = session.save_prompt_blob(&text).expect("save prompt again");
+    assert_eq!(first, second);
+
+    let latest = session
+        .latest_prompt()
+        .expect("latest prompt")
+        .expect("a prompt exists");
+    assert_eq!(latest.hash, first);
+    assert_eq!(latest.text, text);
+}
