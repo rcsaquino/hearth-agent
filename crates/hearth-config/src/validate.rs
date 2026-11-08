@@ -209,7 +209,10 @@ impl WebFetch {
 }
 
 fn is_fetch_provider(name: &str) -> bool {
-    matches!(name, "jina" | "http" | "https" | "tinyfish" | "firecrawl" | "deepseek")
+    matches!(
+        name,
+        "jina" | "http" | "https" | "tinyfish" | "firecrawl" | "deepseek"
+    )
 }
 
 impl WebSearch {

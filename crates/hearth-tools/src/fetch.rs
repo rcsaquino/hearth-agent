@@ -98,9 +98,8 @@ impl Tool for WebFetchTool {
             .ok_or_else(|| ToolError::invalid("invalid_arguments", "url is required"))?;
         let parsed = Url::parse(url)
             .map_err(|error| ToolError::invalid("invalid_url", format!("invalid URL: {error}")))?;
-        validate_target(&parsed, self.allow_loopback).map_err(|error| {
-            ToolError::invalid("blocked_address", error.message)
-        })?;
+        validate_target(&parsed, self.allow_loopback)
+            .map_err(|error| ToolError::invalid("blocked_address", error.message))?;
         if self.providers.is_empty() {
             return Err(ToolError::invalid(
                 "no_provider",
@@ -122,12 +121,13 @@ impl Tool for WebFetchTool {
                         }
                         continue;
                     }
-                    let mut content = format!(
-                        "Provider: {}\nURL: {}",
-                        provider.name(),
-                        result.final_url
-                    );
-                    if let Some(title) = result.title.as_deref().filter(|title| !title.trim().is_empty()) {
+                    let mut content =
+                        format!("Provider: {}\nURL: {}", provider.name(), result.final_url);
+                    if let Some(title) = result
+                        .title
+                        .as_deref()
+                        .filter(|title| !title.trim().is_empty())
+                    {
                         content.push_str(&format!("\nTitle: {title}"));
                     }
                     content.push_str(&format!(
@@ -148,8 +148,8 @@ impl Tool for WebFetchTool {
             }
         }
 
-        let error = first_error
-            .unwrap_or_else(|| FetchError::permanent("every web fetch provider failed"));
+        let error =
+            first_error.unwrap_or_else(|| FetchError::permanent("every web fetch provider failed"));
         Err(ToolError {
             code: "fetch_failed".to_owned(),
             message: error.message,
@@ -184,7 +184,9 @@ impl JinaFetch {
             .timeout(timeout)
             .user_agent("Hearth/0.1")
             .build()
-            .map_err(|error| FetchError::permanent(format!("could not build the HTTP client: {error}")))?;
+            .map_err(|error| {
+                FetchError::permanent(format!("could not build the HTTP client: {error}"))
+            })?;
         Ok(Self {
             base: base.into(),
             api_key,
@@ -263,7 +265,9 @@ impl HttpFetch {
             .gzip(true)
             .brotli(true)
             .build()
-            .map_err(|error| FetchError::permanent(format!("could not build the HTTP client: {error}")))?;
+            .map_err(|error| {
+                FetchError::permanent(format!("could not build the HTTP client: {error}"))
+            })?;
         Ok(Self {
             name,
             allow_loopback,
@@ -361,9 +365,9 @@ fn read_capped(mut reader: impl Read, max_bytes: usize) -> Result<Capped, FetchE
     let mut buffer = [0u8; 8192];
     let mut truncated = false;
     loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| FetchError::temporary(format!("could not read the response: {error}")))?;
+        let read = reader.read(&mut buffer).map_err(|error| {
+            FetchError::temporary(format!("could not read the response: {error}"))
+        })?;
         if read == 0 {
             break;
         }
@@ -431,7 +435,9 @@ pub(crate) fn validate_target(url: &Url, allow_loopback: bool) -> Result<(), Fet
         ));
     }
     if !url.username().is_empty() || url.password().is_some() {
-        return Err(FetchError::permanent("URLs with user information are not allowed"));
+        return Err(FetchError::permanent(
+            "URLs with user information are not allowed",
+        ));
     }
     let host = url
         .host_str()
@@ -447,9 +453,10 @@ pub(crate) fn validate_target(url: &Url, allow_loopback: bool) -> Result<(), Fet
         return check_ip(address, allow_loopback);
     }
     let mut found = false;
-    for address in (host, port).to_socket_addrs().map_err(|error| {
-        FetchError::permanent(format!("could not resolve {host}: {error}"))
-    })? {
+    for address in (host, port)
+        .to_socket_addrs()
+        .map_err(|error| FetchError::permanent(format!("could not resolve {host}: {error}")))?
+    {
         found = true;
         check_ip(address.ip(), allow_loopback)?;
     }

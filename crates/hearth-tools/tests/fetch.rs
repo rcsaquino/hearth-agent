@@ -92,7 +92,9 @@ fn serve(replies: Vec<Reply>) -> Server {
                 response.push_str(&format!("{name}: {value}\r\n"));
             }
             response.push_str("\r\n");
-            stream.write_all(response.as_bytes()).expect("write headers");
+            stream
+                .write_all(response.as_bytes())
+                .expect("write headers");
             stream.write_all(&reply.body).expect("write body");
             captured.push(Captured { path, headers });
         }
@@ -114,9 +116,17 @@ fn jina_is_tried_first_and_labels_untrusted_content() {
     let output = tool
         .call(&json!({"url": "https://93.184.216.34/page"}))
         .expect("fetch");
-    assert!(output.content.contains("Provider: jina"), "{}", output.content);
+    assert!(
+        output.content.contains("Provider: jina"),
+        "{}",
+        output.content
+    );
     assert!(output.content.contains("URL: https://93.184.216.34/page"));
-    assert!(output.content.contains("[Untrusted web content from https://93.184.216.34/page."));
+    assert!(
+        output
+            .content
+            .contains("[Untrusted web content from https://93.184.216.34/page.")
+    );
     assert!(output.content.contains("# Hello"));
     assert!(output.content.contains("World"));
 
@@ -128,9 +138,8 @@ fn jina_is_tried_first_and_labels_untrusted_content() {
 #[test]
 fn jina_sends_an_optional_api_key() {
     let jina = serve(vec![reply(200, "text/plain", "content")]);
-    let provider = Arc::new(
-        JinaFetch::new(jina.base.clone(), Some("jina-key".to_owned())).expect("jina"),
-    );
+    let provider =
+        Arc::new(JinaFetch::new(jina.base.clone(), Some("jina-key".to_owned())).expect("jina"));
     let tool = WebFetchTool::new(vec![provider], false);
     tool.call(&json!({"url": "https://93.184.216.34/page"}))
         .expect("fetch");
@@ -160,7 +169,11 @@ fn jina_failure_falls_back_to_direct_html() {
     ];
     let tool = WebFetchTool::new(providers, true);
     let output = tool.call(&json!({"url": target})).expect("fetch");
-    assert!(output.content.contains("Provider: http"), "{}", output.content);
+    assert!(
+        output.content.contains("Provider: http"),
+        "{}",
+        output.content
+    );
     assert!(output.content.contains("Hello"));
     assert!(output.content.contains("World"));
     assert!(!output.content.contains("bad()"));
@@ -181,12 +194,15 @@ fn direct_pdf_text_is_extracted() {
     )]);
     let target = target(&direct, "/sample.pdf");
     let provider = Arc::new(
-        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5))
-            .expect("direct"),
+        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5)).expect("direct"),
     );
     let tool = WebFetchTool::new(vec![provider], true);
     let output = tool.call(&json!({"url": target})).expect("fetch");
-    assert!(output.content.contains("Hello Hearth PDF"), "{}", output.content);
+    assert!(
+        output.content.contains("Hello Hearth PDF"),
+        "{}",
+        output.content
+    );
     direct.thread.join().expect("direct thread");
 }
 
@@ -195,8 +211,7 @@ fn redirects_are_followed_to_the_final_url() {
     let direct = serve(vec![redirect("/next"), reply(200, "text/plain", "done")]);
     let target = target(&direct, "/start");
     let provider = Arc::new(
-        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5))
-            .expect("direct"),
+        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5)).expect("direct"),
     );
     let tool = WebFetchTool::new(vec![provider], true);
     let output = tool.call(&json!({"url": target})).expect("fetch");
@@ -217,12 +232,15 @@ fn too_many_redirects_are_refused() {
     ]);
     let target = target(&direct, "/start");
     let provider = Arc::new(
-        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5))
-            .expect("direct"),
+        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5)).expect("direct"),
     );
     let tool = WebFetchTool::new(vec![provider], true);
     let error = tool.call(&json!({"url": target})).expect_err("redirects");
-    assert!(error.message.contains("too many redirects"), "{}", error.message);
+    assert!(
+        error.message.contains("too many redirects"),
+        "{}",
+        error.message
+    );
     direct.thread.join().expect("direct thread");
 }
 
@@ -230,9 +248,8 @@ fn too_many_redirects_are_refused() {
 fn the_page_cap_truncates_and_notes_it() {
     let direct = serve(vec![reply(200, "text/plain", "a".repeat(100))]);
     let target = target(&direct, "/big");
-    let provider = Arc::new(
-        HttpFetch::new("http", true, 32, 3, Duration::from_secs(5)).expect("direct"),
-    );
+    let provider =
+        Arc::new(HttpFetch::new("http", true, 32, 3, Duration::from_secs(5)).expect("direct"));
     let tool = WebFetchTool::new(vec![provider], true);
     let output = tool.call(&json!({"url": target})).expect("fetch");
     assert!(output.content.contains("[page truncated at 32 bytes]"));
@@ -282,11 +299,12 @@ fn an_unsupported_content_type_is_an_error() {
     let direct = serve(vec![reply(200, "application/x-unknown", "abc")]);
     let target = target(&direct, "/file");
     let provider = Arc::new(
-        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5))
-            .expect("direct"),
+        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(5)).expect("direct"),
     );
     let tool = WebFetchTool::new(vec![provider], true);
-    let error = tool.call(&json!({"url": target})).expect_err("content type");
+    let error = tool
+        .call(&json!({"url": target}))
+        .expect_err("content type");
     assert!(
         error.message.contains("unsupported content type"),
         "{}",

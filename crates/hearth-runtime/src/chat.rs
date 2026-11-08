@@ -192,7 +192,6 @@ fn build_web_search(settings: &hearth_config::Settings) -> Result<WebSearchTool,
     ))
 }
 
-
 fn build_web_fetch(settings: &hearth_config::Settings) -> Result<WebFetchTool, FetchError> {
     let fetch = settings
         .web
