@@ -1,5 +1,6 @@
 //! Hearth tools: confined file and shell capabilities.
 
+mod fetch;
 mod file_tool;
 mod file_write;
 mod search;
@@ -8,6 +9,7 @@ mod shell_tool;
 mod tool;
 mod workspace;
 
+pub use fetch::{FetchError, FetchProvider, FetchResult, HttpFetch, JinaFetch, WebFetchTool};
 pub use file_tool::FileTool;
 pub use file_write::FileWrite;
 pub use search::{SearchError, SearchProvider, SearchResult, WebSearchTool};
