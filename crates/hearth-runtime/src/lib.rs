@@ -17,6 +17,7 @@ pub mod maintenance;
 mod memory_extract;
 mod prompt_audit;
 mod scheduler;
+pub mod service;
 pub mod skill_review;
 pub mod skills;
 mod stats;
