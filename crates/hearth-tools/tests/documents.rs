@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use hearth_tools::DocumentsTool;
+use hearth_tools::{DocumentsTool, Tool};
 use serde_json::json;
 use tempfile::TempDir;
 use zip::write::SimpleFileOptions;
@@ -12,10 +12,10 @@ fn roots() -> (TempDir, PathBuf, PathBuf, PathBuf) {
     let directory = TempDir::new().expect("temp directory");
     let workspace = directory.path().join("workspace");
     let spill = directory.path().join("spill");
-    let media = directory.path().join("media/inbound/2026-11-09");
+    let media = directory.path().join("media/inbound");
     fs::create_dir_all(&workspace).expect("workspace");
     fs::create_dir_all(&spill).expect("spill");
-    fs::create_dir_all(&media).expect("media");
+    fs::create_dir_all(media.join("2026-11-09")).expect("media");
     (directory, workspace, spill, media)
 }
 
@@ -131,18 +131,26 @@ fn extracts_pdf_docx_pptx_and_xlsx() {
 fn reads_the_inbound_media_root_and_rejects_escapes() {
     let (_directory, workspace, spill, media) = roots();
     let documents = tool(&workspace, &spill, &media);
-    let inbound = media.join("incoming.docx");
+    let inbound = media.join("2026-11-09/incoming.docx");
     write_docx(&inbound);
 
     let relative = documents
         .call(&json!({"path": "media/2026-11-09/incoming.docx"}))
         .expect("media-relative extraction");
-    assert!(relative.content.contains("Hello DOCX"), "{}", relative.content);
+    assert!(
+        relative.content.contains("Hello DOCX"),
+        "{}",
+        relative.content
+    );
 
     let absolute = documents
         .call(&json!({"path": inbound.to_string_lossy()}))
         .expect("absolute inbound extraction");
-    assert!(absolute.content.contains("Hello DOCX"), "{}", absolute.content);
+    assert!(
+        absolute.content.contains("Hello DOCX"),
+        "{}",
+        absolute.content
+    );
 
     let escape = documents
         .call(&json!({"path": "../outside.docx"}))

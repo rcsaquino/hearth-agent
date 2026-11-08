@@ -14,11 +14,12 @@ pub struct DirEntryInfo {
     pub size: u64,
 }
 
-/// A workspace root plus an optional spill root for oversized output.
+/// A workspace root plus optional spill and inbound-media roots for reads.
 #[derive(Debug, Clone)]
 pub struct Workspace {
     root: PathBuf,
     spill: PathBuf,
+    media: Option<PathBuf>,
 }
 
 impl Workspace {
@@ -27,6 +28,20 @@ impl Workspace {
         Self {
             root: root.into(),
             spill: spill.into(),
+            media: None,
+        }
+    }
+
+    /// Build a workspace with an additional read-only inbound-media root.
+    pub fn with_media(
+        root: impl Into<PathBuf>,
+        spill: impl Into<PathBuf>,
+        media: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            root: root.into(),
+            spill: spill.into(),
+            media: Some(media.into()),
         }
     }
 
@@ -36,10 +51,13 @@ impl Workspace {
         Self {
             root: root.clone(),
             spill: root,
+            media: None,
         }
     }
 
-    /// Read a text file. A path starting with `spill/` reads the spill root.
+    /// Read a text file. A path starting with `spill/` reads the spill root,
+    /// `media/` reads the inbound-media root, and an absolute path must live
+    /// under one of the configured roots.
     pub fn read_text(&self, path: &str) -> Result<String, ToolError> {
         let target = self.resolve_read(path)?;
         if !target.is_file() {
@@ -49,6 +67,18 @@ impl Workspace {
             ));
         }
         fs::read_to_string(&target).map_err(ToolError::from)
+    }
+
+    /// Read file bytes under the workspace, spill, or inbound-media root.
+    pub fn read_bytes(&self, path: &str) -> Result<Vec<u8>, ToolError> {
+        let target = self.resolve_read(path)?;
+        if !target.is_file() {
+            return Err(ToolError::invalid(
+                "not_a_file",
+                format!("not a file: {path}"),
+            ));
+        }
+        fs::read(&target).map_err(ToolError::from)
     }
 
     /// Write a text file under the workspace root.
@@ -124,6 +154,15 @@ impl Workspace {
     }
 
     fn resolve_read(&self, path: &str) -> Result<PathBuf, ToolError> {
+        if Path::new(path).is_absolute() {
+            let target = fs::canonicalize(path)
+                .map_err(|_| ToolError::invalid("not_found", format!("not found: {path}")))?;
+            let roots = self.read_roots()?;
+            if !roots.iter().any(|root| target.starts_with(root)) {
+                return Err(escape(path));
+            }
+            return Ok(target);
+        }
         let (root, relative) = self.split_read(path)?;
         let root = fs::canonicalize(&root)
             .map_err(|_| ToolError::invalid("missing_root", "the root does not exist"))?;
@@ -133,6 +172,22 @@ impl Workspace {
             return Err(escape(path));
         }
         Ok(target)
+    }
+
+    fn read_roots(&self) -> Result<Vec<PathBuf>, ToolError> {
+        let mut roots = vec![
+            fs::canonicalize(&self.root).map_err(|_| {
+                ToolError::invalid("missing_root", "the workspace root does not exist")
+            })?,
+            fs::canonicalize(&self.spill)
+                .map_err(|_| ToolError::invalid("missing_root", "the spill root does not exist"))?,
+        ];
+        if let Some(media) = &self.media {
+            roots.push(fs::canonicalize(media).map_err(|_| {
+                ToolError::invalid("missing_root", "the media root does not exist")
+            })?);
+        }
+        Ok(roots)
     }
 
     fn resolve_write(&self, path: &str) -> Result<PathBuf, ToolError> {
@@ -203,6 +258,21 @@ impl Workspace {
                 ));
             }
             return Ok((self.spill.clone(), rest));
+        }
+        if let Some(Component::Normal(first)) = relative.components().next()
+            && first == "media"
+        {
+            let media = self.media.as_ref().ok_or_else(|| {
+                ToolError::invalid("invalid_path", "the inbound-media root is not configured")
+            })?;
+            let rest: PathBuf = relative.components().skip(1).collect();
+            if rest.as_os_str().is_empty() {
+                return Err(ToolError::invalid(
+                    "invalid_path",
+                    "a media path needs a file name",
+                ));
+            }
+            return Ok((media.clone(), rest));
         }
         Ok((self.root.clone(), relative))
     }
