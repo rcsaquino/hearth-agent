@@ -583,7 +583,9 @@ impl Session {
         self.storage
             .write(move |writer| -> Result<Option<ClaimedTask>, CoreError> {
                 let row: Option<RawClaim> = writer.query_optional(
-                    "SELECT id, kind, phase, attempt, input_json, checkpoint_json FROM tasks                      WHERE status = 'pending' AND (next_wake_at IS NULL OR next_wake_at <= ?)                      ORDER BY COALESCE(next_wake_at, created_at), id LIMIT 1",
+                    "SELECT id, kind, phase, attempt, input_json, checkpoint_json FROM tasks \
+                     WHERE status = 'pending' AND (next_wake_at IS NULL OR next_wake_at <= ?) \
+                     ORDER BY COALESCE(next_wake_at, created_at), id LIMIT 1",
                     (now,),
                     |row| {
                         Ok(RawClaim {
