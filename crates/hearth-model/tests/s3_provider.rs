@@ -389,3 +389,23 @@ fn client_errors_do_not_retry() {
     server.request();
     server.finish();
 }
+
+#[test]
+fn malformed_sse_is_a_protocol_error() {
+    let server = FakeServer::start(vec![TestResponse::raw(
+        200,
+        "OK",
+        "text/event-stream",
+        "data: not-json\n\n",
+    )]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let mut stream = provider.stream(request()).expect("stream");
+    let error = match stream.next() {
+        Some(Err(error)) => error,
+        other => panic!("expected a protocol error, got {other:?}"),
+    };
+    assert!(matches!(error, hearth_model::ProviderError::Protocol(_)));
+    assert!(stream.next().is_none());
+    server.request();
+    server.finish();
+}
