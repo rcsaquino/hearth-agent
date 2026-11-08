@@ -167,3 +167,25 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - A claim clears `next_wake_at`, because a running task is no longer asleep.
 - `Session::latest_commit` exposes the newest line in the save log for diagnostics
   and tests.
+
+## 2026-11-08: M1b-2a effect records
+
+- Effect intents are part of a save. The save inserts each intent in the same
+  transaction as its entries, documents, submissions, and settlements, and returns
+  the ids in `Commit.effect_ids` in intent order.
+- A duplicate `(kind, key)` reuses the existing effect row and returns its id. The
+  first intent wins; the duplicate does not overwrite the payload or status.
+- The save allocates its sequence before the changes and inserts the commit row
+  last, so a failure anywhere in the save leaves no commit row, no effect row, and
+  no sequence gap. Effect intents are inserted before that final commit row.
+- Beginning, finishing, failing, and requeueing an effect are saves. Each inserts a
+  `commits` row with the effect's task id when present and one of
+  `effect.started`, `effect.done`, `effect.failed`, `effect.retry`, or
+  `effect.requeued`.
+- A retryable failure returns the effect to `intent` with the error in `result` and
+  no settled time, preserving attempts. A non-retryable failure settles it as
+  `failed` with the error and a settled time.
+- Requeue is the crash-recovery path for a started effect. It returns the effect to
+  `intent`, preserves attempts, payload, and task, and clears the settled time.
+- Effect execution, retry policies, workspace confinement, and the daemon worker
+  are M1b-2b. Crash injection is M1c.
