@@ -26,6 +26,14 @@ struct FakeApi {
 
 impl FakeApi {
     fn start(updates: Vec<Value>) -> Self {
+        Self::start_with(updates, false)
+    }
+
+    fn start_one_per_poll(updates: Vec<Value>) -> Self {
+        Self::start_with(updates, true)
+    }
+
+    fn start_with(updates: Vec<Value>, one_per_poll: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake api");
         listener.set_nonblocking(true).expect("nonblocking");
         let address = listener.local_addr().expect("address");
@@ -47,6 +55,7 @@ impl FakeApi {
                             &updates,
                             &reaction_fails,
                             &shutdown,
+                            one_per_poll,
                         ),
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(5));
@@ -87,6 +96,7 @@ fn handle_connection(
     updates: &Arc<Mutex<Vec<Value>>>,
     reaction_fails: &Arc<AtomicBool>,
     shutdown: &Arc<AtomicBool>,
+    one_per_poll: bool,
 ) {
     let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
     let mut writer = stream.try_clone().expect("clone stream");
@@ -146,8 +156,17 @@ fn handle_connection(
         });
 
         let response = if method == "getUpdates" {
-            let updates = updates.lock().expect("updates").clone();
-            json!({"ok": true, "result": updates})
+            let result = if one_per_poll {
+                let mut queued = updates.lock().expect("updates");
+                if queued.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![queued.remove(0)]
+                }
+            } else {
+                updates.lock().expect("updates").clone()
+            };
+            json!({"ok": true, "result": result})
         } else if method == "setMessageReaction" {
             if reaction_fails.load(Ordering::Relaxed) {
                 json!({"ok": false, "error_code": 500, "description": "synthetic reaction failure"})
@@ -205,6 +224,23 @@ fn setup(
         None,
     );
     (home, harness, poller)
+}
+
+fn seed_queue(session: &hearth_core::Session, key: &str, count: usize) -> String {
+    let conversation = session
+        .create_conversation("Busy", "telegram", key)
+        .expect("create busy conversation");
+    for index in 0..count {
+        session
+            .submit(
+                &conversation.id,
+                &format!("seed:{index}"),
+                "input",
+                json!({"text": format!("queued {index}")}),
+            )
+            .expect("seed submission");
+    }
+    conversation.id
 }
 
 #[test]
@@ -527,5 +563,186 @@ fn an_unauthorized_stop_does_not_call_the_handler() {
     assert_eq!(report.ignored, 1);
     assert!(stop.calls.lock().expect("stop calls").is_empty());
     assert_eq!(harness.session().telegram_offset().expect("offset"), 62);
+    api.stop();
+}
+
+#[test]
+fn a_full_queue_gets_one_busy_notice() {
+    let api = FakeApi::start_one_per_poll(vec![update(42, 1, 20, 42, json!("hello"))]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+    let conversation = seed_queue(harness.session(), "1:0", 10);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.busy, 1);
+    assert_eq!(report.admitted, 0);
+    assert_eq!(report.next_offset, 43);
+    let session = harness.session();
+    assert_eq!(session.telegram_offset().expect("offset"), 43);
+    assert!(session.telegram_update_seen(42).expect("seen"));
+    assert!(
+        session
+            .submission_by_request_id("tg:1:20")
+            .expect("submission")
+            .is_none()
+    );
+    assert_eq!(
+        session
+            .queued_submission_count(&conversation)
+            .expect("queued count"),
+        10
+    );
+    let requests = api.requests();
+    let busy: Vec<&Request> = requests
+        .iter()
+        .filter(|request| request.method == "sendMessage")
+        .collect();
+    assert_eq!(busy.len(), 1);
+    assert_eq!(busy[0].body["chat_id"], 1);
+    assert!(
+        busy[0].body["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("busy")),
+        "busy body was {:?}",
+        busy[0].body
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.method != "setMessageReaction")
+    );
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_second_message_over_the_cap_does_not_notice_again() {
+    let api = FakeApi::start_one_per_poll(vec![
+        update(1, 1, 20, 42, json!("one")),
+        update(2, 1, 21, 42, json!("two")),
+    ]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+    let conversation = seed_queue(harness.session(), "1:0", 10);
+
+    let first = poller.poll_once().expect("first poll");
+    assert_eq!(first.busy, 1);
+    let second = poller.poll_once().expect("second poll");
+    assert_eq!(second.busy, 1);
+    let session = harness.session();
+    assert_eq!(session.telegram_offset().expect("offset"), 3);
+    assert_eq!(
+        session
+            .queued_submission_count(&conversation)
+            .expect("queued count"),
+        10
+    );
+    let notices = api
+        .requests()
+        .iter()
+        .filter(|request| request.method == "sendMessage")
+        .count();
+    assert_eq!(notices, 1);
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_queue_below_the_cap_admits_and_clears_the_busy_flag() {
+    let api = FakeApi::start_one_per_poll(vec![
+        update(1, 1, 20, 42, json!("one")),
+        update(2, 1, 21, 42, json!("two")),
+    ]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+    let conversation = seed_queue(harness.session(), "1:0", 10);
+
+    let first = poller.poll_once().expect("first poll");
+    assert_eq!(first.busy, 1);
+    let session = harness.session();
+    let queued = session
+        .submission_by_request_id("seed:0")
+        .expect("lookup")
+        .expect("seeded submission");
+    session
+        .settle(&queued.id, SubmissionStatus::Cancelled, None)
+        .expect("settle one");
+
+    let second = poller.poll_once().expect("second poll");
+    assert_eq!(second.busy, 0);
+    assert_eq!(second.admitted, 1);
+    assert!(
+        session
+            .submission_by_request_id("tg:1:21")
+            .expect("submission")
+            .is_some()
+    );
+    assert_eq!(
+        session
+            .queued_submission_count(&conversation)
+            .expect("queued count"),
+        10
+    );
+    let notices = api
+        .requests()
+        .iter()
+        .filter(|request| request.method == "sendMessage")
+        .count();
+    assert_eq!(notices, 1);
+    let reactions = api
+        .requests()
+        .iter()
+        .filter(|request| request.method == "setMessageReaction")
+        .count();
+    assert_eq!(reactions, 1);
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_busy_notice_carries_the_thread_id() {
+    let mut value = update(1, 1, 20, 42, json!("hello"));
+    value["message"]["message_thread_id"] = json!(7);
+    let api = FakeApi::start_one_per_poll(vec![value]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+    seed_queue(harness.session(), "1:7", 10);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.busy, 1);
+    let notice = api
+        .requests()
+        .into_iter()
+        .find(|request| request.method == "sendMessage")
+        .expect("busy notice");
+    assert_eq!(notice.body["message_thread_id"], 7);
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_busy_attachment_is_not_downloaded() {
+    let mut value = update(1, 1, 20, 42, json!("hello"));
+    value["message"]["photo"] = json!([{
+        "file_id": "photo-1",
+        "file_unique_id": "photo-1",
+        "width": 10,
+        "height": 10,
+        "file_size": 10
+    }]);
+    let api = FakeApi::start_one_per_poll(vec![value]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+    seed_queue(harness.session(), "1:0", 10);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.busy, 1);
+    let requests = api.requests();
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.method != "getFile")
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.method != "setMessageReaction")
+    );
+    drop(poller);
     api.stop();
 }
