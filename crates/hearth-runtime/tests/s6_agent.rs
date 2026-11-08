@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::time::Duration;
 
 use hearth_core::{Harness, NewTask, Submission, SubmissionStatus, TaskStatus};
 use hearth_model::{
@@ -60,14 +62,18 @@ fn conversation(harness: &Harness) -> String {
 }
 
 fn submit(harness: &Harness, conversation: &str) -> Submission {
+    submit_with(harness, conversation, "req-1")
+}
+
+fn submit_with(harness: &Harness, conversation: &str, request_id: &str) -> Submission {
     harness
         .session()
-        .submit(conversation, "req-1", "input", json!({"text": "hi"}))
+        .submit(conversation, request_id, "input", json!({"text": "hi"}))
         .expect("submit")
         .submission
 }
 
-fn agent(harness: &Harness, provider: Arc<ScriptedProvider>, pricing: Pricing) -> Agent {
+fn agent<P: Provider + 'static>(harness: &Harness, provider: Arc<P>, pricing: Pricing) -> Agent {
     Agent::new(
         harness.session().clone(),
         provider,
@@ -316,4 +322,74 @@ fn a_thinking_only_response_settles_unanswered() {
         .expect("read task")
         .expect("task exists");
     assert_eq!(task.status, TaskStatus::Failed);
+}
+
+struct BlockingProvider {
+    started: Mutex<mpsc::Sender<()>>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+
+impl Provider for BlockingProvider {
+    fn stream(&self, _request: ChatRequest) -> Result<ProviderStream, ProviderError> {
+        self.started
+            .lock()
+            .expect("started lock")
+            .send(())
+            .expect("signal start");
+        self.release
+            .lock()
+            .expect("release lock")
+            .recv_timeout(Duration::from_secs(2))
+            .expect("release first run");
+        Ok(Box::new(
+            vec![
+                Ok(StreamEvent::TextDelta("done".to_owned())),
+                Ok(StreamEvent::Done {
+                    finish_reason: Some("stop".to_owned()),
+                }),
+            ]
+            .into_iter(),
+        ))
+    }
+}
+
+#[test]
+fn two_concurrent_runs_cannot_enter_one_conversation() {
+    let (_home, harness) = harness();
+    let conversation = conversation(&harness);
+    let first = submit_with(&harness, &conversation, "req-1");
+    let second = submit_with(&harness, &conversation, "req-2");
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let provider = Arc::new(BlockingProvider {
+        started: Mutex::new(started_tx),
+        release: Mutex::new(release_rx),
+    });
+    let agent = Arc::new(agent(&harness, provider, Pricing::default()));
+
+    let first_id = first.id.clone();
+    let runner = Arc::clone(&agent);
+    let handle = thread::spawn(move || runner.run_submission(&first_id));
+
+    started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("first run did not start");
+    let error = agent
+        .run_submission(&second.id)
+        .expect_err("a second run in the same conversation must be busy");
+    assert!(matches!(error, AgentError::Busy));
+
+    release_tx.send(()).expect("release first run");
+    let first_outcome = handle
+        .join()
+        .expect("join first run")
+        .expect("first run result");
+    assert_eq!(first_outcome.submission.status, SubmissionStatus::Done);
+
+    let after = harness
+        .session()
+        .submission_by_id(&second.id)
+        .expect("read second submission")
+        .expect("second submission exists");
+    assert_eq!(after.status, SubmissionStatus::Queued);
 }
