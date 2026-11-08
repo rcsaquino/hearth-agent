@@ -170,3 +170,33 @@ fn falls_back_to_entities_when_the_rich_message_is_rejected() {
     assert_eq!(link["length"], 4);
     assert_eq!(link["url"], "https://example.com");
 }
+
+#[test]
+fn splits_a_long_rejected_reply_into_marked_parts() {
+    let markdown = format!("```rust\n{}\n```", "a".repeat(10_000));
+    let server = Server::start(vec![
+        error(400, 400, "too long for rich", None),
+        ok(),
+        ok(),
+        ok(),
+    ]);
+    let (sender, _) = sender(&server.base);
+    let outcome = sender.send_reply(42, &markdown).expect("send");
+    assert_eq!(outcome, SendOutcome::Fallback { parts: 3 });
+    let requests = server.finish();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[0].method, "sendRichMessage");
+    let mut total_units = 0;
+    for (index, request) in requests.iter().skip(1).enumerate() {
+        assert_eq!(request.method, "sendMessage");
+        let text = request.body["text"].as_str().expect("text");
+        assert!(text.encode_utf16().count() <= 4096, "part too long");
+        assert!(text.ends_with(&format!("({}/{})", index + 1, 3)), "missing marker: {text:?}");
+        total_units += text.encode_utf16().count();
+        let has_pre = request.body["entities"]
+            .as_array()
+            .is_some_and(|entities| entities.iter().any(|entity| entity["type"] == "pre"));
+        assert!(has_pre, "part lost its pre entity");
+    }
+    assert!(total_units >= 10_000);
+}
