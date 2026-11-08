@@ -131,7 +131,32 @@ fn required(
 }
 
 fn system_timezone() -> Option<String> {
-    std::env::var("TZ").ok().filter(|value| !value.is_empty())
+    if let Some(value) = std::env::var("TZ").ok().filter(|value| !value.is_empty()) {
+        return Some(value);
+    }
+    if let Some(zone) = timezone_from_localtime(Path::new("/etc/localtime")) {
+        return Some(zone);
+    }
+    std::fs::read_to_string("/etc/timezone")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn timezone_from_target(target: &Path) -> Option<String> {
+    let target = target.to_str()?;
+    let (_, zone) = target.rsplit_once("/zoneinfo/")?;
+    let zone = zone.trim_matches('/');
+    if zone.is_empty() {
+        None
+    } else {
+        Some(zone.to_owned())
+    }
+}
+
+fn timezone_from_localtime(path: &Path) -> Option<String> {
+    let target = std::fs::read_link(path).ok()?;
+    timezone_from_target(&target)
 }
 
 #[cfg(unix)]
@@ -147,4 +172,47 @@ fn open_settings(path: &Path) -> std::io::Result<File> {
 #[cfg(not(unix))]
 fn open_settings(path: &Path) -> std::io::Result<File> {
     OpenOptions::new().write(true).create_new(true).open(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_a_zone_from_an_absolute_zoneinfo_target() {
+        assert_eq!(
+            timezone_from_target(Path::new("/usr/share/zoneinfo/Asia/Manila")),
+            Some("Asia/Manila".to_owned())
+        );
+    }
+
+    #[test]
+    fn extracts_a_zone_from_a_relative_zoneinfo_target() {
+        assert_eq!(
+            timezone_from_target(Path::new("../usr/share/zoneinfo/Etc/UTC")),
+            Some("Etc/UTC".to_owned())
+        );
+    }
+
+    #[test]
+    fn ignores_a_target_outside_zoneinfo() {
+        assert_eq!(timezone_from_target(Path::new("/etc/localtime")), None);
+    }
+
+    #[test]
+    fn ignores_an_empty_target() {
+        assert_eq!(timezone_from_target(Path::new("")), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reads_a_zone_from_a_localtime_symlink() {
+        let directory = tempfile::TempDir::new().expect("temp dir");
+        let link = directory.path().join("localtime");
+        std::os::unix::fs::symlink("/usr/share/zoneinfo/Asia/Manila", &link).expect("symlink");
+        assert_eq!(
+            timezone_from_localtime(&link),
+            Some("Asia/Manila".to_owned())
+        );
+    }
 }

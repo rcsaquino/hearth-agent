@@ -51,6 +51,7 @@ fn init_home(home: &std::path::Path) {
         .args(["--base-url", "https://example.com/v1"])
         .args(["--api-key", "fake-key"])
         .args(["--model", "fake-model"])
+        .args(["--timezone", "UTC"])
         .output()
         .expect("run init");
     assert!(
@@ -318,6 +319,7 @@ fn init_creates_a_working_home() {
         .args(["--base-url", "https://opencode.ai/inference/go/openai/v1"])
         .args(["--api-key", "fake-key"])
         .args(["--model", "fake-model"])
+        .args(["--timezone", "UTC"])
         .output()
         .expect("run hearth");
     assert!(
@@ -387,6 +389,32 @@ fn init_creates_a_working_home() {
         "doctor failed: {}",
         String::from_utf8_lossy(&doctor.stderr)
     );
+}
+
+#[test]
+fn init_uses_the_timezone_from_the_environment() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let output = hearth()
+        .args(["init", "--non-interactive"])
+        .arg("--home")
+        .arg(home.path())
+        .args(["--telegram-token", "123:fake-token"])
+        .args(["--allowed-user-id", "42"])
+        .args(["--base-url", "https://example.com/v1"])
+        .args(["--api-key", "fake-key"])
+        .args(["--model", "fake-model"])
+        .env("TZ", "Asia/Manila")
+        .output()
+        .expect("run hearth");
+    assert!(
+        output.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let settings =
+        std::fs::read_to_string(home.path().join("settings.json")).expect("read settings");
+    let json: serde_json::Value = serde_json::from_str(&settings).expect("settings JSON");
+    assert_eq!(json["identity"]["timezone"], "Asia/Manila");
 }
 
 #[test]
