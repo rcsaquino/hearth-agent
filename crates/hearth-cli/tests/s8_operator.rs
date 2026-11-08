@@ -418,6 +418,31 @@ fn init_uses_the_timezone_from_the_environment() {
 }
 
 #[test]
+fn init_creates_the_default_soul() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+
+    let soul_path = home.path().join("SOUL.md");
+    let soul = std::fs::read_to_string(&soul_path).expect("read SOUL.md");
+    assert!(soul.contains("# Identity"), "missing Identity section");
+    assert!(soul.contains("# Voice"), "missing Voice section");
+    assert!(soul.contains("# Rules"), "missing Rules section");
+    assert!(soul.contains("Hearth"), "missing agent name");
+    assert!(soul.contains("User"), "missing user name");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&soul_path)
+            .expect("SOUL metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "SOUL mode was {mode:o}");
+    }
+}
+
+#[test]
 fn init_refuses_to_overwrite_an_existing_settings_file() {
     let home = tempfile::TempDir::new().expect("temp home");
     init_home(home.path());
