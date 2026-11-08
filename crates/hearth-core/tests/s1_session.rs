@@ -635,3 +635,45 @@ fn settling_with_an_error_records_the_reason() {
     assert_eq!(settled.status, SubmissionStatus::Unanswered);
     assert_eq!(settled.error, Some(json!({"reason": "turn_limit"})));
 }
+
+#[test]
+fn queued_submissions_returns_only_queued_in_order() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let other = session
+        .create_conversation("Other", "local", "local:2")
+        .expect("create conversation");
+
+    let first = session
+        .submit(&conversation.id, "req-1", "input", json!({"text": "one"}))
+        .expect("submit first")
+        .submission;
+    let second = session
+        .submit(&conversation.id, "req-2", "input", json!({"text": "two"}))
+        .expect("submit second")
+        .submission;
+    let third = session
+        .submit(&conversation.id, "req-3", "input", json!({"text": "three"}))
+        .expect("submit third")
+        .submission;
+    session
+        .submit(&other.id, "req-4", "input", json!({"text": "other"}))
+        .expect("submit other");
+    session
+        .begin_submission(&first.id)
+        .expect("begin first submission");
+
+    let queued = session
+        .queued_submissions(&conversation.id)
+        .expect("queued submissions");
+    assert_eq!(
+        queued
+            .iter()
+            .map(|submission| submission.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![second.id.as_str(), third.id.as_str()]
+    );
+}
