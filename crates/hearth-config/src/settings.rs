@@ -73,6 +73,10 @@ pub struct Models {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    #[serde(default = "default_context_window")]
+    pub context_window: u64,
+    #[serde(default = "default_max_output_tokens")]
+    pub max_output_tokens: u64,
     #[serde(default)]
     pub session_header: Option<String>,
     #[serde(default)]
@@ -253,6 +257,12 @@ pub struct Compaction {
     pub idle_minutes: u64,
     #[serde(default = "default_idle_min_tokens")]
     pub idle_min_tokens: u64,
+    #[serde(default = "default_soft_compact")]
+    pub soft_compact: f64,
+    #[serde(default = "default_hard_compact")]
+    pub hard_compact: f64,
+    #[serde(default = "default_keep_recent_tokens")]
+    pub keep_recent_tokens: u64,
 }
 
 impl Default for Compaction {
@@ -260,6 +270,9 @@ impl Default for Compaction {
         Self {
             idle_minutes: default_idle_minutes(),
             idle_min_tokens: default_idle_min_tokens(),
+            soft_compact: default_soft_compact(),
+            hard_compact: default_hard_compact(),
+            keep_recent_tokens: default_keep_recent_tokens(),
         }
     }
 }
@@ -354,6 +367,26 @@ fn default_search_max_results() -> u8 {
 
 fn default_max_turns() -> u32 {
     30
+}
+
+fn default_context_window() -> u64 {
+    128_000
+}
+
+fn default_max_output_tokens() -> u64 {
+    8_192
+}
+
+fn default_soft_compact() -> f64 {
+    0.65
+}
+
+fn default_hard_compact() -> f64 {
+    0.85
+}
+
+fn default_keep_recent_tokens() -> u64 {
+    24_000
 }
 
 fn default_idle_minutes() -> u64 {

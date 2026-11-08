@@ -77,6 +77,21 @@ impl Settings {
             "compaction.idle_min_tokens",
             self.compaction.idle_min_tokens,
         )?;
+        if !(self.compaction.soft_compact.is_finite()
+            && self.compaction.soft_compact > 0.0
+            && self.compaction.soft_compact < self.compaction.hard_compact)
+        {
+            return Err(invalid(
+                "compaction.soft_compact must be greater than 0 and below compaction.hard_compact",
+            ));
+        }
+        if !(self.compaction.hard_compact.is_finite() && self.compaction.hard_compact < 1.0) {
+            return Err(invalid("compaction.hard_compact must be below 1"));
+        }
+        positive(
+            "compaction.keep_recent_tokens",
+            self.compaction.keep_recent_tokens,
+        )?;
         positive(
             "memory.standing_max_tokens",
             self.memory.standing_max_tokens,
@@ -286,6 +301,8 @@ impl Models {
         }
         require("models.api_key", &self.api_key)?;
         require("models.model", &self.model)?;
+        positive("models.context_window", self.context_window)?;
+        positive("models.max_output_tokens", self.max_output_tokens)?;
         if let Some(header) = &self.session_header {
             require("models.session_header", header)?;
         }
