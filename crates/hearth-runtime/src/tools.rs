@@ -13,7 +13,7 @@ use hearth_model::{
 };
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
-    BraveSearch, DeepSeekFetch, DeepSeekSearch, DocumentsTool, ExaSearch, FetchError,
+    BraveSearch, BrowserTool, DeepSeekFetch, DeepSeekSearch, DocumentsTool, ExaSearch, FetchError,
     FetchProvider, FileTool, FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, MediaTool,
     SearchError, SearchProvider, ShellTool, TinyFishFetch, TinyFishSearch, Tool, ToolRegistry,
     WebFetchTool, WebSearchTool,
@@ -183,11 +183,18 @@ fn groups_for(
     let media_tools: Vec<Arc<dyn Tool>> = build_media_tool(settings, workspace, spill, media)
         .map(|tool| vec![Arc::new(tool) as Arc<dyn Tool>])
         .unwrap_or_default();
+    let browser_tools: Vec<Arc<dyn Tool>> = BrowserTool::new(
+        std::env::var("CAMOFOX_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:9377".to_owned()),
+        workspace.to_path_buf(),
+        Duration::from_secs(30),
+    )
+    .map(|tool| vec![Arc::new(tool) as Arc<dyn Tool>])
+    .unwrap_or_default();
     ToolGroups::new(vec![
         ToolGroup::new(
             "browser",
             "Browse and interact with web pages that plain fetch cannot reach.",
-            Vec::new(),
+            browser_tools,
         ),
         ToolGroup::new(
             "documents",
