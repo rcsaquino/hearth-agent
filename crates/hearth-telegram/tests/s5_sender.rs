@@ -250,3 +250,19 @@ fn sends_a_typing_action() {
     assert_eq!(requests[0].body["chat_id"], 42);
     assert_eq!(requests[0].body["action"], "typing");
 }
+
+#[test]
+fn spaces_rapid_sends_by_at_least_one_interval() {
+    let server = Server::start(vec![ok(), ok()]);
+    let (sender, sleeper) = sender(&server.base);
+    sender.send_reply(42, "one").expect("first");
+    sender.send_reply(42, "two").expect("second");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    let sleeps = sleeper.sleeps.lock().expect("sleeps");
+    assert!(
+        sleeps.iter().any(|delay| *delay >= Duration::from_millis(33)),
+        "no send interval: {:?}",
+        *sleeps
+    );
+}
