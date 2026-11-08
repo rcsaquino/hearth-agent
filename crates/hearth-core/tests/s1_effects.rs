@@ -144,3 +144,31 @@ fn finishing_a_started_effect_settles_it_as_done() {
     assert_eq!(effect.result.expect("result")["bytes"], 5);
     assert!(effect.settled_at.is_some());
 }
+
+#[test]
+fn a_retryable_effect_failure_returns_it_to_intent() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
+        )
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+    session.begin_effect(&id).expect("begin effect");
+
+    session
+        .fail_effect(&id, json!({"message": "temporary"}), true)
+        .expect("record retryable failure");
+
+    let effect = session
+        .effect(&id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Intent);
+    assert_eq!(effect.result.expect("result")["message"], "temporary");
+    assert_eq!(effect.settled_at, None);
+    assert_eq!(effect.attempts, 1);
+}
