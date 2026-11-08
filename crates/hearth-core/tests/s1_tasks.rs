@@ -990,3 +990,40 @@ fn a_heartbeat_does_not_advance_the_save_sequence() {
         .expect("claim commit");
     assert_eq!(after, before);
 }
+
+#[test]
+fn claiming_a_task_clears_its_wake_time() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("first claim")
+        .expect("task is runnable");
+    session
+        .finish_task(
+            &task.id,
+            "worker-a",
+            StepOutput::Failed {
+                error: json!({"message": "again"}),
+                retryable: true,
+            },
+        )
+        .expect("retryable failure");
+    clock.advance(2_000_000);
+
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("second claim")
+        .expect("task is due");
+
+    let running = session
+        .task(&task.id)
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(running.status, TaskStatus::Running);
+    assert!(running.next_wake_at.is_none());
+}
