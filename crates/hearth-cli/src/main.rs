@@ -45,6 +45,8 @@ struct EvalArgs {
 enum EvalCommand {
     /// Run the memory recall benchmark.
     Memory(MemoryEvalArgs),
+    /// Run the 100-turn token-efficiency benchmark.
+    Tokens(TokensEvalArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -55,6 +57,13 @@ struct MemoryEvalArgs {
     /// Also run the large-library retrieval check, for example 200k.
     #[arg(long, value_name = "COUNT")]
     scale: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+struct TokensEvalArgs {
+    /// Print the report as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -199,6 +208,45 @@ fn run_eval(args: EvalArgs) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        EvalCommand::Tokens(args) => {
+            let report = hearth_eval::tokens_bench::run()?;
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_tokens_report(&report);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn print_tokens_report(report: &hearth_eval::tokens_bench::TokensReport) {
+    println!(
+        "token benchmark: {} turns, {} compactions, {} summary tokens",
+        report.turns, report.compactions, report.summary_tokens
+    );
+    for target in &report.targets {
+        println!(
+            "{}: {:.3} {} (target {:.3}) {}",
+            target.name,
+            target.measured,
+            target.unit,
+            target.target,
+            if target.met { "met" } else { "missed" }
+        );
+    }
+    println!(
+        "fixed overhead p95/max: {}/{} tokens; prompt tokens p95: {}; cache hit turns: {}",
+        report.fixed_overhead_p95,
+        report.fixed_overhead_max,
+        report.prompt_tokens_p95,
+        report.cache_hit_turns
+    );
+    for (name, total) in &report.token_totals {
+        println!("  {name}: {total} tokens");
+    }
+    for note in &report.deferred {
+        println!("deferred: {note}");
     }
 }
 

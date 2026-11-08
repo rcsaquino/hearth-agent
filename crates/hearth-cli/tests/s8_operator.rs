@@ -1733,3 +1733,24 @@ fn stats_marks_a_priced_model() {
         0
     );
 }
+
+#[test]
+fn eval_tokens_reports_the_100_turn_run() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let output = hearth()
+        .args(["eval", "tokens", "--json"])
+        .env("HEARTH_HOME", home.path())
+        .output()
+        .expect("run eval tokens");
+    assert!(
+        output.status.success(),
+        "eval tokens failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse eval tokens JSON");
+    assert_eq!(report["turns"], 100);
+    assert_eq!(report["per_turn"].as_array().expect("per turn").len(), 100);
+    assert!(report["targets"].as_array().expect("targets").len() >= 5);
+    assert_eq!(report["prefix_stable"], true);
+}
