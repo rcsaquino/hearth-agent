@@ -196,7 +196,9 @@ fn as_of_reads_the_state_at_a_time() {
     let between = session.now_micros();
     let mut next = input("Sam lives in Quezon City", MemoryKind::Fact);
     next.supersedes = Some(old.id.clone());
-    next.valid_from = Some(session.now_micros());
+    // Keep the new fact strictly after the observation time; otherwise a coarse
+    // clock can place both facts on the same microsecond.
+    next.valid_from = Some(between + 1);
     service.save(next).expect("new");
 
     let past = service.as_of(None, between).expect("as of past");
