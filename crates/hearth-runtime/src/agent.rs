@@ -204,11 +204,7 @@ impl Agent {
             );
         }
         if text.is_empty() {
-            return self.settle_failure(
-                &submission,
-                &claimed.id,
-                "The model returned no answer.",
-            );
+            return self.settle_failure(&submission, &claimed.id, "The model returned no answer.");
         }
 
         let mut blocks = Vec::new();

@@ -1323,7 +1323,6 @@ fn daemon_stops_retrying_a_retryable_effect_after_three_attempts() {
     assert_eq!(result["retryable"], false);
 }
 
-
 fn fake_sse_server(answer: &str) -> (String, thread::JoinHandle<Option<serde_json::Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
     listener
@@ -1370,8 +1369,7 @@ fn fake_sse_server(answer: &str) -> (String, thread::JoinHandle<Option<serde_jso
         }
         let mut body = vec![0u8; content_length];
         reader.read_exact(&mut body).expect("request body");
-        let request: serde_json::Value =
-            serde_json::from_slice(&body).expect("request JSON");
+        let request: serde_json::Value = serde_json::from_slice(&body).expect("request JSON");
 
         let mut response = String::from(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
