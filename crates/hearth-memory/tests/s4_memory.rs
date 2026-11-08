@@ -481,7 +481,7 @@ fn recall_ranks_a_recent_important_match_above_an_old_weak_one() {
         .save(input_imp(
             "coffee preference recent",
             MemoryKind::Preference,
-            90,
+            80,
         ))
         .expect("recent");
     let recalled = service.recall("coffee").expect("recall");
@@ -576,7 +576,7 @@ fn recall_finds_a_memory_by_tag() {
 }
 
 #[test]
-fn recall_includes_standing_items() {
+fn standing_items_are_in_l3_not_recall() {
     let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
     let pinned = service
         .save(input_imp("Use metric units", MemoryKind::Rule, 50))
@@ -585,8 +585,13 @@ fn recall_includes_standing_items() {
     service
         .save(input_imp("coffee note alpha", MemoryKind::Fact, 60))
         .expect("save");
+    let standing = service.standing().expect("standing");
+    assert!(standing.items.iter().any(|item| item.id == pinned.id));
     let recalled = service.recall("coffee").expect("recall");
-    assert!(recalled.iter().any(|item| item.id == pinned.id));
+    assert!(
+        !recalled.iter().any(|item| item.id == pinned.id),
+        "standing memory crowded the recall: {recalled:#?}"
+    );
 }
 
 #[test]
