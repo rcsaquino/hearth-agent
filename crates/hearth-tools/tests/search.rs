@@ -1,0 +1,134 @@
+use std::collections::HashMap;
+use std::io::{BufRead, Read, Write};
+use std::net::TcpListener;
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
+
+use hearth_tools::{ExaSearch, SearchProvider, WebSearchTool};
+use serde_json::{Value, json};
+
+struct Captured {
+    path: String,
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+struct Server {
+    base: String,
+    thread: JoinHandle<Captured>,
+}
+
+struct Reply {
+    status: u16,
+    content_type: &'static str,
+    body: String,
+}
+
+fn serve(reply: Reply) -> Server {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
+    let base = format!("http://{}", listener.local_addr().expect("local addr"));
+    let thread = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut reader = std::io::BufReader::new(stream.try_clone().expect("clone stream"));
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).expect("request line");
+        let path = request_line
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or_default()
+            .to_owned();
+        let mut headers = HashMap::new();
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("header line");
+            if line == "\r\n" || line == "\n" || line.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                headers.insert(name.trim().to_lowercase(), value.trim().to_owned());
+            }
+        }
+        let length = headers
+            .get("content-length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        let mut body = vec![0u8; length];
+        if length > 0 {
+            reader.read_exact(&mut body).expect("request body");
+        }
+        let body = String::from_utf8_lossy(&body).to_string();
+        let response = format!(
+            "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            reply.status,
+            reply.content_type,
+            reply.body.len(),
+            reply.body
+        );
+        stream.write_all(response.as_bytes()).expect("write reply");
+        Captured {
+            path,
+            headers,
+            body,
+        }
+    });
+    Server { base, thread }
+}
+
+fn sse(payload: Value) -> Reply {
+    Reply {
+        status: 200,
+        content_type: "text/event-stream",
+        body: format!("data: {payload}\n\n"),
+    }
+}
+
+fn json_reply(payload: Value) -> Reply {
+    Reply {
+        status: 200,
+        content_type: "application/json",
+        body: payload.to_string(),
+    }
+}
+
+fn exa_mcp_payload() -> Value {
+    let inner = json!({
+        "results": [{
+            "title": "Example",
+            "url": "https://example.com/a",
+            "publishedDate": "2026-01-02T00:00:00.000Z",
+            "highlights": ["A useful snippet"]
+        }]
+    });
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "content": [{"type": "text", "text": inner.to_string()}]
+        }
+    })
+}
+
+#[test]
+fn exa_mcp_streams_and_maps_results() {
+    let server = serve(sse(exa_mcp_payload()));
+    let provider: Arc<dyn SearchProvider> =
+        Arc::new(ExaSearch::new(server.base.clone(), server.base.clone(), None));
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("search call");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(value["results"][0]["title"], "Example");
+    assert_eq!(value["results"][0]["url"], "https://example.com/a");
+    assert_eq!(value["results"][0]["snippet"], "A useful snippet");
+    assert_eq!(value["results"][0]["date"], "2026-01-02T00:00:00.000Z");
+
+    let captured = server.thread.join().expect("server thread");
+    assert_eq!(captured.path, "/mcp?tools=web_search_advanced_exa");
+    let request: Value = serde_json::from_str(&captured.body).expect("json rpc body");
+    assert_eq!(request["method"], "tools/call");
+    assert_eq!(request["params"]["name"], "web_search_advanced_exa");
+    assert_eq!(request["params"]["arguments"]["query"], "rust");
+    assert_eq!(request["params"]["arguments"]["numResults"], 5);
+}
