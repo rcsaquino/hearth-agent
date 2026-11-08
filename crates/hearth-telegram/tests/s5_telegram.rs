@@ -19,7 +19,6 @@ struct Request {
 struct FakeApi {
     base_url: String,
     requests: Arc<Mutex<Vec<Request>>>,
-    updates: Arc<Mutex<Vec<Value>>>,
     reaction_fails: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -60,15 +59,10 @@ impl FakeApi {
         Self {
             base_url: format!("http://{address}"),
             requests,
-            updates,
             reaction_fails,
             shutdown,
             thread: Some(thread),
         }
-    }
-
-    fn set_updates(&self, updates: Vec<Value>) {
-        *self.updates.lock().expect("updates") = updates;
     }
 
     fn fail_reactions(&self, fail: bool) {
@@ -146,13 +140,10 @@ fn handle_connection(
         }
         let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
         let method = path.rsplit('/').next().unwrap_or_default().to_owned();
-        requests
-            .lock()
-            .expect("requests")
-            .push(Request {
-                method: method.clone(),
-                body: body.clone(),
-            });
+        requests.lock().expect("requests").push(Request {
+            method: method.clone(),
+            body: body.clone(),
+        });
 
         let response = if method == "getUpdates" {
             let updates = updates.lock().expect("updates").clone();
@@ -200,8 +191,8 @@ fn setup(
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("open harness");
     let session = harness.session().clone();
-    let client = TelegramClient::with_base_url("123:fake", api.base_url.clone())
-        .expect("telegram client");
+    let client =
+        TelegramClient::with_base_url("123:fake", api.base_url.clone()).expect("telegram client");
     let poller = TelegramPoller::new(client, session, allowed_users, allowed_chats, 0);
     (home, harness, poller)
 }
@@ -236,7 +227,10 @@ fn an_authorized_text_update_is_admitted() {
     assert!(session.telegram_update_seen(42).expect("seen"));
 
     let requests = api.requests();
-    let methods: Vec<&str> = requests.iter().map(|request| request.method.as_str()).collect();
+    let methods: Vec<&str> = requests
+        .iter()
+        .map(|request| request.method.as_str())
+        .collect();
     assert_eq!(methods, vec!["getUpdates", "setMessageReaction"]);
     assert_eq!(requests[0].body["offset"], 0);
     assert_eq!(requests[0].body["allowed_updates"][0], "message");
@@ -267,6 +261,166 @@ fn get_updates_sends_the_stored_offset_and_allowed_updates() {
     assert_eq!(
         requests[0].body["allowed_updates"],
         json!(["message", "callback_query"])
+    );
+
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_second_message_reuses_the_conversation() {
+    let api = FakeApi::start(vec![
+        update(1, 1, 10, 42, json!("first")),
+        update(2, 1, 11, 42, json!("second")),
+    ]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.admitted, 2);
+    let session = harness.session();
+    let first = session
+        .submission_by_request_id("tg:1:10")
+        .expect("submission")
+        .expect("first");
+    let second = session
+        .submission_by_request_id("tg:1:11")
+        .expect("submission")
+        .expect("second");
+    assert_eq!(first.conversation_id, second.conversation_id);
+    assert_eq!(
+        session
+            .history(&first.conversation_id)
+            .expect("history")
+            .len(),
+        2
+    );
+
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_replayed_update_is_not_admitted_twice() {
+    let api = FakeApi::start(vec![update(42, 1, 10, 42, json!("hello"))]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+
+    let first = poller.poll_once().expect("first poll");
+    assert_eq!(first.admitted, 1);
+    let second = poller.poll_once().expect("second poll");
+    assert_eq!(second.duplicates, 1);
+    assert_eq!(second.next_offset, 43);
+
+    let session = harness.session();
+    assert_eq!(session.telegram_offset().expect("offset"), 43);
+    let conversation = session
+        .conversation_by_transport("telegram", "1:0")
+        .expect("lookup")
+        .expect("conversation");
+    assert_eq!(session.history(&conversation.id).expect("history").len(), 1);
+    let reaction_count = api
+        .requests()
+        .iter()
+        .filter(|request| request.method == "setMessageReaction")
+        .count();
+    assert_eq!(reaction_count, 1);
+    let offsets: Vec<i64> = api
+        .requests()
+        .iter()
+        .filter(|request| request.method == "getUpdates")
+        .map(|request| request.body["offset"].as_i64().unwrap_or(-1))
+        .collect();
+    assert_eq!(offsets, vec![0, 43]);
+
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn an_unauthorized_sender_is_ignored() {
+    let api = FakeApi::start(vec![update(42, 1, 10, 7, json!("secret"))]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.ignored, 1);
+    let session = harness.session();
+    assert_eq!(session.telegram_offset().expect("offset"), 43);
+    assert!(
+        session
+            .conversation_by_transport("telegram", "1:0")
+            .expect("lookup")
+            .is_none()
+    );
+    assert!(
+        api.requests()
+            .iter()
+            .all(|request| request.method != "setMessageReaction")
+    );
+
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn an_unauthorized_chat_is_ignored() {
+    let api = FakeApi::start(vec![update(42, 1, 10, 42, json!("hello"))]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![999]);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.ignored, 1);
+    assert_eq!(harness.session().telegram_offset().expect("offset"), 43);
+    assert!(
+        harness
+            .session()
+            .conversation_by_transport("telegram", "1:0")
+            .expect("lookup")
+            .is_none()
+    );
+
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_non_text_update_is_ignored() {
+    let api = FakeApi::start(vec![json!({
+        "update_id": 42,
+        "message": {
+            "message_id": 10,
+            "chat": {"id": 1, "type": "private"},
+            "from": {"id": 42, "is_bot": false, "first_name": "Sam"}
+        }
+    })]);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.ignored, 1);
+    assert_eq!(harness.session().telegram_offset().expect("offset"), 43);
+    assert!(
+        harness
+            .session()
+            .conversation_by_transport("telegram", "1:0")
+            .expect("lookup")
+            .is_none()
+    );
+
+    drop(poller);
+    api.stop();
+}
+
+#[test]
+fn a_reaction_failure_does_not_block_admission() {
+    let api = FakeApi::start(vec![update(42, 1, 10, 42, json!("hello"))]);
+    api.fail_reactions(true);
+    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.admitted, 1);
+    assert!(
+        harness
+            .session()
+            .submission_by_request_id("tg:1:10")
+            .expect("submission")
+            .is_some()
     );
 
     drop(poller);
