@@ -127,3 +127,11 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - The daemon still uses the low-level `hearth_storage::open` for its lock and
   migration check. M1b will wire it to `Harness` so there is one session-facing
   writer path.
+
+## 2026-11-08: M1a.1 corrections
+
+- A read waits on a condition variable when all four pooled connections are busy,
+  then proceeds. It no longer fails with a closed-storage error.
+- A settlement's `answer_entry_id`, when present, must belong to the same
+  conversation as the submission. A foreign entry returns `EntryNotFound`, and the
+  submission stays unsettled.
