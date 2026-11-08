@@ -24,4 +24,15 @@ impl Settings {
         }
         Ok(())
     }
+
+    /// Validate that the settings can run a conversation.
+    pub fn validate_for_run(&self) -> Result<(), ConfigError> {
+        self.validate()?;
+        if self.models.is_none() {
+            return Err(invalid(
+                "models is not configured; add the models block or run hearth init",
+            ));
+        }
+        Ok(())
+    }
 }

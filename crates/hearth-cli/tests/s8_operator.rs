@@ -39,6 +39,25 @@ fn doctor_without_settings_fails_with_one_sentence() {
     );
 }
 
+fn init_home(home: &std::path::Path) {
+    let output = hearth()
+        .args(["init", "--non-interactive"])
+        .arg("--home")
+        .arg(home)
+        .args(["--telegram-token", "123:fake-token"])
+        .args(["--allowed-user-id", "42"])
+        .args(["--base-url", "https://example.com/v1"])
+        .args(["--api-key", "fake-key"])
+        .args(["--model", "fake-model"])
+        .output()
+        .expect("run init");
+    assert!(
+        output.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn write_settings(home: &std::path::Path, text: &str) {
     let path = home.join("settings.json");
     std::fs::write(&path, text).expect("write settings");
@@ -106,6 +125,7 @@ fn doctor_rejects_an_unknown_setting() {
 #[test]
 fn doctor_accepts_a_complete_settings_file() {
     let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
     write_settings(
         home.path(),
         r#"{
@@ -217,6 +237,7 @@ fn doctor_names_a_missing_environment_variable() {
 #[test]
 fn doctor_resolves_environment_references() {
     let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
     write_settings(
         home.path(),
         r#"{
@@ -281,4 +302,110 @@ fn doctor_refuses_settings_that_are_not_0600() {
     assert_eq!(line.lines().count(), 1, "expected one sentence: {text}");
     assert!(line.contains("mode"), "unexpected message: {line}");
     assert!(line.contains("600"), "unexpected message: {line}");
+}
+
+#[test]
+fn init_creates_a_working_home() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let output = hearth()
+        .args(["init", "--non-interactive"])
+        .arg("--home")
+        .arg(home.path())
+        .args(["--telegram-token", "123:fake-token"])
+        .args(["--allowed-user-id", "42"])
+        .args(["--base-url", "https://opencode.ai/inference/go/openai/v1"])
+        .args(["--api-key", "fake-key"])
+        .args(["--model", "fake-model"])
+        .output()
+        .expect("run hearth");
+    assert!(
+        output.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("fake-token"), "init echoed the token");
+    assert!(!stdout.contains("fake-key"), "init echoed the api key");
+
+    let settings_path = home.path().join("settings.json");
+    let settings = std::fs::read_to_string(&settings_path).expect("read settings");
+    let json: serde_json::Value = serde_json::from_str(&settings).expect("settings JSON");
+    assert_eq!(json["identity"]["agent_name"], "Hearth");
+    assert_eq!(json["identity"]["user_name"], "User");
+    assert_eq!(json["telegram"]["allowed_user_ids"][0], 42);
+    assert_eq!(json["models"]["session_header"], "x-opencode-session");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&settings_path)
+            .expect("settings metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "settings mode was {mode:o}");
+    }
+
+    for directory in [
+        "workspace",
+        "skills",
+        "skills/learned",
+        "media/inbound",
+        "media/outbound",
+        "spill",
+        "logs",
+        "backups",
+    ] {
+        assert!(
+            home.path().join(directory).is_dir(),
+            "missing directory {directory}"
+        );
+    }
+    let database = home.path().join("hearth.db");
+    assert!(database.is_file(), "missing database");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&database)
+            .expect("database metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "database mode was {mode:o}");
+    }
+
+    let doctor = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run doctor");
+    assert!(
+        doctor.status.success(),
+        "doctor failed: {}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+}
+
+#[test]
+fn init_refuses_to_overwrite_an_existing_settings_file() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let output = hearth()
+        .args(["init", "--non-interactive"])
+        .arg("--home")
+        .arg(home.path())
+        .args(["--telegram-token", "123:other-token"])
+        .args(["--allowed-user-id", "43"])
+        .args(["--base-url", "https://example.com/v1"])
+        .args(["--api-key", "other-key"])
+        .args(["--model", "other-model"])
+        .output()
+        .expect("run init");
+    assert!(!output.status.success());
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.to_lowercase().contains("exists"),
+        "unexpected message: {text}"
+    );
 }
