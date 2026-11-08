@@ -797,6 +797,35 @@ impl Session {
         Ok(seen.is_some())
     }
 
+    /// The oldest queued Telegram submission.
+    pub fn next_queued_telegram_submission(&self) -> Result<Option<Submission>, CoreError> {
+        let raw: Option<RawSubmission> = self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT s.id, s.conversation_id, s.request_id, s.kind, s.content_json, \
+                 s.status, s.answer_entry_id, s.error_json, s.created_at, s.settled_at \
+                 FROM submissions s JOIN conversations c ON c.id = s.conversation_id \
+                 WHERE s.status = 'queued' AND c.transport = 'telegram' \
+                 ORDER BY s.created_at, s.id LIMIT 1",
+                [],
+                |row| {
+                    Ok(RawSubmission {
+                        id: row.get(0)?,
+                        conversation_id: row.get(1)?,
+                        request_id: row.get(2)?,
+                        kind: row.get(3)?,
+                        content_json: row.get(4)?,
+                        status: row.get(5)?,
+                        answer_entry_id: row.get(6)?,
+                        error_json: row.get(7)?,
+                        created_at: row.get(8)?,
+                        settled_at: row.get(9)?,
+                    })
+                },
+            )
+        })?;
+        raw.map(RawSubmission::into_submission).transpose()
+    }
+
     /// Settle a submission exactly once.
     pub fn settle(
         &self,
