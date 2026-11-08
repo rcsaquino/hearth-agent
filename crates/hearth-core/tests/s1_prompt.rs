@@ -38,6 +38,8 @@ fn the_prompt_starts_with_identity_and_operation_and_ends_with_runtime() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
+            standing: String::new(),
+            recall: String::new(),
         })
         .expect("build prompt");
 
@@ -104,6 +106,8 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
+            standing: String::new(),
+            recall: String::new(),
         })
         .expect("build prompt");
 
@@ -166,6 +170,8 @@ fn the_request_carries_the_model_tools_and_session() {
                 parameters: serde_json::json!({"type": "object"}),
             }],
             runtime_note: "RUNTIME".to_owned(),
+            standing: String::new(),
+            recall: String::new(),
         })
         .expect("build prompt");
 
@@ -196,6 +202,8 @@ fn the_audit_document_has_five_segments() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
+            standing: String::new(),
+            recall: String::new(),
         })
         .expect("build prompt");
 
@@ -232,6 +240,8 @@ fn saving_the_same_prompt_twice_reuses_the_hash() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
+            standing: String::new(),
+            recall: String::new(),
         })
         .expect("build prompt");
     let text = serde_json::to_string(&prompt.document).expect("serialize prompt");
@@ -307,6 +317,8 @@ fn image_and_file_blocks_survive_the_prompt_and_audit() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
+            standing: String::new(),
+            recall: String::new(),
         })
         .expect("build prompt");
 
@@ -354,6 +366,8 @@ fn the_operation_carries_the_message_and_voice_rules() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
+            standing: String::new(),
+            recall: String::new(),
         })
         .expect("build prompt");
     let operation = prompt.document["operation"]
@@ -367,4 +381,62 @@ fn the_operation_carries_the_message_and_voice_rules() {
         operation.contains("voice only when"),
         "missing voice rule: {operation}"
     );
+}
+
+#[test]
+fn standing_and_recall_are_placed_in_their_layers() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "first"}))
+                .entry("assistant", json!({"text": "one"}))
+                .entry("user", json!({"text": "newest"})),
+        )
+        .expect("save");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            standing: "S1\nS2".to_owned(),
+            recall: "R1".to_owned(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+
+    let messages = &prompt.request.messages;
+    let standing = messages
+        .iter()
+        .find(|message| {
+            message.role == Role::System && text_of(message).contains("Standing memory")
+        })
+        .expect("standing message");
+    let standing_text = text_of(standing);
+    assert!(standing_text.contains("S1"));
+    assert!(standing_text.contains("S2"));
+
+    let user_positions: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.role == Role::User)
+        .map(|(index, _)| index)
+        .collect();
+    let newest = *user_positions.last().expect("newest user");
+    assert_eq!(messages[newest - 1].role, Role::System);
+    let recall_text = text_of(&messages[newest - 1]);
+    assert!(recall_text.contains("Relevant memory"));
+    assert!(recall_text.contains("R1"));
+
+    let last = messages.last().expect("last");
+    assert_eq!(last.role, Role::System);
+    assert_eq!(text_of(last), "RUNTIME");
+    assert_eq!(prompt.document["standing_memory"], "S1\nS2");
+    assert_eq!(prompt.document["recall"], "R1");
 }
