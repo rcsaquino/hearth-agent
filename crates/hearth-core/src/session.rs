@@ -779,6 +779,23 @@ impl Session {
                         report.woken += 1;
                     }
                 }
+                let expired: Vec<String> = writer.query(
+                    "SELECT id FROM tasks WHERE status = 'running' \
+                     AND (lease_until IS NULL OR lease_until <= ?)",
+                    (now,),
+                    |row| row.get(0),
+                )?;
+                for id in expired {
+                    let changed = writer.execute(
+                        "UPDATE tasks SET status = 'pending', lease_owner = NULL, \
+                         lease_until = NULL, updated_at = ? \
+                         WHERE id = ? AND status = 'running'",
+                        (now, id.as_str()),
+                    )?;
+                    if changed == 1 {
+                        report.requeued += 1;
+                    }
+                }
                 Ok(report)
             })
     }
