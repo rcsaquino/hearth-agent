@@ -3,9 +3,10 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use hearth_model::{Speaker, SpeechClient};
-use hearth_telegram::{MessageTool, TelegramClient};
+use hearth_telegram::{MessageTool, TelegramClient, TelegramSender};
 use hearth_tools::Tool;
 use serde_json::json;
 use tempfile::TempDir;
@@ -119,6 +120,16 @@ fn client(base: &str) -> TelegramClient {
     TelegramClient::with_base_url("token", base).expect("client")
 }
 
+struct NoopSleeper;
+
+impl hearth_telegram::Sleeper for NoopSleeper {
+    fn sleep(&self, _duration: Duration) {}
+}
+
+fn sender(base: &str) -> TelegramSender {
+    TelegramSender::new(client(base), Arc::new(NoopSleeper))
+}
+
 #[test]
 fn one_image_is_sent_with_the_message_tool() {
     let workspace = TempDir::new().expect("workspace");
@@ -127,7 +138,7 @@ fn one_image_is_sent_with_the_message_tool() {
     file(workspace.path(), "image.png", b"IMAGEDATA");
     let (base, server) = bot_server(vec![single(301)]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         42,
         None,
         workspace.path(),
@@ -159,7 +170,7 @@ fn one_document_is_sent_without_a_caption() {
     file(workspace.path(), "notes.txt", b"TEXTDATA");
     let (base, server) = bot_server(vec![single(302)]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         7,
         None,
         workspace.path(),
@@ -185,7 +196,7 @@ fn two_images_are_sent_as_one_album() {
     file(workspace.path(), "two.png", b"TWO");
     let (base, server) = bot_server(vec![album(&[401, 402])]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         9,
         None,
         workspace.path(),
@@ -220,7 +231,7 @@ fn a_mixed_group_is_sent_individually() {
     file(workspace.path(), "notes.txt", b"TEXT");
     let (base, server) = bot_server(vec![single(501), single(502)]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         3,
         None,
         workspace.path(),
@@ -250,7 +261,7 @@ fn speech_is_written_and_sent_as_a_voice_note() {
     );
     let (base, server) = bot_server(vec![single(601)]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         11,
         None,
         workspace.path(),
@@ -292,7 +303,7 @@ fn speech_without_a_speaker_is_an_error() {
     let outbound = TempDir::new().expect("outbound");
     let (base, _server) = bot_server(vec![]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         1,
         None,
         workspace.path(),
@@ -314,7 +325,7 @@ fn invalid_calls_are_rejected_before_any_send() {
     file(workspace.path(), "one.png", b"ONE");
     let (base, _server) = bot_server(vec![]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         1,
         None,
         workspace.path(),
@@ -341,7 +352,7 @@ fn the_message_tool_carries_a_thread_id() {
     file(workspace.path(), "image.png", b"IMAGEDATA");
     let (base, server) = bot_server(vec![single(401)]);
     let tool = MessageTool::new(
-        client(&base),
+        sender(&base),
         42,
         Some(9),
         workspace.path(),
