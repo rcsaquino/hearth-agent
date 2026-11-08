@@ -1,15 +1,16 @@
 //! The agent loop: one submission, one durable generation task, one answer.
 
 use std::collections::HashSet;
+use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use hearth_core::{
-    CoreError, NewEntry, NewTask, NewUsage, PromptInput, Save, Session, StepOutput, Submission,
-    SubmissionStatus, TerminalOutcome,
+    CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session, StepOutput,
+    Submission, SubmissionStatus, TerminalOutcome, parse_blocks,
 };
-use hearth_model::{Pricing, Provider, StreamEvent, Usage};
-use hearth_tools::ToolRegistry;
+use hearth_model::{ContentBlock, Pricing, Provider, StreamEvent, ToolCall, Usage};
+use hearth_tools::{ToolError, ToolRegistry};
 use std::path::PathBuf;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -129,134 +130,261 @@ impl Agent {
             .ok_or_else(|| {
                 AgentError::Invalid("the generation task could not be claimed".to_owned())
             })?;
-
         self.session
             .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
-        let now = OffsetDateTime::now_utc()
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| "unknown time".to_owned());
-        let runtime_note = format!(
-            "Current time: {now}. Conversation: {}. Model: {}.",
-            submission.conversation_id, self.config.model
-        );
-        let prompt = self.session.build_prompt(PromptInput {
-            soul: self.config.soul.clone(),
-            conversation_id: submission.conversation_id.clone(),
-            model: self.config.model.clone(),
-            tools: self.config.tools.specs(),
-            runtime_note,
-        })?;
-        let prompt_text = serde_json::to_string(&prompt.document)
-            .map_err(|error| AgentError::Invalid(error.to_string()))?;
-        let prompt_hash = self.session.save_prompt_blob(&prompt_text)?;
-        self.session.checkpoint_task(
-            &claimed.id,
-            &self.config.owner,
-            json!({"turn": 0, "prompt_hash": prompt_hash}),
-        )?;
 
-        let started = Instant::now();
-        let stream = match self.provider.stream(prompt.request) {
-            Ok(stream) => stream,
-            Err(error) => {
+        let mut turn = claimed
+            .checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.get("turn"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+
+        let history = self.session.history(&submission.conversation_id)?;
+        let pending = pending_calls(&history);
+        if !pending.is_empty() {
+            self.execute_calls(&submission, &claimed.id, &pending)?;
+            turn += 1;
+            self.session.checkpoint_task(
+                &claimed.id,
+                &self.config.owner,
+                json!({"turn": turn}),
+            )?;
+        }
+
+        loop {
+            if turn >= self.config.max_turns {
                 return self.settle_failure(
                     &submission,
                     &claimed.id,
-                    &format!("Provider error: {error}"),
+                    "The turn limit was reached before a final answer.",
+                    "turn_limit",
                 );
             }
-        };
-        let mut text = String::new();
-        let mut thinking = String::new();
-        let mut calls = Vec::new();
-        let mut usage = Usage::default();
-        for event in stream {
-            match event {
-                Ok(StreamEvent::TextDelta(delta)) => text.push_str(&delta),
-                Ok(StreamEvent::ThinkingDelta(delta)) => thinking.push_str(&delta),
-                Ok(StreamEvent::ToolCall(call)) => calls.push(call),
-                Ok(StreamEvent::Usage(value)) => usage = value,
-                Ok(StreamEvent::Done { .. }) => {}
+            let now = OffsetDateTime::now_utc()
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "unknown time".to_owned());
+            let runtime_note = format!(
+                "Current time: {now}. Conversation: {}. Model: {}.",
+                submission.conversation_id, self.config.model
+            );
+            let prompt = self.session.build_prompt(PromptInput {
+                soul: self.config.soul.clone(),
+                conversation_id: submission.conversation_id.clone(),
+                model: self.config.model.clone(),
+                tools: self.config.tools.specs(),
+                runtime_note,
+            })?;
+            let prompt_text = serde_json::to_string(&prompt.document)
+                .map_err(|error| AgentError::Invalid(error.to_string()))?;
+            let prompt_hash = self.session.save_prompt_blob(&prompt_text)?;
+            self.session.checkpoint_task(
+                &claimed.id,
+                &self.config.owner,
+                json!({"turn": turn, "prompt_hash": prompt_hash}),
+            )?;
+
+            let started = Instant::now();
+            let stream = match self.provider.stream(prompt.request) {
+                Ok(stream) => stream,
                 Err(error) => {
-                    let latency_ms = started.elapsed().as_millis() as i64;
-                    if has_usage(usage) {
-                        self.record_usage(
-                            &claimed.id,
-                            &submission.conversation_id,
-                            usage,
-                            latency_ms,
-                        )?;
-                    }
                     return self.settle_failure(
                         &submission,
                         &claimed.id,
                         &format!("Provider error: {error}"),
+                        "provider_error",
                     );
                 }
+            };
+            let mut text = String::new();
+            let mut thinking = String::new();
+            let mut calls = Vec::new();
+            let mut usage = Usage::default();
+            for event in stream {
+                match event {
+                    Ok(StreamEvent::TextDelta(delta)) => text.push_str(&delta),
+                    Ok(StreamEvent::ThinkingDelta(delta)) => thinking.push_str(&delta),
+                    Ok(StreamEvent::ToolCall(call)) => calls.push(call),
+                    Ok(StreamEvent::Usage(value)) => usage = value,
+                    Ok(StreamEvent::Done { .. }) => {}
+                    Err(error) => {
+                        let latency_ms = started.elapsed().as_millis() as i64;
+                        if has_usage(usage) {
+                            self.record_usage(
+                                &claimed.id,
+                                &submission.conversation_id,
+                                usage,
+                                latency_ms,
+                            )?;
+                        }
+                        return self.settle_failure(
+                            &submission,
+                            &claimed.id,
+                            &format!("Provider error: {error}"),
+                            "provider_error",
+                        );
+                    }
+                }
             }
-        }
-        let latency_ms = started.elapsed().as_millis() as i64;
-        self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
-        self.session
-            .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
+            let latency_ms = started.elapsed().as_millis() as i64;
+            self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
+            self.session
+                .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
 
-        if !calls.is_empty() {
-            return self.settle_failure(
-                &submission,
+            if !calls.is_empty() {
+                self.save_assistant(&submission, &prompt_hash, &thinking, &text, &calls)?;
+                self.execute_calls(&submission, &claimed.id, &calls)?;
+                turn += 1;
+                self.session.checkpoint_task(
+                    &claimed.id,
+                    &self.config.owner,
+                    json!({"turn": turn}),
+                )?;
+                continue;
+            }
+            if text.is_empty() {
+                return self.settle_failure(
+                    &submission,
+                    &claimed.id,
+                    "The model returned no answer.",
+                    "empty_answer",
+                );
+            }
+
+            let answer_entry_id =
+                self.save_assistant(&submission, &prompt_hash, &thinking, &text, &[])?;
+            let settled = self.session.settle(
+                &submission.id,
+                SubmissionStatus::Done,
+                Some(&answer_entry_id),
+            )?;
+            self.session.finish_task(
                 &claimed.id,
-                "The model requested a tool, but no tools are available yet.",
-            );
+                &self.config.owner,
+                StepOutput::Terminal {
+                    outcome: TerminalOutcome::Done,
+                    result: json!({"answer_entry_id": answer_entry_id}),
+                },
+            )?;
+            return Ok(RunOutcome {
+                submission: settled,
+                task_id: claimed.id,
+                answer_entry_id: Some(answer_entry_id),
+                answer_text: Some(text),
+                notice: None,
+            });
         }
-        if text.is_empty() {
-            return self.settle_failure(&submission, &claimed.id, "The model returned no answer.");
-        }
+    }
 
+    fn save_assistant(
+        &self,
+        submission: &Submission,
+        prompt_hash: &str,
+        thinking: &str,
+        text: &str,
+        calls: &[ToolCall],
+    ) -> Result<String, AgentError> {
         let mut blocks = Vec::new();
         if !thinking.is_empty() {
             blocks.push(json!({"type": "thinking", "text": thinking}));
         }
-        let answer_text = if text.is_empty() {
-            None
-        } else {
-            Some(text.clone())
-        };
         if !text.is_empty() {
             blocks.push(json!({"type": "text", "text": text}));
+        }
+        for call in calls {
+            blocks.push(json!({
+                "type": "tool_call",
+                "id": call.id,
+                "name": call.name,
+                "arguments": call.arguments,
+            }));
         }
         let entry = NewEntry {
             kind: "assistant".to_owned(),
             content: Value::Array(blocks),
             source: None,
-            prompt_hash: Some(prompt_hash),
+            prompt_hash: Some(prompt_hash.to_owned()),
         };
         let commit = self
             .session
             .save(Save::new(&submission.conversation_id).entry_with(entry))?;
-        let answer_entry_id = commit
+        commit
             .entry_ids
             .first()
             .cloned()
-            .ok_or_else(|| AgentError::Invalid("the answer entry was not saved".to_owned()))?;
-        let settled = self.session.settle(
-            &submission.id,
-            SubmissionStatus::Done,
-            Some(&answer_entry_id),
+            .ok_or_else(|| AgentError::Invalid("the assistant entry was not saved".to_owned()))
+    }
+
+    fn execute_calls(
+        &self,
+        submission: &Submission,
+        task_id: &str,
+        calls: &[ToolCall],
+    ) -> Result<(), AgentError> {
+        let mut blocks = Vec::new();
+        for call in calls {
+            let (content, is_error) = match self.config.tools.call(&call.name, &call.arguments) {
+                Some(Ok(output)) => {
+                    let (content, spill_failed) = self.spill_output(&call.id, &output.content);
+                    (content, output.is_error || spill_failed)
+                }
+                Some(Err(error)) => (error.to_json().to_string(), true),
+                None => {
+                    let error = ToolError::invalid(
+                        "unknown_tool",
+                        format!("unknown tool: {}", call.name),
+                    );
+                    (error.to_json().to_string(), true)
+                }
+            };
+            blocks.push(json!({
+                "type": "tool_result",
+                "call_id": call.id,
+                "content": content,
+                "is_error": is_error,
+            }));
+        }
+        self.session.save(
+            Save::new(&submission.conversation_id)
+                .entry("tool_result", Value::Array(blocks)),
         )?;
-        self.session.finish_task(
-            &claimed.id,
-            &self.config.owner,
-            StepOutput::Terminal {
-                outcome: TerminalOutcome::Done,
-                result: json!({"answer_entry_id": answer_entry_id}),
-            },
-        )?;
-        Ok(RunOutcome {
-            submission: settled,
-            task_id: claimed.id,
-            answer_entry_id: Some(answer_entry_id),
-            answer_text,
-            notice: None,
-        })
+        self.session
+            .heartbeat_task(task_id, &self.config.owner, 60_000_000)?;
+        Ok(())
+    }
+
+    fn spill_output(&self, call_id: &str, content: &str) -> (String, bool) {
+        if hearth_model::estimate_tokens(content) <= 4000 {
+            return (content.to_owned(), false);
+        }
+        let name = sanitize_call_id(call_id);
+        if let Err(error) = fs::create_dir_all(&self.config.spill_dir) {
+            return (
+                format!("tool output was too large and the spill directory failed: {error}"),
+                true,
+            );
+        }
+        let path = self.config.spill_dir.join(format!("{name}.txt"));
+        if let Err(error) = write_private(&path, content) {
+            return (
+                format!("tool output was too large and the spill write failed: {error}"),
+                true,
+            );
+        }
+        let head: String = content.chars().take(2000).collect();
+        let tail: String = {
+            let mut chars: Vec<char> = content.chars().rev().take(1000).collect();
+            chars.reverse();
+            chars.into_iter().collect()
+        };
+        (
+            format!(
+                "[tool output truncated: {} bytes, ~{} tokens; full output: spill/{name}.txt]\n{head}\n...\n{tail}",
+                content.len(),
+                hearth_model::estimate_tokens(content)
+            ),
+            false,
+        )
     }
 
     fn record_usage(
@@ -289,20 +417,24 @@ impl Agent {
         submission: &Submission,
         task_id: &str,
         message: &str,
+        reason: &str,
     ) -> Result<RunOutcome, AgentError> {
         let notice = short_notice(message);
         self.session.save(
             Save::new(&submission.conversation_id).entry("notice", json!({"text": notice})),
         )?;
-        let settled = self
-            .session
-            .settle(&submission.id, SubmissionStatus::Unanswered, None)?;
+        let settled = self.session.settle_with_error(
+            &submission.id,
+            SubmissionStatus::Unanswered,
+            None,
+            Some(json!({"reason": reason})),
+        )?;
         self.session.finish_task(
             task_id,
             &self.config.owner,
             StepOutput::Terminal {
                 outcome: TerminalOutcome::Failed,
-                result: json!({"error": notice}),
+                result: json!({"error": notice, "reason": reason}),
             },
         )?;
         Ok(RunOutcome {
@@ -326,6 +458,72 @@ impl Drop for Reservation<'_> {
             reserved.remove(&self.conversation_id);
         }
     }
+}
+
+fn pending_calls(history: &[Entry]) -> Vec<ToolCall> {
+    let mut results = HashSet::new();
+    for entry in history {
+        if entry.kind == "tool_result" {
+            for block in parse_blocks(&entry.content) {
+                if let ContentBlock::ToolResult { call_id, .. } = block {
+                    results.insert(call_id);
+                }
+            }
+        }
+    }
+    let mut pending = Vec::new();
+    let mut seen = HashSet::new();
+    for entry in history {
+        if entry.kind == "assistant" {
+            for block in parse_blocks(&entry.content) {
+                if let ContentBlock::ToolCall(call) = block
+                    && !results.contains(&call.id)
+                    && seen.insert(call.id.clone())
+                {
+                    pending.push(call);
+                }
+            }
+        }
+    }
+    pending
+}
+
+fn sanitize_call_id(call_id: &str) -> String {
+    let name: String = call_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        "output".to_owned()
+    } else {
+        name
+    }
+}
+
+fn write_private(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.flush()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 fn has_usage(usage: Usage) -> bool {

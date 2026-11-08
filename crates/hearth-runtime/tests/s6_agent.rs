@@ -277,34 +277,44 @@ fn a_running_generation_task_makes_the_agent_busy() {
 }
 
 #[test]
-fn a_tool_call_without_tools_settles_unanswered() {
+fn an_unknown_tool_call_is_reported_and_the_run_continues() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
-    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
-        Ok(StreamEvent::ToolCall(hearth_model::ToolCall {
-            id: "call-1".to_owned(),
-            name: "files".to_owned(),
-            arguments: json!({"path": "a.txt"}),
-        })),
-        Ok(StreamEvent::Done {
-            finish_reason: Some("tool_calls".to_owned()),
-        }),
-    ])]));
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        Ok(vec![
+            Ok(StreamEvent::ToolCall(ToolCall {
+                id: "call-1".to_owned(),
+                name: "nope".to_owned(),
+                arguments: json!({}),
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned()),
+            }),
+        ]),
+        Ok(vec![
+            Ok(StreamEvent::TextDelta("recovered".to_owned())),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("stop".to_owned()),
+            }),
+        ]),
+    ]));
 
     let outcome = agent(home.path(), &harness, provider, Pricing::default())
         .run_submission(&submission.id)
         .expect("run submission");
 
-    assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
-    assert!(outcome.notice.is_some());
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+    assert_eq!(outcome.answer_text.as_deref(), Some("recovered"));
     let history = harness.session().history(&conversation).expect("history");
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[1].kind, "notice");
-    assert!(
-        history.iter().all(|entry| entry.kind != "assistant"),
-        "an orphaned assistant tool call was saved"
-    );
+    assert_eq!(history.len(), 4);
+    assert_eq!(history[1].kind, "assistant");
+    assert_eq!(history[2].kind, "tool_result");
+    let content = history[2].content[0]["content"]
+        .as_str()
+        .expect("tool result content");
+    assert!(content.contains("unknown tool"), "{content}");
+    assert_eq!(history[3].content[0]["text"], "recovered");
 }
 
 #[test]

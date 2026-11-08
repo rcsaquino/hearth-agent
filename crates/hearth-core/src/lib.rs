@@ -15,7 +15,7 @@ pub use model::{
     EffectStatus, Entry, NewEntry, NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission,
     SubmissionStatus, SubmitResult, UsageEvent,
 };
-pub use prompt::{Prompt, PromptInput};
+pub use prompt::{parse_blocks, Prompt, PromptInput};
 pub use session::{Harness, Session};
 pub use soul::default_soul;
 pub use task::{
