@@ -61,12 +61,10 @@ impl Default for MemoryPolicy {
 
 /// Common query words that add no retrieval signal.
 pub const STOPWORDS: &[&str] = &[
-    "a", "about", "an", "and", "are", "as", "at", "be", "been", "being", "but",
-    "by", "can", "could", "did", "do", "does", "for", "from", "had", "has",
-    "have", "he", "her", "here", "him", "his", "i", "if", "in", "into",
-    "is", "it", "its", "may", "me", "might", "must", "my", "no", "not", "of",
-    "on", "or", "our", "she", "should", "so", "some", "than", "that", "the",
-    "their", "them", "then", "there", "these", "they", "this", "those", "to",
-    "was", "we", "were", "will",
+    "a", "about", "an", "and", "are", "as", "at", "be", "been", "being", "but", "by", "can",
+    "could", "did", "do", "does", "for", "from", "had", "has", "have", "he", "her", "here", "him",
+    "his", "i", "if", "in", "into", "is", "it", "its", "may", "me", "might", "must", "my", "no",
+    "not", "of", "on", "or", "our", "she", "should", "so", "some", "than", "that", "the", "their",
+    "them", "then", "there", "these", "they", "this", "those", "to", "was", "we", "were", "will",
     "with", "would", "you", "your",
 ];

@@ -389,10 +389,14 @@ impl MemoryService {
              ORDER BY importance DESC, COALESCE(last_used_at, 0) DESC, created_at"
         );
         let promoted: Vec<RawMemory> = self.read(|reader| {
-            reader.query(&promoted_sql, (now, now), |row| Ok(RawMemory::from_row(row)))
+            reader.query(&promoted_sql, (now, now), |row| {
+                Ok(RawMemory::from_row(row))
+            })
         })?;
         let promotable: Vec<RawMemory> = self.read(|reader| {
-            reader.query(&promotable_sql, (now, now), |row| Ok(RawMemory::from_row(row)))
+            reader.query(&promotable_sql, (now, now), |row| {
+                Ok(RawMemory::from_row(row))
+            })
         })?;
         let mut candidates = Vec::new();
         for row in promoted.into_iter().chain(promotable) {

@@ -890,7 +890,11 @@ fn the_fixture_direct_question_returns_the_expected_fact() {
 fn unrelated_standing_preferences_do_not_crowd_a_query_specific_one() {
     let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
     service
-        .save(input_imp("Prefers short replies.", MemoryKind::Preference, 90))
+        .save(input_imp(
+            "Prefers short replies.",
+            MemoryKind::Preference,
+            90,
+        ))
         .expect("reply preference");
     service
         .save(input_imp("Uses metric units.", MemoryKind::Preference, 90))
@@ -902,7 +906,9 @@ fn unrelated_standing_preferences_do_not_crowd_a_query_specific_one() {
             64,
         ))
         .expect("meeting preference");
-    let recalled = service.recall("When are meetings disliked?").expect("recall");
+    let recalled = service
+        .recall("When are meetings disliked?")
+        .expect("recall");
     assert!(
         recalled.iter().any(|item| item.id == meetings.id),
         "query-specific preference was crowded out: {recalled:#?}"
