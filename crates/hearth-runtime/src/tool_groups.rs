@@ -60,28 +60,6 @@ impl ToolGroups {
         Self { groups }
     }
 
-    /// The groups named in spec 9.2. None of them ship a tool yet; the registry
-    /// says so rather than advertising a callable tool that does not exist.
-    pub fn default_groups() -> Self {
-        Self::new(vec![
-            ToolGroup::new(
-                "browser",
-                "Browse and interact with web pages that plain fetch cannot reach.",
-                Vec::new(),
-            ),
-            ToolGroup::new(
-                "documents",
-                "Read and create PDF, DOCX, PPTX, and XLSX files.",
-                Vec::new(),
-            ),
-            ToolGroup::new(
-                "media",
-                "Generate images and work with speech outside the message tool.",
-                Vec::new(),
-            ),
-        ])
-    }
-
     /// One group by exact name.
     pub fn get(&self, name: &str) -> Option<&Arc<ToolGroup>> {
         self.groups.get(name)

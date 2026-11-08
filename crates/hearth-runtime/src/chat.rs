@@ -14,7 +14,9 @@ use time::OffsetDateTime;
 
 use crate::agent::{Agent, AgentConfig};
 use crate::skills::SkillLibrary;
-use crate::tools::{ToolBuildError, build_tools, memory_policy, pricing_from_settings};
+use crate::tools::{
+    ToolBuildError, ToolMediaRoots, build_tools, memory_policy, pricing_from_settings,
+};
 
 /// A failure that stopped local chat.
 #[derive(Debug, Error)]
@@ -67,6 +69,10 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         None => home.join("workspace"),
     };
     let spill = home.join("spill");
+    let media = ToolMediaRoots {
+        inbound: home.join("media/inbound"),
+        outbound: home.join("media/outbound"),
+    };
 
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
@@ -106,6 +112,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
             memory_source,
             Some(Arc::clone(&skills)),
             None,
+            &media,
         )?;
         let agent = Agent::new(
             session.clone(),

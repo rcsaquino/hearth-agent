@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 use crate::agent::{Agent, AgentConfig};
 use crate::events::EventSink;
-use crate::tools::{MessageTarget, TaskTarget, build_tools};
+use crate::tools::{MessageTarget, TaskTarget, ToolMediaRoots, build_tools};
 
 /// Cancellation tokens shared by the task tool and the helper workers.
 #[derive(Default)]
@@ -342,6 +342,7 @@ pub struct HelperConfig {
     pub workspace: PathBuf,
     pub spill: PathBuf,
     pub outbound: PathBuf,
+    pub media: ToolMediaRoots,
     pub model: String,
     pub provider_name: String,
     pub max_turns: u32,
@@ -523,6 +524,7 @@ impl HelperPool {
             memory_source,
             None,
             Some(task_target),
+            &self.config.media,
         ) {
             Ok(built) => built,
             Err(error) => {

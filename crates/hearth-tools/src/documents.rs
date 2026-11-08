@@ -312,10 +312,10 @@ fn sheet_text(xml: &str, shared: &[String]) -> String {
                 }
             }
             Ok(Event::Text(event)) => {
-                if in_value || in_inline_text {
-                    if let Ok(text) = event.unescape() {
-                        value.push_str(&text);
-                    }
+                if (in_value || in_inline_text)
+                    && let Ok(text) = event.unescape()
+                {
+                    value.push_str(&text);
                 }
             }
             Ok(Event::End(event)) => {

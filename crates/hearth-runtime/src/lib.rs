@@ -40,6 +40,7 @@ pub use scheduler::{
 };
 pub use stats::{StatsError, StatsReport, StatsRow, stats, stats_report};
 pub use tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
+pub use tools::ToolMediaRoots;
 
 /// Install the structured JSON logger used by the daemon.
 pub fn init_logging(home: &Path) -> std::io::Result<()> {

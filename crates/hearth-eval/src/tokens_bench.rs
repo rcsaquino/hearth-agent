@@ -117,7 +117,7 @@ pub fn run() -> Result<TokensReport> {
     fs::write(workspace.join("notes.txt"), "Project Atlas notes.\n").context("write notes")?;
     let spill = dir.path().join("spill");
 
-    let groups = Arc::new(ToolGroups::default_groups());
+    let groups = Arc::new(ToolGroups::default());
     let selection = Arc::new(Mutex::new(HashSet::new()));
     let search = WebSearchTool::new(
         vec![Arc::new(ExaSearch::new(

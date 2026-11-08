@@ -8,19 +8,22 @@ use std::time::Duration;
 use hearth_config::Settings;
 use hearth_core::Session;
 use hearth_memory::{MemoryPolicy, MemoryService, MemorySource, MemoryTool};
-use hearth_model::{Price, Pricing, Speaker};
+use hearth_model::{
+    ImageClient, Price, Pricing, Speaker, SpeechClient, Transcriber, TranscriptionClient,
+};
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
-    BraveSearch, DeepSeekFetch, DeepSeekSearch, ExaSearch, FetchError, FetchProvider, FileTool,
-    FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, SearchError, SearchProvider, ShellTool,
-    TinyFishFetch, TinyFishSearch, ToolRegistry, WebFetchTool, WebSearchTool,
+    BraveSearch, DeepSeekFetch, DeepSeekSearch, DocumentsTool, ExaSearch, FetchError,
+    FetchProvider, FileTool, FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, MediaTool,
+    SearchError, SearchProvider, ShellTool, TinyFishFetch, TinyFishSearch, Tool, ToolRegistry,
+    WebFetchTool, WebSearchTool,
 };
 use thiserror::Error;
 
 use crate::helpers::{HelperControls, TaskTool};
 use crate::scheduler::ScheduleTool;
 use crate::skills::{SkillLibrary, SkillTool};
-use crate::tool_groups::{ToolGroups, ToolSearchTool};
+use crate::tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
 
 /// The Telegram values needed for the message tool.
 pub struct MessageTarget {
@@ -46,6 +49,13 @@ pub struct BuiltTools {
     pub core: ToolRegistry,
     pub groups: Arc<ToolGroups>,
     pub selection: Arc<Mutex<HashSet<String>>>,
+}
+
+/// The inbound and outbound media roots used by the optional tools.
+#[derive(Clone, Debug)]
+pub struct ToolMediaRoots {
+    pub inbound: PathBuf,
+    pub outbound: PathBuf,
 }
 
 /// A tool could not be built from settings.
@@ -97,8 +107,9 @@ pub fn build_tools(
     memory_source: Option<MemorySource>,
     skills: Option<Arc<SkillLibrary>>,
     task: Option<TaskTarget>,
+    media: &ToolMediaRoots,
 ) -> Result<BuiltTools, ToolBuildError> {
-    let groups = Arc::new(ToolGroups::default_groups());
+    let groups = Arc::new(groups_for(settings, workspace, spill, media));
     let selection = Arc::new(Mutex::new(HashSet::new()));
     let mut tools: Vec<Arc<dyn hearth_tools::Tool>> = vec![
         Arc::new(FileTool::new(workspace, spill)),
@@ -156,6 +167,99 @@ pub fn build_tools(
         groups,
         selection,
     })
+}
+
+fn groups_for(
+    settings: &Settings,
+    workspace: &Path,
+    spill: &Path,
+    media: &ToolMediaRoots,
+) -> ToolGroups {
+    let documents = Arc::new(DocumentsTool::new(
+        workspace.to_path_buf(),
+        spill.to_path_buf(),
+        media.inbound.clone(),
+    ));
+    let media_tools: Vec<Arc<dyn Tool>> = build_media_tool(settings, workspace, spill, media)
+        .map(|tool| vec![Arc::new(tool) as Arc<dyn Tool>])
+        .unwrap_or_default();
+    ToolGroups::new(vec![
+        ToolGroup::new(
+            "browser",
+            "Browse and interact with web pages that plain fetch cannot reach.",
+            Vec::new(),
+        ),
+        ToolGroup::new(
+            "documents",
+            "Read PDF, DOCX, PPTX, and XLSX files.",
+            vec![documents],
+        ),
+        ToolGroup::new(
+            "media",
+            "Generate images, transcribe audio, and synthesize speech.",
+            media_tools,
+        ),
+    ])
+}
+
+fn build_media_tool(
+    settings: &Settings,
+    workspace: &Path,
+    spill: &Path,
+    media: &ToolMediaRoots,
+) -> Option<MediaTool> {
+    let config = settings.media.as_ref()?;
+    let image = config.image.as_ref().and_then(|service| {
+        let api_key = service.api_key.clone().filter(|value| !value.is_empty())?;
+        let model = service.model.clone().filter(|value| !value.is_empty())?;
+        let base_url = service
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_owned());
+        ImageClient::new(base_url, api_key, model).ok()
+    });
+    let transcriber = config.stt.as_ref().and_then(|service| {
+        let api_key = service.api_key.clone().filter(|value| !value.is_empty())?;
+        let model = service.model.clone().filter(|value| !value.is_empty())?;
+        let base_url = service
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.groq.com".to_owned());
+        TranscriptionClient::new(base_url, api_key, model)
+            .ok()
+            .map(|client| Arc::new(client) as Arc<dyn Transcriber>)
+    });
+    let speaker = config.tts.as_ref().and_then(|service| {
+        let api_key = service.api_key.clone().filter(|value| !value.is_empty())?;
+        let voice_id = service.voice_id.clone().filter(|value| !value.is_empty())?;
+        let model = service
+            .model
+            .clone()
+            .unwrap_or_else(|| "eleven_v4".to_owned());
+        let output_format = service
+            .output_format
+            .clone()
+            .unwrap_or_else(|| "opus_48000_64".to_owned());
+        let base_url = service
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.elevenlabs.io".to_owned());
+        SpeechClient::new(base_url, api_key, voice_id, model, output_format)
+            .ok()
+            .map(|client| Arc::new(client) as Arc<dyn Speaker>)
+    });
+    if image.is_none() && transcriber.is_none() && speaker.is_none() {
+        return None;
+    }
+    Some(MediaTool::new(
+        image,
+        transcriber,
+        speaker,
+        workspace.to_path_buf(),
+        spill.to_path_buf(),
+        media.inbound.clone(),
+        media.outbound.clone(),
+    ))
 }
 
 fn build_web_search(settings: &Settings) -> Result<WebSearchTool, SearchError> {
@@ -346,6 +450,10 @@ mod core_budget_tests {
             speaker: None,
         };
         let spill = home.path().join("spill");
+        let media = ToolMediaRoots {
+            inbound: home.path().join("media/inbound"),
+            outbound: home.path().join("media/outbound"),
+        };
         let built = build_tools(
             &settings(),
             home.path(),
@@ -355,6 +463,7 @@ mod core_budget_tests {
             None,
             Some(Arc::new(SkillLibrary::new(home.path()))),
             None,
+            &media,
         )
         .expect("tools");
 

@@ -8,7 +8,9 @@ use hearth_config::Settings;
 use hearth_core::{ContextBudget, Harness};
 use hearth_memory::MemoryService;
 use hearth_model::{ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent};
-use hearth_runtime::{HelperConfig, HelperControls, HelperPool, NoopSink, TaskTool};
+use hearth_runtime::{
+    HelperConfig, HelperControls, HelperPool, NoopSink, TaskTool, ToolMediaRoots,
+};
 use hearth_telegram::{SystemSleeper, TelegramClient, TelegramSender};
 use hearth_tools::Tool;
 use serde_json::{Value, json};
@@ -133,6 +135,10 @@ fn helper_config(
         workspace: home.path().join("workspace"),
         spill: home.path().join("spill"),
         outbound: home.path().join("media/outbound"),
+        media: ToolMediaRoots {
+            inbound: home.path().join("media/inbound"),
+            outbound: home.path().join("media/outbound"),
+        },
         model: "fake-model".to_owned(),
         provider_name: "openai-compatible".to_owned(),
         max_turns: 10,
@@ -240,6 +246,10 @@ fn a_helper_runs_and_reports_without_the_parent_transcript() {
         workspace: home.path().join("workspace"),
         spill: home.path().join("spill"),
         outbound: home.path().join("media/outbound"),
+        media: ToolMediaRoots {
+            inbound: home.path().join("media/inbound"),
+            outbound: home.path().join("media/outbound"),
+        },
         model: "fake-model".to_owned(),
         provider_name: "openai-compatible".to_owned(),
         max_turns: 10,
@@ -326,6 +336,10 @@ fn a_missing_report_file_is_written_with_private_mode() {
         workspace: home.path().join("workspace"),
         spill: home.path().join("spill"),
         outbound: home.path().join("media/outbound"),
+        media: ToolMediaRoots {
+            inbound: home.path().join("media/inbound"),
+            outbound: home.path().join("media/outbound"),
+        },
         model: "fake-model".to_owned(),
         provider_name: "openai-compatible".to_owned(),
         max_turns: 10,

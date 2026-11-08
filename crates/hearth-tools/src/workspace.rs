@@ -20,6 +20,7 @@ pub struct Workspace {
     root: PathBuf,
     spill: PathBuf,
     media: Option<PathBuf>,
+    allow_absolute: bool,
 }
 
 impl Workspace {
@@ -29,6 +30,7 @@ impl Workspace {
             root: root.into(),
             spill: spill.into(),
             media: None,
+            allow_absolute: false,
         }
     }
 
@@ -42,6 +44,7 @@ impl Workspace {
             root: root.into(),
             spill: spill.into(),
             media: Some(media.into()),
+            allow_absolute: true,
         }
     }
 
@@ -52,6 +55,7 @@ impl Workspace {
             root: root.clone(),
             spill: root,
             media: None,
+            allow_absolute: false,
         }
     }
 
@@ -155,6 +159,9 @@ impl Workspace {
 
     fn resolve_read(&self, path: &str) -> Result<PathBuf, ToolError> {
         if Path::new(path).is_absolute() {
+            if !self.allow_absolute {
+                return Err(ToolError::invalid("invalid_path", "path must be relative"));
+            }
             let target = fs::canonicalize(path)
                 .map_err(|_| ToolError::invalid("not_found", format!("not found: {path}")))?;
             let roots = self.read_roots()?;

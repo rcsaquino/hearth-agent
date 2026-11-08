@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::skills::SkillLibrary;
-use crate::tools::{build_tools, memory_policy};
+use crate::tools::{ToolMediaRoots, build_tools, memory_policy};
 
 /// Options for `hearth prompt`.
 #[derive(Debug, Default, Clone)]
@@ -69,6 +69,10 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     let secrets = secret_values(&settings);
     let soul = read_soul(home, &settings);
     let (workspace, spill) = workspace_paths(home, &settings);
+    let media = ToolMediaRoots {
+        inbound: home.join("media/inbound"),
+        outbound: home.join("media/outbound"),
+    };
     let built = build_tools(
         &settings,
         &workspace,
@@ -78,6 +82,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
         None,
         Some(Arc::clone(&skills)),
         None,
+        &media,
     )
     .map_err(|error| PromptError::Invalid(error.to_string()))?;
 

@@ -38,7 +38,7 @@ use crate::maintenance::{
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
 use crate::skill_review::{SkillReviewHandler, SkillReviewer};
 use crate::skills::SkillLibrary;
-use crate::tools::{MessageTarget, TaskTarget, build_tools, memory_policy};
+use crate::tools::{MessageTarget, TaskTarget, ToolMediaRoots, build_tools, memory_policy};
 use hearth_memory::{MemoryService, MemorySource};
 
 #[derive(Debug, Error)]
@@ -332,6 +332,10 @@ impl TelegramRuntime {
             workspace: workspace.clone(),
             spill: spill.clone(),
             outbound: home.join("media/outbound"),
+            media: ToolMediaRoots {
+                inbound: home.join("media/inbound"),
+                outbound: home.join("media/outbound"),
+            },
             model: models.model.clone(),
             provider_name: models.kind.clone(),
             max_turns: settings.agent.max_turns,
@@ -353,6 +357,10 @@ impl TelegramRuntime {
             workspace,
             spill,
             outbound: home.join("media/outbound"),
+            media: ToolMediaRoots {
+                inbound: home.join("media/inbound"),
+                outbound: home.join("media/outbound"),
+            },
             model: models.model.clone(),
             provider_name: models.kind.clone(),
             max_turns: settings.agent.max_turns,
@@ -384,6 +392,7 @@ struct TelegramWorker {
     workspace: PathBuf,
     spill: PathBuf,
     outbound: PathBuf,
+    media: ToolMediaRoots,
     model: String,
     provider_name: String,
     max_turns: u32,
@@ -598,6 +607,7 @@ impl TelegramWorker {
                 max_depth: self.settings.tasks.max_depth,
                 max_concurrent: self.settings.tasks.max_concurrent,
             }),
+            &self.media,
         ) {
             Ok(tools) => tools,
             Err(error) => {
