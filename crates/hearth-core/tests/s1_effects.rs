@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
-use hearth_core::{Clock, EffectIntent, EffectStatus, Harness, IdGen, Save};
+use hearth_core::{Clock, CoreError, EffectIntent, EffectStatus, Harness, IdGen, Save};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -224,4 +224,46 @@ fn a_started_effect_can_be_requeued_after_a_crash() {
     assert_eq!(effect.attempts, 1);
     assert_eq!(effect.payload["path"], "a");
     assert_eq!(effect.settled_at, None);
+}
+
+#[test]
+fn invalid_effect_transitions_are_rejected() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
+        )
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+
+    let before_begin = session
+        .finish_effect(&id, json!({}))
+        .expect_err("finish before begin");
+    assert!(matches!(
+        before_begin,
+        CoreError::EffectNotReady { ref id, ref status }
+            if id == &commit.effect_ids[0] && status == "intent"
+    ));
+
+    let unknown = session
+        .finish_effect("missing", json!({}))
+        .expect_err("unknown effect");
+    assert!(matches!(unknown, CoreError::EffectNotFound(ref id) if id == "missing"));
+
+    session.begin_effect(&id).expect("begin effect");
+    let begin_again = session
+        .begin_effect(&id)
+        .expect_err("begin twice");
+    assert!(matches!(begin_again, CoreError::EffectNotReady { .. }));
+
+    session
+        .finish_effect(&id, json!({"ok": true}))
+        .expect("finish effect");
+    let finish_again = session
+        .finish_effect(&id, json!({}))
+        .expect_err("finish twice");
+    assert!(matches!(finish_again, CoreError::EffectNotReady { .. }));
 }
