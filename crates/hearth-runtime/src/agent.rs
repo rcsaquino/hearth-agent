@@ -184,11 +184,11 @@ impl Agent {
                 "The model requested a tool, but no tools are available yet.",
             );
         }
-        if text.is_empty() && thinking.is_empty() {
+        if text.is_empty() {
             return self.settle_failure(
                 &submission,
                 &claimed.id,
-                "The model returned an empty response.",
+                "The model returned no answer.",
             );
         }
 
