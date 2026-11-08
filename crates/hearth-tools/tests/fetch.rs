@@ -7,8 +7,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hearth_tools::{
-    FetchError, FetchProvider, FetchResult, FirecrawlFetch, HttpFetch, JinaFetch,
-    TinyFishFetch, Tool, WebFetchTool,
+    DeepSeekFetch, FetchError, FetchProvider, FetchResult, FirecrawlFetch, HttpFetch,
+    JinaFetch, TinyFishFetch, Tool, WebFetchTool,
 };
 use serde_json::json;
 
@@ -440,4 +440,41 @@ fn firecrawl_maps_its_scrape_response() {
     assert_eq!(body["formats"], json!(["markdown"]));
     assert_eq!(body["onlyMainContent"], true);
     assert_eq!(body["lockdown"], true);
+}
+
+
+#[test]
+fn deepseek_maps_its_fetch_response() {
+    let server = serve(vec![reply(
+        200,
+        "application/json",
+        r#"{"title":"Deep Page","content":"Deep content"}"#,
+    )]);
+    let provider = Arc::new(
+        DeepSeekFetch::new(
+            "deep-key",
+            server.base.clone(),
+            Duration::from_secs(5),
+            2 * 1024 * 1024,
+        )
+        .expect("deepseek"),
+    );
+    let tool = WebFetchTool::new(vec![provider], false);
+    let output = tool
+        .call(&json!({"url": "https://93.184.216.34/page"}))
+        .expect("fetch");
+    assert!(output.content.contains("Provider: deepseek"));
+    assert!(output.content.contains("Title: Deep Page"));
+    assert!(output.content.contains("Deep content"));
+
+    let captured = server.thread.join().expect("server thread");
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].path, "/v1/tools/fetch");
+    assert_eq!(
+        captured[0].headers.get("authorization").map(String::as_str),
+        Some("Bearer deep-key")
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&captured[0].body).expect("request body is JSON");
+    assert_eq!(body["url"], "https://93.184.216.34/page");
 }
