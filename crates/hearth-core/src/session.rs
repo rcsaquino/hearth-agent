@@ -122,7 +122,7 @@ impl Session {
             id: self.ids.new_id(),
             parent_id: parent_id.map(str::to_owned),
             parent_entry_id: None,
-            title: title.to_owned(),
+            title: crate::secrets::redact_secrets(title),
             transport: transport.to_owned(),
             transport_key: transport_key.to_owned(),
             created_at: now,
@@ -191,9 +191,10 @@ impl Session {
 
             let seq = next_sequence(writer)?;
             for (entry, id) in save.entries.iter().zip(entry_ids.iter()) {
-                let content = serde_json::to_string(&entry.content)
+                let content_value = crate::secrets::redact_value(&entry.content);
+                let content = serde_json::to_string(&content_value)
                     .map_err(|error| CoreError::Invalid(error.to_string()))?;
-                let tokens_est = crate::prompt::estimate_content(&entry.content);
+                let tokens_est = crate::prompt::estimate_content(&content_value);
                 writer.execute(
                     "INSERT INTO entries (id, conversation_id, seq, kind, content_json, \
                      tokens_est, source, prompt_hash, created_at) \
@@ -213,8 +214,7 @@ impl Session {
             }
 
             for document in &save.documents {
-                let json = serde_json::to_string(&document.json)
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let json = redacted_json(&document.json)?;
                 match document.expected {
                     None => {
                         writer.execute(
@@ -252,8 +252,7 @@ impl Session {
             }
 
             for submission in &save.submissions {
-                let content = serde_json::to_string(&submission.content)
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let content = redacted_json(&submission.content)?;
                 writer.execute(
                     "INSERT INTO submissions (id, conversation_id, request_id, kind, content_json, \
                      status, answer_entry_id, error_json, created_at, settled_at) \
@@ -283,12 +282,7 @@ impl Session {
                         ));
                     }
                 }
-                let error_json = settle
-                    .error
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let error_json = settle.error.as_ref().map(redacted_json).transpose()?;
                 let changed = writer.execute(
                     "UPDATE submissions SET status = ?, answer_entry_id = ?, error_json = ?, \
                      settled_at = ? WHERE id = ? AND conversation_id = ? AND settled_at IS NULL",
@@ -339,8 +333,7 @@ impl Session {
                 let id = match existing {
                     Some(id) => id,
                     None => {
-                        let payload = serde_json::to_string(&intent.payload)
-                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let payload = redacted_json(&intent.payload)?;
                         writer.execute(
                             "INSERT INTO effects (id, task_id, kind, key, payload_json, status, \
                              result_json, attempts, created_at, settled_at) \
@@ -593,8 +586,7 @@ impl Session {
                     status: effect.status.as_str().to_owned(),
                 });
             }
-            let result_json = serde_json::to_string(&result)
-                .map_err(|error| CoreError::Invalid(error.to_string()))?;
+            let result_json = redacted_json(&result)?;
             writer.execute(
                 "UPDATE effects SET status = 'done', result_json = ?, settled_at = ? \
                      WHERE id = ?",
@@ -625,8 +617,7 @@ impl Session {
                     status: effect.status.as_str().to_owned(),
                 });
             }
-            let error_json = serde_json::to_string(&error)
-                .map_err(|error| CoreError::Invalid(error.to_string()))?;
+            let error_json = redacted_json(&error)?;
             let kind = if retryable {
                 writer.execute(
                     "UPDATE effects SET status = 'intent', result_json = ?, \
@@ -719,8 +710,7 @@ impl Session {
                     status: effect.status.as_str().to_owned(),
                 });
             }
-            let result_json = serde_json::to_string(&result)
-                .map_err(|error| CoreError::Invalid(error.to_string()))?;
+            let result_json = redacted_json(&result)?;
             writer.execute(
                 "UPDATE effects SET status = ?, result_json = ?, settled_at = ? WHERE id = ?",
                 (
@@ -755,9 +745,9 @@ impl Session {
 
     /// Save one prompt text and return its stable hash.
     pub fn save_prompt_blob(&self, text: &str) -> Result<String, CoreError> {
+        let text = crate::secrets::redact_secrets(text);
         let hash = Uuid::new_v5(&Uuid::NAMESPACE_URL, text.as_bytes()).to_string();
         let now = self.clock.now_micros();
-        let text = text.to_owned();
         let write_hash = hash.clone();
         self.storage.write(move |writer| -> Result<(), CoreError> {
             writer.execute(
@@ -1635,7 +1625,8 @@ impl Session {
 
         let now = self.clock.now_micros();
         let id = self.ids.new_id();
-        let input = serde_json::to_string(&new.input)
+        let input_value = crate::secrets::redact_value(&new.input);
+        let input = serde_json::to_string(&input_value)
             .map_err(|error| CoreError::Invalid(error.to_string()))?;
         let task = Task {
             id: id.clone(),
@@ -1646,7 +1637,7 @@ impl Session {
             status: TaskStatus::Pending,
             phase: new.phase,
             attempt: 0,
-            input: new.input,
+            input: input_value,
             checkpoint: None,
             result: None,
             lease_owner: None,
@@ -1723,7 +1714,8 @@ impl Session {
 
         let now = self.clock.now_micros();
         let id = self.ids.new_id();
-        let input = serde_json::to_string(&new.input)
+        let input_value = crate::secrets::redact_value(&new.input);
+        let input = serde_json::to_string(&input_value)
             .map_err(|error| CoreError::Invalid(error.to_string()))?;
         let task = Task {
             id: id.clone(),
@@ -1734,7 +1726,7 @@ impl Session {
             status: TaskStatus::Asleep,
             phase: new.phase,
             attempt: 0,
-            input: new.input,
+            input: input_value,
             checkpoint: None,
             result: None,
             lease_owner: None,
@@ -1865,8 +1857,7 @@ impl Session {
                 if task.status.is_terminal() {
                     return Ok(task);
                 }
-                let result = serde_json::to_string(&result)
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let result = redacted_json(&result)?;
                 let changed = writer.execute(
                     "UPDATE tasks SET status = 'aborted', result_json = ?, terminal_at = ?, \
                  lease_owner = NULL, lease_until = NULL, next_wake_at = NULL, updated_at = ? \
@@ -2200,8 +2191,7 @@ impl Session {
 
                 match output {
                     StepOutput::Next { phase, checkpoint } => {
-                        let checkpoint = serde_json::to_string(&checkpoint)
-                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let checkpoint = redacted_json(&checkpoint)?;
                         let changed = writer.execute(
                             "UPDATE tasks SET status = 'pending', phase = ?, checkpoint_json = ?, \
                          attempt = 0, lease_owner = NULL, lease_until = NULL, next_wake_at = NULL, \
@@ -2217,8 +2207,7 @@ impl Session {
                         phase,
                         checkpoint,
                     } => {
-                        let checkpoint = serde_json::to_string(&checkpoint)
-                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let checkpoint = redacted_json(&checkpoint)?;
                         let changed = writer.execute(
                             "UPDATE tasks SET status = 'asleep', phase = ?, checkpoint_json = ?, \
                              attempt = 0, lease_owner = NULL, lease_until = NULL, \
@@ -2239,8 +2228,7 @@ impl Session {
                     }
                     StepOutput::Terminal { outcome, result } => {
                         let status = outcome.status();
-                        let result = serde_json::to_string(&result)
-                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let result = redacted_json(&result)?;
                         let changed = writer.execute(
                             "UPDATE tasks SET status = ?, result_json = ?, terminal_at = ?, \
                              lease_owner = NULL, lease_until = NULL, next_wake_at = NULL, \
@@ -2276,8 +2264,7 @@ impl Session {
                         error,
                         retryable: false,
                     } => {
-                        let result = serde_json::to_string(&error)
-                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let result = redacted_json(&error)?;
                         let changed = writer.execute(
                             "UPDATE tasks SET status = 'failed', result_json = ?, \
                              terminal_at = ?, lease_owner = NULL, lease_until = NULL, \
@@ -2332,8 +2319,7 @@ impl Session {
                 if task.lease_owner.as_deref() != Some(owner.as_str()) {
                     return Err(CoreError::LeaseLost(task_id.clone()));
                 }
-                let checkpoint = serde_json::to_string(&checkpoint)
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let checkpoint = redacted_json(&checkpoint)?;
                 let changed = writer.execute(
                     "UPDATE tasks SET checkpoint_json = ?, updated_at = ? \
                      WHERE id = ? AND status = 'running' AND lease_owner = ?",
@@ -2507,7 +2493,7 @@ impl Session {
                     id: ids.new_id(),
                     parent_id: Some(source.id.clone()),
                     parent_entry_id: Some(chosen.clone()),
-                    title: source.title.clone(),
+                    title: crate::secrets::redact_secrets(&source.title),
                     transport: source.transport.clone(),
                     transport_key: source.transport_key.clone(),
                     created_at: now,
@@ -2534,8 +2520,7 @@ impl Session {
                 let seq = record_commit(writer, now, Some(fork.id.as_str()), None, "fork")?;
                 for entry in &copied {
                     let id = ids.new_id();
-                    let content = serde_json::to_string(&entry.content)
-                        .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                    let content = redacted_json(&entry.content)?;
                     writer.execute(
                         "INSERT INTO entries (id, conversation_id, seq, kind, content_json, \
                      tokens_est, source, prompt_hash, created_at) \
@@ -2856,6 +2841,11 @@ fn add_memory(
     actor: &str,
     now: i64,
 ) -> Result<(), CoreError> {
+    if crate::secrets::contains_secret(&item.content) {
+        return Err(CoreError::Invalid(
+            "credential-like memory content was refused".to_owned(),
+        ));
+    }
     let tags =
         serde_json::to_string(&item.tags).map_err(|error| CoreError::Invalid(error.to_string()))?;
     writer.execute(
@@ -2943,6 +2933,11 @@ fn update_memory(
         .content
         .clone()
         .unwrap_or_else(|| old_content.clone());
+    if update.content.is_some() && crate::secrets::contains_secret(&content) {
+        return Err(CoreError::Invalid(
+            "credential-like memory content was refused".to_owned(),
+        ));
+    }
     let tags = match &update.tags {
         Some(tags) => {
             serde_json::to_string(tags).map_err(|error| CoreError::Invalid(error.to_string()))?
@@ -3072,6 +3067,11 @@ fn memory_event(
 
 fn hash_content(content: &str) -> String {
     Uuid::new_v5(&Uuid::NAMESPACE_OID, content.as_bytes()).to_string()
+}
+
+fn redacted_json(value: &Value) -> Result<String, CoreError> {
+    serde_json::to_string(&crate::secrets::redact_value(value))
+        .map_err(|error| CoreError::Invalid(error.to_string()))
 }
 
 fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {

@@ -599,6 +599,7 @@ impl Agent {
                 match event {
                     Ok(StreamEvent::TextDelta(delta)) => {
                         text.push_str(&delta);
+                        hearth_storage::crash_if("mid_stream");
                         emit(
                             events,
                             &claimed.id,
@@ -609,6 +610,7 @@ impl Agent {
                     }
                     Ok(StreamEvent::ThinkingDelta(delta)) => {
                         thinking.push_str(&delta);
+                        hearth_storage::crash_if("mid_stream");
                         emit(
                             events,
                             &claimed.id,
@@ -735,7 +737,7 @@ impl Agent {
                 submission: settled,
                 task_id: claimed.id,
                 answer_entry_id: Some(answer_entry_id),
-                answer_text: Some(text),
+                answer_text: Some(hearth_core::secrets::redact_secrets(&text)),
                 notice: None,
             });
         }
@@ -885,8 +887,9 @@ impl Agent {
     }
 
     fn spill_output(&self, call_id: &str, content: &str) -> (String, bool) {
-        if hearth_model::estimate_tokens(content) <= 4000 {
-            return (content.to_owned(), false);
+        let content = hearth_core::secrets::redact_secrets(content);
+        if hearth_model::estimate_tokens(&content) <= 4000 {
+            return (content, false);
         }
         let name = sanitize_call_id(call_id);
         if let Err(error) = fs::create_dir_all(&self.config.spill_dir) {
@@ -896,7 +899,7 @@ impl Agent {
             );
         }
         let path = self.config.spill_dir.join(format!("{name}.txt"));
-        if let Err(error) = write_private(&path, content) {
+        if let Err(error) = write_private(&path, &content) {
             return (
                 format!("tool output was too large and the spill write failed: {error}"),
                 true,
@@ -912,7 +915,7 @@ impl Agent {
             format!(
                 "[tool output truncated: {} bytes, ~{} tokens; full output: spill/{name}.txt]\n{head}\n...\n{tail}",
                 content.len(),
-                hearth_model::estimate_tokens(content)
+                hearth_model::estimate_tokens(&content)
             ),
             false,
         )
@@ -991,7 +994,7 @@ impl Agent {
         reason: &str,
         events: &dyn EventSink,
     ) -> Result<RunOutcome, AgentError> {
-        let notice = short_notice(message);
+        let notice = hearth_core::secrets::redact_secrets(&short_notice(message));
         self.session.save(
             Save::new(&submission.conversation_id).entry("notice", json!({"text": notice})),
         )?;

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use hearth_core::{EffectIntent, EffectStatus, Harness, Save};
+use hearth_core::{EffectIntent, EffectStatus, Harness, Save, SubmissionStatus, TaskStatus};
 use tempfile::TempDir;
 
 fn home() -> TempDir {
@@ -251,4 +251,108 @@ fn a_crash_during_an_effect_replays_it_once() {
         .expect("latest commit")
         .expect("a commit exists");
     assert_eq!(commit.kind, "effect.done");
+}
+
+#[test]
+fn a_crash_mid_stream_keeps_the_input_and_retries_once() {
+    let home = home();
+    let home_text = home.path().to_str().expect("utf-8 home");
+    let conversation = conversation(home.path());
+
+    let crashed = run(
+        home.path(),
+        &[
+            "agent",
+            home_text,
+            conversation.as_str(),
+            "req-agent-mid-stream",
+        ],
+        Some("mid_stream"),
+    );
+    assert!(
+        !crashed.status.success(),
+        "the driver did not crash: {}",
+        output_text(&crashed)
+    );
+
+    {
+        let harness = Harness::open(home.path()).expect("reopen harness");
+        let session = harness.session();
+        let history = session.history(&conversation).expect("history");
+        assert_eq!(history.len(), 1, "history was {history:?}");
+        assert_eq!(history[0].kind, "user");
+        assert!(
+            !history.iter().any(|entry| entry.kind == "assistant"),
+            "an assistant entry was saved before the crash"
+        );
+        let submission = session
+            .submission_by_request_id("req-agent-mid-stream")
+            .expect("submission lookup")
+            .expect("submission exists");
+        assert_eq!(submission.status, SubmissionStatus::Running);
+
+        let task_id: String = session
+            .storage()
+            .read(|reader| {
+                reader.query_row(
+                    "SELECT id FROM tasks WHERE kind = 'generation' ORDER BY created_at DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .expect("generation task");
+        let task = session
+            .task(&task_id)
+            .expect("read task")
+            .expect("task exists");
+        assert_eq!(task.status, TaskStatus::Running);
+
+        let expire_id = task_id.clone();
+        session
+            .storage()
+            .write(move |writer| -> Result<(), hearth_storage::StorageError> {
+                writer.execute(
+                    "UPDATE tasks SET lease_until = 0 WHERE id = ?",
+                    (&expire_id,),
+                )?;
+                Ok(())
+            })
+            .expect("expire the lease");
+        let recovery = session.recover_tasks().expect("recover tasks");
+        assert_eq!(recovery.requeued, 1);
+        let task = session
+            .task(&task_id)
+            .expect("read task")
+            .expect("task exists");
+        assert_eq!(task.status, TaskStatus::Pending);
+    }
+
+    let retry = run(
+        home.path(),
+        &[
+            "agent",
+            home_text,
+            conversation.as_str(),
+            "req-agent-mid-stream",
+        ],
+        None,
+    );
+    assert!(
+        retry.status.success(),
+        "the retry failed: {}",
+        output_text(&retry)
+    );
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let session = harness.session();
+    let history = session.history(&conversation).expect("history");
+    assert_eq!(history.len(), 2, "history was {history:?}");
+    assert_eq!(history[0].kind, "user");
+    assert_eq!(history[1].kind, "assistant");
+    let submission = session
+        .submission_by_request_id("req-agent-mid-stream")
+        .expect("submission lookup")
+        .expect("submission exists");
+    assert_eq!(submission.status, SubmissionStatus::Done);
+    assert!(submission.answer_entry_id.is_some());
 }

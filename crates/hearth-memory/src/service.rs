@@ -1353,42 +1353,10 @@ fn fts_query(query: &str) -> String {
 }
 
 fn reject_secret(content: &str) -> Result<(), MemoryError> {
-    let lower = content.to_ascii_lowercase();
-    for prefix in ["sk-", "ghp_", "xoxb-", "akia"] {
-        if lower.contains(prefix) {
-            return Err(MemoryError::Secret(
-                "credential-like content was refused".to_owned(),
-            ));
-        }
-    }
-    let mut words = content.split_whitespace().peekable();
-    while let Some(token) = words.next() {
-        if token.eq_ignore_ascii_case("bearer") && words.peek().is_some_and(|next| next.len() >= 8)
-        {
-            return Err(MemoryError::Secret(
-                "credential-like content was refused".to_owned(),
-            ));
-        }
-        if let Some((left, right)) = token.split_once(':')
-            && left.len() >= 8
-            && left.chars().all(|character| character.is_ascii_digit())
-            && right.len() >= 20
-        {
-            return Err(MemoryError::Secret(
-                "credential-like content was refused".to_owned(),
-            ));
-        }
-        let lower_token = token.to_ascii_lowercase();
-        for key in ["api_key", "apikey", "token", "password", "secret"] {
-            if let Some(rest) = lower_token.strip_prefix(key) {
-                let rest = rest.trim_start_matches(['=', ':']);
-                if rest.len() >= 8 && !rest.starts_with('$') {
-                    return Err(MemoryError::Secret(
-                        "credential-like content was refused".to_owned(),
-                    ));
-                }
-            }
-        }
+    if hearth_core::secrets::contains_secret(content) {
+        return Err(MemoryError::Secret(
+            "credential-like content was refused".to_owned(),
+        ));
     }
     Ok(())
 }

@@ -6,6 +6,7 @@ mod compaction;
 mod error;
 mod model;
 mod prompt;
+pub mod secrets;
 mod session;
 mod soul;
 mod task;

@@ -59,11 +59,41 @@ pub fn init_logging(home: &Path) -> std::io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     }
+    let file = std::sync::Arc::new(std::sync::Mutex::new(file));
+    let writer_file = std::sync::Arc::clone(&file);
     let subscriber = tracing_subscriber::fmt()
         .json()
         .with_max_level(tracing::Level::INFO)
-        .with_writer(std::sync::Mutex::new(file))
+        .with_writer(move || RedactingWriter {
+            file: std::sync::Arc::clone(&writer_file),
+        })
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
     Ok(())
+}
+
+/// A log writer that redacts credential-shaped tokens before they reach disk.
+struct RedactingWriter {
+    file: std::sync::Arc<std::sync::Mutex<std::fs::File>>,
+}
+
+impl std::io::Write for RedactingWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let text = String::from_utf8_lossy(buffer);
+        let redacted = hearth_core::secrets::redact_secrets(&text);
+        let mut file = self
+            .file
+            .lock()
+            .map_err(|_| std::io::Error::other("log lock is poisoned"))?;
+        file.write_all(redacted.as_bytes())?;
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut file = self
+            .file
+            .lock()
+            .map_err(|_| std::io::Error::other("log lock is poisoned"))?;
+        file.flush()
+    }
 }
