@@ -354,3 +354,26 @@ fn effect_transitions_advance_the_save_sequence() {
         .expect("commit exists");
     assert_eq!(terminal.kind, "effect.failed");
 }
+
+#[test]
+fn a_failed_save_leaves_no_effect_or_commit() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+
+    let result = session.save(
+        Save::new(&conversation_id).effect(
+            EffectIntent::new("file_write", "write-1", json!({})).task("missing-task"),
+        ),
+    );
+
+    assert!(result.is_err(), "the missing task must fail the save");
+    assert!(
+        session.latest_commit().expect("read commit").is_none(),
+        "a failed save must not leave a commit"
+    );
+    assert!(
+        session.effect("id-2").expect("read effect").is_none(),
+        "a failed save must not leave an effect"
+    );
+}
