@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use hearth_core::{Harness, Session};
+use hearth_core::{Harness, MemoryChange, MemoryWrite, NewMemory, Session};
 use hearth_memory::{
     MemoryError, MemoryKind, MemoryPatch, MemoryService, MemoryStatus, MemoryTool, NewMemoryInput,
     SourceKind,
@@ -600,4 +600,139 @@ fn the_standing_render_includes_id_kind_date_and_importance() {
     assert!(rendered.contains("rule"));
     assert!(rendered.contains("p=90"));
     assert!(rendered.contains("Use metric units"));
+}
+
+
+// ---- M4c: standing refresh and consolidation ----
+
+fn raw_memory(
+    session: &Session,
+    content: &str,
+    kind: MemoryKind,
+    importance: i64,
+    fingerprint: &str,
+    tags: &[&str],
+) -> String {
+    let id = session.new_id();
+    let now = session.now_micros();
+    let item = NewMemory {
+        id: id.clone(),
+        kind: kind.as_str().to_owned(),
+        content: content.to_owned(),
+        tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
+        fingerprint: fingerprint.to_owned(),
+        importance,
+        status: MemoryStatus::Active.as_str().to_owned(),
+        valid_from: None,
+        valid_to: None,
+        supersedes_id: None,
+        source_kind: SourceKind::User.as_str().to_owned(),
+        source_ref: None,
+        standing: "none".to_owned(),
+        created_at: now,
+        last_used_at: None,
+    };
+    session
+        .save_memory(vec![MemoryWrite::new(MemoryChange::Add(item), "system")])
+        .expect("raw memory");
+    id
+}
+
+#[test]
+fn a_standing_refresh_promotes_a_qualifying_row_and_bumps_the_version() {
+    let (_home, _clock, session, service) = setup_clock(MemoryPolicy::default());
+    let id = raw_memory(
+        &session,
+        "Use metric units",
+        MemoryKind::Rule,
+        90,
+        "fp-refresh-promote",
+        &[],
+    );
+    assert_eq!(service.standing_version().expect("v"), 0);
+    let standing = service.standing().expect("standing");
+    assert_eq!(standing.items.len(), 1);
+    assert_eq!(standing.items[0].id, id);
+    assert_eq!(standing.items[0].standing, Standing::Promoted);
+    assert_eq!(standing.version, 1);
+    assert_eq!(service.standing_version().expect("v"), 1);
+    let saved = service.get(&id).expect("get").expect("row");
+    assert_eq!(saved.standing, Standing::Promoted);
+}
+
+#[test]
+fn a_qualifying_row_demoted_by_the_cap_leaves_the_version_unchanged() {
+    let policy = MemoryPolicy {
+        standing_max_tokens: 0,
+        ..MemoryPolicy::default()
+    };
+    let (_home, _clock, session, service) = setup_clock(policy);
+    let id = raw_memory(
+        &session,
+        "Use metric units",
+        MemoryKind::Rule,
+        90,
+        "fp-cap-demote",
+        &[],
+    );
+    assert_eq!(service.standing_version().expect("v"), 0);
+    let standing = service.standing().expect("standing");
+    assert!(standing.items.is_empty());
+    assert_eq!(standing.version, 0);
+    assert_eq!(service.standing_version().expect("v"), 0);
+    let saved = service.get(&id).expect("get").expect("row");
+    assert_eq!(saved.standing, Standing::None);
+}
+
+#[test]
+fn near_duplicates_consolidate_into_one_active_row() {
+    let (_home, _clock, session, service) = setup_clock(MemoryPolicy::default());
+    let survivor = raw_memory(
+        &session,
+        "The patient prefers dark roast coffee",
+        MemoryKind::Preference,
+        50,
+        "fp-consolidate-a",
+        &[],
+    );
+    let duplicate = raw_memory(
+        &session,
+        "The patient prefers dark roast coffee daily",
+        MemoryKind::Preference,
+        70,
+        "fp-consolidate-b",
+        &["coffee"],
+    );
+    let unrelated = raw_memory(
+        &session,
+        "Sam lives in Manila",
+        MemoryKind::Fact,
+        50,
+        "fp-consolidate-c",
+        &[],
+    );
+
+    let report = service.consolidate().expect("consolidate");
+    assert_eq!(report.merged, 1);
+    assert_eq!(report.unchanged, 2);
+
+    let survivor_item = service.get(&survivor).expect("get").expect("survivor");
+    let duplicate_item = service.get(&duplicate).expect("get").expect("duplicate");
+    let unrelated_item = service.get(&unrelated).expect("get").expect("unrelated");
+    assert_eq!(survivor_item.status, MemoryStatus::Active);
+    assert_eq!(survivor_item.importance, 70);
+    assert!(survivor_item.tags.contains(&"coffee".to_owned()));
+    assert_eq!(duplicate_item.status, MemoryStatus::Superseded);
+    assert!(duplicate_item.valid_to.is_some());
+    assert_eq!(unrelated_item.status, MemoryStatus::Active);
+
+    let events = count(
+        &session,
+        "SELECT COUNT(*) FROM memory_events WHERE action = 'update'",
+    );
+    assert!(events >= 2, "merge events {events}");
+
+    let active = service.search("coffee", 10).expect("search");
+    assert!(active.iter().any(|item| item.id == survivor));
+    assert!(!active.iter().any(|item| item.id == duplicate));
 }

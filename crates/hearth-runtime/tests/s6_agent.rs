@@ -4,12 +4,13 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use hearth_core::{Harness, NewTask, Save, Submission, SubmissionStatus, TaskStatus};
+use hearth_core::{Harness, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus};
 use hearth_model::{
     ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
     StreamEvent, ToolCall, Usage,
 };
 use hearth_runtime::{Agent, AgentConfig, AgentError, EventSink, RunEvent};
+use hearth_memory::{MemoryKind, MemoryService, NewMemoryInput, SourceKind};
 use hearth_tools::{FileTool, Tool, ToolRegistry};
 use serde_json::json;
 use std::fs;
@@ -1005,6 +1006,65 @@ fn text_script(answer: &str) -> Script {
     ])
 }
 
+fn json_script(text: &str) -> Script {
+    Ok(vec![
+        Ok(StreamEvent::TextDelta(text.to_owned())),
+        Ok(StreamEvent::Usage(Usage {
+            input_tokens: 10,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 3,
+            reasoning_tokens: 0,
+        })),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])
+}
+
+fn noop_script() -> Script {
+    json_script(r#"{"operations":[{"op":"noop"}]}"#)
+}
+
+fn submit_text(
+    harness: &Harness,
+    conversation: &str,
+    request_id: &str,
+    text: &str,
+) -> (Submission, String) {
+    let submission = harness
+        .session()
+        .submit(conversation, request_id, "input", json!({"text": text}))
+        .expect("submit")
+        .submission;
+    let user_entry = harness
+        .session()
+        .history(conversation)
+        .expect("history")
+        .into_iter()
+        .rev()
+        .find(|entry| entry.kind == "user")
+        .expect("user entry")
+        .id;
+    (submission, user_entry)
+}
+
+fn latest_extract_task(harness: &Harness, conversation: &str) -> Option<Task> {
+    let id: Option<String> = harness
+        .session()
+        .storage()
+        .read(|reader| {
+            reader.query_optional(
+                "SELECT id FROM tasks WHERE kind = 'memory.extract' AND conversation_id = ? \
+                 ORDER BY created_at DESC, id DESC LIMIT 1",
+                (conversation,),
+                |row| row.get(0),
+            )
+        })
+        .expect("task query");
+    id.and_then(|id| harness.session().task(&id).expect("task"))
+}
+
 fn memory_input(
     content: &str,
     kind: hearth_memory::MemoryKind,
@@ -1052,7 +1112,10 @@ fn the_agent_injects_standing_and_recall_memory() {
         )
         .expect("submit")
         .submission;
-    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Dark roast.")]));
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Dark roast."),
+        noop_script(),
+    ]));
     let outcome = agent(
         home.path(),
         &harness,
@@ -1065,7 +1128,7 @@ fn the_agent_injects_standing_and_recall_memory() {
     assert_eq!(outcome.answer_text.as_deref(), Some("Dark roast."));
 
     let requests = provider.requests();
-    let request = requests.last().expect("request");
+    let request = requests.first().expect("request");
     let texts: Vec<String> = request.messages.iter().map(message_text).collect();
     assert!(
         texts
@@ -1155,7 +1218,10 @@ fn a_memory_failure_does_not_stop_the_answer() {
         )
         .expect("submit")
         .submission;
-    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Still here.")]));
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Still here."),
+        noop_script(),
+    ]));
     let outcome = agent(
         home.path(),
         &harness,
@@ -1167,4 +1233,207 @@ fn a_memory_failure_does_not_stop_the_answer() {
     .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Still here."));
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+}
+
+// ---- M4c: post-run memory extraction ----
+
+#[test]
+fn an_answer_is_extracted_into_memory() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let (submission, user_entry) = submit_text(
+        &harness,
+        &conversation,
+        "req-extract",
+        "I prefer dark roast coffee",
+    );
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let extraction = format!(
+        r#"{{"operations":[{{"op":"add","kind":"preference","content":"Sam prefers dark roast coffee","tags":["coffee"],"importance":70,"evidence_entry_id":"{}","evidence_quote":"I prefer dark roast coffee"}}]}}"#,
+        user_entry
+    );
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Noted."),
+        json_script(&extraction),
+    ]));
+
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("Noted."));
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+
+    let found = memory.search("dark roast", 5).expect("search");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].source_kind, SourceKind::Session);
+    assert_eq!(found[0].source_ref.as_deref(), Some(user_entry.as_str()));
+
+    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
+    assert_eq!(task.status, TaskStatus::Done);
+    let result = task.result.as_ref().expect("result");
+    assert_eq!(result["applied"], 1);
+    let usage = harness.session().usage_for_task(&task.id).expect("usage");
+    assert_eq!(usage.len(), 1);
+    assert_eq!(usage[0].kind, "memory.extract");
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    let extraction_text: String = requests[1]
+        .messages
+        .iter()
+        .map(message_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(extraction_text.contains("I prefer dark roast coffee"));
+    assert!(extraction_text.contains("operations"));
+
+    let prompt = harness
+        .session()
+        .latest_prompt()
+        .expect("blob")
+        .expect("prompt");
+    assert!(prompt.text.contains("I prefer dark roast coffee"));
+}
+
+#[test]
+fn an_extraction_without_valid_evidence_is_rejected() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let (submission, _user_entry) = submit_text(
+        &harness,
+        &conversation,
+        "req-extract-bad",
+        "I prefer dark roast coffee",
+    );
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let extraction = r#"{"operations":[{"op":"add","kind":"preference","content":"Sam prefers dark roast coffee","evidence_entry_id":"missing","evidence_quote":"I prefer dark roast coffee"}]}"#;
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Noted."),
+        json_script(extraction),
+    ]));
+
+    agent(home.path(), &harness, provider, Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+
+    assert_eq!(memory.stats().expect("stats").total, 0);
+    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
+    assert_eq!(task.status, TaskStatus::Done);
+    let result = task.result.as_ref().expect("result");
+    assert_eq!(result["applied"], 0);
+    assert_eq!(result["rejected"], 1);
+}
+
+#[test]
+fn a_noop_extraction_writes_nothing() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let (submission, _user_entry) = submit_text(
+        &harness,
+        &conversation,
+        "req-extract-noop",
+        "I prefer dark roast coffee",
+    );
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Noted."),
+        noop_script(),
+    ]));
+
+    agent(home.path(), &harness, provider, Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+
+    assert_eq!(memory.stats().expect("stats").total, 0);
+    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
+    assert_eq!(task.status, TaskStatus::Done);
+}
+
+#[test]
+fn a_trivial_message_skips_extraction() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
+
+    agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+
+    assert_eq!(provider.requests().len(), 1);
+    assert!(latest_extract_task(&harness, &conversation).is_none());
+    assert_eq!(memory.stats().expect("stats").total, 0);
+}
+
+#[test]
+fn a_malformed_extraction_fails_the_task_but_not_the_answer() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let (submission, _user_entry) = submit_text(
+        &harness,
+        &conversation,
+        "req-extract-malformed",
+        "I prefer dark roast coffee",
+    );
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Still answered."),
+        json_script("not json"),
+    ]));
+
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
+
+    assert_eq!(outcome.answer_text.as_deref(), Some("Still answered."));
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+    assert_eq!(memory.stats().expect("stats").total, 0);
+    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
+    assert_eq!(task.status, TaskStatus::Failed);
+    assert!(task.result.as_ref().expect("result")["error"].is_string());
+}
+
+#[test]
+fn the_extraction_request_contains_the_run_and_similar_memories() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    memory
+        .save(memory_input(
+            "Sam prefers dark roast coffee",
+            MemoryKind::Preference,
+            60,
+        ))
+        .expect("seed memory");
+    let (submission, _user_entry) = submit_text(
+        &harness,
+        &conversation,
+        "req-extract-similar",
+        "I prefer dark roast coffee",
+    );
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        text_script("Noted."),
+        noop_script(),
+    ]));
+
+    agent(home.path(), &harness, Arc::clone(&provider), Pricing::default())
+        .with_memory(memory)
+        .run_submission(&submission.id)
+        .expect("run");
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    let extraction_text: String = requests[1]
+        .messages
+        .iter()
+        .map(message_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(extraction_text.contains("Sam prefers dark roast coffee"));
 }
