@@ -287,3 +287,306 @@ fn the_memory_tool_covers_every_action() {
         .expect("forget");
     assert!(forget.content.contains("forgotten"));
 }
+
+// ---- M4b: standing memory and automatic recall ----
+
+use hearth_core::{Clock, IdGen, UuidV7};
+use hearth_memory::{MemoryPolicy, Standing};
+use std::sync::atomic::{AtomicI64, Ordering};
+
+struct StepClock(AtomicI64);
+
+impl StepClock {
+    fn new() -> Self {
+        Self(AtomicI64::new(1_700_000_000_000_000))
+    }
+
+    fn advance_days(&self, days: i64) {
+        self.0
+            .fetch_add(days * 86_400_000_000, Ordering::Relaxed);
+    }
+}
+
+impl Clock for StepClock {
+    fn now_micros(&self) -> i64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+fn setup_clock(policy: MemoryPolicy) -> (TempDir, Arc<StepClock>, Session, MemoryService) {
+    let home = TempDir::new().expect("temp home");
+    let clock = Arc::new(StepClock::new());
+    let harness = Harness::open_with(
+        home.path(),
+        clock.clone(),
+        Arc::new(UuidV7) as Arc<dyn IdGen>,
+    )
+    .expect("open harness");
+    let session = harness.session().clone();
+    let service = MemoryService::with_policy(session.clone(), policy);
+    (home, clock, session, service)
+}
+
+fn input_imp(content: &str, kind: MemoryKind, importance: i64) -> NewMemoryInput {
+    NewMemoryInput {
+        content: content.to_owned(),
+        kind,
+        tags: Vec::new(),
+        importance,
+        source_kind: SourceKind::User,
+        source_ref: None,
+        supersedes: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn a_high_importance_rule_promotes_into_standing_and_bumps_the_version() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let saved = service
+        .save(input_imp("Use metric units", MemoryKind::Rule, 90))
+        .expect("save");
+    assert_eq!(saved.standing, Standing::Promoted);
+
+    let standing = service.standing().expect("standing");
+    assert_eq!(standing.items.len(), 1);
+    assert_eq!(standing.items[0].id, saved.id);
+    assert_eq!(standing.version, 1);
+    assert_eq!(service.standing_version().expect("version"), 1);
+    assert!(
+        service
+            .render_standing(&standing.items)
+            .contains("Use metric units")
+    );
+}
+
+#[test]
+fn a_low_importance_fact_does_not_change_standing() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    service
+        .save(input_imp("Sam likes blue pens", MemoryKind::Fact, 50))
+        .expect("save");
+    let standing = service.standing().expect("standing");
+    assert!(standing.items.is_empty());
+    assert_eq!(standing.version, 0);
+}
+
+#[test]
+fn pinned_items_are_always_standing() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let saved = service
+        .save(input_imp("Sam likes blue pens", MemoryKind::Fact, 50))
+        .expect("save");
+    let pinned = service.pin(&saved.id, true).expect("pin");
+    assert_eq!(pinned.standing, Standing::Pinned);
+    let standing = service.standing().expect("standing");
+    assert_eq!(standing.items.len(), 1);
+    assert_eq!(standing.items[0].id, saved.id);
+    assert_eq!(standing.version, 1);
+}
+
+#[test]
+fn promoted_items_over_the_cap_are_demoted() {
+    let policy = MemoryPolicy {
+        standing_max_tokens: 35,
+        ..MemoryPolicy::default()
+    };
+    let (_home, _clock, _session, service) = setup_clock(policy);
+    let first = service
+        .save(input_imp(
+            "Rule one: always answer in metric units and never guess",
+            MemoryKind::Rule,
+            90,
+        ))
+        .expect("first");
+    let second = service
+        .save(input_imp(
+            "Rule two: prefer short answers and avoid long explanations",
+            MemoryKind::Rule,
+            90,
+        ))
+        .expect("second");
+    let third = service
+        .save(input_imp(
+            "Rule three: check the time before scheduling anything",
+            MemoryKind::Rule,
+            90,
+        ))
+        .expect("third");
+    let standing = service.standing().expect("standing");
+    assert!(standing.items.len() < 3);
+    assert_eq!(standing.items[0].id, first.id);
+    assert_eq!(standing.items[0].standing, Standing::Promoted);
+    let mut demoted = 0;
+    for id in [&second.id, &third.id] {
+        let item = service.get(id).expect("get").expect("exists");
+        if item.standing == Standing::None {
+            demoted += 1;
+        }
+    }
+    assert!(demoted >= 1);
+    assert!(standing.version >= 1);
+}
+
+#[test]
+fn the_standing_version_changes_only_when_the_set_changes() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let rule = service
+        .save(input_imp("Use metric units", MemoryKind::Rule, 90))
+        .expect("rule");
+    assert_eq!(service.standing_version().expect("v"), 1);
+    let fact = service
+        .save(input_imp("Sam likes blue pens", MemoryKind::Fact, 50))
+        .expect("fact");
+    assert_eq!(service.standing_version().expect("v"), 1);
+    service
+        .update(
+            &rule.id,
+            MemoryPatch {
+                content: Some("Use metric units and Celsius".to_owned()),
+                ..MemoryPatch::default()
+            },
+        )
+        .expect("update rule");
+    assert_eq!(service.standing_version().expect("v"), 2);
+    service
+        .update(
+            &fact.id,
+            MemoryPatch {
+                content: Some("Sam likes green pens".to_owned()),
+                ..MemoryPatch::default()
+            },
+        )
+        .expect("update fact");
+    assert_eq!(service.standing_version().expect("v"), 2);
+    service.pin(&fact.id, true).expect("pin");
+    assert_eq!(service.standing_version().expect("v"), 3);
+    service.forget(&rule.id).expect("forget");
+    assert_eq!(service.standing_version().expect("v"), 4);
+}
+
+#[test]
+fn recall_ranks_a_recent_important_match_above_an_old_weak_one() {
+    let (_home, clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let old = service
+        .save(input_imp("coffee preference old", MemoryKind::Preference, 20))
+        .expect("old");
+    clock.advance_days(365);
+    let recent = service
+        .save(input_imp("coffee preference recent", MemoryKind::Preference, 90))
+        .expect("recent");
+    let recalled = service.recall("coffee").expect("recall");
+    assert_eq!(recalled[0].id, recent.id);
+    let old_pos = recalled.iter().position(|item| item.id == old.id);
+    assert!(old_pos.is_none() || old_pos == Some(recalled.len() - 1));
+    let read = service.get(&recent.id).expect("get").expect("exists");
+    assert!(read.last_used_at.is_some());
+}
+
+#[test]
+fn recall_caps_items_and_budget() {
+    let policy = MemoryPolicy {
+        recall_max_tokens: 40,
+        ..MemoryPolicy::default()
+    };
+    let (_home, _clock, _session, service) = setup_clock(policy);
+    for word in [
+        "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
+    ] {
+        service
+            .save(input_imp(
+                &format!("coffee note {word}"),
+                MemoryKind::Fact,
+                50,
+            ))
+            .expect("save");
+    }
+    let recalled = service.recall("coffee").expect("recall");
+    assert!(recalled.len() <= 6);
+    let tokens: i64 = recalled
+        .iter()
+        .map(|item| hearth_model::estimate_tokens(&service.render_line(item)))
+        .sum();
+    assert!(tokens <= 40, "recall used {tokens} tokens");
+}
+
+#[test]
+fn recall_keeps_at_most_two_per_kind() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    for word in ["alpha", "bravo", "charlie", "delta"] {
+        service
+            .save(input_imp(&format!("coffee fact {word}"), MemoryKind::Fact, 60))
+            .expect("fact");
+        service
+            .save(input_imp(
+                &format!("coffee preference {word}"),
+                MemoryKind::Preference,
+                60,
+            ))
+            .expect("preference");
+    }
+    let recalled = service.recall("coffee").expect("recall");
+    let facts = recalled
+        .iter()
+        .filter(|item| item.kind == MemoryKind::Fact)
+        .count();
+    let prefs = recalled
+        .iter()
+        .filter(|item| item.kind == MemoryKind::Preference)
+        .count();
+    assert!(facts <= 2, "facts {facts}");
+    assert!(prefs <= 2, "prefs {prefs}");
+}
+
+#[test]
+fn trivial_input_returns_no_recall() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    service
+        .save(input_imp("coffee note alpha", MemoryKind::Fact, 60))
+        .expect("save");
+    for query in ["", "hi", "thanks", "ok", "👍", "a"] {
+        assert!(
+            service.recall(query).expect("recall").is_empty(),
+            "query {query:?} returned recall"
+        );
+    }
+}
+
+#[test]
+fn recall_finds_a_memory_by_tag() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let mut tagged = input_imp("Sam drinks espresso", MemoryKind::Preference, 60);
+    tagged.tags = vec!["coffee".to_owned()];
+    let saved = service.save(tagged).expect("save");
+    let recalled = service.recall("coffee").expect("recall");
+    assert!(recalled.iter().any(|item| item.id == saved.id));
+}
+
+#[test]
+fn recall_includes_standing_items() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let pinned = service
+        .save(input_imp("Use metric units", MemoryKind::Rule, 50))
+        .expect("save");
+    service.pin(&pinned.id, true).expect("pin");
+    service
+        .save(input_imp("coffee note alpha", MemoryKind::Fact, 60))
+        .expect("save");
+    let recalled = service.recall("coffee").expect("recall");
+    assert!(recalled.iter().any(|item| item.id == pinned.id));
+}
+
+#[test]
+fn the_standing_render_includes_id_kind_date_and_importance() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let saved = service
+        .save(input_imp("Use metric units", MemoryKind::Rule, 90))
+        .expect("save");
+    let standing = service.standing().expect("standing");
+    let rendered = service.render_standing(&standing.items);
+    assert!(rendered.contains(&saved.id));
+    assert!(rendered.contains("rule"));
+    assert!(rendered.contains("p=90"));
+    assert!(rendered.contains("Use metric units"));
+}
