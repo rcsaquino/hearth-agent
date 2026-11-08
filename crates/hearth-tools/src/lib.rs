@@ -1,5 +1,6 @@
 //! Hearth tools: confined file and shell capabilities.
 
+mod browser;
 mod documents;
 mod fetch;
 mod file_tool;
@@ -11,6 +12,7 @@ mod shell_tool;
 mod tool;
 mod workspace;
 
+pub use browser::BrowserTool;
 pub use documents::DocumentsTool;
 pub use fetch::{
     DeepSeekFetch, FetchError, FetchProvider, FetchResult, FirecrawlFetch, HttpFetch, JinaFetch,
