@@ -1,4 +1,6 @@
-use std::process::Command;
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 fn hearth() -> Command {
     Command::new(env!("CARGO_BIN_EXE_hearth"))
@@ -407,5 +409,289 @@ fn init_refuses_to_overwrite_an_existing_settings_file() {
     assert!(
         text.to_lowercase().contains("exists"),
         "unexpected message: {text}"
+    );
+}
+
+fn remove_database(home: &std::path::Path) {
+    for name in ["hearth.db", "hearth.db-wal", "hearth.db-shm"] {
+        let path = home.join(name);
+        if path.exists() {
+            std::fs::remove_file(path).expect("remove database file");
+        }
+    }
+}
+
+#[test]
+fn doctor_reports_a_missing_database() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    remove_database(home.path());
+    let output = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run hearth");
+    assert!(!output.status.success());
+    let text = String::from_utf8_lossy(&output.stderr);
+    let line = text.trim();
+    assert_eq!(line.lines().count(), 1, "expected one sentence: {text}");
+    assert!(
+        line.to_lowercase().contains("database"),
+        "unexpected message: {line}"
+    );
+}
+
+#[test]
+fn doctor_reports_a_corrupt_database() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    std::fs::write(home.path().join("hearth.db"), "this is not a database")
+        .expect("corrupt database");
+    let output = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run hearth");
+    assert!(!output.status.success());
+    let text = String::from_utf8_lossy(&output.stderr);
+    let line = text.trim();
+    assert_eq!(line.lines().count(), 1, "expected one sentence: {text}");
+    assert!(
+        line.to_lowercase().contains("database"),
+        "unexpected message: {line}"
+    );
+}
+
+#[test]
+fn doctor_does_not_print_secrets() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let output = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run hearth");
+    assert!(
+        output.status.success(),
+        "doctor failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("settings: ok"), "missing settings line");
+    assert!(stdout.contains("database: ok"), "missing database line");
+    for secret in ["fake-token", "fake-key"] {
+        assert!(!stdout.contains(secret), "stdout leaked {secret}");
+        assert!(!stderr.contains(secret), "stderr leaked {secret}");
+    }
+}
+
+fn wait_for_lock_pid(home: &Path, child: &mut Child) -> u32 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait().expect("poll daemon") {
+            panic!("daemon exited before writing the lock: {status}");
+        }
+        if let Ok(text) = std::fs::read_to_string(home.join("hearth.lock"))
+            && let Ok(pid) = text.trim().parse::<u32>()
+            && pid == child.id()
+        {
+            return pid;
+        }
+        if Instant::now() >= deadline {
+            panic!("daemon did not write the lock file");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn terminate(mut child: Child) {
+    let _ = Command::new("kill")
+        .arg("-TERM")
+        .arg(child.id().to_string())
+        .status();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait().expect("poll daemon") {
+            Some(_) => return,
+            None if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            None => {
+                let _ = child.kill();
+                panic!("daemon did not stop on SIGTERM");
+            }
+        }
+    }
+}
+
+#[test]
+fn daemon_writes_its_pid_to_the_lock_file() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let mut child = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn daemon");
+    let pid = wait_for_lock_pid(home.path(), &mut child);
+    assert_eq!(pid, child.id());
+    terminate(child);
+}
+
+#[test]
+fn second_daemon_refuses_to_start() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let mut first = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn first daemon");
+    let pid = wait_for_lock_pid(home.path(), &mut first);
+
+    let second = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run second daemon");
+    assert!(!second.status.success());
+    let text = String::from_utf8_lossy(&second.stderr);
+    let line = text.trim();
+    assert_eq!(line.lines().count(), 1, "expected one sentence: {text}");
+    assert!(
+        line.contains("already running"),
+        "unexpected message: {line}"
+    );
+    assert!(line.contains(&pid.to_string()), "missing pid: {line}");
+
+    terminate(first);
+}
+
+#[test]
+fn daemon_releases_the_lock_on_shutdown() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let mut first = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn first daemon");
+    let first_pid = wait_for_lock_pid(home.path(), &mut first);
+    terminate(first);
+
+    let mut second = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn second daemon");
+    let second_pid = wait_for_lock_pid(home.path(), &mut second);
+    assert_ne!(first_pid, second_pid);
+    terminate(second);
+}
+
+#[test]
+fn a_stale_lock_does_not_block_a_new_daemon() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let mut first = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn first daemon");
+    let first_pid = wait_for_lock_pid(home.path(), &mut first);
+    first.kill().expect("kill first daemon");
+    first.wait().expect("reap first daemon");
+
+    let mut second = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn second daemon");
+    let second_pid = wait_for_lock_pid(home.path(), &mut second);
+    assert_ne!(first_pid, second_pid);
+    terminate(second);
+}
+
+#[test]
+fn doctor_reports_the_lock_state() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+
+    let idle = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run doctor");
+    assert!(idle.status.success());
+    let idle_stdout = String::from_utf8_lossy(&idle.stdout);
+    assert!(
+        idle_stdout.contains("lock: not held"),
+        "unexpected output: {idle_stdout}"
+    );
+
+    let mut daemon = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn daemon");
+    let pid = wait_for_lock_pid(home.path(), &mut daemon);
+
+    let held = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run doctor");
+    assert!(held.status.success());
+    let held_stdout = String::from_utf8_lossy(&held.stdout);
+    assert!(
+        held_stdout.contains("lock: held"),
+        "unexpected output: {held_stdout}"
+    );
+    assert!(
+        held_stdout.contains(&pid.to_string()),
+        "missing pid: {held_stdout}"
+    );
+
+    terminate(daemon);
+
+    let released = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run doctor");
+    assert!(released.status.success());
+    let released_stdout = String::from_utf8_lossy(&released.stdout);
+    assert!(
+        released_stdout.contains("lock: not held"),
+        "unexpected output: {released_stdout}"
     );
 }

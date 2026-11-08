@@ -55,6 +55,7 @@ struct InitArgs {
 }
 
 fn main() {
+    hearth_runtime::init_logging();
     let cli = Cli::parse();
     if let Err(error) = run(cli) {
         eprintln!("{error}");
@@ -79,7 +80,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 timezone: args.timezone,
             },
         )?,
-        Command::Daemon => anyhow::bail!("daemon is not implemented yet"),
+        Command::Daemon => hearth_runtime::daemon(&home)?,
         Command::Doctor => hearth_runtime::doctor(&home)?,
     }
     Ok(())
