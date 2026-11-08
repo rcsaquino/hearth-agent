@@ -237,3 +237,27 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   sequence 1; `after_commit` preserves one submission and a repeated request id is
   harmless; `during_effect` leaves a started effect and a written file, and restart
   requeues and replays it idempotently with attempts 2.
+
+## 2026-11-08: M2a provider adapter
+
+- Approved M2 decisions: the fake provider belongs to M2; a retryable task failure is
+  logged by the M2 scheduler without adding a schema column; fork copies the current
+  conversation documents at M2; the token estimator lands in M2.
+- One synchronous OpenAI-compatible adapter. No async runtime. Requests use
+  `POST {base_url}/chat/completions` with SSE, `stream_options.include_usage`, tool
+  specs, optional temperature and output cap, the configured extra headers, and the
+  session header when configured.
+- The stream translates text, reasoning, tool-call fragments, usage, and the finish
+  reason. Tool calls are assembled by index and their argument JSON is parsed before
+  they are emitted. Malformed SSE is a structured protocol error.
+- Thinking blocks are stored on entries but are not replayed in provider requests;
+  the adapter sends text only. Reasoning is surfaced live as a `ThinkingDelta`.
+- Initial requests retry transport errors and HTTP 429, 500, 502, 503, and 504 up to
+  three attempts with exponential backoff through an injected `Sleeper`. Client
+  errors such as 400, 401, 403, and 404 do not retry. A stream that has started is
+  never retried.
+- `estimate_tokens` is characters divided by four plus a 10 percent margin, rounded
+  up. It is the single estimator for later budgets.
+- Models without a known price record tokens with zero cost; the usage ledger and
+  pricing registry arrive with M2b.
+- `mid_stream` remains deferred to M2b.
