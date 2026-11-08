@@ -14,10 +14,20 @@ pub use init::{InitError, InitOptions, init};
 pub fn init_logging(home: &Path) -> std::io::Result<()> {
     let logs = home.join("logs");
     std::fs::create_dir_all(&logs)?;
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(logs.join("hearth.log"))?;
+    let path = logs.join("hearth.log");
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
     let subscriber = tracing_subscriber::fmt()
         .json()
         .with_max_level(tracing::Level::INFO)

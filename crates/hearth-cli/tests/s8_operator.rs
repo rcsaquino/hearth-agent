@@ -891,6 +891,17 @@ fn daemon_writes_a_structured_log() {
     wait_for_log(home.path(), "hearth daemon started");
     terminate(daemon);
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(home.path().join("logs/hearth.log"))
+            .expect("log metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "log mode was {mode:o}");
+    }
+
     let log = std::fs::read_to_string(home.path().join("logs/hearth.log")).expect("read log");
     assert!(log.contains("\"pid\""), "log has no pid field: {log}");
     assert!(
