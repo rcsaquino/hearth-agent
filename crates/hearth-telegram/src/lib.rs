@@ -7,7 +7,7 @@ mod poller;
 mod sender;
 mod types;
 
-pub use api::{TelegramClient, TelegramError};
+pub use api::{MediaKind, TelegramClient, TelegramError};
 pub use format::{Entity, FormattedText, format_markdown, split_formatted};
 pub use media_store::{InboundMedia, MediaStoreError};
 pub use poller::{PollError, PollReport, TelegramPoller};

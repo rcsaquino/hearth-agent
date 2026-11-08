@@ -1,8 +1,10 @@
 //! A small blocking client for the Telegram Bot API.
 
 use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use reqwest::blocking::multipart::{Form, Part};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -46,6 +48,22 @@ struct Parameters {
     retry_after: Option<u64>,
 }
 
+/// The media kinds accepted in one album.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaKind {
+    Photo,
+    Video,
+}
+
+impl MediaKind {
+    fn media_type(self) -> &'static str {
+        match self {
+            Self::Photo => "photo",
+            Self::Video => "video",
+        }
+    }
+}
+
 /// A blocking Telegram Bot API client.
 pub struct TelegramClient {
     token: String,
@@ -76,15 +94,9 @@ impl TelegramClient {
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value, TelegramError> {
-        let url = format!(
-            "{}/bot{}/{}",
-            self.base_url.trim_end_matches('/'),
-            self.token,
-            method
-        );
         let response = self
             .http
-            .post(url)
+            .post(self.url(method))
             .json(&params)
             .send()
             .map_err(transport_error)?;
@@ -92,8 +104,40 @@ impl TelegramClient {
         let body = response
             .text()
             .map_err(|_| TelegramError::Transport("could not read the response".to_owned()))?;
+        self.parse_envelope(method, status, &body)
+    }
+
+    fn call_multipart(&self, method: &str, form: Form) -> Result<Value, TelegramError> {
+        let response = self
+            .http
+            .post(self.url(method))
+            .multipart(form)
+            .send()
+            .map_err(transport_error)?;
+        let status = response.status();
+        let body = response
+            .text()
+            .map_err(|_| TelegramError::Transport("could not read the response".to_owned()))?;
+        self.parse_envelope(method, status, &body)
+    }
+
+    fn url(&self, method: &str) -> String {
+        format!(
+            "{}/bot{}/{}",
+            self.base_url.trim_end_matches('/'),
+            self.token,
+            method
+        )
+    }
+
+    fn parse_envelope(
+        &self,
+        method: &str,
+        status: reqwest::StatusCode,
+        body: &str,
+    ) -> Result<Value, TelegramError> {
         let envelope: Envelope =
-            serde_json::from_str(&body).map_err(|error| TelegramError::Protocol {
+            serde_json::from_str(body).map_err(|error| TelegramError::Protocol {
                 method: method.to_owned(),
                 detail: format!(
                     "status {status}, invalid JSON: {error}: {}",
@@ -174,6 +218,130 @@ impl TelegramClient {
         }
         self.call("sendMessage", params)?;
         Ok(())
+    }
+
+    /// Send one photo and return its message id.
+    pub fn send_photo(
+        &self,
+        chat_id: i64,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.send_file("sendPhoto", "photo", chat_id, path, caption)
+    }
+
+    /// Send one document and return its message id.
+    pub fn send_document(
+        &self,
+        chat_id: i64,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.send_file("sendDocument", "document", chat_id, path, caption)
+    }
+
+    /// Send one video and return its message id.
+    pub fn send_video(
+        &self,
+        chat_id: i64,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.send_file("sendVideo", "video", chat_id, path, caption)
+    }
+
+    /// Send one voice note and return its message id.
+    pub fn send_voice(
+        &self,
+        chat_id: i64,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        self.send_file("sendVoice", "voice", chat_id, path, caption)
+    }
+
+    fn send_file(
+        &self,
+        method: &str,
+        field: &str,
+        chat_id: i64,
+        path: &Path,
+        caption: Option<&str>,
+    ) -> Result<i64, TelegramError> {
+        let mut form = Form::new().text("chat_id", chat_id.to_string());
+        if let Some(caption) = caption.filter(|value| !value.is_empty()) {
+            form = form.text("caption", caption.to_owned());
+        }
+        let part = Part::file(path).map_err(|error| TelegramError::Protocol {
+            method: method.to_owned(),
+            detail: format!("file could not be opened: {error}"),
+        })?;
+        form = form.part(field.to_owned(), part);
+        let result = self.call_multipart(method, form)?;
+        result["message_id"]
+            .as_i64()
+            .ok_or_else(|| TelegramError::Protocol {
+                method: method.to_owned(),
+                detail: "response has no message id".to_owned(),
+            })
+    }
+
+    /// Send two to ten photos or videos as one album.
+    pub fn send_media_group(
+        &self,
+        chat_id: i64,
+        items: &[(MediaKind, PathBuf)],
+        caption: Option<&str>,
+    ) -> Result<Vec<i64>, TelegramError> {
+        if items.is_empty() {
+            return Err(TelegramError::Protocol {
+                method: "sendMediaGroup".to_owned(),
+                detail: "an album needs at least one item".to_owned(),
+            });
+        }
+        let mut media = Vec::with_capacity(items.len());
+        for (index, (kind, _)) in items.iter().enumerate() {
+            let mut entry = json!({
+                "type": kind.media_type(),
+                "media": format!("attach://file{index}"),
+            });
+            if index == 0
+                && let Some(caption) = caption.filter(|value| !value.is_empty())
+            {
+                entry["caption"] = Value::String(caption.to_owned());
+            }
+            media.push(entry);
+        }
+        let media_json = serde_json::to_string(&media).map_err(|error| TelegramError::Protocol {
+            method: "sendMediaGroup".to_owned(),
+            detail: format!("media list could not be serialized: {error}"),
+        })?;
+        let mut form = Form::new()
+            .text("chat_id", chat_id.to_string())
+            .text("media", media_json);
+        for (index, (_, path)) in items.iter().enumerate() {
+            let part = Part::file(path).map_err(|error| TelegramError::Protocol {
+                method: "sendMediaGroup".to_owned(),
+                detail: format!("file could not be opened: {error}"),
+            })?;
+            form = form.part(format!("file{index}"), part);
+        }
+        let result = self.call_multipart("sendMediaGroup", form)?;
+        let array = result.as_array().ok_or_else(|| TelegramError::Protocol {
+            method: "sendMediaGroup".to_owned(),
+            detail: "response is not a message list".to_owned(),
+        })?;
+        array
+            .iter()
+            .map(|message| {
+                message["message_id"]
+                    .as_i64()
+                    .ok_or_else(|| TelegramError::Protocol {
+                        method: "sendMediaGroup".to_owned(),
+                        detail: "message list has no id".to_owned(),
+                    })
+            })
+            .collect()
     }
 
     /// Resolve one Telegram file descriptor.
