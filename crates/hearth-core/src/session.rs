@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use hearth_storage::{Storage, Writer};
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
-    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewSubmission, Save,
-    Submission, SubmissionStatus, SubmitResult,
+    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewSubmission,
+    PromptBlob, Save, Submission, SubmissionStatus, SubmitResult,
 };
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
@@ -545,6 +546,40 @@ impl Session {
         })?;
         self.effect(id)?
             .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
+    }
+
+    /// Save one prompt text and return its stable hash.
+    pub fn save_prompt_blob(&self, text: &str) -> Result<String, CoreError> {
+        let hash = Uuid::new_v5(&Uuid::NAMESPACE_URL, text.as_bytes()).to_string();
+        let now = self.clock.now_micros();
+        let text = text.to_owned();
+        let write_hash = hash.clone();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            writer.execute(
+                "INSERT OR IGNORE INTO prompt_blobs (hash, text, created_at) VALUES (?, ?, ?)",
+                (write_hash.as_str(), text.as_str(), now),
+            )?;
+            Ok(())
+        })?;
+        Ok(hash)
+    }
+
+    /// Read the newest saved prompt.
+    pub fn latest_prompt(&self) -> Result<Option<PromptBlob>, CoreError> {
+        Ok(self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT hash, text, created_at FROM prompt_blobs \
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok(PromptBlob {
+                        hash: row.get(0)?,
+                        text: row.get(1)?,
+                        created_at: row.get(2)?,
+                    })
+                },
+            )
+        })?)
     }
 
     /// Hand in a message with a receipt.

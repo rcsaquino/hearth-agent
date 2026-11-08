@@ -180,6 +180,14 @@ pub struct Commit {
     pub effect_ids: Vec<String>,
 }
 
+/// One saved prompt text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptBlob {
+    pub hash: String,
+    pub text: String,
+    pub created_at: i64,
+}
+
 /// One line in the save log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitRecord {
