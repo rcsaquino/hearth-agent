@@ -831,3 +831,42 @@ fn logging_rejects_an_unknown_level() {
     value["logging"] = serde_json::json!({"level": "loud"});
     expect_settings_failure(&value, "logging.level");
 }
+
+fn wait_for_log(home: &Path, needle: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(text) = std::fs::read_to_string(home.join("logs/hearth.log"))
+            && text.contains(needle)
+        {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("log did not contain {needle:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn daemon_writes_a_structured_log() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    let mut daemon = hearth()
+        .args(["daemon"])
+        .arg("--home")
+        .arg(home.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn daemon");
+    wait_for_lock_pid(home.path(), &mut daemon);
+    wait_for_log(home.path(), "hearth daemon started");
+    terminate(daemon);
+
+    let log = std::fs::read_to_string(home.path().join("logs/hearth.log")).expect("read log");
+    assert!(log.contains("\"pid\""), "log has no pid field: {log}");
+    assert!(
+        log.lines().all(|line| line.trim_start().starts_with('{')),
+        "log is not JSON lines: {log}"
+    );
+}

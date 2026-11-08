@@ -55,7 +55,6 @@ struct InitArgs {
 }
 
 fn main() {
-    hearth_runtime::init_logging();
     let cli = Cli::parse();
     if let Err(error) = run(cli) {
         eprintln!("{error}");
@@ -65,6 +64,9 @@ fn main() {
 
 fn run(cli: Cli) -> anyhow::Result<()> {
     let home = resolve_home(cli.home)?;
+    if matches!(&cli.command, Command::Daemon) {
+        hearth_runtime::init_logging(&home)?;
+    }
     match cli.command {
         Command::Init(args) => hearth_runtime::init(
             &home,
