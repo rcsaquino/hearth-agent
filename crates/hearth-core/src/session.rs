@@ -1076,6 +1076,85 @@ impl Session {
             })
     }
 
+    /// Claim one specific runnable task.
+    pub fn claim_task_by_id(
+        &self,
+        task_id: &str,
+        owner: &str,
+        lease_micros: i64,
+    ) -> Result<Option<ClaimedTask>, CoreError> {
+        if owner.trim().is_empty() {
+            return Err(CoreError::Invalid("task owner is empty".to_owned()));
+        }
+        if lease_micros <= 0 {
+            return Err(CoreError::Invalid("task lease must be positive".to_owned()));
+        }
+        let now = self.clock.now_micros();
+        let task_id = task_id.to_owned();
+        let owner = owner.to_owned();
+        self.storage
+            .write(move |writer| -> Result<Option<ClaimedTask>, CoreError> {
+                let row: Option<RawClaim> = writer.query_optional(
+                    "SELECT id, conversation_id, kind, phase, attempt, input_json, checkpoint_json \
+                     FROM tasks WHERE id = ? AND status = 'pending' \
+                     AND (next_wake_at IS NULL OR next_wake_at <= ?)",
+                    (task_id.as_str(), now),
+                    |row| {
+                        Ok(RawClaim {
+                            id: row.get(0)?,
+                            conversation_id: row.get(1)?,
+                            kind: row.get(2)?,
+                            phase: row.get(3)?,
+                            attempt: row.get(4)?,
+                            input_json: row.get(5)?,
+                            checkpoint_json: row.get(6)?,
+                        })
+                    },
+                )?;
+                let Some(row) = row else {
+                    return Ok(None);
+                };
+                let attempt = row.attempt + 1;
+                let changed = writer.execute(
+                    "UPDATE tasks SET status = 'running', lease_owner = ?, lease_until = ?, \
+                     attempt = ?, next_wake_at = NULL, updated_at = ? \
+                     WHERE id = ? AND status = 'pending'",
+                    (
+                        owner.as_str(),
+                        now + lease_micros,
+                        attempt,
+                        now,
+                        row.id.as_str(),
+                    ),
+                )?;
+                if changed != 1 {
+                    return Ok(None);
+                }
+                record_commit(
+                    writer,
+                    now,
+                    row.conversation_id.as_deref(),
+                    Some(row.id.as_str()),
+                    "task.claim",
+                )?;
+                let input = serde_json::from_str(&row.input_json)
+                    .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+                let checkpoint = row
+                    .checkpoint_json
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()
+                    .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+                Ok(Some(ClaimedTask {
+                    id: row.id,
+                    kind: row.kind,
+                    phase: row.phase,
+                    attempt,
+                    input,
+                    checkpoint,
+                }))
+            })
+    }
+
     /// Extend the lease on a running task.
     pub fn heartbeat_task(
         &self,

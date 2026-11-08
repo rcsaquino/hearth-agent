@@ -89,6 +89,11 @@ impl SubmissionStatus {
             _ => None,
         }
     }
+
+    /// Whether this is one of the final endings.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Done | Self::Unanswered | Self::Cancelled)
+    }
 }
 
 /// The state of an outside action.
