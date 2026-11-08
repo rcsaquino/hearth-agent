@@ -90,24 +90,62 @@ impl OpenAiCompatibleProvider {
     fn body(&self, request: &ChatRequest) -> Result<Value, ProviderError> {
         let mut messages = Vec::with_capacity(request.messages.len());
         for message in &request.messages {
-            let role = match message.role {
-                Role::System => "system",
-                Role::User => "user",
-                Role::Assistant | Role::Tool => {
-                    return Err(ProviderError::Config(
-                        "assistant and tool messages are not translated yet".to_owned(),
-                    ));
+            match message.role {
+                Role::System | Role::User => {
+                    let role = if message.role == Role::System {
+                        "system"
+                    } else {
+                        "user"
+                    };
+                    messages.push(json!({
+                        "role": role,
+                        "content": text_blocks(&message.blocks),
+                    }));
                 }
-            };
-            let text = message
-                .blocks
-                .iter()
-                .filter_map(|block| match block {
-                    ContentBlock::Text(text) => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<String>();
-            messages.push(json!({"role": role, "content": text}));
+                Role::Assistant => {
+                    let text = text_blocks(&message.blocks);
+                    let mut tool_calls = Vec::new();
+                    for block in &message.blocks {
+                        if let ContentBlock::ToolCall(call) = block {
+                            let arguments =
+                                serde_json::to_string(&call.arguments).map_err(|error| {
+                                    ProviderError::Config(format!(
+                                        "tool call arguments could not be serialized: {error}"
+                                    ))
+                                })?;
+                            tool_calls.push(json!({
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.name,
+                                    "arguments": arguments,
+                                }
+                            }));
+                        }
+                    }
+                    let mut value = json!({"role": "assistant"});
+                    value["content"] = if text.is_empty() {
+                        Value::Null
+                    } else {
+                        Value::String(text)
+                    };
+                    if !tool_calls.is_empty() {
+                        value["tool_calls"] = json!(tool_calls);
+                    }
+                    messages.push(value);
+                }
+                Role::Tool => {
+                    for block in &message.blocks {
+                        if let ContentBlock::ToolResult { call_id, content } = block {
+                            messages.push(json!({
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": content,
+                            }));
+                        }
+                    }
+                }
+            }
         }
 
         let tools: Vec<Value> = request
@@ -372,4 +410,14 @@ fn parse_usage(value: &Value) -> Usage {
             .as_i64()
             .unwrap_or(0),
     }
+}
+
+fn text_blocks(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
 }
