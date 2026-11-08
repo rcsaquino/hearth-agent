@@ -768,6 +768,36 @@ impl Session {
             .ok_or_else(|| CoreError::SubmissionNotFound(submission_id.to_owned()))
     }
 
+    /// Read the next Telegram update offset. Zero means no offset yet.
+    pub fn telegram_offset(&self) -> Result<i64, CoreError> {
+        let value: Option<String> = self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT value FROM meta WHERE key = 'telegram_offset'",
+                [],
+                |row| row.get(0),
+            )
+        })?;
+        match value {
+            Some(value) => value
+                .parse()
+                .map_err(|_| CoreError::Corrupt("telegram_offset is not a number".to_owned())),
+            None => Ok(0),
+        }
+    }
+
+    /// Store the next Telegram update offset.
+    pub fn set_telegram_offset(&self, offset: i64) -> Result<(), CoreError> {
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            writer.execute(
+                "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (offset.to_string(),),
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     /// Read one conversation.
     pub fn conversation(&self, id: &str) -> Result<Option<Conversation>, CoreError> {
         let sql = format!("{CONVERSATION_SELECT} WHERE id = ?");
