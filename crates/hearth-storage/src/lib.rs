@@ -1,6 +1,7 @@
 //! Hearth storage: SQLite connections and migrations.
 
 mod schema;
+mod storage;
 
 use std::path::Path;
 
@@ -9,6 +10,8 @@ use thiserror::Error;
 
 /// The schema version this build understands.
 pub const SCHEMA_VERSION: i64 = 1;
+
+pub use storage::{Reader, Storage, Writer};
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -20,6 +23,23 @@ pub enum StorageError {
     SchemaVersion { found: i64, expected: i64 },
     #[error("database integrity check failed: {0}")]
     Integrity(String),
+    #[error("storage writer is closed")]
+    Closed,
+    #[error("storage lock is poisoned")]
+    Poisoned,
+}
+
+impl StorageError {
+    /// Whether this error is a unique or primary-key constraint violation.
+    pub fn is_unique_violation(&self) -> bool {
+        match self {
+            StorageError::Sqlite(rusqlite::Error::SqliteFailure(error, _)) => {
+                error.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                    || error.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Open a database for writing, apply connection settings, and migrate it.
