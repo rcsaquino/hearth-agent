@@ -81,7 +81,7 @@ pub fn prune(backups: &Path, today: Date) -> Result<Vec<PathBuf>, BackupError> {
         }
         entries.push((date, entry.path()));
     }
-    entries.sort_by(|left, right| right.0.cmp(&left.0));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.0));
 
     let daily: HashSet<PathBuf> = entries
         .iter()
