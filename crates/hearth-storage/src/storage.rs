@@ -1,8 +1,8 @@
 //! Session-facing storage boundary: one writer thread and a read pool.
 
 use std::path::Path;
-use std::sync::{Condvar, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
 use rusqlite::Connection;
