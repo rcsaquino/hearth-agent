@@ -514,9 +514,7 @@ fn fake_provider_slow(answer: &str, delay: Duration) -> (String, thread::JoinHan
             .expect("provider first chunk");
         stream.flush().expect("provider flush");
         thread::sleep(delay);
-        stream
-            .write_all(rest.as_bytes())
-            .expect("provider rest");
+        stream.write_all(rest.as_bytes()).expect("provider rest");
         stream.flush().expect("provider flush rest");
     });
     (format!("{base}/v1"), handle)

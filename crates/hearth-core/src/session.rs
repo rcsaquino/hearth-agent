@@ -941,25 +941,26 @@ impl Session {
         next_offset: i64,
     ) -> Result<bool, CoreError> {
         let now = self.clock.now_micros();
-        self.storage.write(move |writer| -> Result<bool, CoreError> {
-            let inserted = match writer.execute(
-                "INSERT INTO telegram_updates (update_id, chat_id, message_id, processed_at) \
+        self.storage
+            .write(move |writer| -> Result<bool, CoreError> {
+                let inserted = match writer.execute(
+                    "INSERT INTO telegram_updates (update_id, chat_id, message_id, processed_at) \
                  VALUES (?, ?, ?, ?)",
-                (update.update_id, update.chat_id, update.message_id, now),
-            ) {
-                Ok(_) => true,
-                Err(error) if error.is_unique_violation() => false,
-                Err(error) => return Err(error.into()),
-            };
-            if inserted {
-                writer.execute(
-                    "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
+                    (update.update_id, update.chat_id, update.message_id, now),
+                ) {
+                    Ok(_) => true,
+                    Err(error) if error.is_unique_violation() => false,
+                    Err(error) => return Err(error.into()),
+                };
+                if inserted {
+                    writer.execute(
+                        "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (next_offset.to_string(),),
-                )?;
-            }
-            Ok(inserted)
-        })
+                        (next_offset.to_string(),),
+                    )?;
+                }
+                Ok(inserted)
+            })
     }
 
     /// The oldest queued Telegram submission.

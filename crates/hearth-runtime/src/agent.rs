@@ -440,11 +440,9 @@ impl Agent {
         self.session.save(
             Save::new(&submission.conversation_id).entry("notice", json!({"text": notice})),
         )?;
-        let settled = self.session.settle(
-            &submission.id,
-            SubmissionStatus::Cancelled,
-            None,
-        )?;
+        let settled = self
+            .session
+            .settle(&submission.id, SubmissionStatus::Cancelled, None)?;
         self.session.finish_task(
             task_id,
             &self.config.owner,
