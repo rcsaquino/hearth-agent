@@ -158,3 +158,35 @@ fn exa_rest_uses_the_api_key_and_maps_results() {
     assert_eq!(captured.path, "/search");
     assert_eq!(captured.headers.get("x-api-key").map(String::as_str), Some("exa-key"));
 }
+
+#[test]
+fn brave_maps_web_results() {
+    let server = serve(json_reply(json!({
+        "web": {"results": [{
+            "title": "Brave Example",
+            "url": "https://brave.example/a",
+            "description": "Brave snippet",
+            "age": "2 days ago"
+        }]}
+    })));
+    let provider: Arc<dyn SearchProvider> =
+        Arc::new(BraveSearch::new(server.base.clone(), "brave-key".to_owned()).expect("brave provider"));
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("search call");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(value["results"][0]["title"], "Brave Example");
+    assert_eq!(value["results"][0]["snippet"], "Brave snippet");
+    assert_eq!(value["results"][0]["date"], "2 days ago");
+
+    let captured = server.thread.join().expect("server thread");
+    assert!(captured.path.starts_with("/web/search?"));
+    assert!(captured.path.contains("q=rust"));
+    assert!(captured.path.contains("count=5"));
+    assert_eq!(
+        captured.headers.get("x-subscription-token").map(String::as_str),
+        Some("brave-key")
+    );
+}
