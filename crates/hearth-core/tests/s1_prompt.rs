@@ -440,3 +440,72 @@ fn standing_and_recall_are_placed_in_their_layers() {
     assert_eq!(prompt.document["standing_memory"], "S1\nS2");
     assert_eq!(prompt.document["recall"], "R1");
 }
+
+#[test]
+fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(Save::new(&conversation.id).entry("user", json!({"text": "hello"})))
+        .expect("save user entry");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL TEXT".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: vec![hearth_model::ToolSpec {
+                name: "files".to_owned(),
+                description: "Read files.".to_owned(),
+                parameters: json!({"type": "object"}),
+            }],
+            standing: "S1".to_owned(),
+            recall: "R1".to_owned(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+
+    let tokens = prompt.tokens;
+    let estimate = |text: &str| hearth_model::estimate_tokens(text) as u64;
+    assert_eq!(tokens.identity, estimate("SOUL TEXT"));
+    assert_eq!(
+        tokens.operation,
+        estimate(prompt.document["operation"].as_str().expect("operation"))
+    );
+    assert_eq!(
+        tokens.tools,
+        estimate(&serde_json::to_string(&prompt.document["tools"]).expect("tools JSON"))
+    );
+    assert_eq!(tokens.standing, estimate("S1"));
+    assert_eq!(
+        tokens.transcript,
+        estimate(&serde_json::to_string(&prompt.document["transcript"]).expect("transcript JSON"))
+    );
+    assert_eq!(tokens.recall, estimate("R1"));
+    assert_eq!(tokens.runtime, estimate("RUNTIME"));
+    assert_eq!(tokens.skills, 0);
+    assert_eq!(
+        tokens.fixed,
+        tokens.identity
+            + tokens.operation
+            + tokens.tools
+            + tokens.standing
+            + tokens.skills
+            + tokens.runtime
+    );
+    assert_eq!(
+        tokens.total,
+        tokens.fixed + tokens.transcript + tokens.recall
+    );
+    assert!(
+        tokens.fixed <= hearth_core::FIXED_OVERHEAD_TARGET,
+        "fixed overhead {} exceeds the target",
+        tokens.fixed
+    );
+    assert!(tokens.over_budget().is_empty());
+    assert_eq!(prompt.document["tokens"]["total"], tokens.total);
+    assert_eq!(prompt.document["tokens"]["fixed"], tokens.fixed);
+}
