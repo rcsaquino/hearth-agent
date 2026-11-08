@@ -93,3 +93,27 @@ fn a_duplicate_effect_key_reuses_the_existing_effect() {
     assert_eq!(effect.payload["n"], 1, "the first intent wins");
     assert_eq!(session.effect("id-3").expect("read missing"), None);
 }
+
+#[test]
+fn beginning_an_effect_marks_it_started_and_counts_an_attempt() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({"path": "a"}))),
+        )
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+
+    session.begin_effect(&id).expect("begin effect");
+
+    let effect = session
+        .effect(&id)
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.status, EffectStatus::Started);
+    assert_eq!(effect.attempts, 1);
+    assert_eq!(effect.settled_at, None);
+}
