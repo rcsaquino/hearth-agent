@@ -416,3 +416,199 @@ fn pending_and_started_effects_are_listed_in_order() {
     assert_eq!(started[0].id, ids[1]);
     assert!(session.pending_effects(0).expect("zero limit").is_empty());
 }
+
+#[test]
+fn an_effect_can_be_marked_done_from_intent() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "done-1",
+            json!({"path": "a"}),
+        )))
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+
+    let done = session
+        .mark_effect_done(&id, json!({"delivered": true}))
+        .expect("mark done");
+
+    assert_eq!(done.status, EffectStatus::Done);
+    assert_eq!(done.result.expect("result")["delivered"], true);
+    assert!(done.settled_at.is_some());
+    let latest = session.latest_commit().expect("commit").expect("exists");
+    assert_eq!(latest.kind, "effect.done");
+}
+
+#[test]
+fn an_unknown_effect_can_be_recovered_as_done() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "telegram.send",
+            "tg:1",
+            json!({"markdown": "hello"}),
+        )))
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+    session.begin_effect(&id).expect("begin");
+
+    let unknown = session
+        .mark_effect_unknown(&id, json!({"message": "uncertain"}))
+        .expect("mark unknown");
+    assert_eq!(unknown.status, EffectStatus::Unknown);
+    assert_eq!(
+        session
+            .latest_commit()
+            .expect("commit")
+            .expect("exists")
+            .kind,
+        "effect.unknown"
+    );
+    let again = session
+        .mark_effect_unknown(&id, json!({"message": "again"}))
+        .expect("unknown is idempotent");
+    assert_eq!(again.status, EffectStatus::Unknown);
+
+    let done = session
+        .mark_effect_done(&id, json!({"recovered": true}))
+        .expect("recover done");
+    assert_eq!(done.status, EffectStatus::Done);
+    assert_eq!(
+        session
+            .latest_commit()
+            .expect("commit")
+            .expect("exists")
+            .kind,
+        "effect.done"
+    );
+}
+
+#[test]
+fn an_effect_can_be_marked_failed_from_started() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "telegram.send",
+            "tg:2",
+            json!({}),
+        )))
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+    session.begin_effect(&id).expect("begin");
+
+    let failed = session
+        .mark_effect_failed(&id, json!({"error": "rejected"}))
+        .expect("mark failed");
+    assert_eq!(failed.status, EffectStatus::Failed);
+    assert_eq!(failed.result.expect("result")["error"], "rejected");
+    assert_eq!(
+        session
+            .latest_commit()
+            .expect("commit")
+            .expect("exists")
+            .kind,
+        "effect.failed"
+    );
+}
+
+#[test]
+fn done_and_failed_effects_are_terminal() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "telegram.send",
+            "tg:3",
+            json!({}),
+        )))
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+    session.mark_effect_done(&id, json!({})).expect("done");
+
+    assert!(matches!(
+        session.mark_effect_done(&id, json!({})),
+        Err(CoreError::EffectNotReady { .. })
+    ));
+    assert!(matches!(
+        session.mark_effect_failed(&id, json!({})),
+        Err(CoreError::EffectNotReady { .. })
+    ));
+    assert!(matches!(
+        session.mark_effect_unknown(&id, json!({})),
+        Err(CoreError::EffectNotReady { .. })
+    ));
+}
+
+#[test]
+fn effects_awaiting_delivery_lists_intent_and_unknown() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let mut ids = Vec::new();
+    for key in ["a", "b", "c"] {
+        let commit = session
+            .save(Save::new(&conversation_id).effect(EffectIntent::new(
+                "telegram.send",
+                key,
+                json!({"markdown": key}),
+            )))
+            .expect("save");
+        ids.push(commit.effect_ids[0].clone());
+    }
+    session.begin_effect(&ids[1]).expect("begin b");
+    session
+        .mark_effect_unknown(&ids[1], json!({"message": "uncertain"}))
+        .expect("unknown b");
+    session
+        .mark_effect_done(&ids[2], json!({}))
+        .expect("done c");
+    session
+        .save(Save::new(&conversation_id).effect(EffectIntent::new("file_write", "d", json!({}))))
+        .expect("other kind");
+
+    let awaiting = session
+        .effects_awaiting_delivery("telegram.send")
+        .expect("awaiting");
+    assert_eq!(
+        awaiting
+            .iter()
+            .map(|effect| effect.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a", "b"]
+    );
+}
+
+#[test]
+fn an_effect_can_be_read_by_its_kind_and_key() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+    let commit = session
+        .save(Save::new(&conversation_id).effect(EffectIntent::new(
+            "file_write",
+            "by-key",
+            json!({"path": "a"}),
+        )))
+        .expect("save");
+    let id = commit.effect_ids[0].clone();
+
+    let effect = session
+        .effect_by_key("file_write", "by-key")
+        .expect("read")
+        .expect("exists");
+    assert_eq!(effect.id, id);
+    assert!(
+        session
+            .effect_by_key("file_write", "missing")
+            .expect("read missing")
+            .is_none()
+    );
+}
