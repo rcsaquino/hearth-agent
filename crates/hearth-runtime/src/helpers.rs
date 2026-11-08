@@ -324,7 +324,6 @@ fn is_terminal(status: TaskStatus) -> bool {
     status.is_terminal()
 }
 
-
 /// Everything a helper worker needs.
 pub struct HelperConfig {
     pub settings: Arc<Settings>,
@@ -361,10 +360,10 @@ impl HelperPool {
 
     /// Claim and run at most one helper task.
     pub fn run_once(&self) -> Result<bool, CoreError> {
-        let Some(task) = self
-            .config
-            .session
-            .claim_task_for_kind(&self.config.owner, 3_600_000_000, "helper")?
+        let Some(task) =
+            self.config
+                .session
+                .claim_task_for_kind(&self.config.owner, 3_600_000_000, "helper")?
         else {
             return Ok(false);
         };
@@ -705,11 +704,9 @@ fn send_notice(
                 key,
                 payload,
             )))?;
-            commit
-                .effect_ids
-                .first()
-                .cloned()
-                .ok_or_else(|| CoreError::Invalid("helper notification effect was not saved".into()))?
+            commit.effect_ids.first().cloned().ok_or_else(|| {
+                CoreError::Invalid("helper notification effect was not saved".into())
+            })?
         }
     };
     session.begin_effect(&effect_id)?;

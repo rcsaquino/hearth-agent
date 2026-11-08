@@ -76,14 +76,24 @@ fn helper_tasks_can_be_listed_newest_first() {
         .expect("parent");
     let first = session
         .create_task(
-            NewTask::new("helper", 1, "run", json!({"parent_conversation_id": parent.id}))
-                .conversation(&parent.id),
+            NewTask::new(
+                "helper",
+                1,
+                "run",
+                json!({"parent_conversation_id": parent.id}),
+            )
+            .conversation(&parent.id),
         )
         .expect("first");
     let second = session
         .create_task(
-            NewTask::new("helper", 1, "run", json!({"parent_conversation_id": parent.id}))
-                .conversation(&parent.id),
+            NewTask::new(
+                "helper",
+                1,
+                "run",
+                json!({"parent_conversation_id": parent.id}),
+            )
+            .conversation(&parent.id),
         )
         .expect("second");
     let tasks = session.tasks_by_kind("helper").expect("list");

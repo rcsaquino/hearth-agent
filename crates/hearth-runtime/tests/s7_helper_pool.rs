@@ -6,12 +6,8 @@ use std::thread;
 use hearth_config::Settings;
 use hearth_core::{ContextBudget, Harness};
 use hearth_memory::MemoryService;
-use hearth_model::{
-    ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent,
-};
-use hearth_runtime::{
-    HelperConfig, HelperControls, HelperPool, NoopSink, TaskTool,
-};
+use hearth_model::{ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent};
+use hearth_runtime::{HelperConfig, HelperControls, HelperPool, NoopSink, TaskTool};
 use hearth_telegram::{SystemSleeper, TelegramClient, TelegramSender};
 use hearth_tools::Tool;
 use serde_json::{Value, json};
@@ -110,7 +106,12 @@ fn a_helper_runs_and_reports_without_the_parent_transcript() {
         .create_conversation("Parent", "telegram", "42:0")
         .expect("parent");
     session
-        .submit(&parent.id, "parent-1", "input", json!({"text": "Parent secret context"}))
+        .submit(
+            &parent.id,
+            "parent-1",
+            "input",
+            json!({"text": "Parent secret context"}),
+        )
         .expect("parent input");
 
     let controls = Arc::new(HelperControls::new());
@@ -169,9 +170,15 @@ fn a_helper_runs_and_reports_without_the_parent_transcript() {
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].kind, "assistant");
     assert_eq!(history[1].content["text"], "Helper report: done.");
-    assert_eq!(history[1].source.as_deref(), Some(format!("helper:{task_id}").as_str()));
+    assert_eq!(
+        history[1].source.as_deref(),
+        Some(format!("helper:{task_id}").as_str())
+    );
 
-    let report_path = home.path().join("spill").join(format!("helper-{task_id}.txt"));
+    let report_path = home
+        .path()
+        .join("spill")
+        .join(format!("helper-{task_id}.txt"));
     assert_eq!(
         std::fs::read_to_string(&report_path).expect("report file"),
         "Helper report: done."
@@ -199,7 +206,16 @@ fn a_missing_report_file_is_written_with_private_mode() {
         .create_conversation("Parent", "telegram", "42:0")
         .expect("parent");
     let controls = Arc::new(HelperControls::new());
-    let tool = TaskTool::new(session.clone(), &parent.id, 42, None, 0, controls.clone(), 2, 4);
+    let tool = TaskTool::new(
+        session.clone(),
+        &parent.id,
+        42,
+        None,
+        0,
+        controls.clone(),
+        2,
+        4,
+    );
     let spawn = tool
         .call(&json!({"action": "spawn", "brief": "Write a report"}))
         .expect("spawn");
@@ -233,7 +249,10 @@ fn a_missing_report_file_is_written_with_private_mode() {
     });
     let pool = HelperPool::new(config, controls);
     assert!(pool.run_once().expect("run"));
-    let path = home.path().join("spill").join(format!("helper-{task_id}.txt"));
+    let path = home
+        .path()
+        .join("spill")
+        .join(format!("helper-{task_id}.txt"));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

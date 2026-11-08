@@ -1804,31 +1804,32 @@ impl Session {
     pub fn abort_task(&self, task_id: &str, result: Value) -> Result<Task, CoreError> {
         let now = self.clock.now_micros();
         let task_id = task_id.to_owned();
-        self.storage.write(move |writer| -> Result<Task, CoreError> {
-            let task = load_task(writer, &task_id)?
-                .ok_or_else(|| CoreError::TaskNotFound(task_id.clone()))?;
-            if task.status.is_terminal() {
-                return Ok(task);
-            }
-            let result = serde_json::to_string(&result)
-                .map_err(|error| CoreError::Invalid(error.to_string()))?;
-            let changed = writer.execute(
-                "UPDATE tasks SET status = 'aborted', result_json = ?, terminal_at = ?, \
+        self.storage
+            .write(move |writer| -> Result<Task, CoreError> {
+                let task = load_task(writer, &task_id)?
+                    .ok_or_else(|| CoreError::TaskNotFound(task_id.clone()))?;
+                if task.status.is_terminal() {
+                    return Ok(task);
+                }
+                let result = serde_json::to_string(&result)
+                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                let changed = writer.execute(
+                    "UPDATE tasks SET status = 'aborted', result_json = ?, terminal_at = ?, \
                  lease_owner = NULL, lease_until = NULL, next_wake_at = NULL, updated_at = ? \
                  WHERE id = ? AND status IN ('pending','running','asleep')",
-                (result, now, now, task_id.as_str()),
-            )?;
-            if changed == 1 {
-                record_commit(
-                    writer,
-                    now,
-                    task.conversation_id.as_deref(),
-                    Some(task_id.as_str()),
-                    "task.abort",
+                    (result, now, now, task_id.as_str()),
                 )?;
-            }
-            load_task(writer, &task_id)?.ok_or(CoreError::TaskNotFound(task_id))
-        })
+                if changed == 1 {
+                    record_commit(
+                        writer,
+                        now,
+                        task.conversation_id.as_deref(),
+                        Some(task_id.as_str()),
+                        "task.abort",
+                    )?;
+                }
+                load_task(writer, &task_id)?.ok_or(CoreError::TaskNotFound(task_id))
+            })
     }
 
     /// Claim the oldest runnable task.

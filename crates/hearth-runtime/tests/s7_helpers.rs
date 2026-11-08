@@ -60,7 +60,13 @@ fn spawn_creates_a_child_conversation_and_helper_task() {
 
     let listed = tool.call(&json!({"action": "list"})).expect("list");
     let items = content(&listed);
-    assert!(items.as_array().expect("array").iter().any(|item| item["id"] == task_id));
+    assert!(
+        items
+            .as_array()
+            .expect("array")
+            .iter()
+            .any(|item| item["id"] == task_id)
+    );
 
     let result = tool
         .call(&json!({"action": "result", "task_id": task_id}))
@@ -74,7 +80,10 @@ fn kill_aborts_a_pending_helper() {
     let out = tool
         .call(&json!({"action": "spawn", "brief": "A job"}))
         .expect("spawn");
-    let task_id = content(&out)["task_id"].as_str().expect("task id").to_owned();
+    let task_id = content(&out)["task_id"]
+        .as_str()
+        .expect("task id")
+        .to_owned();
     let killed = tool
         .call(&json!({"action": "kill", "task_id": task_id}))
         .expect("kill");
@@ -100,9 +109,10 @@ fn depth_beyond_the_limit_is_rejected() {
         2,
         4,
     );
-    assert!(deep
-        .call(&json!({"action": "spawn", "brief": "Too deep"}))
-        .is_err());
+    assert!(
+        deep.call(&json!({"action": "spawn", "brief": "Too deep"}))
+            .is_err()
+    );
 }
 
 #[test]
@@ -127,7 +137,8 @@ fn concurrency_limit_is_enforced() {
         .expect("first");
     tool.call(&json!({"action": "spawn", "brief": "Two"}))
         .expect("second");
-    assert!(tool
-        .call(&json!({"action": "spawn", "brief": "Three"}))
-        .is_err());
+    assert!(
+        tool.call(&json!({"action": "spawn", "brief": "Three"}))
+            .is_err()
+    );
 }
