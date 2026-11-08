@@ -10,10 +10,10 @@ fn database() -> (TempDir, PathBuf) {
 }
 
 #[test]
-fn a_fresh_database_reaches_schema_version_one() {
+fn a_fresh_database_reaches_schema_version_two() {
     let (_directory, path) = database();
     let storage = Storage::open(&path).expect("open storage");
-    assert_eq!(storage.schema_version().expect("schema version"), 1);
+    assert_eq!(storage.schema_version().expect("schema version"), 2);
 }
 
 #[test]
@@ -21,10 +21,10 @@ fn reopening_the_database_is_idempotent() {
     let (_directory, path) = database();
     {
         let storage = Storage::open(&path).expect("open storage");
-        assert_eq!(storage.schema_version().expect("schema version"), 1);
+        assert_eq!(storage.schema_version().expect("schema version"), 2);
     }
     let storage = Storage::open(&path).expect("reopen storage");
-    assert_eq!(storage.schema_version().expect("schema version"), 1);
+    assert_eq!(storage.schema_version().expect("schema version"), 2);
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn a_future_schema_version_is_rejected() {
         error,
         hearth_storage::StorageError::SchemaVersion {
             found: 99,
-            expected: 1
+            expected: 2
         }
     ));
 }

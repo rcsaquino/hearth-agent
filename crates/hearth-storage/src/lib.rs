@@ -10,7 +10,7 @@ use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
 /// The schema version this build understands.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub use storage::{Reader, Storage, Writer};
 
@@ -84,20 +84,31 @@ fn configure(connection: &Connection) -> Result<(), StorageError> {
 /// Apply every migration the database is missing.
 pub fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    match version {
-        0 => {
-            let transaction = connection.transaction()?;
-            transaction.execute_batch(schema::MIGRATION_0001)?;
-            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-            transaction.commit()?;
+    if version > SCHEMA_VERSION {
+        return Err(StorageError::SchemaVersion {
+            found: version,
+            expected: SCHEMA_VERSION,
+        });
+    }
+    let mut current = version;
+    for (from, sql, to) in [
+        (0, schema::MIGRATION_0001, 1),
+        (1, schema::MIGRATION_0002, 2),
+    ] {
+        if current != from {
+            continue;
         }
-        SCHEMA_VERSION => {}
-        found => {
-            return Err(StorageError::SchemaVersion {
-                found,
-                expected: SCHEMA_VERSION,
-            });
-        }
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(sql)?;
+        transaction.pragma_update(None, "user_version", to)?;
+        transaction.commit()?;
+        current = to;
+    }
+    if current != SCHEMA_VERSION {
+        return Err(StorageError::SchemaVersion {
+            found: current,
+            expected: SCHEMA_VERSION,
+        });
     }
     Ok(())
 }
