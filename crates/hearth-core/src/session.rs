@@ -549,10 +549,67 @@ impl Session {
     /// Claim the oldest runnable task.
     pub fn claim_task(
         &self,
-        _owner: &str,
-        _lease_micros: i64,
+        owner: &str,
+        lease_micros: i64,
     ) -> Result<Option<ClaimedTask>, CoreError> {
-        Ok(None)
+        if owner.trim().is_empty() {
+            return Err(CoreError::Invalid("task owner is empty".to_owned()));
+        }
+        if lease_micros <= 0 {
+            return Err(CoreError::Invalid("task lease must be positive".to_owned()));
+        }
+        let now = self.clock.now_micros();
+        let owner = owner.to_owned();
+        self.storage
+            .write(move |writer| -> Result<Option<ClaimedTask>, CoreError> {
+                let row: Option<RawClaim> = writer.query_optional(
+                    "SELECT id, kind, phase, attempt, input_json, checkpoint_json FROM tasks                      WHERE status = 'pending' AND (next_wake_at IS NULL OR next_wake_at <= ?)                      ORDER BY COALESCE(next_wake_at, created_at), id LIMIT 1",
+                    (now,),
+                    |row| {
+                        Ok(RawClaim {
+                            id: row.get(0)?,
+                            kind: row.get(1)?,
+                            phase: row.get(2)?,
+                            attempt: row.get(3)?,
+                            input_json: row.get(4)?,
+                            checkpoint_json: row.get(5)?,
+                        })
+                    },
+                )?;
+                let Some(row) = row else {
+                    return Ok(None);
+                };
+                let attempt = row.attempt + 1;
+                let changed = writer.execute(
+                    "UPDATE tasks SET status = 'running', lease_owner = ?, lease_until = ?, \
+                     attempt = ?, updated_at = ? WHERE id = ? AND status = 'pending'",
+                    (
+                        owner.as_str(),
+                        now + lease_micros,
+                        attempt,
+                        now,
+                        row.id.as_str(),
+                    ),
+                )?;
+                if changed != 1 {
+                    return Ok(None);
+                }
+                let input = serde_json::from_str(&row.input_json)
+                    .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+                let checkpoint = row
+                    .checkpoint_json
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()
+                    .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+                Ok(Some(ClaimedTask {
+                    id: row.id,
+                    kind: row.kind,
+                    phase: row.phase,
+                    attempt,
+                    input,
+                    checkpoint,
+                }))
+            })
     }
 
     /// Extend the lease on a running task.
@@ -882,4 +939,13 @@ impl RawTask {
             terminal_at: self.terminal_at,
         })
     }
+}
+
+struct RawClaim {
+    id: String,
+    kind: String,
+    phase: String,
+    attempt: i64,
+    input_json: String,
+    checkpoint_json: Option<String>,
 }
