@@ -99,3 +99,21 @@ fn formats_headings_lists_quotes_and_tables() {
     assert!(value.text.contains("A: 1"), "{}", value.text);
     assert!(value.text.contains("B: 2"), "{}", value.text);
 }
+
+#[test]
+fn keeps_entities_out_of_inline_code() {
+    let value = format_markdown("**`code`** and **bold**");
+    let code = entity(&value, "code");
+    assert_eq!((code.offset, code.length), (0, 4));
+    for entity in &value.entities {
+        if entity.kind == "code" || entity.kind == "pre" {
+            continue;
+        }
+        assert!(
+            entity.offset >= code.offset + code.length || entity.offset + entity.length <= code.offset,
+            "entity overlaps code: {:?}",
+            entity
+        );
+    }
+    assert!(value.entities.iter().any(|entity| entity.kind == "bold" && entity.offset >= 9));
+}
