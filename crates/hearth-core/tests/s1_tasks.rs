@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
-use hearth_core::{Clock, Harness, IdGen, NewTask, StepOutput, TaskStatus, TerminalOutcome};
+use hearth_core::{Clock, Harness, IdGen, NewTask, Save, StepOutput, TaskStatus, TerminalOutcome};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -731,4 +731,30 @@ fn the_latest_commit_is_none_on_a_new_harness() {
             .expect("latest commit")
             .is_none()
     );
+}
+
+#[test]
+fn a_save_records_the_latest_commit() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+
+    let commit = session
+        .save(Save::new(&conversation.id).entry("user", json!({"text": "hello"})))
+        .expect("save");
+
+    let latest = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("a save records a commit");
+    assert_eq!(latest.seq, commit.seq);
+    assert_eq!(latest.created_at, clock.now());
+    assert_eq!(latest.kind, "save");
+    assert_eq!(
+        latest.conversation_id.as_deref(),
+        Some(conversation.id.as_str())
+    );
+    assert!(latest.task_id.is_none());
 }
