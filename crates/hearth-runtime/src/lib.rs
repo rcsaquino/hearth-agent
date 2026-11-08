@@ -8,6 +8,7 @@ mod daemon;
 mod doctor;
 mod effect_worker;
 mod init;
+mod tools;
 
 pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};
 pub use chat::{ChatError, chat};

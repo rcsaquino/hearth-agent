@@ -3,21 +3,16 @@
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
-use hearth_tools::{
-    BraveSearch, DeepSeekFetch, DeepSeekSearch, ExaSearch, FetchError, FetchProvider, FileTool,
-    FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, SearchError, SearchProvider, ShellTool,
-    TinyFishFetch, TinyFishSearch, ToolRegistry, WebFetchTool, WebSearchTool,
-};
 use serde_json::json;
 use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::agent::{Agent, AgentConfig};
+use crate::tools::{ToolBuildError, build_tools};
 
 /// A failure that stopped local chat.
 #[derive(Debug, Error)]
@@ -29,9 +24,7 @@ pub enum ChatError {
     #[error(transparent)]
     Provider(#[from] ProviderError),
     #[error(transparent)]
-    Search(#[from] SearchError),
-    #[error(transparent)]
-    Fetch(#[from] FetchError),
+    Tools(#[from] ToolBuildError),
     #[error("chat input failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -72,14 +65,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         None => home.join("workspace"),
     };
     let spill = home.join("spill");
-    let web_search = Arc::new(build_web_search(&settings)?);
-    let web_fetch = Arc::new(build_web_fetch(&settings)?);
-    let tools = ToolRegistry::new(vec![
-        Arc::new(FileTool::new(workspace.clone(), spill.clone())),
-        Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
-        web_search,
-        web_fetch,
-    ]);
+    let tools = build_tools(&settings, &workspace, &spill, None)?;
 
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
@@ -130,158 +116,3 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
     Ok(())
 }
 
-fn build_web_search(settings: &hearth_config::Settings) -> Result<WebSearchTool, SearchError> {
-    let search = settings
-        .web
-        .as_ref()
-        .map(|web| web.search.clone())
-        .unwrap_or_default();
-    let mut providers: Vec<Arc<dyn SearchProvider>> = Vec::new();
-    for name in &search.order {
-        let key = search
-            .providers
-            .get(name)
-            .and_then(|provider| provider.api_key.clone())
-            .filter(|key| !key.is_empty());
-        match name.as_str() {
-            "exa" => providers.push(Arc::new(ExaSearch::new(
-                "https://mcp.exa.ai",
-                "https://api.exa.ai",
-                key,
-            )?)),
-            "brave" => {
-                if let Some(key) = key {
-                    providers.push(Arc::new(BraveSearch::new(
-                        "https://api.search.brave.com/res/v1",
-                        key,
-                    )?));
-                }
-            }
-            "deepseek" => {
-                if let Some(key) = key {
-                    providers.push(Arc::new(DeepSeekSearch::new(
-                        "https://api.deepseek.com",
-                        key,
-                    )?));
-                }
-            }
-            "firecrawl" => {
-                if let Some(key) = key {
-                    providers.push(Arc::new(FirecrawlSearch::new(
-                        "https://api.firecrawl.dev",
-                        key,
-                    )?));
-                }
-            }
-            "tinyfish" => {
-                if let Some(key) = key {
-                    providers.push(Arc::new(TinyFishSearch::new(
-                        "https://api.search.tinyfish.ai",
-                        key,
-                    )?));
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(WebSearchTool::new(
-        providers,
-        search.parallel as usize,
-        search.results as usize,
-        search.max_results as usize,
-    ))
-}
-
-fn build_web_fetch(settings: &hearth_config::Settings) -> Result<WebFetchTool, FetchError> {
-    let fetch = settings
-        .web
-        .as_ref()
-        .map(|web| web.fetch.clone())
-        .unwrap_or_default();
-    Ok(WebFetchTool::new(build_fetch_providers(&fetch)?, false))
-}
-
-fn build_fetch_providers(
-    fetch: &hearth_config::WebFetch,
-) -> Result<Vec<Arc<dyn FetchProvider>>, FetchError> {
-    let mut providers: Vec<Arc<dyn FetchProvider>> = Vec::new();
-    let mut direct_added = false;
-    for name in &fetch.order {
-        let key = fetch
-            .providers
-            .get(name)
-            .and_then(|provider| provider.api_key.clone())
-            .filter(|key| !key.is_empty());
-        match name.as_str() {
-            "jina" => providers.push(Arc::new(JinaFetch::new("https://r.jina.ai", key)?)),
-            "http" | "https" => {
-                if !direct_added {
-                    providers.push(Arc::new(HttpFetch::production("http")?));
-                    direct_added = true;
-                }
-            }
-            "tinyfish" => {
-                if let Some(key) = key {
-                    providers.push(Arc::new(TinyFishFetch::production(key)?));
-                }
-            }
-            "firecrawl" => {
-                if let Some(key) = key {
-                    providers.push(Arc::new(FirecrawlFetch::production(key)?));
-                }
-            }
-            "deepseek" => {
-                if let Some(key) = key {
-                    providers.push(Arc::new(DeepSeekFetch::production(key)?));
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(providers)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use hearth_config::{FetchProvider as FetchProviderConfig, WebFetch};
-    use std::collections::BTreeMap;
-
-    fn configured(order: &[&str], keys: &[(&str, &str)]) -> WebFetch {
-        let mut providers = BTreeMap::new();
-        for (name, key) in keys {
-            providers.insert(
-                (*name).to_owned(),
-                FetchProviderConfig {
-                    api_key: Some((*key).to_owned()),
-                },
-            );
-        }
-        WebFetch {
-            order: order.iter().map(|name| (*name).to_owned()).collect(),
-            providers,
-        }
-    }
-
-    #[test]
-    fn the_fetch_chain_follows_the_order_and_keeps_direct_once() {
-        let fetch = configured(
-            &["jina", "tinyfish", "http", "firecrawl", "https", "deepseek"],
-            &[("tinyfish", "t"), ("firecrawl", "f"), ("deepseek", "d")],
-        );
-        let chain = build_fetch_providers(&fetch).expect("fetch chain");
-        let names: Vec<&str> = chain.iter().map(|provider| provider.name()).collect();
-        assert_eq!(
-            names,
-            vec!["jina", "tinyfish", "http", "firecrawl", "deepseek"]
-        );
-    }
-
-    #[test]
-    fn a_keyed_provider_without_a_key_is_skipped() {
-        let fetch = configured(&["tinyfish", "http"], &[]);
-        let chain = build_fetch_providers(&fetch).expect("fetch chain");
-        let names: Vec<&str> = chain.iter().map(|provider| provider.name()).collect();
-        assert_eq!(names, vec!["http"]);
-    }
-}
