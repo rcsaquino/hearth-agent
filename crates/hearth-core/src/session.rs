@@ -12,6 +12,7 @@ use crate::model::{
     Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewSubmission, Save,
     Submission, SubmissionStatus, SubmitResult,
 };
+use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
 
 const CONVERSATION_SELECT: &str = "SELECT id, parent_id, parent_entry_id, title, transport, \
@@ -671,6 +672,11 @@ impl Session {
             })
         })?;
         raw.into_iter().map(RawEntry::into_entry).collect()
+    }
+
+    /// Assemble the prompt for a conversation.
+    pub fn build_prompt(&self, input: PromptInput) -> Result<Prompt, CoreError> {
+        crate::prompt::build_for(self, input)
     }
 
     /// Read one document.

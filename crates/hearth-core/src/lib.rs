@@ -3,6 +3,7 @@
 mod clock;
 mod error;
 mod model;
+mod prompt;
 mod session;
 mod soul;
 mod task;
@@ -14,6 +15,7 @@ pub use model::{
     EffectStatus, Entry, NewEntry, NewSubmission, Save, Settle, Submission, SubmissionStatus,
     SubmitResult,
 };
+pub use prompt::{Prompt, PromptInput};
 pub use session::{Harness, Session};
 pub use soul::default_soul;
 pub use task::{
