@@ -10,7 +10,7 @@ cd "$work/repo"
 git init -q
 git config user.name "Hearth Test"
 git config user.email "hearth-test@example.com"
-printf 'ordinary notes\n' > notes.txt
+printf 'ordinary notes\nplanted-private-value\n' > notes.txt
 git add notes.txt
 git commit -qm initial
 
