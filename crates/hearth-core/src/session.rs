@@ -633,7 +633,8 @@ impl Session {
                 let attempt = row.attempt + 1;
                 let changed = writer.execute(
                     "UPDATE tasks SET status = 'running', lease_owner = ?, lease_until = ?, \
-                     attempt = ?, updated_at = ? WHERE id = ? AND status = 'pending'",
+                     attempt = ?, next_wake_at = NULL, updated_at = ? \
+                     WHERE id = ? AND status = 'pending'",
                     (
                         owner.as_str(),
                         now + lease_micros,
