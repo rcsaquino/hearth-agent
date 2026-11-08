@@ -789,6 +789,34 @@ impl Session {
         Ok(raw.map(RawConversation::into_conversation))
     }
 
+    /// Read the newest conversation for a transport channel.
+    pub fn conversation_by_transport(
+        &self,
+        transport: &str,
+        key: &str,
+    ) -> Result<Option<Conversation>, CoreError> {
+        let sql = format!(
+            "{CONVERSATION_SELECT} WHERE transport = ? AND transport_key = ? \
+             AND archived = 0 ORDER BY created_at DESC, rowid DESC LIMIT 1"
+        );
+        let raw: Option<RawConversation> = self.storage.read(|reader| {
+            reader.query_optional(&sql, (transport, key), |row| {
+                Ok(RawConversation {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    parent_entry_id: row.get(2)?,
+                    title: row.get(3)?,
+                    transport: row.get(4)?,
+                    transport_key: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    archived: row.get(8)?,
+                })
+            })
+        })?;
+        Ok(raw.map(RawConversation::into_conversation))
+    }
+
     /// Read the entries of a conversation in order.
     pub fn history(&self, conversation_id: &str) -> Result<Vec<Entry>, CoreError> {
         let sql = format!("{ENTRY_SELECT} WHERE conversation_id = ? ORDER BY seq, rowid");
