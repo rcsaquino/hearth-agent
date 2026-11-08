@@ -102,14 +102,28 @@ fn write_response(stream: &mut TcpStream, body: &Value) {
 
 #[derive(Default)]
 struct TelegramState {
-    served: AtomicBool,
     typing: AtomicUsize,
     reactions: AtomicUsize,
     rich: Mutex<Vec<String>>,
+    rich_sends: AtomicUsize,
     stop: AtomicBool,
 }
 
-fn fake_telegram() -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
+fn write_response_status(stream: &mut TcpStream, status: u16, body: &Value) {
+    let text = serde_json::to_string(body).expect("json");
+    write!(
+        stream,
+        "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        text.len(),
+        text
+    )
+    .expect("write response");
+}
+
+fn fake_telegram_script(
+    updates: Vec<Value>,
+    fail_first_rich: bool,
+) -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind telegram");
     listener
         .set_nonblocking(true)
@@ -117,6 +131,7 @@ fn fake_telegram() -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
     let base = format!("http://{}", listener.local_addr().expect("telegram addr"));
     let state = Arc::new(TelegramState::default());
     let thread_state = Arc::clone(&state);
+    let next_update = Arc::new(AtomicUsize::new(0));
     let handle = thread::spawn(move || {
         while !thread_state.stop.load(Ordering::Relaxed) {
             match listener.accept() {
@@ -126,17 +141,9 @@ fn fake_telegram() -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
                     let method = request.path.rsplit('/').next().unwrap_or_default();
                     let body = match method {
                         "getUpdates" => {
-                            if !thread_state.served.swap(true, Ordering::SeqCst) {
-                                json!({"ok": true, "result": [{
-                                    "update_id": 1,
-                                    "message": {
-                                        "message_id": 10,
-                                        "date": 1_730_000_000,
-                                        "chat": {"id": 42, "type": "private"},
-                                        "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
-                                        "text": "hello"
-                                    }
-                                }]})
+                            let index = next_update.fetch_add(1, Ordering::SeqCst);
+                            if let Some(update) = updates.get(index) {
+                                json!({"ok": true, "result": [update.clone()]})
                             } else {
                                 thread::sleep(Duration::from_millis(20));
                                 json!({"ok": true, "result": []})
@@ -151,12 +158,21 @@ fn fake_telegram() -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
                             json!({"ok": true, "result": true})
                         }
                         "sendRichMessage" => {
+                            let send_index = thread_state.rich_sends.fetch_add(1, Ordering::SeqCst);
+                            if fail_first_rich && send_index == 0 {
+                                write_response_status(
+                                    &mut stream,
+                                    500,
+                                    &json!({"ok": false, "description": "synthetic send failure"}),
+                                );
+                                continue;
+                            }
                             let markdown = request.body["rich_message"]["markdown"]
                                 .as_str()
                                 .unwrap_or_default()
                                 .to_owned();
                             thread_state.rich.lock().expect("rich").push(markdown);
-                            json!({"ok": true, "result": {"message_id": 500}})
+                            json!({"ok": true, "result": {"message_id": 500 + send_index}})
                         }
                         _ => json!({"ok": true, "result": true}),
                     };
@@ -172,27 +188,51 @@ fn fake_telegram() -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
     (base, state, handle)
 }
 
-fn fake_provider() -> (String, thread::JoinHandle<()>) {
+fn fake_telegram() -> (String, Arc<TelegramState>, thread::JoinHandle<()>) {
+    fake_telegram_script(
+        vec![json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 10,
+                "date": 1_730_000_000,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "text": "hello"
+            }
+        })],
+        false,
+    )
+}
+
+fn fake_provider_answers(answers: Vec<&str>) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider");
     let base = format!("http://{}", listener.local_addr().expect("provider addr"));
+    let owned: Vec<String> = answers.into_iter().map(str::to_owned).collect();
     let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("provider accept");
-        let _ = read_request(&mut stream);
-        let body = concat!(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"Telegram answer\"}}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
-            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3,\"total_tokens\":13}}\n\n",
-            "data: [DONE]\n\n"
-        );
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        )
-        .expect("provider response");
+        for answer in owned {
+            let (mut stream, _) = listener.accept().expect("provider accept");
+            let _ = read_request(&mut stream);
+            let delta = json!({"choices": [{"delta": {"content": answer}}]});
+            let finish = json!({"choices": [{"delta": {}, "finish_reason": "stop"}]});
+            let usage = json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}});
+            let body = format!(
+                "data: {}\n\ndata: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                delta, finish, usage
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("provider response");
+        }
     });
     (format!("{base}/v1"), handle)
+}
+
+fn fake_provider() -> (String, thread::JoinHandle<()>) {
+    fake_provider_answers(vec!["Telegram answer"])
 }
 
 struct DaemonGuard(Option<Child>);
@@ -300,4 +340,142 @@ fn the_daemon_answers_a_telegram_message() {
         .expect("submission");
     assert_eq!(submission.status, SubmissionStatus::Done);
     assert!(session.latest_usage().expect("usage").is_some());
+}
+
+fn wait_for_rich_count(state: &TelegramState, count: usize) -> Vec<String> {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let rich = state.rich.lock().expect("rich").clone();
+        if rich.len() >= count {
+            return rich;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "the daemon sent {} rich messages, wanted {count}",
+                rich.len()
+            );
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn the_daemon_recovers_an_uncertain_telegram_answer() {
+    use hearth_core::{EffectStatus, Harness, SubmissionStatus};
+
+    let (provider_base, provider_thread) =
+        fake_provider_answers(vec!["First answer", "Second answer"]);
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(
+        vec![
+            json!({
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    "date": 1_730_000_000,
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "text": "hello"
+                }
+            }),
+            json!({
+                "update_id": 2,
+                "message": {
+                    "message_id": 11,
+                    "date": 1_730_000_001,
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "text": "again"
+                }
+            }),
+        ],
+        true,
+    );
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let rich = wait_for_rich_count(&telegram_state, 2);
+    assert!(
+        rich[0].contains("Recovered reply") && rich[0].contains("First answer"),
+        "first rich message was {:?}",
+        rich[0]
+    );
+    assert!(
+        rich[1].contains("Second answer"),
+        "second rich message was {:?}",
+        rich[1]
+    );
+    assert!(telegram_state.typing.load(Ordering::SeqCst) > 0);
+    assert!(telegram_state.reactions.load(Ordering::SeqCst) > 0);
+
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let session = harness.session();
+    let conversation = session
+        .conversation_by_transport("telegram", "42:0")
+        .expect("lookup")
+        .expect("telegram conversation");
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(history.len(), 4, "history was {history:?}");
+    let users: Vec<&str> = history
+        .iter()
+        .filter(|entry| entry.kind == "user")
+        .map(|entry| entry.content[0]["text"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(users, vec!["hello", "again"]);
+    let assistants: Vec<&str> = history
+        .iter()
+        .filter(|entry| entry.kind == "assistant")
+        .map(|entry| entry.content[0]["text"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(assistants, vec!["First answer", "Second answer"]);
+
+    let first = session
+        .submission_by_request_id("tg:42:10")
+        .expect("lookup first")
+        .expect("first submission");
+    let second = session
+        .submission_by_request_id("tg:42:11")
+        .expect("lookup second")
+        .expect("second submission");
+    assert_eq!(first.status, SubmissionStatus::Done);
+    assert_eq!(second.status, SubmissionStatus::Done);
+
+    let first_answer = history
+        .iter()
+        .find(|entry| Some(&entry.id) == first.answer_entry_id.as_ref())
+        .expect("first answer entry");
+    assert_eq!(first_answer.content[0]["text"], "First answer");
+    let second_answer = history
+        .iter()
+        .find(|entry| Some(&entry.id) == second.answer_entry_id.as_ref())
+        .expect("second answer entry");
+    assert_eq!(second_answer.content[0]["text"], "Second answer");
+
+    let first_effect = session
+        .effect_by_key("telegram.send", &format!("tg:{}", first.id))
+        .expect("read first effect")
+        .expect("first effect");
+    assert_eq!(first_effect.status, EffectStatus::Done);
+    assert_eq!(
+        first_effect.result.expect("first result")["recovered"],
+        true,
+        "the first answer should be marked recovered"
+    );
+    let second_effect = session
+        .effect_by_key("telegram.send", &format!("tg:{}", second.id))
+        .expect("read second effect")
+        .expect("second effect");
+    assert_eq!(second_effect.status, EffectStatus::Done);
+    assert!(
+        session
+            .effects_awaiting_delivery("telegram.send")
+            .expect("awaiting")
+            .is_empty()
+    );
 }
