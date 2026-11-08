@@ -755,3 +755,11 @@ a rare-path residual, not the normal path. Paraphrase recall remains 0.650.
 The S2 schema tests were updated to version 4. The small-set benchmark is
 unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 15/15, 195 stored rows, 0 secret leaks.
+
+## 2026-11-08: M6e memory provenance and global standing version
+
+- An explicit memory-tool save now uses the current run's user entry as provenance: source_kind `user`, source_ref the entry id. Without a run source it records source_kind `session` and no source_ref; it never claims assistant provenance for a user fact.
+- `Session::latest_user_entry_id` returns the newest user entry. The runtime `build_tools` takes an optional `MemorySource`. The daemon sets it per submission; local chat rebuilds the per-line tools and agent with that line's source.
+- The standing version is global in the meta key `standing_version`, not a per-conversation `memory_state` document. A bump writes the memory changes and the new version in one transaction with an expected-value check and one retry. A missing key is version 0.
+- The `memory_state` document kind remains available for future last-consolidation data. The memory save context remains the system/memory conversation.
+- The daemon status reads the global version through `MemoryService::standing_version`.
