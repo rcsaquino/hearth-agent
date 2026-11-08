@@ -383,10 +383,27 @@ impl Session {
     }
 
     /// Mark an effect intent as started.
-    pub fn begin_effect(&self, _id: &str) -> Result<Effect, CoreError> {
-        Err(CoreError::Invalid(
-            "effect lifecycle is not implemented".to_owned(),
-        ))
+    pub fn begin_effect(&self, id: &str) -> Result<Effect, CoreError> {
+        let effect_id = id.to_owned();
+        self.storage
+            .write(move |writer| -> Result<(), CoreError> {
+                let effect = load_effect(writer, &effect_id)?
+                    .ok_or_else(|| CoreError::EffectNotFound(effect_id.clone()))?;
+                if effect.status != EffectStatus::Intent {
+                    return Err(CoreError::EffectNotReady {
+                        id: effect_id,
+                        status: effect.status.as_str().to_owned(),
+                    });
+                }
+                writer.execute(
+                    "UPDATE effects SET status = 'started', attempts = attempts + 1, \
+                     settled_at = NULL WHERE id = ?",
+                    (effect_id.as_str(),),
+                )?;
+                Ok(())
+            })?;
+        self.effect(id)?
+            .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
     }
 
     /// Settle a started effect.
@@ -1441,3 +1458,22 @@ fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {
     raw.map(RawTask::into_task).transpose()
 }
 
+
+fn load_effect(writer: &Writer<'_>, id: &str) -> Result<Option<Effect>, CoreError> {
+    let sql = format!("{EFFECT_SELECT} WHERE id = ?");
+    let raw: Option<RawEffect> = writer.query_optional(&sql, (id,), |row| {
+        Ok(RawEffect {
+            id: row.get(0)?,
+            task_id: row.get(1)?,
+            kind: row.get(2)?,
+            key: row.get(3)?,
+            payload_json: row.get(4)?,
+            status: row.get(5)?,
+            result_json: row.get(6)?,
+            attempts: row.get(7)?,
+            created_at: row.get(8)?,
+            settled_at: row.get(9)?,
+        })
+    })?;
+    raw.map(RawEffect::into_effect).transpose()
+}
