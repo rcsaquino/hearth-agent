@@ -683,5 +683,5 @@ local fake-server and fixture tests.
   active standing rows and promotable candidates.
 - Result: recall@10 0.939, precision 0.928, preference 1.000, direct 0.971,
   paraphrase 0.650, 195 stored rows, temporal 20/20, supersession 15/15, zero
-  secret leaks. The 200k retrieval p95 is 356 ms against the 80 ms target; that
+  secret leaks. The 200k retrieval p95 is 353 ms against the 80 ms target; that
   gap moves to M6b.
