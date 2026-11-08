@@ -7,8 +7,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hearth_tools::{
-    DeepSeekFetch, FetchError, FetchProvider, FetchResult, FirecrawlFetch, HttpFetch,
-    JinaFetch, TinyFishFetch, Tool, WebFetchTool,
+    DeepSeekFetch, FetchError, FetchProvider, FetchResult, FirecrawlFetch, HttpFetch, JinaFetch,
+    TinyFishFetch, Tool, WebFetchTool,
 };
 use serde_json::json;
 
@@ -401,7 +401,6 @@ fn tinyfish_maps_its_fetch_response() {
     assert_eq!(body["per_url_timeout_ms"], 30000);
 }
 
-
 #[test]
 fn firecrawl_maps_its_scrape_response() {
     let server = serve(vec![reply(
@@ -441,7 +440,6 @@ fn firecrawl_maps_its_scrape_response() {
     assert_eq!(body["onlyMainContent"], true);
     assert_eq!(body["lockdown"], true);
 }
-
 
 #[test]
 fn deepseek_maps_its_fetch_response() {

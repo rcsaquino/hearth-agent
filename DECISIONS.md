@@ -384,3 +384,20 @@ New dependencies for the fetch work: reqwest gained the gzip and brotli
 features for compressed pages, html2text extracts readable HTML, and
 pdf-extract extracts PDF text. They are confined to hearth-tools and covered by
 local fake-server and fixture tests.
+
+## 2026-11-08: M2c-2b keyed fetch providers
+
+- TinyFish fetch: POST the base `https://api.fetch.tinyfish.ai` with X-API-Key and
+  `{urls:[url], format:"markdown", per_url_timeout_ms:30000}`. Read `results` and
+  `errors`; use the matching result's `text` (string or object), `title`, and
+  `final_url`.
+- Firecrawl fetch: POST `{base}/v2/scrape` with Bearer auth and
+  `{url, formats:["markdown"], onlyMainContent:true, lockdown:true}`. Read
+  `data.markdown` and `data.metadata.title`.
+- DeepSeek fetch: POST `{base}/v1/tools/fetch` with Bearer auth and `{url}`. Read
+  `title` and `content`.
+- Keyed providers join the chain only when their key is present and non-empty.
+  `http` and `https` are one direct provider; the first alias wins and the second
+  is skipped. The chain follows `web.fetch.order`.
+- 429 and 5xx are retryable; other 4xx are permanent. Provider content is capped
+  at the fetch limit with a truncation note.

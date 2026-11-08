@@ -427,7 +427,6 @@ fn pdf_to_text(bytes: &[u8]) -> Result<String, FetchError> {
         .map_err(|error| FetchError::permanent(format!("could not read the PDF: {error}")))
 }
 
-
 /// TinyFish fetch, keyed.
 pub struct TinyFishFetch {
     base: String,
@@ -690,10 +689,7 @@ impl FetchProvider for DeepSeekFetch {
     }
 }
 
-fn json_response(
-    response: reqwest::blocking::Response,
-    label: &str,
-) -> Result<Value, FetchError> {
+fn json_response(response: reqwest::blocking::Response, label: &str) -> Result<Value, FetchError> {
     let status = response.status();
     if !status.is_success() {
         let retryable = status.as_u16() == 429 || status.is_server_error();
