@@ -19,6 +19,7 @@ struct TestResponse {
 }
 
 impl TestResponse {
+    #[allow(dead_code)]
     fn sse(chunks: &[&str]) -> Self {
         let mut body = String::new();
         for chunk in chunks {
@@ -35,6 +36,7 @@ impl TestResponse {
         }
     }
 
+    #[allow(dead_code)]
     fn text(status: u16, reason: &'static str, body: &str) -> Self {
         Self {
             status,
@@ -44,6 +46,7 @@ impl TestResponse {
         }
     }
 
+    #[allow(dead_code)]
     fn raw(status: u16, reason: &'static str, content_type: &'static str, body: &str) -> Self {
         Self {
             status,
@@ -143,9 +146,7 @@ fn write_response(stream: &mut TcpStream, response: &TestResponse) {
         response.content_type,
         response.body.len()
     );
-    stream
-        .write_all(head.as_bytes())
-        .expect("response head");
+    stream.write_all(head.as_bytes()).expect("response head");
     stream
         .write_all(response.body.as_bytes())
         .expect("response body");
@@ -164,6 +165,7 @@ impl Sleeper for NoopSleeper {
 }
 
 impl NoopSleeper {
+    #[allow(dead_code)]
     fn sleeps(&self) -> usize {
         self.sleeps.lock().expect("sleep lock").len()
     }
@@ -247,14 +249,7 @@ fn a_text_stream_sends_the_request_and_yields_deltas() {
     assert_eq!(captured.body["stream"], true);
     assert_eq!(captured.body["stream_options"]["include_usage"], true);
     assert_eq!(captured.body["max_tokens"], 100);
-    assert!(
-        (captured.body["temperature"]
-            .as_f64()
-            .expect("temperature")
-            - 0.2)
-            .abs()
-            < 1e-6
-    );
+    assert!((captured.body["temperature"].as_f64().expect("temperature") - 0.2).abs() < 1e-6);
     assert_eq!(captured.body["tools"][0]["type"], "function");
     assert_eq!(captured.body["tools"][0]["function"]["name"], "files");
     assert_eq!(captured.body["messages"][0]["role"], "system");
