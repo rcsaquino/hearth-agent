@@ -786,7 +786,7 @@ fn hearth_status_reads_a_running_daemon() {
     assert_eq!(status["model"], "fake-model");
     assert!(status["uptime_seconds"].as_u64().is_some());
     assert_eq!(status["tasks_running"], 0);
-    assert_eq!(status["tasks_asleep"], 2);
+    assert_eq!(status["tasks_asleep"], 3);
     assert_eq!(status["memory_items"], 1);
     assert_eq!(status["standing_memory_version"], 1);
     assert_eq!(status["last_consolidation"], "2026-11-09T03:30:00Z");
