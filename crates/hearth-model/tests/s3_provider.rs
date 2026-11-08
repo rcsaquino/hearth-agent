@@ -258,3 +258,32 @@ fn a_text_stream_sends_the_request_and_yields_deltas() {
     assert_eq!(captured.body["messages"][1]["content"], "hi");
     server.finish();
 }
+
+#[test]
+fn tool_call_deltas_assemble_into_one_call() {
+    let server = FakeServer::start(vec![TestResponse::sse(&[
+        r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"files","arguments":"{\"pa"}}]},"finish_reason":null}]}"#,
+        r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+    ])]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let events: Vec<StreamEvent> = provider
+        .stream(request())
+        .expect("stream")
+        .collect::<Result<_, _>>()
+        .expect("events");
+    assert_eq!(
+        events,
+        vec![
+            StreamEvent::ToolCall(hearth_model::ToolCall {
+                id: "call_1".to_owned(),
+                name: "files".to_owned(),
+                arguments: json!({"path": "a.txt"}),
+            }),
+            StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned())
+            },
+        ]
+    );
+    server.request();
+    server.finish();
+}
