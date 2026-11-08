@@ -663,6 +663,31 @@ impl Session {
                             return Err(CoreError::LeaseLost(task_id));
                         }
                     }
+                    StepOutput::Sleep {
+                        until_micros,
+                        phase,
+                        checkpoint,
+                    } => {
+                        let checkpoint = serde_json::to_string(&checkpoint)
+                            .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                        let changed = writer.execute(
+                            "UPDATE tasks SET status = 'asleep', phase = ?, checkpoint_json = ?, \
+                             attempt = 0, lease_owner = NULL, lease_until = NULL, \
+                             next_wake_at = ?, updated_at = ? \
+                             WHERE id = ? AND status = 'running' AND lease_owner = ?",
+                            (
+                                phase,
+                                checkpoint,
+                                until_micros,
+                                now,
+                                task_id.as_str(),
+                                owner.as_str(),
+                            ),
+                        )?;
+                        if changed != 1 {
+                            return Err(CoreError::LeaseLost(task_id));
+                        }
+                    }
                     _ => {
                         return Err(CoreError::Invalid(
                             "step outcome is not implemented".to_owned(),
@@ -676,7 +701,28 @@ impl Session {
 
     /// Requeue tasks whose leases or sleeps expired.
     pub fn recover_tasks(&self) -> Result<RecoveryReport, CoreError> {
-        Ok(RecoveryReport::default())
+        let now = self.clock.now_micros();
+        self.storage
+            .write(move |writer| -> Result<RecoveryReport, CoreError> {
+                let mut report = RecoveryReport::default();
+                let due: Vec<String> = writer.query(
+                    "SELECT id FROM tasks WHERE status = 'asleep' \
+                     AND next_wake_at IS NOT NULL AND next_wake_at <= ?",
+                    (now,),
+                    |row| row.get(0),
+                )?;
+                for id in due {
+                    let changed = writer.execute(
+                        "UPDATE tasks SET status = 'pending', next_wake_at = NULL, updated_at = ? \
+                         WHERE id = ? AND status = 'asleep'",
+                        (now, id.as_str()),
+                    )?;
+                    if changed == 1 {
+                        report.woken += 1;
+                    }
+                }
+                Ok(report)
+            })
     }
 
     /// Fork a conversation at a chosen entry.
