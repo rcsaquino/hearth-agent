@@ -233,6 +233,8 @@ impl Agent {
                 conversation_id: submission.conversation_id.clone(),
                 model: self.config.model.clone(),
                 tools: self.config.tools.specs(),
+                standing: String::new(),
+                recall: String::new(),
                 runtime_note,
             })?;
             let prompt_text = serde_json::to_string(&prompt.document)

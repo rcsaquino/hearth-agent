@@ -21,6 +21,8 @@ pub struct PromptInput {
     pub conversation_id: String,
     pub model: String,
     pub tools: Vec<ToolSpec>,
+    pub standing: String,
+    pub recall: String,
     pub runtime_note: String,
 }
 
@@ -33,7 +35,7 @@ pub struct Prompt {
 
 /// Assemble the request and the audit document.
 pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError> {
-    let mut messages = Vec::with_capacity(history.len() + 2);
+    let mut messages = Vec::with_capacity(history.len() + 4);
     messages.push(ChatMessage {
         role: Role::System,
         blocks: vec![ContentBlock::Text(format!(
@@ -41,7 +43,30 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             input.soul, OPERATION
         ))],
     });
-    for entry in history {
+    if !input.standing.trim().is_empty() {
+        messages.push(ChatMessage {
+            role: Role::System,
+            blocks: vec![ContentBlock::Text(format!(
+                "## Standing memory\n\n{}",
+                input.standing
+            ))],
+        });
+    }
+    let newest_user = history
+        .iter()
+        .rposition(|entry| {
+            message_for_entry(entry).is_some_and(|message| message.role == Role::User)
+        });
+    for (index, entry) in history.iter().enumerate() {
+        if Some(index) == newest_user && !input.recall.trim().is_empty() {
+            messages.push(ChatMessage {
+                role: Role::System,
+                blocks: vec![ContentBlock::Text(format!(
+                    "## Relevant memory\n\n{}",
+                    input.recall
+                ))],
+            });
+        }
         if let Some(message) = message_for_entry(entry) {
             messages.push(message);
         }
@@ -76,6 +101,8 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "identity": input.soul,
         "operation": OPERATION,
         "tools": tools,
+        "standing_memory": input.standing,
+        "recall": input.recall,
         "transcript": transcript,
         "runtime": input.runtime_note,
     });
