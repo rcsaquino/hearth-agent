@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use hearth_storage::{Storage, StorageError, Writer};
+use hearth_storage::{Storage, Writer};
 use serde_json::Value;
 use uuid::Uuid;
 
