@@ -427,6 +427,151 @@ fn pdf_to_text(bytes: &[u8]) -> Result<String, FetchError> {
         .map_err(|error| FetchError::permanent(format!("could not read the PDF: {error}")))
 }
 
+
+/// TinyFish fetch, keyed.
+pub struct TinyFishFetch {
+    base: String,
+    api_key: String,
+    max_bytes: usize,
+    client: Client,
+}
+
+impl TinyFishFetch {
+    /// Build the TinyFish provider with explicit limits.
+    pub fn new(
+        api_key: impl Into<String>,
+        base: impl Into<String>,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> Result<Self, FetchError> {
+        let client = Client::builder()
+            .timeout(timeout)
+            .user_agent("Hearth/0.1")
+            .build()
+            .map_err(|error| {
+                FetchError::permanent(format!("could not build the HTTP client: {error}"))
+            })?;
+        Ok(Self {
+            base: base.into(),
+            api_key: api_key.into(),
+            max_bytes,
+            client,
+        })
+    }
+
+    /// The production defaults.
+    pub fn production(api_key: impl Into<String>) -> Result<Self, FetchError> {
+        Self::new(
+            api_key,
+            "https://api.fetch.tinyfish.ai",
+            Duration::from_secs(60),
+            DEFAULT_MAX_BYTES,
+        )
+    }
+}
+
+impl FetchProvider for TinyFishFetch {
+    fn name(&self) -> &'static str {
+        "tinyfish"
+    }
+
+    fn fetch(&self, url: &str) -> Result<FetchResult, FetchError> {
+        let body = json!({
+            "urls": [url],
+            "format": "markdown",
+            "per_url_timeout_ms": 30000,
+        });
+        let response = self
+            .client
+            .post(&self.base)
+            .header("X-API-Key", &self.api_key)
+            .json(&body)
+            .send()
+            .map_err(|error| FetchError::temporary(format!("request failed: {error}")))?;
+        let value = json_response(response, "TinyFish fetch")?;
+        let results = value["results"].as_array();
+        let result = results
+            .and_then(|items| {
+                items.iter().find(|item| {
+                    item["url"].as_str() == Some(url) || item["final_url"].as_str() == Some(url)
+                })
+            })
+            .or_else(|| results.and_then(|items| items.first()));
+        let Some(result) = result else {
+            let message = value["errors"]
+                .as_array()
+                .and_then(|errors| errors.first())
+                .and_then(|error| error["error"].as_str())
+                .unwrap_or("TinyFish returned no result");
+            return Err(FetchError::permanent(message.to_owned()));
+        };
+        let text = result["text"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| {
+                result["text"]
+                    .as_object()
+                    .map(|_| result["text"].to_string())
+            })
+            .or_else(|| result["content"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        if text.trim().is_empty() {
+            let message = value["errors"]
+                .as_array()
+                .and_then(|errors| errors.first())
+                .and_then(|error| error["error"].as_str())
+                .unwrap_or("TinyFish returned no text");
+            return Err(FetchError::permanent(message.to_owned()));
+        }
+        let final_url = result["final_url"].as_str().unwrap_or(url).to_owned();
+        let title = result["title"]
+            .as_str()
+            .map(str::to_owned)
+            .filter(|title| !title.is_empty());
+        Ok(FetchResult {
+            text: cap_text(text, self.max_bytes),
+            final_url,
+            title,
+        })
+    }
+}
+
+fn json_response(
+    response: reqwest::blocking::Response,
+    label: &str,
+) -> Result<Value, FetchError> {
+    let status = response.status();
+    if !status.is_success() {
+        let retryable = status.as_u16() == 429 || status.is_server_error();
+        let snippet: String = response
+            .text()
+            .unwrap_or_default()
+            .chars()
+            .take(200)
+            .collect();
+        return Err(FetchError {
+            message: format!("{label} returned {}: {snippet}", status.as_u16()),
+            retryable,
+        });
+    }
+    response
+        .json()
+        .map_err(|error| FetchError::permanent(format!("{label} returned invalid JSON: {error}")))
+}
+
+fn cap_text(mut text: String, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    text.push_str(&format!("\n[page truncated at {max_bytes} bytes]"));
+    text
+}
+
 /// Refuse a target that is not a public http or https address.
 pub(crate) fn validate_target(url: &Url, allow_loopback: bool) -> Result<(), FetchError> {
     if url.scheme() != "http" && url.scheme() != "https" {

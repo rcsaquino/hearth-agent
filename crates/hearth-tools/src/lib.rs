@@ -9,7 +9,9 @@ mod shell_tool;
 mod tool;
 mod workspace;
 
-pub use fetch::{FetchError, FetchProvider, FetchResult, HttpFetch, JinaFetch, WebFetchTool};
+pub use fetch::{
+    FetchError, FetchProvider, FetchResult, HttpFetch, JinaFetch, TinyFishFetch, WebFetchTool,
+};
 pub use file_tool::FileTool;
 pub use file_write::FileWrite;
 pub use search::{SearchError, SearchProvider, SearchResult, WebSearchTool};
