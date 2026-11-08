@@ -9,9 +9,9 @@ use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
 use hearth_tools::{
-    BraveSearch, DeepSeekSearch, ExaSearch, FetchError, FetchProvider, FileTool, FirecrawlSearch,
-    HttpFetch, JinaFetch, SearchError, SearchProvider, ShellTool, TinyFishSearch, ToolRegistry,
-    WebFetchTool, WebSearchTool,
+    BraveSearch, DeepSeekFetch, DeepSeekSearch, ExaSearch, FetchError, FetchProvider, FileTool,
+    FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, SearchError, SearchProvider, ShellTool,
+    TinyFishFetch, TinyFishSearch, ToolRegistry, WebFetchTool, WebSearchTool,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -198,6 +198,12 @@ fn build_web_fetch(settings: &hearth_config::Settings) -> Result<WebFetchTool, F
         .as_ref()
         .map(|web| web.fetch.clone())
         .unwrap_or_default();
+    Ok(WebFetchTool::new(build_fetch_providers(&fetch)?, false))
+}
+
+fn build_fetch_providers(
+    fetch: &hearth_config::WebFetch,
+) -> Result<Vec<Arc<dyn FetchProvider>>, FetchError> {
     let mut providers: Vec<Arc<dyn FetchProvider>> = Vec::new();
     let mut direct_added = false;
     for name in &fetch.order {
@@ -214,12 +220,25 @@ fn build_web_fetch(settings: &hearth_config::Settings) -> Result<WebFetchTool, F
                     direct_added = true;
                 }
             }
-            // These providers arrive in M2c-2b. The settings accept them now.
-            "tinyfish" | "firecrawl" | "deepseek" => {}
+            "tinyfish" => {
+                if let Some(key) = key {
+                    providers.push(Arc::new(TinyFishFetch::production(key)?));
+                }
+            }
+            "firecrawl" => {
+                if let Some(key) = key {
+                    providers.push(Arc::new(FirecrawlFetch::production(key)?));
+                }
+            }
+            "deepseek" => {
+                if let Some(key) = key {
+                    providers.push(Arc::new(DeepSeekFetch::production(key)?));
+                }
+            }
             _ => {}
         }
     }
-    Ok(WebFetchTool::new(providers, false))
+    Ok(providers)
 }
 
 #[cfg(test)]
