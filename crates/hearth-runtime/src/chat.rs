@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use hearth_config::ConfigError;
-use hearth_core::{CoreError, Harness};
+use hearth_core::{ContextBudget, CoreError, Harness};
 use hearth_memory::{MemoryService, MemorySource};
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
 use serde_json::json;
@@ -117,7 +117,14 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
                 spill_dir: spill.clone(),
             },
         )
-        .with_memory(Arc::clone(&memory));
+        .with_memory(Arc::clone(&memory))
+        .with_budget(ContextBudget::new(
+            models.context_window,
+            models.max_output_tokens,
+            settings.compaction.soft_compact,
+            settings.compaction.hard_compact,
+            settings.compaction.keep_recent_tokens,
+        ));
         match agent.run_submission(&submitted.submission.id) {
             Ok(outcome) => {
                 if let Some(answer) = outcome.answer_text {

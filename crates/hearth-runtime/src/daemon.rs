@@ -8,7 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use hearth_config::{ConfigError, Media, Settings};
-use hearth_core::{CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission};
+use hearth_core::{
+    ContextBudget, CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission,
+};
 use hearth_model::{
     MediaError, OpenAiCompatibleProvider, Pricing, Provider, ProviderError, Speaker, SpeechClient,
     Transcriber, TranscriptionClient,
@@ -248,6 +250,13 @@ impl TelegramRuntime {
             Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
+        let budget = ContextBudget::new(
+            models.context_window,
+            models.max_output_tokens,
+            settings.compaction.soft_compact,
+            settings.compaction.hard_compact,
+            settings.compaction.keep_recent_tokens,
+        );
         let worker = TelegramWorker {
             settings: Arc::clone(&settings),
             session,
@@ -262,6 +271,7 @@ impl TelegramRuntime {
             model: models.model.clone(),
             provider_name: models.kind.clone(),
             max_turns: settings.agent.max_turns,
+            budget,
             pid: std::process::id(),
             cancellations,
             events,
@@ -284,6 +294,7 @@ struct TelegramWorker {
     model: String,
     provider_name: String,
     max_turns: u32,
+    budget: ContextBudget,
     pid: u32,
     cancellations: Arc<CancellationRegistry>,
     events: Arc<EventBus>,
@@ -432,7 +443,8 @@ impl TelegramWorker {
                 spill_dir: self.spill.clone(),
             },
         )
-        .with_memory(Arc::clone(&self.memory));
+        .with_memory(Arc::clone(&self.memory))
+        .with_budget(self.budget);
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let typing_sender = self.sender.clone();

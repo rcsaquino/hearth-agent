@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use hearth_core::{
-    CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session, StepOutput,
-    Submission, SubmissionStatus, TerminalOutcome, parse_blocks,
+    ContextBudget, CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session,
+    StepOutput, Submission, SubmissionStatus, TerminalOutcome, build_prompt, parse_blocks,
 };
 use hearth_memory::MemoryService;
 use hearth_model::{ContentBlock, Pricing, Provider, StreamEvent, ToolCall, Usage};
@@ -53,6 +53,8 @@ pub enum AgentError {
     Busy,
     #[error("{0}")]
     Invalid(String),
+    #[error("prompt exceeds the context budget: {0}")]
+    Budget(String),
 }
 
 /// Runs submissions against a provider.
@@ -63,6 +65,7 @@ pub struct Agent {
     config: AgentConfig,
     memory: Option<Arc<MemoryService>>,
     reservations: Mutex<HashSet<String>>,
+    budget: ContextBudget,
 }
 
 impl Agent {
@@ -80,7 +83,14 @@ impl Agent {
             config,
             memory: None,
             reservations: Mutex::new(HashSet::new()),
+            budget: ContextBudget::default(),
         }
+    }
+
+    /// Override the context budget for this agent.
+    pub fn with_budget(mut self, budget: ContextBudget) -> Self {
+        self.budget = budget;
+        self
     }
 
     /// Attach the memory library to this agent.
@@ -261,16 +271,45 @@ impl Agent {
                 "Current time: {now}. Conversation: {}. Model: {}.",
                 submission.conversation_id, self.config.model
             );
+            let history = self.session.history(&submission.conversation_id)?;
             let (standing, recall) = self.memory_context(latest_user_text(&history).as_deref());
-            let prompt = self.session.build_prompt(PromptInput {
+            let tools = self.config.tools.specs();
+            let make_input = |recall: String| PromptInput {
                 soul: self.config.soul.clone(),
                 conversation_id: submission.conversation_id.clone(),
                 model: self.config.model.clone(),
-                tools: self.config.tools.specs(),
-                standing,
+                tools: tools.clone(),
+                standing: standing.clone(),
                 recall,
-                runtime_note,
-            })?;
+                runtime_note: runtime_note.clone(),
+            };
+            let mut recall_text = recall;
+            let mut prompt = build_prompt(make_input(recall_text.clone()), &history)?;
+            while prompt.tokens.total > self.budget.usable && !recall_text.is_empty() {
+                let mut lines: Vec<&str> = recall_text.lines().collect();
+                lines.pop();
+                recall_text = lines.join("\n");
+                prompt = build_prompt(make_input(recall_text.clone()), &history)?;
+            }
+            if prompt.tokens.total > self.budget.usable {
+                let shrunk = shrink_tool_results(&history);
+                prompt = build_prompt(make_input(recall_text), &shrunk)?;
+            }
+            if prompt.tokens.total > self.budget.usable {
+                return self.settle_failure(
+                    &submission,
+                    &claimed.id,
+                    "The conversation is too large for the model window even after shrinking. Start a new chat or let compaction run.",
+                    "budget",
+                    events,
+                );
+            }
+            let over = prompt.tokens.over_budget();
+            if !over.is_empty() {
+                tracing::warn!(segments = ?over, "prompt segment over budget");
+            }
+            prompt.request.max_tokens =
+                Some(self.budget.max_output_tokens.min(u32::MAX as u64) as u32);
             let prompt_text = serde_json::to_string(&prompt.document)
                 .map_err(|error| AgentError::Invalid(error.to_string()))?;
             let prompt_hash = self.session.save_prompt_blob(&prompt_text)?;
@@ -820,6 +859,66 @@ fn latest_user_text(history: &[Entry]) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
     (!text.trim().is_empty()).then_some(text)
+}
+
+const TOOL_RESULT_SHRINK_TOKENS: i64 = 1_000;
+const TOOL_RESULT_HEAD_CHARS: usize = 4_000;
+const TOOL_RESULT_TAIL_CHARS: usize = 1_000;
+
+fn shrink_tool_results(history: &[Entry]) -> Vec<Entry> {
+    history
+        .iter()
+        .map(|entry| {
+            if entry.kind != "tool_result" {
+                return entry.clone();
+            }
+            let estimated = entry
+                .tokens_est
+                .max(hearth_model::estimate_tokens(&entry.content.to_string()));
+            if estimated <= TOOL_RESULT_SHRINK_TOKENS {
+                return entry.clone();
+            }
+            let Some(items) = entry.content.as_array() else {
+                return entry.clone();
+            };
+            let mut changed = false;
+            let new_items: Vec<Value> = items
+                .iter()
+                .map(|item| {
+                    if item.get("type").and_then(Value::as_str) != Some("tool_result") {
+                        return item.clone();
+                    }
+                    let Some(content) = item.get("content").and_then(Value::as_str) else {
+                        return item.clone();
+                    };
+                    if content.chars().count() <= TOOL_RESULT_HEAD_CHARS + TOOL_RESULT_TAIL_CHARS {
+                        return item.clone();
+                    }
+                    changed = true;
+                    let head: String = content.chars().take(TOOL_RESULT_HEAD_CHARS).collect();
+                    let mut tail_chars: Vec<char> =
+                        content.chars().rev().take(TOOL_RESULT_TAIL_CHARS).collect();
+                    tail_chars.reverse();
+                    let tail: String = tail_chars.into_iter().collect();
+                    let mut replacement = item.clone();
+                    replacement["content"] = json!(format!(
+                        "{head}\n... [truncated to fit the context budget]\n{tail}"
+                    ));
+                    replacement
+                })
+                .collect();
+            if !changed {
+                return entry.clone();
+            }
+            let content = Value::Array(new_items);
+            let tokens_est = hearth_model::estimate_tokens(&content.to_string());
+            Entry {
+                content,
+                tokens_est,
+                ..entry.clone()
+            }
+        })
+        .collect()
 }
 
 fn has_usage(usage: Usage) -> bool {
