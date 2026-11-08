@@ -339,3 +339,32 @@ fn image_and_file_blocks_survive_the_prompt_and_audit() {
         })
     );
 }
+
+#[test]
+fn the_operation_carries_the_message_and_voice_rules() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL TEXT".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME NOTE".to_owned(),
+        })
+        .expect("build prompt");
+    let operation = prompt.document["operation"]
+        .as_str()
+        .expect("operation segment");
+    assert!(
+        operation.contains("message tool"),
+        "missing message rule: {operation}"
+    );
+    assert!(
+        operation.contains("voice only when"),
+        "missing voice rule: {operation}"
+    );
+}
