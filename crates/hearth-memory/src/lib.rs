@@ -7,7 +7,7 @@ mod types;
 
 pub use constants::MemoryPolicy;
 pub use service::{MemoryPatch, MemoryService, NewMemoryInput, is_trivial};
-pub use tool::MemoryTool;
+pub use tool::{MemorySource, MemoryTool};
 pub use types::{
     ConsolidationReport, MemoryError, MemoryItem, MemoryKind, MemoryStats, MemoryStatus,
     SourceKind, Standing, StandingMemory,

@@ -9,15 +9,44 @@ use serde_json::{Value, json};
 use crate::service::{MemoryPatch, MemoryService, NewMemoryInput};
 use crate::types::{MemoryError, MemoryItem, MemoryKind, SourceKind};
 
+/// The provenance a run attaches to an explicit memory save.
+#[derive(Debug, Clone)]
+pub struct MemorySource {
+    pub source_kind: SourceKind,
+    pub source_ref: Option<String>,
+}
+
+impl MemorySource {
+    /// A fact stated by the user in a concrete entry.
+    pub fn user(source_ref: impl Into<String>) -> Self {
+        Self {
+            source_kind: SourceKind::User,
+            source_ref: Some(source_ref.into()),
+        }
+    }
+}
+
 /// The model-facing memory library tool.
 pub struct MemoryTool {
     service: Arc<MemoryService>,
+    source: Option<MemorySource>,
 }
 
 impl MemoryTool {
     /// Build the tool over one memory service.
     pub fn new(service: Arc<MemoryService>) -> Self {
-        Self { service }
+        Self {
+            service,
+            source: None,
+        }
+    }
+
+    /// Build the tool with the provenance of the current run.
+    pub fn with_source(service: Arc<MemoryService>, source: MemorySource) -> Self {
+        Self {
+            service,
+            source: Some(source),
+        }
     }
 }
 
@@ -100,6 +129,15 @@ impl Tool for MemoryTool {
                     .get("supersedes")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
+                let source_kind = self
+                    .source
+                    .as_ref()
+                    .map(|source| source.source_kind)
+                    .unwrap_or(SourceKind::Session);
+                let source_ref = self
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.source_ref.clone());
                 let item = self
                     .service
                     .save(NewMemoryInput {
@@ -107,8 +145,8 @@ impl Tool for MemoryTool {
                         kind,
                         tags,
                         importance,
-                        source_kind: SourceKind::Assistant,
-                        source_ref: None,
+                        source_kind,
+                        source_ref,
                         supersedes,
                         valid_from: None,
                         valid_to: None,

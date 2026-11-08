@@ -4,12 +4,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use hearth_core::{
-    Conversation, CoreError, Document, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewMemory,
-    Save, Session,
+    Conversation, CoreError, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewMemory, Save,
+    Session,
 };
 use hearth_storage::rusqlite;
 use hearth_storage::{Reader, StorageError};
-use serde_json::{Value, json};
+use serde_json::Value;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -30,9 +30,9 @@ const MEMORY_SELECT_M: &str = "SELECT m.id, m.kind, m.content, m.tags, m.fingerp
      m.importance, m.status, m.valid_from, m.valid_to, m.supersedes_id, m.source_kind, \
      m.source_ref, m.standing, m.created_at, m.last_used_at FROM memory_items m";
 
-const MEMORY_STATE_KIND: &str = "memory_state";
 const MEMORY_STATE_TRANSPORT: &str = "system";
 const MEMORY_STATE_KEY: &str = "memory";
+const MEMORY_VERSION_KEY: &str = "standing_version";
 
 /// Input for one new memory.
 #[derive(Debug, Clone)]
@@ -615,9 +615,10 @@ impl MemoryService {
 
     /// The current standing-memory version.
     pub fn standing_version(&self) -> Result<u64, MemoryError> {
-        let (_conversation, document) = self.memory_state()?;
-        Ok(document
-            .and_then(|doc| doc.json.get("standing_version").and_then(Value::as_u64))
+        Ok(self
+            .session
+            .meta_value(MEMORY_VERSION_KEY)?
+            .and_then(|value| value.parse().ok())
             .unwrap_or(0))
     }
 
@@ -995,27 +996,25 @@ impl MemoryService {
             self.session.save_memory(writes)?;
             return Ok(());
         }
+        let conversation = self.memory_conversation()?;
         for attempt in 0..2 {
-            let (conversation, document) = self.memory_state()?;
-            let current = document
-                .as_ref()
-                .and_then(|doc| doc.json.get("standing_version"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let next = current + 1;
-            let expected = document.as_ref().map(|doc| doc.version);
-            let mut save = Save::new(&conversation.id);
+            let current = self.session.meta_value(MEMORY_VERSION_KEY)?;
+            let next = current
+                .as_deref()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0)
+                + 1;
+            let mut save = Save::new(&conversation.id).meta(
+                MEMORY_VERSION_KEY,
+                current.clone(),
+                next.to_string(),
+            );
             for write in &writes {
                 save = save.memory(write.clone());
             }
-            save = save.document(
-                MEMORY_STATE_KIND,
-                expected,
-                json!({"standing_version": next}),
-            );
             match self.session.save(save) {
                 Ok(_) => return Ok(()),
-                Err(CoreError::DocumentVersion { .. }) if attempt == 0 => continue,
+                Err(CoreError::MetaVersion { .. }) if attempt == 0 => continue,
                 Err(error) => return Err(error.into()),
             }
         }
@@ -1024,20 +1023,18 @@ impl MemoryService {
         ))
     }
 
-    fn memory_state(&self) -> Result<(Conversation, Option<Document>), MemoryError> {
-        let conversation = match self
+    fn memory_conversation(&self) -> Result<Conversation, MemoryError> {
+        match self
             .session
             .conversation_by_transport(MEMORY_STATE_TRANSPORT, MEMORY_STATE_KEY)?
         {
-            Some(conversation) => conversation,
-            None => self.session.create_conversation(
+            Some(conversation) => Ok(conversation),
+            None => Ok(self.session.create_conversation(
                 "Memory state",
                 MEMORY_STATE_TRANSPORT,
                 MEMORY_STATE_KEY,
-            )?,
-        };
-        let document = self.session.document(&conversation.id, MEMORY_STATE_KIND)?;
-        Ok((conversation, document))
+            )?),
+        }
     }
 
     fn find_by_fingerprint(&self, fingerprint: &str) -> Result<Option<MemoryItem>, MemoryError> {
