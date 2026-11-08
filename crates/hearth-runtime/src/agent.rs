@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -93,6 +94,15 @@ impl Agent {
 
     /// Run one submission to a final answer or a settled failure.
     pub fn run_submission(&self, submission_id: &str) -> Result<RunOutcome, AgentError> {
+        self.run_submission_with_cancel(submission_id, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Run one submission, stopping at the next boundary when `cancel` is set.
+    pub fn run_submission_with_cancel(
+        &self,
+        submission_id: &str,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<RunOutcome, AgentError> {
         let submission = self
             .session
             .submission_by_id(submission_id)?
@@ -132,6 +142,9 @@ impl Agent {
             })?;
         self.session
             .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
+        if cancel.load(Ordering::Relaxed) {
+            return self.settle_cancelled(&submission, &claimed.id);
+        }
 
         let mut turn = claimed
             .checkpoint
@@ -180,6 +193,9 @@ impl Agent {
                 &self.config.owner,
                 json!({"turn": turn, "prompt_hash": prompt_hash}),
             )?;
+            if cancel.load(Ordering::Relaxed) {
+                return self.settle_cancelled(&submission, &claimed.id);
+            }
 
             let started = Instant::now();
             let stream = match self.provider.stream(prompt.request) {
@@ -404,6 +420,37 @@ impl Agent {
             latency_ms,
         })?;
         Ok(())
+    }
+
+    fn settle_cancelled(
+        &self,
+        submission: &Submission,
+        task_id: &str,
+    ) -> Result<RunOutcome, AgentError> {
+        let notice = "Stopped.";
+        self.session.save(
+            Save::new(&submission.conversation_id).entry("notice", json!({"text": notice})),
+        )?;
+        let settled = self.session.settle(
+            &submission.id,
+            SubmissionStatus::Cancelled,
+            None,
+        )?;
+        self.session.finish_task(
+            task_id,
+            &self.config.owner,
+            StepOutput::Terminal {
+                outcome: TerminalOutcome::Aborted,
+                result: json!({"reason": "cancelled"}),
+            },
+        )?;
+        Ok(RunOutcome {
+            submission: settled,
+            task_id: task_id.to_owned(),
+            answer_entry_id: None,
+            answer_text: None,
+            notice: Some(notice.to_owned()),
+        })
     }
 
     fn settle_failure(
