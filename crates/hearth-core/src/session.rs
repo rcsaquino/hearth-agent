@@ -963,6 +963,18 @@ impl Session {
             })
     }
 
+    /// Count queued submissions in one conversation.
+    pub fn queued_submission_count(&self, conversation_id: &str) -> Result<usize, CoreError> {
+        let count: i64 = self.storage.read(|reader| {
+            reader.query_row(
+                "SELECT COUNT(*) FROM submissions WHERE conversation_id = ? AND status = 'queued'",
+                (conversation_id,),
+                |row| row.get(0),
+            )
+        })?;
+        Ok(count.max(0) as usize)
+    }
+
     /// The oldest queued Telegram submission.
     pub fn next_queued_telegram_submission(&self) -> Result<Option<Submission>, CoreError> {
         let raw: Option<RawSubmission> = self.storage.read(|reader| {
