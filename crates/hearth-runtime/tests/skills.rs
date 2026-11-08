@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use hearth_runtime::skills::{SkillLibrary, SkillSave, SkillStatus, SkillTool};
+use hearth_runtime::skills::{SkillLibrary, SkillStatus, SkillTool};
 use hearth_tools::Tool;
 use serde_json::json;
 use tempfile::TempDir;
