@@ -924,3 +924,40 @@ fn recovery_records_a_poison_commit() {
     assert_eq!(latest.kind, "task.poison");
     assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
 }
+
+#[test]
+fn recovery_records_a_wake_commit() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("task is runnable");
+    session
+        .finish_task(
+            &task.id,
+            "worker-a",
+            StepOutput::Sleep {
+                until_micros: clock.now() + 1_000,
+                phase: "wait".to_owned(),
+                checkpoint: json!({}),
+            },
+        )
+        .expect("sleep task");
+    clock.advance(2_000);
+
+    let report = session.recover_tasks().expect("recover tasks");
+    assert_eq!(report.woken, 1);
+
+    let latest = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("waking records a commit");
+    assert_eq!(latest.seq, 4);
+    assert_eq!(latest.kind, "task.wake");
+    assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
+}
