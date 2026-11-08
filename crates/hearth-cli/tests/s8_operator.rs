@@ -68,6 +68,18 @@ fn init_home_with_base_url(home: &std::path::Path, base_url: &str) {
     );
 }
 
+fn init_daemon_home(home: &std::path::Path) {
+    init_home(home);
+    let path = home.join("settings.json");
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read settings"))
+            .expect("parse settings");
+    if let Some(object) = value.as_object_mut() {
+        object.remove("telegram");
+    }
+    write_settings(home, &serde_json::to_string_pretty(&value).expect("settings json"));
+}
+
 fn write_settings(home: &std::path::Path, text: &str) {
     let path = home.join("settings.json");
     std::fs::write(&path, text).expect("write settings");
@@ -591,7 +603,7 @@ fn terminate(mut child: Child) {
 #[test]
 fn daemon_writes_its_pid_to_the_lock_file() {
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let mut child = hearth()
         .args(["daemon"])
         .arg("--home")
@@ -608,7 +620,7 @@ fn daemon_writes_its_pid_to_the_lock_file() {
 #[test]
 fn second_daemon_refuses_to_start() {
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let mut first = hearth()
         .args(["daemon"])
         .arg("--home")
@@ -641,7 +653,7 @@ fn second_daemon_refuses_to_start() {
 #[test]
 fn daemon_releases_the_lock_on_shutdown() {
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let mut first = hearth()
         .args(["daemon"])
         .arg("--home")
@@ -669,7 +681,7 @@ fn daemon_releases_the_lock_on_shutdown() {
 #[test]
 fn a_stale_lock_does_not_block_a_new_daemon() {
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let mut first = hearth()
         .args(["daemon"])
         .arg("--home")
@@ -698,7 +710,7 @@ fn a_stale_lock_does_not_block_a_new_daemon() {
 #[test]
 fn doctor_reports_the_lock_state() {
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
 
     let idle = hearth()
         .arg("doctor")
@@ -910,7 +922,7 @@ fn wait_for_log(home: &Path, needle: &str) {
 #[test]
 fn daemon_writes_a_structured_log() {
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let mut daemon = hearth()
         .args(["daemon"])
         .arg("--home")
@@ -974,7 +986,7 @@ fn daemon_recovers_an_expired_task_lease() {
     use hearth_core::{Harness, NewTask, TaskStatus};
 
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
 
     let task_id = {
         let harness = Harness::open(home.path()).expect("open harness");
@@ -1059,7 +1071,7 @@ fn daemon_executes_a_file_write_effect() {
     use hearth_core::{EffectStatus, Harness};
 
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let effect_id = seed_effect(
         home.path(),
         "file_write",
@@ -1114,7 +1126,7 @@ fn daemon_fails_a_path_escape_effect() {
     use hearth_core::{EffectStatus, Harness};
 
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let effect_id = seed_effect(
         home.path(),
         "file_write",
@@ -1156,7 +1168,7 @@ fn daemon_fails_an_unknown_effect_kind() {
     use hearth_core::{EffectStatus, Harness};
 
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let effect_id = seed_effect(
         home.path(),
         "unsupported.effect",
@@ -1194,7 +1206,7 @@ fn daemon_requeues_a_started_file_write_effect() {
     use hearth_core::{EffectStatus, Harness};
 
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let effect_id = seed_effect(
         home.path(),
         "file_write",
@@ -1244,7 +1256,7 @@ fn daemon_fails_a_symlink_escape_effect() {
     use hearth_core::{EffectStatus, Harness};
 
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let outside = tempfile::TempDir::new().expect("outside");
     std::os::unix::fs::symlink(outside.path(), home.path().join("workspace/link"))
         .expect("create symlink");
@@ -1287,7 +1299,7 @@ fn daemon_stops_retrying_a_retryable_effect_after_three_attempts() {
     use hearth_core::{EffectStatus, Harness};
 
     let home = tempfile::TempDir::new().expect("temp home");
-    init_home(home.path());
+    init_daemon_home(home.path());
     let effect_id = seed_effect(
         home.path(),
         "file_write",
