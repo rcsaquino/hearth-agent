@@ -11,7 +11,7 @@ use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
     Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewSubmission,
-    PromptBlob, Save, Submission, SubmissionStatus, SubmitResult,
+    NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult, UsageEvent,
 };
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
@@ -582,6 +582,86 @@ impl Session {
                 },
             )
         })?)
+    }
+
+    /// Record one model call in the usage ledger.
+    pub fn record_usage(&self, new: NewUsage) -> Result<UsageEvent, CoreError> {
+        let id = self.ids.new_id();
+        let ts = self.clock.now_micros();
+        let event = UsageEvent {
+            id: id.clone(),
+            ts,
+            task_id: new.task_id,
+            conversation_id: new.conversation_id,
+            provider: new.provider,
+            model: new.model,
+            kind: new.kind,
+            input_tokens: new.usage.input_tokens,
+            cache_read_tokens: new.usage.cache_read_tokens,
+            cache_write_tokens: new.usage.cache_write_tokens,
+            output_tokens: new.usage.output_tokens,
+            reasoning_tokens: new.usage.reasoning_tokens,
+            cost_micros: new.cost_micros,
+            latency_ms: new.latency_ms,
+        };
+        let insert = event.clone();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            writer.execute(
+                "INSERT INTO usage_events (id, ts, task_id, conversation_id, provider, model, \
+                 kind, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, \
+                 reasoning_tokens, cost_micros, latency_ms) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    insert.id.as_str(),
+                    insert.ts,
+                    insert.task_id.as_deref(),
+                    insert.conversation_id.as_deref(),
+                    insert.provider.as_str(),
+                    insert.model.as_str(),
+                    insert.kind.as_str(),
+                    insert.input_tokens,
+                    insert.cache_read_tokens,
+                    insert.cache_write_tokens,
+                    insert.output_tokens,
+                    insert.reasoning_tokens,
+                    insert.cost_micros,
+                    insert.latency_ms,
+                ),
+            )?;
+            Ok(())
+        })?;
+        Ok(event)
+    }
+
+    /// Read the usage recorded for a task, oldest first.
+    pub fn usage_for_task(&self, task_id: &str) -> Result<Vec<UsageEvent>, CoreError> {
+        let raw: Vec<UsageEvent> = self.storage.read(|reader| {
+            reader.query(
+                "SELECT id, ts, task_id, conversation_id, provider, model, kind, input_tokens, \
+                 cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, \
+                 cost_micros, latency_ms FROM usage_events WHERE task_id = ? ORDER BY ts, id",
+                (task_id,),
+                |row| {
+                    Ok(UsageEvent {
+                        id: row.get(0)?,
+                        ts: row.get(1)?,
+                        task_id: row.get(2)?,
+                        conversation_id: row.get(3)?,
+                        provider: row.get(4)?,
+                        model: row.get(5)?,
+                        kind: row.get(6)?,
+                        input_tokens: row.get(7)?,
+                        cache_read_tokens: row.get(8)?,
+                        cache_write_tokens: row.get(9)?,
+                        output_tokens: row.get(10)?,
+                        reasoning_tokens: row.get(11)?,
+                        cost_micros: row.get(12)?,
+                        latency_ms: row.get(13)?,
+                    })
+                },
+            )
+        })?;
+        Ok(raw)
     }
 
     /// Hand in a message with a receipt.

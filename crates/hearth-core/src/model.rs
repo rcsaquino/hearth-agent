@@ -1,5 +1,6 @@
 //! Records and the save value object.
 
+use hearth_model::Usage;
 use serde_json::Value;
 
 /// One chat and its metadata.
@@ -178,6 +179,38 @@ pub struct Commit {
     pub seq: i64,
     pub entry_ids: Vec<String>,
     pub effect_ids: Vec<String>,
+}
+
+/// A model call to record in the usage ledger.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewUsage {
+    pub task_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub provider: String,
+    pub model: String,
+    pub kind: String,
+    pub usage: Usage,
+    pub cost_micros: i64,
+    pub latency_ms: i64,
+}
+
+/// One recorded model call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageEvent {
+    pub id: String,
+    pub ts: i64,
+    pub task_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub provider: String,
+    pub model: String,
+    pub kind: String,
+    pub input_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cost_micros: i64,
+    pub latency_ms: i64,
 }
 
 /// One saved prompt text.
