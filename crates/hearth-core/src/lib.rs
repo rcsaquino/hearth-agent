@@ -12,9 +12,9 @@ pub use clock::{Clock, IdGen, SystemClock, UuidV7};
 pub use error::CoreError;
 pub use model::{
     Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,
-    EffectStatus, Entry, NewEntry, NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission,
-    SubmissionStatus, SubmitResult, TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent,
-    UsageTotals,
+    EffectStatus, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewEntry, NewMemory,
+    NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission, SubmissionStatus, SubmitResult,
+    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
 };
 pub use prompt::{Prompt, PromptInput, parse_blocks};
 pub use session::{Harness, Session};

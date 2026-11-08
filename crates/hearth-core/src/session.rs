@@ -10,9 +10,10 @@ use uuid::Uuid;
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
-    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewEntry,
-    NewSubmission, NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult,
-    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
+    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, MemoryChange,
+    MemoryUpdate, MemoryWrite, NewEntry, NewMemory, NewSubmission, NewUsage, PromptBlob, Save,
+    Submission, SubmissionStatus, SubmitResult, TaskCounts, TelegramAdmission, TelegramUpdate,
+    UsageEvent, UsageTotals,
 };
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
@@ -73,6 +74,21 @@ pub struct Session {
 }
 
 impl Session {
+    /// The durable storage handle used by the memory subsystem for reads.
+    pub fn storage(&self) -> &Storage {
+        &self.storage
+    }
+
+    /// A new time-ordered identifier from the configured source.
+    pub fn new_id(&self) -> String {
+        self.ids.new_id()
+    }
+
+    /// The current time in UTC microseconds from the configured clock.
+    pub fn now_micros(&self) -> i64 {
+        self.clock.now_micros()
+    }
+
     /// Create a conversation.
     pub fn create_conversation(
         &self,
@@ -291,6 +307,7 @@ impl Session {
             }
 
             let mut recorded_effect_ids = Vec::with_capacity(save.effects.len());
+            apply_memory(writer, &save.memory, now)?;
             for (intent, generated_id) in save.effects.iter().zip(effect_ids.iter()) {
                 let existing: Option<String> = writer.query_optional(
                     "SELECT id FROM effects WHERE kind = ? AND key = ?",
@@ -677,6 +694,21 @@ impl Session {
         })?;
         self.effect(id)?
             .ok_or_else(|| CoreError::EffectNotFound(id.to_owned()))
+    }
+
+    /// Write memory changes without a conversation. The save still has one commit.
+    pub fn save_memory(&self, writes: Vec<MemoryWrite>) -> Result<Commit, CoreError> {
+        let now = self.clock.now_micros();
+        self.storage.write(move |writer| -> Result<Commit, CoreError> {
+            let seq = next_sequence(writer)?;
+            apply_memory(writer, &writes, now)?;
+            insert_commit(writer, seq, now, None, None, "memory")?;
+            Ok(Commit {
+                seq,
+                entry_ids: Vec::new(),
+                effect_ids: Vec::new(),
+            })
+        })
     }
 
     /// Save one prompt text and return its stable hash.
@@ -2274,6 +2306,230 @@ fn record_commit(
     let seq = next_sequence(writer)?;
     insert_commit(writer, seq, now, conversation_id, task_id, kind)?;
     Ok(seq)
+}
+
+fn apply_memory(writer: &Writer<'_>, writes: &[MemoryWrite], now: i64) -> Result<(), CoreError> {
+    for write in writes {
+        match &write.change {
+            MemoryChange::Add(item) => add_memory(writer, item, &write.actor, now)?,
+            MemoryChange::Update(update) => update_memory(writer, update, &write.actor, now)?,
+            MemoryChange::Forget { id } => forget_memory(writer, id, &write.actor, now)?,
+            MemoryChange::Pin { id, standing } => {
+                pin_memory(writer, id, standing, &write.actor, now)?
+            }
+        }
+    }
+    Ok(())
+}
+
+fn add_memory(
+    writer: &Writer<'_>,
+    item: &NewMemory,
+    actor: &str,
+    now: i64,
+) -> Result<(), CoreError> {
+    let tags = serde_json::to_string(&item.tags)
+        .map_err(|error| CoreError::Invalid(error.to_string()))?;
+    writer.execute(
+        "INSERT INTO memory_items (id, kind, content, tags, fingerprint, importance, status, \
+         valid_from, valid_to, supersedes_id, source_kind, source_ref, standing, created_at, \
+         last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            item.id.as_str(),
+            item.kind.as_str(),
+            item.content.as_str(),
+            tags.as_str(),
+            item.fingerprint.as_str(),
+            item.importance,
+            item.status.as_str(),
+            item.valid_from,
+            item.valid_to,
+            item.supersedes_id.as_deref(),
+            item.source_kind.as_str(),
+            item.source_ref.as_deref(),
+            item.standing.as_str(),
+            item.created_at,
+            item.last_used_at,
+        ),
+    )?;
+    memory_event(
+        writer,
+        &item.id,
+        "add",
+        actor,
+        None,
+        Some(hash_content(&item.content)),
+        now,
+    )
+}
+
+fn update_memory(
+    writer: &Writer<'_>,
+    update: &MemoryUpdate,
+    actor: &str,
+    now: i64,
+) -> Result<(), CoreError> {
+    let old: Option<(String, String, String, i64, String, Option<i64>, String, Option<i64>)> =
+        writer.query_optional(
+            "SELECT content, tags, fingerprint, importance, status, valid_to, standing, \
+             last_used_at FROM memory_items WHERE id = ?",
+            (update.id.as_str(),),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )?;
+    let Some((old_content, old_tags, old_fingerprint, old_importance, old_status, old_valid_to, old_standing, old_used)) = old else {
+        return Err(CoreError::Invalid(format!(
+            "memory {} not found",
+            update.id
+        )));
+    };
+    let content = update.content.clone().unwrap_or_else(|| old_content.clone());
+    let tags = match &update.tags {
+        Some(tags) => serde_json::to_string(tags)
+            .map_err(|error| CoreError::Invalid(error.to_string()))?,
+        None => old_tags.clone(),
+    };
+    let fingerprint = update
+        .fingerprint
+        .clone()
+        .unwrap_or_else(|| {
+            if update.content.is_some() {
+                hash_content(&content)
+            } else {
+                old_fingerprint.clone()
+            }
+        });
+    let importance = update.importance.unwrap_or(old_importance);
+    let status = update.status.clone().unwrap_or(old_status);
+    let valid_to = update.valid_to.or(old_valid_to);
+    let standing = update.standing.clone().unwrap_or(old_standing);
+    let last_used_at = update.last_used_at.or(old_used);
+    writer.execute(
+        "UPDATE memory_items SET content = ?, tags = ?, fingerprint = ?, importance = ?, \
+         status = ?, valid_to = ?, standing = ?, last_used_at = ? WHERE id = ?",
+        (
+            content.as_str(),
+            tags.as_str(),
+            fingerprint.as_str(),
+            importance,
+            status.as_str(),
+            valid_to,
+            standing.as_str(),
+            last_used_at,
+            update.id.as_str(),
+        ),
+    )?;
+    memory_event(
+        writer,
+        &update.id,
+        "update",
+        actor,
+        Some(hash_content(&old_content)),
+        Some(hash_content(&content)),
+        now,
+    )
+}
+
+fn forget_memory(
+    writer: &Writer<'_>,
+    id: &str,
+    actor: &str,
+    now: i64,
+) -> Result<(), CoreError> {
+    let old: Option<(i64, String, String)> = writer.query_optional(
+        "SELECT rowid, content, tags FROM memory_items WHERE id = ?",
+        (id,),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let Some((rowid, content, tags)) = old else {
+        return Err(CoreError::Invalid(format!("memory {id} not found")));
+    };
+    writer.execute(
+        "UPDATE memory_items SET status = 'deleted' WHERE id = ?",
+        (id,),
+    )?;
+    writer.execute(
+        "INSERT INTO memory_fts (memory_fts, rowid, content, tags) VALUES ('delete', ?, ?, ?)",
+        (rowid, content.as_str(), tags.as_str()),
+    )?;
+    memory_event(
+        writer,
+        id,
+        "forget",
+        actor,
+        Some(hash_content(&content)),
+        None,
+        now,
+    )
+}
+
+fn pin_memory(
+    writer: &Writer<'_>,
+    id: &str,
+    standing: &str,
+    actor: &str,
+    now: i64,
+) -> Result<(), CoreError> {
+    let content: Option<String> = writer.query_optional(
+        "SELECT content FROM memory_items WHERE id = ?",
+        (id,),
+        |row| row.get(0),
+    )?;
+    let Some(content) = content else {
+        return Err(CoreError::Invalid(format!("memory {id} not found")));
+    };
+    writer.execute(
+        "UPDATE memory_items SET standing = ? WHERE id = ?",
+        (standing, id),
+    )?;
+    memory_event(
+        writer,
+        id,
+        "pin",
+        actor,
+        Some(hash_content(&content)),
+        Some(hash_content(&content)),
+        now,
+    )
+}
+
+fn memory_event(
+    writer: &Writer<'_>,
+    item_id: &str,
+    action: &str,
+    actor: &str,
+    old_hash: Option<String>,
+    new_hash: Option<String>,
+    now: i64,
+) -> Result<(), CoreError> {
+    writer.execute(
+        "INSERT INTO memory_events (id, item_id, action, actor, old_hash, new_hash, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            Uuid::now_v7().to_string(),
+            item_id,
+            action,
+            actor,
+            old_hash,
+            new_hash,
+            now,
+        ),
+    )?;
+    Ok(())
+}
+
+fn hash_content(content: &str) -> String {
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, content.as_bytes()).to_string()
 }
 
 fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {
