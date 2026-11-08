@@ -163,6 +163,9 @@ impl Agent {
         }
 
         loop {
+            if cancel.load(Ordering::Relaxed) {
+                return self.settle_cancelled(&submission, &claimed.id);
+            }
             if turn >= self.config.max_turns {
                 return self.settle_failure(
                     &submission,
@@ -243,10 +246,16 @@ impl Agent {
             self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
             self.session
                 .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
+            if cancel.load(Ordering::Relaxed) {
+                return self.settle_cancelled(&submission, &claimed.id);
+            }
 
             if !calls.is_empty() {
                 self.save_assistant(&submission, &prompt_hash, &thinking, &text, &calls)?;
                 self.execute_calls(&submission, &claimed.id, &calls)?;
+                if cancel.load(Ordering::Relaxed) {
+                    return self.settle_cancelled(&submission, &claimed.id);
+                }
                 turn += 1;
                 self.session.checkpoint_task(
                     &claimed.id,
