@@ -254,3 +254,33 @@ fn firecrawl_maps_web_results() {
     assert_eq!(body["limit"], 5);
     assert_eq!(body["sources"][0], "web");
 }
+
+#[test]
+fn tinyfish_maps_results() {
+    let server = serve(json_reply(json!({
+        "results": [{
+            "title": "TinyFish Example",
+            "url": "https://tinyfish.example/a",
+            "snippet": "TinyFish snippet",
+            "date": "2026-03-04"
+        }]
+    })));
+    let provider: Arc<dyn SearchProvider> =
+        Arc::new(TinyFishSearch::new(server.base.clone(), "tf-key".to_owned()).expect("tinyfish provider"));
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("search call");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(value["results"][0]["title"], "TinyFish Example");
+    assert_eq!(value["results"][0]["snippet"], "TinyFish snippet");
+    assert_eq!(value["results"][0]["date"], "2026-03-04");
+
+    let captured = server.thread.join().expect("server thread");
+    assert!(captured.path.contains("query=rust"));
+    assert_eq!(
+        captured.headers.get("x-api-key").map(String::as_str),
+        Some("tf-key")
+    );
+}
