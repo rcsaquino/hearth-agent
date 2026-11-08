@@ -9,6 +9,8 @@ use hearth_core::{
     SubmissionStatus, TerminalOutcome,
 };
 use hearth_model::{Pricing, Provider, StreamEvent, Usage};
+use hearth_tools::ToolRegistry;
+use std::path::PathBuf;
 use serde_json::{Value, json};
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -22,6 +24,8 @@ pub struct AgentConfig {
     pub provider_name: String,
     pub owner: String,
     pub max_turns: u32,
+    pub tools: ToolRegistry,
+    pub spill_dir: PathBuf,
 }
 
 /// The outcome of one submission.
@@ -139,7 +143,7 @@ impl Agent {
             soul: self.config.soul.clone(),
             conversation_id: submission.conversation_id.clone(),
             model: self.config.model.clone(),
-            tools: Vec::new(),
+            tools: self.config.tools.specs(),
             runtime_note,
         })?;
         let prompt_text = serde_json::to_string(&prompt.document)

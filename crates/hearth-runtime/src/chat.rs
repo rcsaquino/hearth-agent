@@ -3,10 +3,12 @@
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
 use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
+use hearth_tools::{FileTool, ShellTool, ToolRegistry};
 use serde_json::json;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -56,6 +58,17 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         hearth_core::default_soul(&settings.identity.agent_name, &settings.identity.user_name)
     });
 
+    let workspace = match settings.agent.workspace.clone() {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => home.join(path),
+        None => home.join("workspace"),
+    };
+    let spill = home.join("spill");
+    let tools = ToolRegistry::new(vec![
+        Arc::new(FileTool::new(workspace.clone(), spill.clone())),
+        Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
+    ]);
+
     let harness = Harness::open(home)?;
     let session = harness.session().clone();
     let transport_key = format!("local:{}", OffsetDateTime::now_utc().unix_timestamp_nanos());
@@ -70,6 +83,8 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
             provider_name: models.kind.clone(),
             owner: format!("chat:{}", std::process::id()),
             max_turns: settings.agent.max_turns,
+            tools,
+            spill_dir: spill,
         },
     );
 

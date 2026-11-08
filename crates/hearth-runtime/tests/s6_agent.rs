@@ -8,6 +8,8 @@ use hearth_model::{
     ChatRequest, Price, Pricing, Provider, ProviderError, ProviderStream, StreamEvent, Usage,
 };
 use hearth_runtime::{Agent, AgentConfig, AgentError};
+use hearth_tools::ToolRegistry;
+use std::path::Path;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -73,7 +75,12 @@ fn submit_with(harness: &Harness, conversation: &str, request_id: &str) -> Submi
         .submission
 }
 
-fn agent<P: Provider + 'static>(harness: &Harness, provider: Arc<P>, pricing: Pricing) -> Agent {
+fn agent<P: Provider + 'static>(
+    home: &Path,
+    harness: &Harness,
+    provider: Arc<P>,
+    pricing: Pricing,
+) -> Agent {
     Agent::new(
         harness.session().clone(),
         provider,
@@ -84,13 +91,15 @@ fn agent<P: Provider + 'static>(harness: &Harness, provider: Arc<P>, pricing: Pr
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
             max_turns: 4,
+            tools: ToolRegistry::default(),
+            spill_dir: home.join("spill"),
         },
     )
 }
 
 #[test]
 fn a_plain_answer_settles_the_submission_and_records_usage() {
-    let (_home, harness) = harness();
+    let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
@@ -118,7 +127,7 @@ fn a_plain_answer_settles_the_submission_and_records_usage() {
         },
     );
 
-    let outcome = agent(&harness, Arc::clone(&provider), pricing)
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider), pricing)
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -179,7 +188,7 @@ fn a_plain_answer_settles_the_submission_and_records_usage() {
 
 #[test]
 fn a_provider_error_settles_unanswered_with_a_notice() {
-    let (_home, harness) = harness();
+    let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![Err(ProviderError::Request {
@@ -188,7 +197,7 @@ fn a_provider_error_settles_unanswered_with_a_notice() {
         retryable: false,
     })]));
 
-    let outcome = agent(&harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -212,7 +221,7 @@ fn a_provider_error_settles_unanswered_with_a_notice() {
 
 #[test]
 fn a_running_generation_task_makes_the_agent_busy() {
-    let (_home, harness) = harness();
+    let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
     harness
@@ -234,7 +243,7 @@ fn a_running_generation_task_makes_the_agent_busy() {
         .expect("task is claimable");
 
     let provider = Arc::new(ScriptedProvider::new(vec![]));
-    let error = agent(&harness, provider, Pricing::default())
+    let error = agent(home.path(), &harness, provider, Pricing::default())
         .run_submission(&submission.id)
         .expect_err("a busy conversation must be rejected");
     assert!(matches!(error, AgentError::Busy));
@@ -249,7 +258,7 @@ fn a_running_generation_task_makes_the_agent_busy() {
 
 #[test]
 fn a_tool_call_without_tools_settles_unanswered() {
-    let (_home, harness) = harness();
+    let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
@@ -263,7 +272,7 @@ fn a_tool_call_without_tools_settles_unanswered() {
         }),
     ])]));
 
-    let outcome = agent(&harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -280,7 +289,7 @@ fn a_tool_call_without_tools_settles_unanswered() {
 
 #[test]
 fn a_thinking_only_response_settles_unanswered() {
-    let (_home, harness) = harness();
+    let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
@@ -297,7 +306,7 @@ fn a_thinking_only_response_settles_unanswered() {
         }),
     ])]));
 
-    let outcome = agent(&harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider, Pricing::default())
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -355,7 +364,7 @@ impl Provider for BlockingProvider {
 
 #[test]
 fn two_concurrent_runs_cannot_enter_one_conversation() {
-    let (_home, harness) = harness();
+    let (home, harness) = harness();
     let conversation = conversation(&harness);
     let first = submit_with(&harness, &conversation, "req-1");
     let second = submit_with(&harness, &conversation, "req-2");
@@ -365,7 +374,7 @@ fn two_concurrent_runs_cannot_enter_one_conversation() {
         started: Mutex::new(started_tx),
         release: Mutex::new(release_rx),
     });
-    let agent = Arc::new(agent(&harness, provider, Pricing::default()));
+    let agent = Arc::new(agent(home.path(), &harness, provider, Pricing::default()));
 
     let first_id = first.id.clone();
     let runner = Arc::clone(&agent);
