@@ -77,7 +77,8 @@ impl TelegramSender {
                         return self.send_fallback(chat_id, markdown);
                     }
                     Err(TelegramError::Api {
-                        code: Some(500..=599), ..
+                        code: Some(500..=599),
+                        ..
                     }) => {
                         return Ok(SendOutcome::Uncertain {
                             message: "the Telegram server failed after the request".to_owned(),

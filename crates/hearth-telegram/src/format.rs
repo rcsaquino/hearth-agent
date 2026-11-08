@@ -216,9 +216,7 @@ fn blocks(writer: &mut Writer, markdown: &str) {
                         writer.append("\n");
                     }
                     let label = header.get(column).copied().unwrap_or("Column");
-                    writer.mark("bold", None, |writer| {
-                        writer.append(&format!("{label}: "))
-                    });
+                    writer.mark("bold", None, |writer| writer.append(&format!("{label}: ")));
                     inline(writer, cell);
                 }
             }
@@ -321,7 +319,9 @@ fn is_table_separator(line: &str) -> bool {
         })
 }
 
-fn table_start<'a>(lines: &'a [&'a str], index: usize) -> Option<(Vec<&'a str>, Vec<Vec<&'a str>>, usize)> {
+type TableRows<'a> = (Vec<&'a str>, Vec<Vec<&'a str>>, usize);
+
+fn table_start<'a>(lines: &'a [&'a str], index: usize) -> Option<TableRows<'a>> {
     let header = lines.get(index)?;
     let separator = lines.get(index + 1)?;
     if !header.contains('|') || !is_table_separator(separator) {
@@ -353,7 +353,11 @@ fn fence_start(line: &str) -> Option<(String, String)> {
 
 fn is_fence_close(line: &str, fence: &str) -> bool {
     let trimmed = line.trim_start();
-    trimmed.starts_with(fence) && trimmed.trim_end_matches(fence_chars(fence)).trim().is_empty()
+    trimmed.starts_with(fence)
+        && trimmed
+            .trim_end_matches(fence_chars(fence))
+            .trim()
+            .is_empty()
 }
 
 fn fence_chars(fence: &str) -> &str {
@@ -377,19 +381,19 @@ fn inline(writer: &mut Writer, input: &str) {
                 continue 'outer;
             }
         }
-        if chars[index] == '[' {
-            if let Some((label, url, next)) = parse_link(&chars, index) {
-                let safe = is_safe_url(&url);
-                if safe {
-                    writer.mark("text_link", Some(("url", &url)), |writer| {
-                        writer.append(&label)
-                    });
-                } else {
-                    writer.append(&label);
-                }
-                index = next;
-                continue;
+        if chars[index] == '['
+            && let Some((label, url, next)) = parse_link(&chars, index)
+        {
+            let safe = is_safe_url(&url);
+            if safe {
+                writer.mark("text_link", Some(("url", &url)), |writer| {
+                    writer.append(&label)
+                });
+            } else {
+                writer.append(&label);
             }
+            index = next;
+            continue;
         }
         if chars[index] == '`'
             && let Some(end) = find_char(&chars, index + 1, '`')

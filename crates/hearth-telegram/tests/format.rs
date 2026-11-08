@@ -1,6 +1,9 @@
 use hearth_telegram::{format_markdown, split_formatted};
 
-fn entity<'a>(value: &'a hearth_telegram::FormattedText, kind: &str) -> &'a hearth_telegram::Entity {
+fn entity<'a>(
+    value: &'a hearth_telegram::FormattedText,
+    kind: &str,
+) -> &'a hearth_telegram::Entity {
     value
         .entities
         .iter()
@@ -48,8 +51,16 @@ fn splits_long_text_with_markers() {
     assert!(parts.len() > 1);
     let total = parts.len();
     for (index, part) in parts.iter().enumerate() {
-        assert!(part.text.encode_utf16().count() <= 40, "part too long: {:?}", part.text);
-        assert!(part.text.ends_with(&format!("({}/{})", index + 1, total)), "missing marker: {:?}", part.text);
+        assert!(
+            part.text.encode_utf16().count() <= 40,
+            "part too long: {:?}",
+            part.text
+        );
+        assert!(
+            part.text.ends_with(&format!("({}/{})", index + 1, total)),
+            "missing marker: {:?}",
+            part.text
+        );
     }
 }
 
@@ -61,9 +72,14 @@ fn keeps_split_code_inside_pre_entities() {
     assert!(parts.len() > 1);
     for (index, part) in parts.iter().enumerate() {
         assert!(part.text.encode_utf16().count() <= 4096);
-        assert!(part.text.ends_with(&format!("({}/{})", index + 1, parts.len())));
         assert!(
-            part.entities.iter().any(|entity| entity.kind == "pre" && entity.language.as_deref() == Some("rust")),
+            part.text
+                .ends_with(&format!("({}/{})", index + 1, parts.len()))
+        );
+        assert!(
+            part.entities
+                .iter()
+                .any(|entity| entity.kind == "pre" && entity.language.as_deref() == Some("rust")),
             "part {} lost its pre entity: {:?}",
             index + 1,
             part.entities
@@ -75,20 +91,40 @@ fn keeps_split_code_inside_pre_entities() {
 fn formats_italic_strikethrough_spoiler_and_underline() {
     let value = format_markdown("*it* ~~gone~~ ||secret|| __under__");
     assert_eq!(value.text, "it gone secret under");
-    assert_eq!((entity(&value, "italic").offset, entity(&value, "italic").length), (0, 2));
     assert_eq!(
-        (entity(&value, "strikethrough").offset, entity(&value, "strikethrough").length),
+        (
+            entity(&value, "italic").offset,
+            entity(&value, "italic").length
+        ),
+        (0, 2)
+    );
+    assert_eq!(
+        (
+            entity(&value, "strikethrough").offset,
+            entity(&value, "strikethrough").length
+        ),
         (3, 4)
     );
-    assert_eq!((entity(&value, "spoiler").offset, entity(&value, "spoiler").length), (8, 6));
-    assert_eq!((entity(&value, "underline").offset, entity(&value, "underline").length), (15, 5));
+    assert_eq!(
+        (
+            entity(&value, "spoiler").offset,
+            entity(&value, "spoiler").length
+        ),
+        (8, 6)
+    );
+    assert_eq!(
+        (
+            entity(&value, "underline").offset,
+            entity(&value, "underline").length
+        ),
+        (15, 5)
+    );
 }
 
 #[test]
 fn formats_headings_lists_quotes_and_tables() {
-    let value = format_markdown(
-        "# Title\n\n- one\n- two\n\n> quoted\n\n| A | B |\n|---|---|\n| 1 | 2 |",
-    );
+    let value =
+        format_markdown("# Title\n\n- one\n- two\n\n> quoted\n\n| A | B |\n|---|---|\n| 1 | 2 |");
     let heading = entity(&value, "bold");
     assert_eq!(
         &value.text[heading.offset..heading.offset + heading.length],
@@ -110,10 +146,16 @@ fn keeps_entities_out_of_inline_code() {
             continue;
         }
         assert!(
-            entity.offset >= code.offset + code.length || entity.offset + entity.length <= code.offset,
+            entity.offset >= code.offset + code.length
+                || entity.offset + entity.length <= code.offset,
             "entity overlaps code: {:?}",
             entity
         );
     }
-    assert!(value.entities.iter().any(|entity| entity.kind == "bold" && entity.offset >= 9));
+    assert!(
+        value
+            .entities
+            .iter()
+            .any(|entity| entity.kind == "bold" && entity.offset >= 9)
+    );
 }

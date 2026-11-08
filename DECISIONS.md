@@ -423,3 +423,21 @@ local fake-server and fixture tests.
   admission.
 - Bot API errors and transport messages never include the token or request URL.
   Attachments, voice, callbacks, and replies are deferred to M3b.
+
+## 2026-11-08: Telegram outgoing text (M3b-1)
+
+- A final answer under 32,768 UTF-8 bytes and 500 non-empty blocks is sent as one
+  `sendRichMessage` with the Markdown. The rich path is skipped when either limit
+  is exceeded.
+- Only a 4xx rich rejection triggers the entity fallback. A transport failure,
+  protocol failure, or 5xx is uncertain and is never resent by a different method.
+- A 429 sleeps for `retry_after` seconds (one second when absent) and retries the
+  same method up to three attempts. The same rule applies to fallback parts.
+- The fallback renders Markdown to plain text plus Telegram entities. Offsets are
+  UTF-16 code units, non-code entities are clipped around code and pre ranges, and
+  entities are sorted and capped at 100 per message.
+- Fallback text splits at 4,096 UTF-16 units, never inside a surrogate pair,
+  preferring paragraph, line, then space boundaries. Each part gets an `(n/m)`
+  marker. A split pre entity stays a pre entity with its language.
+- Sends are spaced by at least 33 milliseconds, capped at about 30 per second.
+- `sendChatAction` typing is exposed for the daemon worker.

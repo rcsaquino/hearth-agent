@@ -312,7 +312,11 @@ fn oversized_markdown_skips_the_rich_path() {
         "{outcome:?}"
     );
     let requests = server.finish();
-    assert!(requests.iter().all(|request| request.method == "sendMessage"));
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.method == "sendMessage")
+    );
 }
 
 #[test]

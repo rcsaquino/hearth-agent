@@ -162,8 +162,8 @@ impl TelegramClient {
     ) -> Result<(), TelegramError> {
         let mut params = json!({"chat_id": chat_id, "text": text});
         if !entities.is_empty() {
-            params["entities"] = serde_json::to_value(entities)
-                .map_err(|error| TelegramError::Protocol {
+            params["entities"] =
+                serde_json::to_value(entities).map_err(|error| TelegramError::Protocol {
                     method: "sendMessage".to_owned(),
                     detail: format!("entities could not be serialized: {error}"),
                 })?;
