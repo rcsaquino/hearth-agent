@@ -1,5 +1,6 @@
 //! Hearth core: the permanent record, saves, documents, submissions, and forks.
 
+mod budget;
 mod clock;
 mod error;
 mod model;
@@ -8,6 +9,10 @@ mod session;
 mod soul;
 mod task;
 
+pub use budget::{
+    ContextBudget, FIXED_OVERHEAD_TARGET, SEGMENT_IDENTITY, SEGMENT_OPERATION, SEGMENT_RECALL,
+    SEGMENT_RUNTIME, SEGMENT_SKILLS, SEGMENT_STANDING, SEGMENT_TOOLS, TokenCounts,
+};
 pub use clock::{Clock, IdGen, SystemClock, UuidV7};
 pub use error::CoreError;
 pub use model::{
