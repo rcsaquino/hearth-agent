@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.5, plain-language edition
-**Date:** 2026-11-08
+**Status:** Draft 0.6, plain-language edition
+**Date:** 2026-11-09
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -1310,6 +1310,8 @@ code.
     "base_url": "https://opencode.ai/inference/go/openai/v1",
     "api_key": "${OPENCODE_API_KEY}",
     "model": "deepseek-v4.1-flash",
+    "context_window": 128000,
+    "max_output_tokens": 8192,
     "session_header": "x-opencode-session"
   },
   "media": {
@@ -1388,6 +1390,11 @@ Optional overrides, only when needed:
 | `agent.max_turns` | `30` | Run limit |
 | `compaction.idle_minutes` | `60` | Idle time before auto compaction |
 | `compaction.idle_min_tokens` | `100000` | Minimum context for idle compaction |
+| `compaction.soft_compact` | `0.65` | Soft compaction fraction of usable context |
+| `compaction.hard_compact` | `0.85` | Hard compaction fraction of usable context |
+| `compaction.keep_recent_tokens` | `24000` | Recent tokens kept through compaction |
+| `models.context_window` | `128000` | Model context window in tokens |
+| `models.max_output_tokens` | `8192` | Reply tokens reserved from the window |
 | `memory.standing_max_tokens` | `1200` | Standing-memory budget |
 | `memory.recall_max_tokens` | `900` | Per-turn recall budget |
 | `media.image.model` | `openai/gpt-image-2.6-sunburst` | Image model |
@@ -1403,7 +1410,11 @@ Optional overrides, only when needed:
   `allowed_user_ids` must be non-empty. `telegram.base_url`, when present, must be
   an http or https URL.
 - The `models` block requires `kind`, `base_url`, `api_key`, and `model`. `kind`
-  must be `openai-compatible`.
+  must be `openai-compatible`. `models.context_window` and
+  `models.max_output_tokens` must be positive.
+- `compaction.soft_compact` must be greater than 0 and below
+  `compaction.hard_compact`, which must be below 1. `compaction.keep_recent_tokens`
+  must be positive.
 - Each `media` block is optional and enabled only when present. A block missing
   `api_key` or `model` is rejected; `tts` also requires `voice_id`.
 - `media.*.kind` must be a supported kind, and `base_url`, when present, must use
@@ -1764,6 +1775,8 @@ install contains nothing personal.
 | Save durability | `synchronous=FULL` | 4.4 |
 | Read connections | 4 | 11.1 |
 | Turn limit | 30 | 5.1 |
+| Context window | 128,000 tokens | 6.2 |
+| Reserved reply | 8,192 tokens | 6.2 |
 | Soft compaction | 65% of usable context | 5.5 |
 | Hard compaction | 85% of usable context | 5.5 |
 | Keep recent tokens | 24,000 | 5.5 |

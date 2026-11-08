@@ -763,3 +763,11 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - The standing version is global in the meta key `standing_version`, not a per-conversation `memory_state` document. A bump writes the memory changes and the new version in one transaction with an expected-value check and one retry. A missing key is version 0.
 - The `memory_state` document kind remains available for future last-consolidation data. The memory save context remains the system/memory conversation.
 - The daemon status reads the global version through `MemoryService::standing_version`.
+
+## 2026-11-09: M5a context budgets
+
+- `models.context_window` (default 128000) and `models.max_output_tokens` (default 8192) are optional settings. `compaction.soft_compact` (0.65), `hard_compact` (0.85), and `keep_recent_tokens` (24000) are optional.
+- Budget: reserve = max(max_output, 4096) + 1024; usable = window - reserve; soft and hard are floors of their fractions of usable; keep is min(keep_recent, 35% of usable).
+- Segment budgets follow 6.1. The fixed overhead is identity + operation + tools + standing + skills + runtime; the target is 4500. The transcript takes the remainder. The prompt audit document records per-segment counts plus total and fixed.
+- Before a provider request, if the prompt exceeds usable: drop trailing recall lines from the lowest score, then replace oversized old tool results with a bounded head and tail plus a truncation note, then settle unanswered with reason `budget` and make no provider call.
+- The provider request's `max_tokens` is the configured max output. Local chat and the daemon build the budget from settings; the default applies when the new keys are omitted. The `budget` notice is the M5a fallback; soft and hard compaction is M5b.
