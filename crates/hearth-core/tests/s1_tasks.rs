@@ -678,3 +678,44 @@ fn tasks_are_claimed_in_wake_order_with_creation_order_breaking_ties() {
         .expect("runnable");
     assert_eq!(claimed.id, third.id, "creation order breaks the tie");
 }
+
+#[test]
+fn a_task_for_an_unknown_conversation_or_parent_task_is_rejected() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+
+    let missing_conversation = session
+        .create_task(NewTask::new("test", 1, "start", json!({})).conversation("missing"))
+        .unwrap_err();
+    assert!(matches!(
+        missing_conversation,
+        hearth_core::CoreError::ConversationNotFound(_)
+    ));
+
+    let missing_parent = session
+        .create_task(NewTask::new("test", 1, "start", json!({})).parent("missing"))
+        .unwrap_err();
+    assert!(matches!(
+        missing_parent,
+        hearth_core::CoreError::TaskNotFound(_)
+    ));
+
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let parent = session
+        .create_task(NewTask::new("parent", 1, "start", json!({})))
+        .expect("create parent");
+    let child = session
+        .create_task(
+            NewTask::new("child", 1, "start", json!({}))
+                .conversation(conversation.id.clone())
+                .parent(parent.id.clone()),
+        )
+        .expect("create child");
+    assert_eq!(
+        child.conversation_id.as_deref(),
+        Some(conversation.id.as_str())
+    );
+    assert_eq!(child.parent_task_id.as_deref(), Some(parent.id.as_str()));
+}
