@@ -151,14 +151,19 @@ fn fence_chars(fence: &str) -> &str {
 fn inline(writer: &mut Writer, input: &str) {
     let chars: Vec<char> = input.chars().collect();
     let mut index = 0;
-    while index < chars.len() {
-        if starts_with(&chars, index, "**")
-            && let Some(end) = find(&chars, index + 2, "**")
-        {
-            let inner: String = chars[index + 2..end].iter().collect();
-            writer.mark("bold", None, |writer| writer.append(&inner));
-            index = end + 2;
-            continue;
+    'outer: while index < chars.len() {
+        for (marker, kind) in [
+            ("**", "bold"),
+            ("~~", "strikethrough"),
+            ("||", "spoiler"),
+            ("__", "underline"),
+            ("*", "italic"),
+            ("_", "italic"),
+        ] {
+            if let Some(next) = delimited(writer, &chars, index, marker, kind) {
+                index = next;
+                continue 'outer;
+            }
         }
         if chars[index] == '[' {
             if let Some((label, url, next)) = parse_link(&chars, index) {
@@ -185,6 +190,23 @@ fn inline(writer: &mut Writer, input: &str) {
         writer.append(&chars[index].to_string());
         index += 1;
     }
+}
+
+fn delimited(
+    writer: &mut Writer,
+    chars: &[char],
+    index: usize,
+    marker: &str,
+    kind: &str,
+) -> Option<usize> {
+    if !starts_with(chars, index, marker) {
+        return None;
+    }
+    let width = marker.chars().count();
+    let end = find(chars, index + width, marker)?;
+    let inner: String = chars[index + width..end].iter().collect();
+    writer.mark(kind, None, |writer| inline(writer, &inner));
+    Some(end + width)
 }
 
 fn starts_with(chars: &[char], index: usize, needle: &str) -> bool {
