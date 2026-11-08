@@ -86,6 +86,7 @@ fn prompt_input(conversation_id: &str) -> PromptInput {
         model: "model".to_owned(),
         tools: Vec::new(),
         standing: String::new(),
+        standing_version: 0,
         recall: String::new(),
         runtime_note: "Runtime note.".to_owned(),
     }

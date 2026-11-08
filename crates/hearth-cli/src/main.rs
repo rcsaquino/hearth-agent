@@ -25,6 +25,10 @@ enum Command {
     Watch(WatchArgs),
     /// Ask the running daemon for its status.
     Status(StatusArgs),
+    /// Show usage and cost summaries from the local ledger.
+    Stats(StatsArgs),
+    /// Inspect the exact prompt sent to the provider.
+    Prompt(PromptArgs),
     /// Check settings, database, and lock without printing secrets.
     Doctor,
     /// Run the offline evaluation suite.
@@ -63,8 +67,36 @@ struct WatchArgs {
 }
 
 #[derive(Debug, clap::Args)]
+struct PromptArgs {
+    /// Show the prompt saved for this entry id.
+    entry_id: Option<String>,
+    /// Show the newest saved prompt.
+    #[arg(long)]
+    last: bool,
+    /// Print the audit document as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Print the stable system prefix only.
+    #[arg(long)]
+    system: bool,
+    /// Assemble a hypothetical next prompt without saving or calling the provider.
+    #[arg(long, value_name = "TEXT")]
+    preview: Option<String>,
+    /// Print the OpenAI-compatible wire body without sending it.
+    #[arg(long)]
+    wire: bool,
+}
+
+#[derive(Debug, clap::Args)]
 struct StatusArgs {
     /// Print the raw status object.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, clap::Args)]
+struct StatsArgs {
+    /// Print the summary as JSON.
     #[arg(long)]
     json: bool,
 }
@@ -132,6 +164,18 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Chat => hearth_runtime::chat(&home)?,
         Command::Watch(args) => hearth_runtime::watch(&home, args.task_id, args.json)?,
         Command::Status(args) => hearth_runtime::status(&home, args.json)?,
+        Command::Stats(args) => hearth_runtime::stats(&home, args.json)?,
+        Command::Prompt(args) => hearth_runtime::prompt(
+            &home,
+            hearth_runtime::PromptOptions {
+                entry_id: args.entry_id,
+                last: args.last,
+                json: args.json,
+                system: args.system,
+                preview: args.preview,
+                wire: args.wire,
+            },
+        )?,
         Command::Doctor => hearth_runtime::doctor(&home)?,
         Command::Eval(args) => run_eval(args)?,
     }

@@ -1,5 +1,7 @@
 //! Prompt assembly from the permanent record.
 
+use std::collections::BTreeMap;
+
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Role, ToolSpec};
 use serde_json::{Value, json};
 
@@ -7,6 +9,7 @@ use crate::budget::TokenCounts;
 use crate::error::CoreError;
 use crate::model::Entry;
 use crate::session::Session;
+use uuid::Uuid;
 
 /// The operation layer, kept short and stable.
 pub const OPERATION: &str = "## Operation\n\n\
@@ -23,6 +26,7 @@ pub struct PromptInput {
     pub model: String,
     pub tools: Vec<ToolSpec>,
     pub standing: String,
+    pub standing_version: u64,
     pub recall: String,
     pub runtime_note: String,
 }
@@ -33,6 +37,8 @@ pub struct Prompt {
     pub request: ChatRequest,
     pub document: Value,
     pub tokens: TokenCounts,
+    pub prefix_hash: String,
+    pub prefix_parts: BTreeMap<String, String>,
 }
 
 /// Assemble the request and the audit document.
@@ -114,6 +120,23 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         tokens_for(&input.recall),
         tokens_for(&input.runtime_note),
     );
+    let skills_text = String::new();
+    let mut prefix_parts = BTreeMap::new();
+    prefix_parts.insert("identity".to_owned(), hash_part(&input.soul));
+    prefix_parts.insert("operation".to_owned(), hash_part(OPERATION));
+    prefix_parts.insert("tools".to_owned(), hash_part(&tools_text));
+    prefix_parts.insert(
+        "standing".to_owned(),
+        hash_part(&format!("{}\n{}", input.standing, input.standing_version)),
+    );
+    prefix_parts.insert("skills".to_owned(), hash_part(&skills_text));
+    let prefix_hash = hash_part(
+        &prefix_parts
+            .iter()
+            .map(|(name, hash)| format!("{name}:{hash}"))
+            .collect::<Vec<_>>()
+            .join("|"),
+    );
     let document = json!({
         "identity": input.soul,
         "operation": OPERATION,
@@ -122,6 +145,10 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "recall": input.recall,
         "transcript": transcript,
         "runtime": input.runtime_note,
+        "model": input.model,
+        "session_id": input.conversation_id,
+        "prefix_hash": prefix_hash,
+        "prefix_parts": prefix_parts,
         "tokens": {
             "identity": tokens.identity,
             "operation": tokens.operation,
@@ -149,7 +176,40 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         request,
         document,
         tokens,
+        prefix_hash,
+        prefix_parts,
     })
+}
+
+fn hash_part(text: &str) -> String {
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, text.as_bytes()).to_string()
+}
+
+/// Compare two prefix part maps and name the layers that changed.
+pub fn prefix_cause(
+    previous: Option<&Value>,
+    current: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(previous) = previous.and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut causes = Vec::new();
+    for (part, hash) in current {
+        let changed = previous.get(part).and_then(Value::as_str) != Some(hash.as_str());
+        if !changed {
+            continue;
+        }
+        let label = match part.as_str() {
+            "identity" => "SOUL.md",
+            "operation" => "operation",
+            "tools" => "tools",
+            "standing" => "standing memory",
+            "skills" => "skills index",
+            _ => part.as_str(),
+        };
+        causes.push(label.to_owned());
+    }
+    causes
 }
 
 fn tokens_for(text: &str) -> u64 {
@@ -305,4 +365,97 @@ pub fn estimate_content(value: &Value) -> i64 {
 pub fn build_for(session: &Session, input: PromptInput) -> Result<Prompt, CoreError> {
     let history = session.history_for_prompt(&input.conversation_id)?;
     build(input, &history)
+}
+
+/// Rebuild the provider-neutral request from a saved prompt audit document.
+pub fn request_from_document(document: &Value) -> Option<ChatRequest> {
+    let model = document.get("model")?.as_str()?.to_owned();
+    let conversation_id = document.get("session_id")?.as_str()?.to_owned();
+    let identity = document.get("identity")?.as_str()?;
+    let operation = document.get("operation")?.as_str()?;
+    let standing = document
+        .get("standing_memory")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let recall = document
+        .get("recall")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let runtime = document
+        .get("runtime")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let tools = document
+        .get("tools")?
+        .as_array()?
+        .iter()
+        .map(|tool| {
+            Some(ToolSpec {
+                name: tool.get("name")?.as_str()?.to_owned(),
+                description: tool.get("description")?.as_str()?.to_owned(),
+                parameters: tool.get("parameters")?.clone(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    let mut messages = vec![ChatMessage {
+        role: Role::System,
+        blocks: vec![ContentBlock::Text(format!("{identity}\n\n{operation}"))],
+    }];
+    if !standing.trim().is_empty() {
+        messages.push(ChatMessage {
+            role: Role::System,
+            blocks: vec![ContentBlock::Text(format!(
+                "## Standing memory\n\n{standing}"
+            ))],
+        });
+    }
+    let transcript = document.get("transcript")?.as_array()?;
+    let parsed: Vec<ChatMessage> = transcript
+        .iter()
+        .filter_map(|message| {
+            let role = match message.get("role")?.as_str()? {
+                "system" => Role::System,
+                "user" => Role::User,
+                "assistant" => Role::Assistant,
+                "tool" => Role::Tool,
+                _ => return None,
+            };
+            let blocks = message
+                .get("blocks")?
+                .as_array()?
+                .iter()
+                .flat_map(parse_blocks)
+                .collect();
+            Some(ChatMessage { role, blocks })
+        })
+        .collect();
+    let newest_user = parsed.iter().rposition(|message| message.role == Role::User);
+    for (index, message) in parsed.into_iter().enumerate() {
+        if Some(index) == newest_user && !recall.trim().is_empty() {
+            messages.push(ChatMessage {
+                role: Role::System,
+                blocks: vec![ContentBlock::Text(format!(
+                    "## Relevant memory\n\n{recall}"
+                ))],
+            });
+        }
+        messages.push(message);
+    }
+    messages.push(ChatMessage {
+        role: Role::System,
+        blocks: vec![ContentBlock::Text(runtime.to_owned())],
+    });
+
+    Some(ChatRequest {
+        model,
+        messages,
+        tools,
+        temperature: None,
+        max_tokens: document
+            .get("max_tokens")
+            .and_then(Value::as_u64)
+            .map(|value| value.min(u32::MAX as u64) as u32),
+        session_id: Some(conversation_id),
+    })
 }

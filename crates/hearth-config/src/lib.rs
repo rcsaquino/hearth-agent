@@ -11,6 +11,7 @@ mod validate;
 
 pub use settings::{
     Agent, Compaction, FetchProvider, Identity, ImageService, Logging, Media, Memory, Models,
+    PriceConfig,
     SearchProvider, Settings, SttService, Tasks, Telegram, TtsService, Web, WebFetch, WebSearch,
 };
 

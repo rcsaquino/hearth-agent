@@ -25,7 +25,7 @@ pub use model::{
     NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission, SubmissionStatus, SubmitResult,
     TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
 };
-pub use prompt::{Prompt, PromptInput, build as build_prompt, parse_blocks};
+pub use prompt::{Prompt, PromptInput, build as build_prompt, parse_blocks, prefix_cause, request_from_document};
 pub use session::{Harness, Session};
 pub use soul::default_soul;
 pub use task::{

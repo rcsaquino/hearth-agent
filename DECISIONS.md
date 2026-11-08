@@ -781,3 +781,23 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Hard compaction runs before the provider request when the prompt exceeds the hard threshold, then rebuilds the prompt; a second over-budget prompt takes the M5a budget notice path. Soft compaction runs after the answer is durable and delivered, from the daemon worker and local chat, so the user never waits on it. The idle daemon check runs every 60 seconds, selects at most one conversation per 60 minutes, is silent, and requires `min(100000, 65% of usable)` visible tokens plus history newer than the last summary. An attempted history is not retried until a new entry arrives. A genuine writer conflict waits for the next idle period.
 - A provider context-overflow error compacts once from the visible history and retries the request once; a second failure takes the normal provider-error path.
 - Known limits for review: the idle daemon path is covered by the core candidate test rather than a 60-minute integration test; the summary text quality is not model-evaluated offline; the soft pass adds the flush and summary cost after the answer.
+
+## 2026-11-09: M5c prompt cache, prompt audit, pricing, and stats
+
+- The stable prefix is identity, operation, tools, standing memory (including its
+  version), and skills. A prefix hash and per-part hashes are stored in the
+  generation checkpoint. A change is logged with the layer names SOUL.md, operation,
+  tools, standing memory, or skills index. Transcript, recall, and runtime changes do
+  not change the prefix.
+- `hearth prompt` supports the newest prompt, a specific entry, JSON, the stable
+  system prefix with no history, a preview, and the wire body. It redacts configured
+  secrets. It opens the harness for reading; it does not save prompts or call a
+  provider.
+- `models.pricing` is an optional per-model map in micros per million tokens. Unknown
+  models remain unpriced, record tokens, and cost zero; the stats and status show
+  them as unpriced. No rates were invented for the live model.
+- `hearth stats` aggregates by day, model, and task kind. The usage ledger has no
+  per-tool column, so the spec's "by tool" claim is narrowed to what the record can
+  support instead of adding a column without a tool call path.
+- The stats command opens the database read-only. The prompt audit uses the harness
+  and may perform normal migration on first open; it does not write records.

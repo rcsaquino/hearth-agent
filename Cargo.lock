@@ -616,6 +616,7 @@ dependencies = [
  "hearth-core",
  "hearth-eval",
  "hearth-memory",
+ "hearth-model",
  "hearth-runtime",
  "serde_json",
  "tempfile",

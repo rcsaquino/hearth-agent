@@ -259,6 +259,7 @@ impl TelegramRuntime {
             settings.compaction.hard_compact,
             settings.compaction.keep_recent_tokens,
         );
+        let pricing = crate::tools::pricing_from_settings(&settings);
         let worker = TelegramWorker {
             settings: Arc::clone(&settings),
             session,
@@ -274,6 +275,7 @@ impl TelegramRuntime {
             provider_name: models.kind.clone(),
             max_turns: settings.agent.max_turns,
             budget,
+            pricing,
             pid: std::process::id(),
             cancellations,
             events,
@@ -297,6 +299,7 @@ struct TelegramWorker {
     provider_name: String,
     max_turns: u32,
     budget: ContextBudget,
+    pricing: Pricing,
     pid: u32,
     cancellations: Arc<CancellationRegistry>,
     events: Arc<EventBus>,
@@ -429,7 +432,7 @@ impl TelegramWorker {
         let compactor = Compactor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            Pricing::default(),
+            self.pricing.clone(),
             Some(Arc::clone(&self.memory)),
             self.model.clone(),
             self.provider_name.clone(),
@@ -506,7 +509,7 @@ impl TelegramWorker {
         let agent = Agent::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            Pricing::default(),
+            self.pricing.clone(),
             AgentConfig {
                 soul: self.soul.clone(),
                 model: self.model.clone(),

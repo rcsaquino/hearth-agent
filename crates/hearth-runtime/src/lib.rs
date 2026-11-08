@@ -12,6 +12,8 @@ mod events;
 mod init;
 mod ipc;
 mod memory_extract;
+mod prompt_audit;
+mod stats;
 mod tools;
 
 pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};
@@ -23,6 +25,8 @@ pub use effect_worker::EffectWorker;
 pub use events::{EventBus, EventSink, NoopSink, RunEvent};
 pub use init::{InitError, InitOptions, init};
 pub use ipc::{IpcError, StatusContext, serve, status, watch};
+pub use prompt_audit::{PromptError, PromptOptions, prompt};
+pub use stats::{StatsError, StatsReport, StatsRow, stats, stats_report};
 
 /// Install the structured JSON logger used by the daemon.
 pub fn init_logging(home: &Path) -> std::io::Result<()> {

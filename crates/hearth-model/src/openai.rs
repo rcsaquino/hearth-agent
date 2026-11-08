@@ -89,6 +89,11 @@ impl OpenAiCompatibleProvider {
         })
     }
 
+    /// Build the exact wire body without sending it.
+    pub fn wire_body(&self, request: &ChatRequest) -> Result<Value, ProviderError> {
+        self.body(request)
+    }
+
     fn body(&self, request: &ChatRequest) -> Result<Value, ProviderError> {
         let mut messages = Vec::with_capacity(request.messages.len());
         for message in &request.messages {

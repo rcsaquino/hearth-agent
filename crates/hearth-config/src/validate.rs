@@ -310,6 +310,22 @@ impl Models {
             require("models.headers key", name)?;
             require("models.headers value", value)?;
         }
+        for (model, price) in &self.pricing {
+            require("models.pricing model", model)?;
+            for (name, value) in [
+                ("input", price.input),
+                ("cache_read", price.cache_read),
+                ("cache_write", price.cache_write),
+                ("output", price.output),
+                ("reasoning", price.reasoning),
+            ] {
+                if value < 0 {
+                    return Err(invalid(format!(
+                        "models.pricing.{model}.{name} must not be negative"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 }

@@ -1496,3 +1496,237 @@ fn chat_runs_one_line_through_the_real_provider_adapter() {
         "chat tools were: {tool_names:?}"
     );
 }
+
+fn seed_prompt_home(soul: &str) -> (tempfile::TempDir, String) {
+    use hearth_core::{Harness, NewEntry, PromptInput, Save};
+
+    let home = tempfile::TempDir::new().expect("prompt home");
+    init_home(home.path());
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Prompt", "local", "local:prompt")
+        .expect("conversation");
+    session
+        .save(Save::new(&conversation.id).entry("user", serde_json::json!({"text": "hello"})))
+        .expect("user entry");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: soul.to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "fake-model".to_owned(),
+            tools: Vec::new(),
+            standing: String::new(),
+            standing_version: 0,
+            recall: String::new(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+    let text = serde_json::to_string(&prompt.document).expect("prompt json");
+    let hash = session.save_prompt_blob(&text).expect("prompt blob");
+    let commit = session
+        .save(Save::new(&conversation.id).entry_with(NewEntry {
+            kind: "assistant".to_owned(),
+            content: serde_json::json!({"text": "answer"}),
+            source: None,
+            prompt_hash: Some(hash),
+        }))
+        .expect("assistant entry");
+    (home, commit.entry_ids[0].clone())
+}
+
+#[test]
+fn prompt_last_and_entry_views() {
+    let (home, entry_id) = seed_prompt_home("SOUL TEXT");
+    let last = hearth()
+        .args(["prompt", "--last", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("prompt last");
+    assert!(last.status.success());
+    let text = String::from_utf8_lossy(&last.stdout);
+    assert!(text.contains("SOUL TEXT"));
+    assert!(text.contains("hello"));
+
+    let entry = hearth()
+        .args(["prompt", &entry_id, "--home"])
+        .arg(home.path())
+        .output()
+        .expect("prompt entry");
+    assert!(entry.status.success());
+    assert!(String::from_utf8_lossy(&entry.stdout).contains("SOUL TEXT"));
+}
+
+#[test]
+fn prompt_json_has_prefix_and_tokens() {
+    let (home, _entry) = seed_prompt_home("SOUL TEXT");
+    let output = hearth()
+        .args(["prompt", "--last", "--json", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("prompt json");
+    assert!(output.status.success());
+    let document: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert!(document["prefix_hash"].is_string());
+    assert!(document["prefix_parts"]["identity"].is_string());
+    assert!(document["tokens"]["total"].as_u64().is_some());
+    assert_eq!(document["model"], "fake-model");
+}
+
+#[test]
+fn prompt_system_works_without_history() {
+    let home = tempfile::TempDir::new().expect("system home");
+    init_home(home.path());
+    let output = hearth()
+        .args(["prompt", "--system", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("prompt system");
+    assert!(
+        output.status.success(),
+        "system failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("## Identity"));
+    assert!(text.contains("## Operation"));
+    assert!(text.contains("## Tools"));
+    assert!(text.contains("## Standing memory"));
+}
+
+#[test]
+fn prompt_preview_and_wire() {
+    let (home, _entry) = seed_prompt_home("SOUL TEXT");
+    let preview = hearth()
+        .args(["prompt", "--preview", "What do I like?", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("prompt preview");
+    assert!(preview.status.success());
+    assert!(String::from_utf8_lossy(&preview.stdout).contains("What do I like?"));
+
+    let wire = hearth()
+        .args(["prompt", "--last", "--wire", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("prompt wire");
+    assert!(
+        wire.status.success(),
+        "wire failed: {}",
+        String::from_utf8_lossy(&wire.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&wire.stdout).expect("wire json");
+    assert_eq!(body["model"], "fake-model");
+    assert!(body["messages"].is_array());
+    assert!(body["stream"].as_bool().unwrap_or(false));
+}
+
+#[test]
+fn prompt_views_redact_configured_secrets() {
+    let (home, _entry) = seed_prompt_home("SOUL fake-key");
+    let output = hearth()
+        .args(["prompt", "--last", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("prompt redaction");
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("[redacted]"), "no redaction marker: {text}");
+    assert!(!text.contains("fake-key"), "secret leaked: {text}");
+}
+
+#[test]
+fn stats_summarizes_usage_and_marks_unpriced_models() {
+    use hearth_core::{Harness, NewUsage};
+    use hearth_model::Usage;
+
+    let home = tempfile::TempDir::new().expect("stats home");
+    init_home(home.path());
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        harness
+            .session()
+            .record_usage(NewUsage {
+                task_id: None,
+                conversation_id: None,
+                provider: "openai-compatible".to_owned(),
+                model: "fake-model".to_owned(),
+                kind: "chat".to_owned(),
+                usage: Usage {
+                    input_tokens: 100,
+                    cache_read_tokens: 10,
+                    output_tokens: 20,
+                    ..Usage::default()
+                },
+                cost_micros: 100,
+                latency_ms: 5,
+            })
+            .expect("record usage");
+    }
+    let output = hearth()
+        .args(["stats", "--json", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("stats");
+    assert!(
+        output.status.success(),
+        "stats failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("stats json");
+    assert_eq!(report["rows"][0]["model"], "fake-model");
+    assert_eq!(report["rows"][0]["calls"], 1);
+    assert_eq!(report["rows"][0]["input_tokens"], 100);
+    assert_eq!(report["rows"][0]["unpriced"], true);
+    assert_eq!(report["total_cost_micros"], 100);
+}
+
+#[test]
+fn stats_marks_a_priced_model() {
+    use hearth_core::{Harness, NewUsage};
+    use hearth_model::Usage;
+
+    let home = tempfile::TempDir::new().expect("priced stats home");
+    init_home(home.path());
+    let path = home.path().join("settings.json");
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("settings")).expect("json");
+    value["models"]["pricing"] = serde_json::json!({
+        "fake-model": {"input": 1000000, "cache_read": 0, "cache_write": 0, "output": 2000000, "reasoning": 0}
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&value).expect("json")).expect("write");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("mode");
+    }
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        harness
+            .session()
+            .record_usage(NewUsage {
+                task_id: None,
+                conversation_id: None,
+                provider: "openai-compatible".to_owned(),
+                model: "fake-model".to_owned(),
+                kind: "chat".to_owned(),
+                usage: Usage {
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    ..Usage::default()
+                },
+                cost_micros: 140,
+                latency_ms: 5,
+            })
+            .expect("record usage");
+    }
+    let output = hearth()
+        .args(["stats", "--json", "--home"])
+        .arg(home.path())
+        .output()
+        .expect("stats");
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("stats json");
+    assert_eq!(report["rows"][0]["unpriced"], false);
+    assert_eq!(report["unpriced_models"].as_array().expect("array").len(), 0);
+}

@@ -9,7 +9,7 @@ use std::time::Instant;
 use hearth_core::{
     ContextBudget, CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session,
     StepOutput, Submission, SubmissionStatus, TerminalOutcome, build_prompt, parse_blocks,
-    plan_compaction,
+    plan_compaction, prefix_cause,
 };
 use hearth_memory::MemoryService;
 use hearth_model::{ContentBlock, Pricing, Provider, ProviderError, StreamEvent, ToolCall, Usage};
@@ -101,15 +101,18 @@ impl Agent {
         self
     }
 
-    fn memory_context(&self, query: Option<&str>) -> (String, String) {
+    fn memory_context(&self, query: Option<&str>) -> (String, String, u64) {
         let Some(memory) = &self.memory else {
-            return (String::new(), String::new());
+            return (String::new(), String::new(), 0);
         };
-        let standing = match memory.standing() {
-            Ok(standing) => memory.render_standing(&standing.items),
+        let (standing, standing_version) = match memory.standing() {
+            Ok(standing) => (
+                memory.render_standing(&standing.items),
+                standing.version,
+            ),
             Err(error) => {
                 tracing::warn!(%error, "standing memory could not be read");
-                String::new()
+                (String::new(), 0)
             }
         };
         let recall = query
@@ -121,7 +124,7 @@ impl Agent {
                 }
             })
             .unwrap_or_default();
-        (standing, recall)
+        (standing, recall, standing_version)
     }
 
     fn compactor(&self) -> Compactor {
@@ -166,7 +169,8 @@ impl Agent {
             "Current time: {now}. Conversation: {conversation_id}. Model: {}.",
             self.config.model
         );
-        let (standing, recall) = self.memory_context(latest_user_text(&history).as_deref());
+        let (standing, recall, standing_version) =
+            self.memory_context(latest_user_text(&history).as_deref());
         let prompt = build_prompt(
             PromptInput {
                 soul: self.config.soul.clone(),
@@ -174,6 +178,7 @@ impl Agent {
                 model: self.config.model.clone(),
                 tools: self.config.tools.specs(),
                 standing,
+                standing_version,
                 recall,
                 runtime_note,
             },
@@ -317,6 +322,7 @@ impl Agent {
 
         let mut hard_compacted = false;
         let mut overflow_attempted = false;
+        let mut previous_prefix: Option<Value> = None;
         'turn: loop {
             if cancel.load(Ordering::Relaxed) {
                 return self.settle_cancelled(&submission, &claimed.id, events);
@@ -347,7 +353,8 @@ impl Agent {
             let history = self
                 .session
                 .history_for_prompt(&submission.conversation_id)?;
-            let (standing, recall) = self.memory_context(latest_user_text(&history).as_deref());
+            let (standing, recall, standing_version) =
+                self.memory_context(latest_user_text(&history).as_deref());
             let tools = self.config.tools.specs();
             let make_input = |recall: String| PromptInput {
                 soul: self.config.soul.clone(),
@@ -355,6 +362,7 @@ impl Agent {
                 model: self.config.model.clone(),
                 tools: tools.clone(),
                 standing: standing.clone(),
+                standing_version,
                 recall,
                 runtime_note: runtime_note.clone(),
             };
@@ -396,16 +404,28 @@ impl Agent {
             if !over.is_empty() {
                 tracing::warn!(segments = ?over, "prompt segment over budget");
             }
-            prompt.request.max_tokens =
-                Some(self.budget.max_output_tokens.min(u32::MAX as u64) as u32);
+            let max_tokens = self.budget.max_output_tokens.min(u32::MAX as u64) as u32;
+            prompt.request.max_tokens = Some(max_tokens);
+            prompt.document["max_tokens"] = json!(max_tokens);
             let prompt_text = serde_json::to_string(&prompt.document)
                 .map_err(|error| AgentError::Invalid(error.to_string()))?;
             let prompt_hash = self.session.save_prompt_blob(&prompt_text)?;
+            let causes = prefix_cause(previous_prefix.as_ref(), &prompt.prefix_parts);
+            if !causes.is_empty() {
+                tracing::info!(?causes, "prompt prefix changed");
+            }
             self.session.checkpoint_task(
                 &claimed.id,
                 &self.config.owner,
-                json!({"turn": turn, "prompt_hash": prompt_hash}),
+                json!({
+                    "turn": turn,
+                    "prompt_hash": prompt_hash,
+                    "prefix_hash": prompt.prefix_hash.clone(),
+                    "prefix_parts": prompt.prefix_parts.clone(),
+                    "prefix_cause": causes,
+                }),
             )?;
+            previous_prefix = Some(json!(prompt.prefix_parts.clone()));
             emit(
                 events,
                 &claimed.id,

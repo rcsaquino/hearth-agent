@@ -20,6 +20,7 @@ serde_json = "1"
 [dev-dependencies]
 tempfile = "3"
 hearth-core = { path = "../hearth-core" }
+hearth-model = { path = "../hearth-model" }
 hearth-memory = { path = "../hearth-memory" }
 
 [lints]

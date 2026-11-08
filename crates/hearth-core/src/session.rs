@@ -765,6 +765,24 @@ impl Session {
         })?)
     }
 
+    /// Read the prompt saved for an entry, when it has one.
+    pub fn prompt_for_entry(&self, entry_id: &str) -> Result<Option<PromptBlob>, CoreError> {
+        Ok(self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT p.hash, p.text, p.created_at FROM entries e \
+                 JOIN prompt_blobs p ON p.hash = e.prompt_hash WHERE e.id = ?",
+                (entry_id,),
+                |row| {
+                    Ok(PromptBlob {
+                        hash: row.get(0)?,
+                        text: row.get(1)?,
+                        created_at: row.get(2)?,
+                    })
+                },
+            )
+        })?)
+    }
+
     /// Record one model call in the usage ledger.
     pub fn record_usage(&self, new: NewUsage) -> Result<UsageEvent, CoreError> {
         let id = self.ids.new_id();
@@ -1209,6 +1227,29 @@ impl Session {
         let sql = format!("{CONVERSATION_SELECT} WHERE id = ?");
         let raw: Option<RawConversation> = self.storage.read(|reader| {
             reader.query_optional(&sql, (id,), |row| {
+                Ok(RawConversation {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    parent_entry_id: row.get(2)?,
+                    title: row.get(3)?,
+                    transport: row.get(4)?,
+                    transport_key: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    archived: row.get(8)?,
+                })
+            })
+        })?;
+        Ok(raw.map(RawConversation::into_conversation))
+    }
+
+    /// Read the most recently active conversation.
+    pub fn latest_conversation(&self) -> Result<Option<Conversation>, CoreError> {
+        let sql = format!(
+            "{CONVERSATION_SELECT} WHERE archived = 0              ORDER BY updated_at DESC, created_at DESC, rowid DESC LIMIT 1"
+        );
+        let raw: Option<RawConversation> = self.storage.read(|reader| {
+            reader.query_optional(&sql, [], |row| {
                 Ok(RawConversation {
                     id: row.get(0)?,
                     parent_id: row.get(1)?,

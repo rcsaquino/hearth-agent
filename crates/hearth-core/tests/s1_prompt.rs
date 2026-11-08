@@ -39,6 +39,7 @@ fn the_prompt_starts_with_identity_and_operation_and_ends_with_runtime() {
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
             standing: String::new(),
+            standing_version: 0,
             recall: String::new(),
         })
         .expect("build prompt");
@@ -107,6 +108,7 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
             standing: String::new(),
+            standing_version: 0,
             recall: String::new(),
         })
         .expect("build prompt");
@@ -171,6 +173,7 @@ fn the_request_carries_the_model_tools_and_session() {
             }],
             runtime_note: "RUNTIME".to_owned(),
             standing: String::new(),
+            standing_version: 0,
             recall: String::new(),
         })
         .expect("build prompt");
@@ -203,6 +206,7 @@ fn the_audit_document_has_five_segments() {
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
             standing: String::new(),
+            standing_version: 0,
             recall: String::new(),
         })
         .expect("build prompt");
@@ -241,6 +245,7 @@ fn saving_the_same_prompt_twice_reuses_the_hash() {
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
             standing: String::new(),
+            standing_version: 0,
             recall: String::new(),
         })
         .expect("build prompt");
@@ -318,6 +323,7 @@ fn image_and_file_blocks_survive_the_prompt_and_audit() {
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
             standing: String::new(),
+            standing_version: 0,
             recall: String::new(),
         })
         .expect("build prompt");
@@ -367,6 +373,7 @@ fn the_operation_carries_the_message_and_voice_rules() {
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
             standing: String::new(),
+            standing_version: 0,
             recall: String::new(),
         })
         .expect("build prompt");
@@ -406,6 +413,7 @@ fn standing_and_recall_are_placed_in_their_layers() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             standing: "S1\nS2".to_owned(),
+            standing_version: 0,
             recall: "R1".to_owned(),
             runtime_note: "RUNTIME".to_owned(),
         })
@@ -463,6 +471,7 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
                 parameters: json!({"type": "object"}),
             }],
             standing: "S1".to_owned(),
+            standing_version: 0,
             recall: "R1".to_owned(),
             runtime_note: "RUNTIME".to_owned(),
         })
@@ -508,4 +517,70 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
     assert!(tokens.over_budget().is_empty());
     assert_eq!(prompt.document["tokens"]["total"], tokens.total);
     assert_eq!(prompt.document["tokens"]["fixed"], tokens.fixed);
+}
+
+#[test]
+fn the_prefix_hash_tracks_only_the_stable_layers() {
+    use hearth_core::prefix_cause;
+    use hearth_model::ToolSpec;
+
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(Save::new(&conversation.id).entry("user", json!({"text": "hello"})))
+        .expect("save user entry");
+
+    let tool = ToolSpec {
+        name: "files".to_owned(),
+        description: "Read files.".to_owned(),
+        parameters: json!({"type": "object"}),
+    };
+    let build = |soul: &str,
+                 tools: Vec<ToolSpec>,
+                 standing_version: u64,
+                 recall: &str,
+                 runtime: &str| {
+        session
+            .build_prompt(PromptInput {
+                soul: soul.to_owned(),
+                conversation_id: conversation.id.clone(),
+                model: "test-model".to_owned(),
+                tools,
+                standing: "S1".to_owned(),
+                standing_version,
+                recall: recall.to_owned(),
+                runtime_note: runtime.to_owned(),
+            })
+            .expect("build prompt")
+    };
+
+    let first = build("SOUL", Vec::new(), 0, "R1", "RUN");
+    let same = build("SOUL", Vec::new(), 0, "R1", "RUN");
+    assert_eq!(first.prefix_hash, same.prefix_hash);
+    assert!(first.document["prefix_hash"].is_string());
+    assert_eq!(first.document["model"], "test-model");
+    assert_eq!(first.document["session_id"], conversation.id);
+    assert!(first.document["prefix_parts"]["identity"].is_string());
+
+    let soul = build("SOUL 2", Vec::new(), 0, "R1", "RUN");
+    assert_ne!(first.prefix_hash, soul.prefix_hash);
+    let causes = prefix_cause(Some(&json!(first.prefix_parts)), &soul.prefix_parts);
+    assert_eq!(causes, vec!["SOUL.md"]);
+
+    let tools = build("SOUL", vec![tool], 0, "R1", "RUN");
+    assert_ne!(first.prefix_hash, tools.prefix_hash);
+    let causes = prefix_cause(Some(&json!(first.prefix_parts)), &tools.prefix_parts);
+    assert_eq!(causes, vec!["tools"]);
+
+    let standing = build("SOUL", Vec::new(), 1, "R1", "RUN");
+    assert_ne!(first.prefix_hash, standing.prefix_hash);
+    let causes = prefix_cause(Some(&json!(first.prefix_parts)), &standing.prefix_parts);
+    assert_eq!(causes, vec!["standing memory"]);
+
+    let runtime = build("SOUL", Vec::new(), 0, "R2", "RUN 2");
+    assert_eq!(first.prefix_hash, runtime.prefix_hash);
+    assert!(prefix_cause(Some(&json!(first.prefix_parts)), &runtime.prefix_parts).is_empty());
 }

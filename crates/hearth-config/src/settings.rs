@@ -81,6 +81,24 @@ pub struct Models {
     pub session_header: Option<String>,
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub pricing: BTreeMap<String, PriceConfig>,
+}
+
+/// Per-model token prices in micros per million tokens.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PriceConfig {
+    #[serde(default)]
+    pub input: i64,
+    #[serde(default)]
+    pub cache_read: i64,
+    #[serde(default)]
+    pub cache_write: i64,
+    #[serde(default)]
+    pub output: i64,
+    #[serde(default)]
+    pub reasoning: i64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

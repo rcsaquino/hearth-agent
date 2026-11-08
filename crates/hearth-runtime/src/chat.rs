@@ -7,13 +7,13 @@ use std::sync::Arc;
 use hearth_config::ConfigError;
 use hearth_core::{ContextBudget, CoreError, Harness};
 use hearth_memory::{MemoryService, MemorySource};
-use hearth_model::{OpenAiCompatibleProvider, Pricing, ProviderError};
+use hearth_model::{OpenAiCompatibleProvider, ProviderError};
 use serde_json::json;
 use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::agent::{Agent, AgentConfig};
-use crate::tools::{ToolBuildError, build_tools, memory_policy};
+use crate::tools::{ToolBuildError, build_tools, memory_policy, pricing_from_settings};
 
 /// A failure that stopped local chat.
 #[derive(Debug, Error)]
@@ -106,7 +106,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         let agent = Agent::new(
             session.clone(),
             Arc::clone(&provider),
-            Pricing::default(),
+            pricing_from_settings(&settings),
             AgentConfig {
                 soul: soul.clone(),
                 model: models.model.clone(),

@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.6, plain-language edition
+**Status:** Draft 0.7, plain-language edition
 **Date:** 2026-11-09
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -1312,7 +1312,8 @@ code.
     "model": "deepseek-v4.1-flash",
     "context_window": 128000,
     "max_output_tokens": 8192,
-    "session_header": "x-opencode-session"
+    "session_header": "x-opencode-session",
+    "pricing": {}
   },
   "media": {
     "image": {
@@ -1433,6 +1434,9 @@ Optional overrides, only when needed:
   values are positive.
 - `models.session_header` is optional and names a header sent with the conversation
   id, for gateways that route by session.
+- `models.pricing` is optional. Each entry gives input, cache read, cache write,
+  output, and reasoning micros per million tokens; values must not be negative. A
+  model that is not listed is unpriced: tokens are recorded and cost is zero.
 - Missing sections take defaults, versioned with the binary. An empty file parses but
   cannot run a conversation until `models` is defined.
 - Inline secrets are permitted, but environment references are recommended.
@@ -1526,7 +1530,8 @@ which model spent it, and how much of the prompt was served from cache.
   today's cost, and uptime.
 - `hearth watch` follows a live run or task; logs and the usage ledger keep the
   durable record.
-- `hearth stats` aggregates by day, model, task kind, and tool.
+- `hearth stats` aggregates by day, model, and task kind. The ledger does not carry a
+  per-tool column, so tool-level totals are not claimed.
 - Budget enforcement warns at `warn_at`, stops new generation at the daily limit when
   `hard_stop` is true, and tells the user the remaining reset time.
 - Pricing comes from a model registry with per-model overrides. Unknown models record
@@ -1795,6 +1800,7 @@ install contains nothing personal.
 | Helper retention | 30 days or newest 25 runs | 5.4 |
 | ETA reminder | 10 minutes past expectation | 5.4 |
 | Tool schema budget | 1,200 tokens | 6.1, 9.1 |
+| Model pricing | per-model micros map; absent is unpriced | 13 |
 | Skills index | 300 tokens, 50 active | 6.1, 9.6 |
 | Skill review | 04:30 local time, 0 to 3 new skills | 9.6 |
 | Learned skills | `skills/learned/` | 9.6 |
