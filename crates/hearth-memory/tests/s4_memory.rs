@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use hearth_core::{Harness, MemoryChange, MemoryWrite, NewMemory, Save, Session};
 use hearth_memory::{
-    MemoryError, MemoryKind, MemoryPatch, MemoryService, MemoryStatus, MemoryTool, NewMemoryInput,
-    SourceKind,
+    MemoryError, MemoryKind, MemoryPatch, MemoryService, MemoryStatus, MemorySource, MemoryTool,
+    NewMemoryInput, SourceKind,
 };
 use hearth_tools::Tool;
 use serde_json::json;
@@ -1190,4 +1190,137 @@ fn standing_is_cached_until_a_memory_write() {
     let refreshed = service.standing().expect("standing");
     assert!(refreshed.items.iter().any(|item| item.id == second.id));
     assert!(refreshed.version > standing.version);
+}
+
+#[test]
+fn a_memory_tool_save_records_the_user_entry_source() {
+    let (_home, session, service) = setup();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("conversation");
+    session
+        .submit(&conversation.id, "req-1", "input", json!({"text": "I prefer metric"}))
+        .expect("submit");
+    let entry = session
+        .latest_user_entry_id(&conversation.id)
+        .expect("latest")
+        .expect("entry");
+    let service = Arc::new(service);
+    let tool = MemoryTool::with_source(Arc::clone(&service), MemorySource::user(entry.clone()));
+    let saved = tool
+        .call(&json!({"action": "save", "content": "Sam prefers metric units", "kind": "preference", "importance": 85}))
+        .expect("save");
+    let id = saved.content.trim().to_owned();
+    let item = service.get(&id).expect("get").expect("row");
+    assert_eq!(item.source_kind, SourceKind::User);
+    assert_eq!(item.source_ref, Some(entry));
+}
+
+#[test]
+fn a_memory_tool_save_without_a_source_is_session_scoped() {
+    let (_home, session, service) = setup();
+    let service = Arc::new(service);
+    let tool = MemoryTool::new(Arc::clone(&service));
+    let saved = tool
+        .call(&json!({"action": "save", "content": "Sam likes green pens", "kind": "fact"}))
+        .expect("save");
+    let id = saved.content.trim().to_owned();
+    let item = service.get(&id).expect("get").expect("row");
+    assert_eq!(item.source_kind, SourceKind::Session);
+    assert_eq!(item.source_ref, None);
+    let _ = session;
+}
+
+#[test]
+fn a_second_conversation_uses_its_own_entry_source() {
+    let (_home, session, service) = setup();
+    let first = session
+        .create_conversation("First", "local", "local:1")
+        .expect("first");
+    let second = session
+        .create_conversation("Second", "local", "local:2")
+        .expect("second");
+    session
+        .submit(&first.id, "req-1", "input", json!({"text": "first fact"}))
+        .expect("first submit");
+    session
+        .submit(&second.id, "req-2", "input", json!({"text": "second fact"}))
+        .expect("second submit");
+    let first_entry = session
+        .latest_user_entry_id(&first.id)
+        .expect("first latest")
+        .expect("first entry");
+    let second_entry = session
+        .latest_user_entry_id(&second.id)
+        .expect("second latest")
+        .expect("second entry");
+    let service = Arc::new(service);
+    let first_tool = MemoryTool::with_source(Arc::clone(&service), MemorySource::user(first_entry.clone()));
+    let second_tool = MemoryTool::with_source(Arc::clone(&service), MemorySource::user(second_entry.clone()));
+    let first_id = first_tool
+        .call(&json!({"action": "save", "content": "The lab bench is on the third floor", "kind": "fact"}))
+        .expect("first save")
+        .content
+        .trim()
+        .to_owned();
+    let second_id = second_tool
+        .call(&json!({"action": "save", "content": "The meeting room is Cedar", "kind": "fact"}))
+        .expect("second save")
+        .content
+        .trim()
+        .to_owned();
+    assert_eq!(
+        service.get(&first_id).expect("get first").expect("first row").source_ref,
+        Some(first_entry)
+    );
+    assert_eq!(
+        service.get(&second_id).expect("get second").expect("second row").source_ref,
+        Some(second_entry)
+    );
+}
+
+#[test]
+fn the_standing_version_is_global_across_conversations() {
+    let (_home, session, service) = setup();
+    let _first = session
+        .create_conversation("First", "local", "local:1")
+        .expect("first");
+    service
+        .save(input_imp("Use metric units", MemoryKind::Rule, 90))
+        .expect("first rule");
+    assert_eq!(service.standing_version().expect("v"), 1);
+    assert_eq!(
+        session.meta_value("standing_version").expect("meta"),
+        Some("1".to_owned())
+    );
+    let _second = session
+        .create_conversation("Second", "local", "local:2")
+        .expect("second");
+    service
+        .save(input_imp("Use Celsius", MemoryKind::Rule, 90))
+        .expect("second rule");
+    assert_eq!(service.standing_version().expect("v"), 2);
+    assert_eq!(
+        session.meta_value("standing_version").expect("meta"),
+        Some("2".to_owned())
+    );
+}
+
+#[test]
+fn a_last_used_update_does_not_bump_the_standing_version() {
+    let (_home, _clock, _session, service) = setup_clock(MemoryPolicy::default());
+    let item = service
+        .save(input_imp("Use metric units", MemoryKind::Rule, 90))
+        .expect("rule");
+    assert_eq!(service.standing_version().expect("v"), 1);
+    service
+        .update(
+            &item.id,
+            MemoryPatch {
+                last_used_at: Some(1),
+                ..MemoryPatch::default()
+            },
+        )
+        .expect("last used");
+    assert_eq!(service.standing_version().expect("v"), 1);
 }
