@@ -10,7 +10,9 @@ use crate::session::Session;
 /// The operation layer, kept short and stable.
 pub const OPERATION: &str = "## Operation\n\n\
 You act for one user on one local machine. Tools run without approval prompts. \
-Use tools when they help, keep answers plain and brief, and never reveal secrets.";
+Use tools when they help, keep answers plain and brief, and never reveal secrets. \
+Use the message tool to send files, and use voice only when the user explicitly \
+asks for voice.";
 
 /// Inputs for one assembled prompt.
 #[derive(Debug, Clone)]
