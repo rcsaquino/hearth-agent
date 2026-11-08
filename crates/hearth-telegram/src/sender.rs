@@ -114,9 +114,52 @@ impl TelegramSender {
             if part.text.trim().is_empty() {
                 continue;
             }
-            self.limiter.wait(&*self.sleeper);
-            self.client.send_message(chat_id, &part.text, &part.entities)?;
-            sent += 1;
+            let mut attempts = 0;
+            loop {
+                self.limiter.wait(&*self.sleeper);
+                match self
+                    .client
+                    .send_message(chat_id, &part.text, &part.entities)
+                {
+                    Ok(()) => {
+                        sent += 1;
+                        break;
+                    }
+                    Err(
+                        error @ TelegramError::Api {
+                            code: Some(429),
+                            retry_after,
+                            ..
+                        },
+                    ) => {
+                        if attempts >= 2 {
+                            return Err(error);
+                        }
+                        self.sleeper
+                            .sleep(Duration::from_secs(retry_after.unwrap_or(1)));
+                        attempts += 1;
+                    }
+                    Err(TelegramError::Api {
+                        code: Some(500..=599),
+                        ..
+                    }) => {
+                        return Ok(SendOutcome::Uncertain {
+                            message: "the Telegram server failed after the request".to_owned(),
+                        });
+                    }
+                    Err(TelegramError::Transport(message)) => {
+                        return Ok(SendOutcome::Uncertain {
+                            message: format!("delivery is uncertain: {message}"),
+                        });
+                    }
+                    Err(TelegramError::Protocol { .. }) => {
+                        return Ok(SendOutcome::Uncertain {
+                            message: "delivery is uncertain: invalid Telegram response".to_owned(),
+                        });
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
         }
         Ok(SendOutcome::Fallback { parts: sent })
     }
