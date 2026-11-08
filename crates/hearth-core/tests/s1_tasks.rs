@@ -385,3 +385,33 @@ fn a_non_retryable_failure_settles_the_task_as_failed() {
         TaskStatus::Failed
     );
 }
+
+#[test]
+fn an_expired_lease_is_requeued_on_recovery() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 1_000_000)
+        .expect("claim task")
+        .expect("a task is runnable");
+    clock.advance(2_000_000);
+
+    let report = session.recover_tasks().expect("recovery");
+    assert_eq!(report.requeued, 1);
+    assert_eq!(report.poisoned, 0);
+    let recovered = session.task(&task.id).expect("read").expect("exists");
+    assert_eq!(recovered.status, TaskStatus::Pending);
+    assert!(recovered.lease_owner.is_none());
+    assert!(recovered.lease_until.is_none());
+    assert_eq!(recovered.attempt, 1);
+
+    let claimed = session
+        .claim_task("worker-b", 60_000_000)
+        .expect("claim after recovery")
+        .expect("the task is runnable");
+    assert_eq!(claimed.attempt, 2);
+}
