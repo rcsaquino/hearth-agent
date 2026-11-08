@@ -330,3 +330,18 @@ fn too_many_blocks_skips_the_rich_path() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "sendMessage");
 }
+
+#[test]
+fn sends_carry_a_thread_id_when_present() {
+    let server = Server::start(vec![ok(), ok()]);
+    let (sender, _) = sender(&server.base);
+
+    sender.send_reply(42, Some(7), "hi").expect("reply");
+    sender.send_typing(42, Some(7)).expect("typing");
+
+    let requests = server.finish();
+    assert_eq!(requests[0].method, "sendRichMessage");
+    assert_eq!(requests[0].body["message_thread_id"], 7);
+    assert_eq!(requests[1].method, "sendChatAction");
+    assert_eq!(requests[1].body["message_thread_id"], 7);
+}
