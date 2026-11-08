@@ -4,7 +4,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use hearth_tools::{BraveSearch, ExaSearch, SearchProvider, Tool, WebSearchTool};
+use hearth_tools::{BraveSearch, DeepSeekSearch, ExaSearch, SearchProvider, Tool, WebSearchTool};
 use serde_json::{Value, json};
 
 struct Captured {

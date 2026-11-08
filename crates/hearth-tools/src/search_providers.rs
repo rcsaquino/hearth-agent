@@ -351,3 +351,69 @@ fn strip_html(value: &str) -> String {
         .trim()
         .to_owned()
 }
+
+/// DeepSeek's tools search endpoint.
+pub struct DeepSeekSearch {
+    base: String,
+    api_key: String,
+    client: Client,
+}
+
+impl DeepSeekSearch {
+    /// Build a DeepSeek provider.
+    pub fn new(base: impl Into<String>, api_key: impl Into<String>) -> Result<Self, SearchError> {
+        Ok(Self {
+            base: base.into(),
+            api_key: api_key.into(),
+            client: client()?,
+        })
+    }
+}
+
+impl SearchProvider for DeepSeekSearch {
+    fn name(&self) -> &'static str {
+        "deepseek"
+    }
+
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
+        let url = format!("{}/v1/tools/search", self.base.trim_end_matches('/'));
+        let body = json!({"query": query, "count": limit});
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Accept", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|error| SearchError::temporary(format!("DeepSeek transport error: {error}")))?;
+        let text = response_text(response, "DeepSeek")?;
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|error| SearchError::permanent(format!("DeepSeek returned invalid JSON: {error}")))?;
+        let mut results = Vec::new();
+        if let Some(items) = value.get("results").and_then(Value::as_array) {
+            for item in items {
+                let Some(url) = item.get("url").and_then(Value::as_str) else {
+                    continue;
+                };
+                let title = item
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or(url)
+                    .to_owned();
+                let snippet = item
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("snippet").and_then(Value::as_str))
+                    .unwrap_or_default();
+                results.push(SearchResult {
+                    title,
+                    url: url.to_owned(),
+                    snippet: truncate(snippet, SNIPPET_CHARS),
+                    date: None,
+                });
+            }
+        }
+        Ok(results)
+    }
+}
