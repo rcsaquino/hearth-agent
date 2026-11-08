@@ -415,3 +415,41 @@ fn an_expired_lease_is_requeued_on_recovery() {
         .expect("the task is runnable");
     assert_eq!(claimed.attempt, 2);
 }
+
+#[test]
+fn a_task_that_expires_twice_is_failed_as_poisoned() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 1_000_000)
+        .expect("first claim")
+        .expect("a task is runnable");
+    clock.advance(2_000_000);
+    let first = session.recover_tasks().expect("first recovery");
+    assert_eq!(first.requeued, 1);
+    assert_eq!(first.poisoned, 0);
+
+    session
+        .claim_task("worker-b", 1_000_000)
+        .expect("second claim")
+        .expect("the task is runnable again");
+    clock.advance(2_000_000);
+    let second = session.recover_tasks().expect("second recovery");
+    assert_eq!(second.requeued, 0);
+    assert_eq!(second.poisoned, 1);
+
+    let poisoned = session.task(&task.id).expect("read").expect("exists");
+    assert_eq!(poisoned.status, TaskStatus::Failed);
+    assert_eq!(poisoned.result, Some(json!({"error": "poisoned"})));
+    assert_eq!(poisoned.terminal_at, Some(clock.now()));
+    assert!(
+        session
+            .claim_task("worker-c", 60_000_000)
+            .expect("claim poisoned")
+            .is_none()
+    );
+}
