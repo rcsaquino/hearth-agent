@@ -1,0 +1,66 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+
+use hearth_core::{Clock, EffectIntent, EffectStatus, Harness, IdGen, Save};
+use serde_json::json;
+use tempfile::TempDir;
+
+struct TestClock(Arc<AtomicI64>);
+
+impl Clock for TestClock {
+    fn now_micros(&self) -> i64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+struct TestIds(Arc<AtomicU64>);
+
+impl IdGen for TestIds {
+    fn new_id(&self) -> String {
+        format!("id-{}", self.0.fetch_add(1, Ordering::SeqCst) + 1)
+    }
+}
+
+fn harness() -> (TempDir, Harness) {
+    let home = TempDir::new().expect("temp home");
+    let clock = Arc::new(TestClock(Arc::new(AtomicI64::new(1_000_000))));
+    let ids = Arc::new(TestIds(Arc::new(AtomicU64::new(0))));
+    let harness = Harness::open_with(home.path(), clock, ids).expect("open harness");
+    (home, harness)
+}
+
+fn conversation(session: &hearth_core::Session) -> String {
+    session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation")
+        .id
+}
+
+#[test]
+fn a_save_records_an_effect_intent() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+
+    let intent = EffectIntent::new(
+        "file_write",
+        "write-1",
+        json!({"path": "notes/a.txt", "content": "hello"}),
+    );
+    let commit = session
+        .save(Save::new(&conversation_id).effect(intent))
+        .expect("save effect intent");
+
+    assert_eq!(commit.effect_ids, vec!["id-2".to_owned()]);
+    let effect = session
+        .effect(&commit.effect_ids[0])
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.kind, "file_write");
+    assert_eq!(effect.key, "write-1");
+    assert_eq!(effect.status, EffectStatus::Intent);
+    assert_eq!(effect.payload["path"], "notes/a.txt");
+    assert_eq!(effect.attempts, 0);
+    assert_eq!(effect.task_id, None);
+    assert_eq!(effect.settled_at, None);
+}
