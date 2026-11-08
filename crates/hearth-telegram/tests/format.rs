@@ -20,3 +20,16 @@ fn formats_bold_links_and_inline_code() {
     let code = entity(&value, "code");
     assert_eq!((code.offset, code.length), (24, 4));
 }
+
+#[test]
+fn formats_a_fenced_code_block_with_its_language() {
+    let value = format_markdown("Before\n\n```rust\nfn main() {}\n```\n\nAfter");
+    let code = entity(&value, "pre");
+    assert_eq!(code.language.as_deref(), Some("rust"));
+    assert_eq!(
+        &value.text[code.offset..code.offset + code.length],
+        "fn main() {}"
+    );
+    assert!(value.text.starts_with("Before"));
+    assert!(value.text.ends_with("After"));
+}
