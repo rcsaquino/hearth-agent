@@ -1,5 +1,6 @@
 //! Hearth storage: SQLite connections and migrations.
 
+mod backup;
 mod schema;
 mod storage;
 
@@ -12,6 +13,7 @@ use thiserror::Error;
 /// The schema version this build understands.
 pub const SCHEMA_VERSION: i64 = 4;
 
+pub use backup::{snapshot, verify};
 pub use storage::{Reader, Storage, Writer};
 
 #[derive(Debug, Error)]
