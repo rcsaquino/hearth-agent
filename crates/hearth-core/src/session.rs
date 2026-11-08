@@ -1839,9 +1839,7 @@ impl Session {
         retention_runs: u32,
         now: i64,
     ) -> Result<usize, CoreError> {
-        let cutoff = now.saturating_sub(
-            (retention_days as i64).saturating_mul(86_400_000_000),
-        );
+        let cutoff = now.saturating_sub((retention_days as i64).saturating_mul(86_400_000_000));
         let rows: Vec<(String, Option<String>, i64)> = self.storage.read(|reader| {
             reader.query(
                 "SELECT id, conversation_id, created_at FROM tasks WHERE kind = 'helper' \

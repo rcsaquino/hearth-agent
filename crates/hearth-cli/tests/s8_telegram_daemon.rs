@@ -976,3 +976,234 @@ fn a_reminder_survives_a_restart() {
         .expect("task exists");
     assert_eq!(task.status, TaskStatus::Done);
 }
+
+#[test]
+fn a_helper_runs_in_the_daemon_and_notifies_the_parent() {
+    use hearth_core::{Harness, NewTask, TaskStatus};
+
+    let (provider_base, provider_thread) =
+        fake_provider_answers(vec!["Helper report from the daemon"]);
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let (parent_id, task_id) = {
+        let harness = Harness::open(home.path()).expect("open harness");
+        let session = harness.session();
+        let parent = session
+            .create_conversation("Parent", "telegram", "42:0")
+            .expect("parent");
+        let helper = session
+            .create_conversation_with_parent("Helper", "helper", "helper:1", &parent.id)
+            .expect("helper");
+        let task = session
+            .create_task(
+                NewTask::new(
+                    "helper",
+                    1,
+                    "run",
+                    json!({
+                        "brief": "Produce a short report.",
+                        "parent_conversation_id": parent.id,
+                        "chat_id": 42,
+                        "thread_id": null,
+                        "depth": 1,
+                        "expected_seconds": 600,
+                        "tool_groups": []
+                    }),
+                )
+                .conversation(&helper.id),
+            )
+            .expect("helper task");
+        (parent.id, task.id)
+    };
+
+    let daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    let rich = wait_for_rich_count(&telegram_state, 1);
+    assert!(
+        rich[0].contains("Helper report from the daemon"),
+        "helper notice missing the report: {rich:?}"
+    );
+    assert!(
+        rich[0].contains("Report:"),
+        "helper notice missing the report path: {rich:?}"
+    );
+
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let history = harness.session().history(&parent_id).expect("history");
+    assert!(
+        history.iter().any(|entry| entry.kind == "assistant"
+            && entry.content["text"] == "Helper report from the daemon"),
+        "helper report entry missing: {history:?}"
+    );
+    let task = harness
+        .session()
+        .task(&task_id)
+        .expect("task")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Done);
+}
+
+fn send_text_stream(stream: &mut TcpStream, text: &str) {
+    let delta = json!({"choices": [{"delta": {"content": text}}]});
+    let finish = json!({"choices": [{"delta": {}, "finish_reason": "stop"}]});
+    let usage = json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}});
+    let body = format!(
+        "data: {}\n\ndata: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        delta, finish, usage
+    );
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .expect("provider response");
+}
+
+fn send_tool_stream(stream: &mut TcpStream, name: &str, arguments: &str) {
+    let call = json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_task", "type": "function", "function": {"name": name, "arguments": arguments}}]}}]});
+    let finish = json!({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]});
+    let usage = json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}});
+    let body = format!(
+        "data: {}\n\ndata: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        call, finish, usage
+    );
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .expect("provider response");
+}
+
+fn fake_helper_provider() -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider");
+    let base = format!("http://{}", listener.local_addr().expect("provider addr"));
+    let handle = thread::spawn(move || {
+        for _ in 0..4 {
+            let (mut stream, _) = listener.accept().expect("provider accept");
+            let request = read_request(&mut stream);
+            let messages = request.body["messages"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let all = serde_json::to_string(&messages).unwrap_or_default();
+            let extraction = all.contains("operations");
+            let tool_result = messages
+                .iter()
+                .any(|message| message["role"].as_str() == Some("tool"));
+            let helper = !tool_result
+                && messages.iter().any(|message| {
+                    message["role"].as_str() == Some("user")
+                        && message["content"].as_str() == Some("Produce a helper report.")
+                });
+            if extraction {
+                send_text_stream(&mut stream, "{\"operations\":[{\"op\":\"noop\"}]}");
+            } else if helper {
+                send_text_stream(&mut stream, "Helper report from helper");
+            } else if tool_result {
+                send_text_stream(&mut stream, "Parent final answer");
+            } else {
+                let arguments = json!({
+                    "action": "spawn",
+                    "brief": "Produce a helper report.",
+                    "expected_minutes": 10
+                })
+                .to_string();
+                send_tool_stream(&mut stream, "task", &arguments);
+            }
+        }
+    });
+    (format!("{base}/v1"), handle)
+}
+
+#[test]
+fn a_parent_spawns_a_helper_through_the_daemon() {
+    use hearth_core::{Harness, TaskStatus};
+
+    let (provider_base, provider_thread) = fake_helper_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(
+        vec![json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 10,
+                "date": 1_730_000_000,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "text": "Spawn a helper to write a report."
+            }
+        })],
+        false,
+    );
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let daemon = DaemonGuard::new(
+        hearth()
+            .args(["daemon"])
+            .arg("--home")
+            .arg(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    let rich = wait_for_rich_count(&telegram_state, 2);
+    assert!(
+        rich.iter()
+            .any(|text| text.contains("Helper report from helper")),
+        "helper report notice missing: {rich:?}"
+    );
+    assert!(
+        rich.iter().any(|text| text.contains("Parent final answer")),
+        "parent final answer missing: {rich:?}"
+    );
+
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let session = harness.session();
+    let helper = session
+        .tasks_by_kind("helper")
+        .expect("helpers")
+        .into_iter()
+        .next()
+        .expect("helper task");
+    assert_eq!(helper.status, TaskStatus::Done);
+    let parent = session
+        .conversation_by_transport("telegram", "42:0")
+        .expect("lookup")
+        .expect("parent");
+    let history = session.history(&parent.id).expect("history");
+    assert!(
+        history.iter().any(|entry| entry.kind == "assistant"
+            && entry.content["text"] == "Helper report from helper"),
+        "helper report entry missing: {history:?}"
+    );
+    assert!(
+        history.iter().any(|entry| entry.kind == "assistant"
+            && entry.content.to_string().contains("Parent final answer")),
+        "parent final entry missing: {history:?}"
+    );
+}

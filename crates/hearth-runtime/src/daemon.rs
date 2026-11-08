@@ -82,6 +82,13 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     let session = harness.session().clone();
     let started = Instant::now();
     let recovery = session.recover_tasks()?;
+    if let Ok(pruned) = session.prune_helpers(
+        settings.tasks.retention_days,
+        settings.tasks.retention_runs,
+        session.now_micros(),
+    ) {
+        tracing::info!(pruned, "helper retention complete");
+    }
     tracing::info!(
         requeued = recovery.requeued,
         poisoned = recovery.poisoned,
