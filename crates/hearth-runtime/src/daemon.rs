@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -13,8 +14,8 @@ use hearth_model::{
     Transcriber, TranscriptionClient,
 };
 use hearth_telegram::{
-    InboundMedia, SendOutcome, SystemSleeper, TelegramClient, TelegramError, TelegramPoller,
-    TelegramSender,
+    InboundMedia, SendOutcome, StopHandler, SystemSleeper, TelegramClient, TelegramError,
+    TelegramPoller, TelegramSender,
 };
 use serde_json::json;
 use signal_hook::consts::{SIGINT, SIGTERM};
@@ -199,6 +200,7 @@ impl TelegramRuntime {
         let media = settings.media.clone().unwrap_or_default();
         let transcriber = build_transcriber(&media)?;
         let speaker = build_speaker(&media)?;
+        let cancellations = Arc::new(CancellationRegistry::default());
         let poller = TelegramPoller::new(
             client.clone(),
             session.clone(),
@@ -207,7 +209,7 @@ impl TelegramRuntime {
             30,
             InboundMedia::new(home.join("media/inbound")),
             transcriber,
-            None,
+            Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
         let worker = TelegramWorker {
@@ -225,6 +227,7 @@ impl TelegramRuntime {
             provider_name: models.kind.clone(),
             max_turns: settings.agent.max_turns,
             pid: std::process::id(),
+            cancellations,
         };
         Ok(Self { poller, worker })
     }
@@ -245,6 +248,69 @@ struct TelegramWorker {
     provider_name: String,
     max_turns: u32,
     pid: u32,
+    cancellations: Arc<CancellationRegistry>,
+}
+
+#[derive(Default)]
+struct CancellationRegistry {
+    tokens: Mutex<HashMap<i64, Arc<AtomicBool>>>,
+}
+
+impl CancellationRegistry {
+    fn register(self: &Arc<Self>, chat_id: i64) -> RunCancellation {
+        let token = Arc::new(AtomicBool::new(false));
+        if let Ok(mut tokens) = self.tokens.lock() {
+            tokens.insert(chat_id, Arc::clone(&token));
+        }
+        RunCancellation {
+            registry: Arc::clone(self),
+            chat_id,
+            token,
+        }
+    }
+
+    fn remove(&self, chat_id: i64) {
+        if let Ok(mut tokens) = self.tokens.lock() {
+            tokens.remove(&chat_id);
+        }
+    }
+
+    fn set_cancelled(&self, chat_id: i64) -> bool {
+        let Ok(tokens) = self.tokens.lock() else {
+            return false;
+        };
+        let Some(token) = tokens.get(&chat_id) else {
+            return false;
+        };
+        token.store(true, Ordering::Relaxed);
+        true
+    }
+}
+
+struct RunCancellation {
+    registry: Arc<CancellationRegistry>,
+    chat_id: i64,
+    token: Arc<AtomicBool>,
+}
+
+impl RunCancellation {
+    fn token(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.token)
+    }
+}
+
+impl Drop for RunCancellation {
+    fn drop(&mut self) {
+        self.registry.remove(self.chat_id);
+    }
+}
+
+struct RegistryStop(Arc<CancellationRegistry>);
+
+impl StopHandler for RegistryStop {
+    fn stop(&self, chat_id: i64) -> bool {
+        self.0.set_cancelled(chat_id)
+    }
 }
 
 impl TelegramWorker {
@@ -285,6 +351,7 @@ impl TelegramWorker {
         };
 
         self.recover_delivery(chat_id, thread_id);
+        let run_cancel = self.cancellations.register(chat_id);
 
         let target = MessageTarget {
             client: self.client.clone(),
@@ -328,7 +395,7 @@ impl TelegramWorker {
                 }
             }
         });
-        let outcome = agent.run_submission(&submission.id);
+        let outcome = agent.run_submission_with_cancel(&submission.id, run_cancel.token());
         let _ = stop_tx.send(());
         let _ = typing.join();
 
