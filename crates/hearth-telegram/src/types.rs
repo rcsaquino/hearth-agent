@@ -20,9 +20,21 @@ pub struct Message {
     #[serde(default)]
     pub from: Option<User>,
     #[serde(default)]
+    pub date: i64,
+    #[serde(default)]
     pub text: Option<String>,
     #[serde(default)]
     pub caption: Option<String>,
+    #[serde(default)]
+    pub photo: Vec<PhotoSize>,
+    #[serde(default)]
+    pub document: Option<Document>,
+    #[serde(default)]
+    pub audio: Option<Audio>,
+    #[serde(default)]
+    pub voice: Option<Voice>,
+    #[serde(default)]
+    pub video: Option<Video>,
 }
 
 /// The chat a message belongs to.
@@ -45,4 +57,84 @@ pub struct User {
     pub first_name: Option<String>,
     #[serde(default)]
     pub username: Option<String>,
+}
+
+/// One size of an incoming photo.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PhotoSize {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: String,
+    #[serde(default)]
+    pub width: i64,
+    #[serde(default)]
+    pub height: i64,
+    #[serde(default)]
+    pub file_size: Option<i64>,
+}
+
+/// One incoming document.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Document {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: String,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<i64>,
+}
+
+/// One incoming audio file.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Audio {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: String,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<i64>,
+}
+
+/// One incoming voice note.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Voice {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: String,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<i64>,
+}
+
+/// One incoming video.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Video {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: String,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<i64>,
+}
+
+/// The Bot API file descriptor.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileInfo {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: String,
+    #[serde(default)]
+    pub file_size: Option<i64>,
+    #[serde(default)]
+    pub file_path: Option<String>,
 }

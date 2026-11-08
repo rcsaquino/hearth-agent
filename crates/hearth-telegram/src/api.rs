@@ -1,11 +1,13 @@
 //! A small blocking client for the Telegram Bot API.
 
+use std::io::Read;
+
 use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::format::Entity;
-use crate::types::Update;
+use crate::types::{FileInfo, Update};
 
 /// A Telegram API failure. Messages never include the token or request URL.
 #[derive(Debug, Error)]
@@ -21,6 +23,8 @@ pub enum TelegramError {
     Protocol { method: String, detail: String },
     #[error("telegram transport failed: {0}")]
     Transport(String),
+    #[error("telegram file is larger than {limit} bytes")]
+    TooLarge { limit: usize },
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +174,66 @@ impl TelegramClient {
         }
         self.call("sendMessage", params)?;
         Ok(())
+    }
+
+    /// Resolve one Telegram file descriptor.
+    pub fn get_file(&self, file_id: &str) -> Result<FileInfo, TelegramError> {
+        let result = self.call("getFile", json!({"file_id": file_id}))?;
+        serde_json::from_value(result).map_err(|error| TelegramError::Protocol {
+            method: "getFile".to_owned(),
+            detail: format!("invalid file descriptor: {error}"),
+        })
+    }
+
+    /// Download one Bot API file path with a hard byte cap.
+    pub fn download_file(
+        &self,
+        file_path: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, TelegramError> {
+        let base = format!(
+            "{}/file/bot{}/",
+            self.base_url.trim_end_matches('/'),
+            self.token
+        );
+        let mut url =
+            reqwest::Url::parse(&base).map_err(|error| TelegramError::Protocol {
+                method: "download".to_owned(),
+                detail: format!("invalid file base URL: {error}"),
+            })?;
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|_| TelegramError::Protocol {
+                    method: "download".to_owned(),
+                    detail: "file path cannot be appended".to_owned(),
+                })?;
+            segments.pop_if_empty();
+            for segment in file_path.split('/') {
+                segments.push(segment);
+            }
+        }
+        let response = self.http.get(url).send().map_err(transport_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(TelegramError::Api {
+                method: "download".to_owned(),
+                code: Some(status.as_u16() as i64),
+                description: "file download failed".to_owned(),
+                retry_after: None,
+            });
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(max_bytes as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| {
+                TelegramError::Transport(format!("could not read the file: {error}"))
+            })?;
+        if bytes.len() > max_bytes {
+            return Err(TelegramError::TooLarge { limit: max_bytes });
+        }
+        Ok(bytes)
     }
 
     /// Acknowledge one message with an emoji reaction.
