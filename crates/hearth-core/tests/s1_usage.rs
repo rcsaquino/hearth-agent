@@ -51,3 +51,36 @@ fn recording_usage_keeps_every_field() {
     assert_eq!(read.len(), 1);
     assert_eq!(read[0], recorded);
 }
+
+#[test]
+fn the_latest_usage_row_is_available() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let task = session
+        .create_task(
+            NewTask::new("test.usage", 1, "start", json!({})).conversation(&conversation.id),
+        )
+        .expect("create task");
+    let recorded = session
+        .record_usage(NewUsage {
+            task_id: Some(task.id.clone()),
+            conversation_id: Some(conversation.id.clone()),
+            provider: "openai-compatible".to_owned(),
+            model: "test-model".to_owned(),
+            kind: "chat".to_owned(),
+            usage: Usage::default(),
+            cost_micros: 0,
+            latency_ms: 1,
+        })
+        .expect("record usage");
+
+    let latest = session
+        .latest_usage()
+        .expect("latest usage")
+        .expect("a usage row");
+    assert_eq!(latest.id, recorded.id);
+}
