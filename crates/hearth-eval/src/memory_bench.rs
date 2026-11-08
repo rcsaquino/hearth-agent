@@ -294,7 +294,7 @@ pub fn run() -> Result<BenchReport> {
         let hit = top
             .clone()
             .any(|item| has_any(&item.id, &question.expected_keys, &id_to_keys));
-        let denominator = question.relevant_keys.len().min(5).max(1);
+        let denominator = question.relevant_keys.len().clamp(1, 5);
         let relevant = retrieved
             .iter()
             .take(5)
