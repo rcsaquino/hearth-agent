@@ -4,6 +4,7 @@ use std::path::Path;
 
 mod daemon;
 mod doctor;
+mod effect_worker;
 mod init;
 
 pub use daemon::{DaemonError, daemon};

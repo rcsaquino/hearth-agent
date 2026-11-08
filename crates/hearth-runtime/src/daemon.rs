@@ -1,12 +1,18 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use hearth_config::ConfigError;
 use hearth_core::{CoreError, Harness};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use thiserror::Error;
+
+use crate::effect_worker::EffectWorker;
 
 #[derive(Debug, Error)]
 pub enum DaemonError {
@@ -22,7 +28,7 @@ pub enum DaemonError {
     Io(#[from] std::io::Error),
 }
 
-/// Acquire the single-writer lock, migrate the database, and wait for a signal.
+/// Acquire the single-writer lock, recover interrupted work, and wait.
 pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     let settings = hearth_config::load(home)?;
     settings.validate_for_run()?;
@@ -44,13 +50,35 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     lock.flush()?;
 
     let harness = Harness::open(home)?;
-    let recovery = harness.session().recover_tasks()?;
+    let session = harness.session().clone();
+    let recovery = session.recover_tasks()?;
     tracing::info!(
         requeued = recovery.requeued,
         poisoned = recovery.poisoned,
         woken = recovery.woken,
         "task recovery complete"
     );
+
+    let workspace = match settings.agent.workspace.clone() {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => home.join(path),
+        None => home.join("workspace"),
+    };
+    let worker = EffectWorker::new(session, workspace);
+    let recovered = worker.recover_started()?;
+    tracing::info!(recovered, "effect recovery complete");
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let worker_shutdown = Arc::clone(&shutdown);
+    let handle = thread::spawn(move || {
+        while !worker_shutdown.load(Ordering::Relaxed) {
+            if let Err(error) = worker.run_once() {
+                tracing::error!(%error, "effect worker iteration failed");
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+    tracing::info!("effect worker started");
 
     tracing::info!(
         pid = std::process::id(),
@@ -60,6 +88,10 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     let mut signals = Signals::new([SIGTERM, SIGINT])?;
     if let Some(signal) = signals.forever().next() {
         tracing::info!(signal, "hearth daemon stopping");
+    }
+    shutdown.store(true, Ordering::Relaxed);
+    if handle.join().is_err() {
+        tracing::error!("effect worker panicked");
     }
     drop(harness);
     Ok(())
