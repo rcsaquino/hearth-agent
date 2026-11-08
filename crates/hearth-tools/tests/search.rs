@@ -190,3 +190,34 @@ fn brave_maps_web_results() {
         Some("brave-key")
     );
 }
+
+#[test]
+fn deepseek_maps_results() {
+    let server = serve(json_reply(json!({
+        "results": [{
+            "title": "DeepSeek Example",
+            "url": "https://deepseek.example/a",
+            "summary": "DeepSeek snippet"
+        }]
+    })));
+    let provider: Arc<dyn SearchProvider> =
+        Arc::new(DeepSeekSearch::new(server.base.clone(), "ds-key".to_owned()).expect("deepseek provider"));
+    let tool = WebSearchTool::new(vec![provider], 3, 5, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("search call");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(value["results"][0]["title"], "DeepSeek Example");
+    assert_eq!(value["results"][0]["snippet"], "DeepSeek snippet");
+
+    let captured = server.thread.join().expect("server thread");
+    assert_eq!(captured.path, "/v1/tools/search");
+    assert_eq!(
+        captured.headers.get("authorization").map(String::as_str),
+        Some("Bearer ds-key")
+    );
+    let body: Value = serde_json::from_str(&captured.body).expect("request body");
+    assert_eq!(body["query"], "rust");
+    assert_eq!(body["count"], 5);
+}
