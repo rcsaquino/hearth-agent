@@ -614,6 +614,8 @@ dependencies = [
  "anyhow",
  "clap",
  "hearth-core",
+ "hearth-eval",
+ "hearth-memory",
  "hearth-runtime",
  "serde_json",
  "tempfile",
@@ -646,7 +648,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hearth-core",
+ "hearth-memory",
+ "hearth-model",
  "hearth-runtime",
+ "hearth-storage",
+ "serde",
  "serde_json",
  "tempfile",
 ]

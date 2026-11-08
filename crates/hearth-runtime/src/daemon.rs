@@ -89,6 +89,10 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         None => home.join("workspace"),
     };
     let spill = home.join("spill");
+    let memory = Arc::new(MemoryService::with_policy(
+        session.clone(),
+        memory_policy(&settings),
+    ));
 
     let effect_worker = EffectWorker::new(session.clone(), workspace.clone());
     let recovered = effect_worker.recover_started()?;
@@ -107,6 +111,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             session: session.clone(),
             model,
             started,
+            memory: Arc::clone(&memory),
         },
         Arc::clone(&events),
         Arc::clone(&shutdown),
@@ -138,6 +143,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             workspace,
             spill,
             Arc::clone(&events),
+            Arc::clone(&memory),
         )?;
         let poller_shutdown = Arc::clone(&shutdown);
         let poller = runtime.poller;
@@ -186,6 +192,7 @@ impl TelegramRuntime {
         workspace: PathBuf,
         spill: PathBuf,
         events: Arc<EventBus>,
+        memory: Arc<MemoryService>,
     ) -> Result<Self, DaemonError> {
         let telegram = settings
             .telegram
@@ -241,10 +248,6 @@ impl TelegramRuntime {
             Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
-        let memory = Arc::new(MemoryService::with_policy(
-            session.clone(),
-            memory_policy(&settings),
-        ));
         let worker = TelegramWorker {
             settings: Arc::clone(&settings),
             session,

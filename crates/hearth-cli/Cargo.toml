@@ -13,12 +13,14 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+hearth-eval = { path = "../hearth-eval" }
 hearth-runtime = { path = "../hearth-runtime" }
+serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
-serde_json = "1"
 hearth-core = { path = "../hearth-core" }
+hearth-memory = { path = "../hearth-memory" }
 
 [lints]
 workspace = true

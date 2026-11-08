@@ -648,3 +648,13 @@ local fake-server and fixture tests.
   entry and final answer, not the newest user entry, because a queued input can
   arrive mid-run. The run-entry selection now matches the submission's
   created_at and content and stops at the answer entry.
+
+## 2026-11-08: M4d memory benchmark
+
+- Fixture: `crates/hearth-eval/fixtures/memory_bench.json`, 200 synthetic memories and 200 questions across direct, preference, person, project, temporal, contradiction, paraphrase, and duplicate categories, plus a 10-string secret adversarial set. The first 20 questions are marked `spot_check`.
+- Targets: recall@10 0.90, precision@5 0.80, recall tokens p95 900, retrieval p95 80 ms at 200k items, zero secret leaks.
+- Measured baseline: recall@10 0.161, precision@5 0.148, recall tokens p95 161, retrieval p95 5.5 ms on the small set; temporal 0/20, supersession 15/15, paraphrase 0/20, duplicate failures 0, secret leaks 0, stored rows 190 (200 fixture memories, 5 intentional duplicate merges, 5 near-duplicate merges from the M4a dedupe). The 200k scale check: 20 queries, p95 1523 ms against the 80 ms target.
+- The benchmark may miss the 1.0 targets; it prints the targets and the baseline. Only harness errors, nonzero leakage, or duplicate-write failure are hard failures.
+- The supersede path now skips duplicate merging so a deliberate replacement inserts the new row. A bearer credential pattern is rejected by the memory writer.
+- Status: `standing_memory_version` reads the `memory_state` document; `memory_items` is the real count.
+- CLI: `hearth eval memory [--json] [--scale 200k]`; the 200k check is an ignored test and the CLI flag.

@@ -211,6 +211,7 @@ fn secrets_are_refused() {
         "my key is sk-live-abcdefghijklmnop",
         "token=abcdefgh1234",
         "123456789:AAFakeTokenFakeTokenFakeTokenFake",
+        "authorization is Bearer abcdefghijklmnop",
     ] {
         let error = service
             .save(input(content, MemoryKind::Fact))

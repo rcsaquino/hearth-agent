@@ -26,6 +26,25 @@ fn help_lists_the_m0_commands() {
 }
 
 #[test]
+fn eval_memory_runs_the_benchmark() {
+    let output = hearth()
+        .args(["eval", "memory", "--json"])
+        .output()
+        .expect("run eval");
+    assert!(
+        output.status.success(),
+        "eval failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("eval json");
+    assert_eq!(report["questions"], 200);
+    assert_eq!(report["fixture_memories"], 200);
+    assert_eq!(report["secret_leaks"], 0);
+    assert_eq!(report["duplicate_failures"], 0);
+    assert!(report["stored_rows"].as_u64().expect("stored rows") <= 200);
+}
+
+#[test]
 fn doctor_without_settings_fails_with_one_sentence() {
     let home = tempfile::TempDir::new().expect("temp home");
     let output = hearth()

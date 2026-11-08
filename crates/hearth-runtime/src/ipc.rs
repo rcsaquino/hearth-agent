@@ -39,6 +39,7 @@ pub struct StatusContext {
     pub session: Session,
     pub model: String,
     pub started: Instant,
+    pub memory: std::sync::Arc<hearth_memory::MemoryService>,
 }
 
 #[derive(Deserialize)]
@@ -157,6 +158,7 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
     let totals = context.session.usage_totals_since(midnight)?;
     let counts = context.session.task_counts()?;
     let memory = context.session.memory_item_count()?;
+    let standing_version = context.memory.standing_version().unwrap_or(0);
     let denominator = totals.input_tokens + totals.cache_read_tokens;
     let cache_hit_rate = if denominator > 0 {
         totals.cache_read_tokens as f64 / denominator as f64
@@ -173,7 +175,7 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         "input_tokens": totals.input_tokens,
         "cache_hit_rate": cache_hit_rate,
         "memory_items": memory,
-        "standing_memory_version": 0,
+        "standing_memory_version": standing_version,
         "last_skill_review": Value::Null,
     }))
 }

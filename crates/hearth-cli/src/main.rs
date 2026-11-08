@@ -27,6 +27,30 @@ enum Command {
     Status(StatusArgs),
     /// Check settings, database, and lock without printing secrets.
     Doctor,
+    /// Run the offline evaluation suite.
+    Eval(EvalArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct EvalArgs {
+    #[command(subcommand)]
+    command: EvalCommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum EvalCommand {
+    /// Run the memory recall benchmark.
+    Memory(MemoryEvalArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct MemoryEvalArgs {
+    /// Print the report as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Also run the large-library retrieval check, for example 200k.
+    #[arg(long, value_name = "COUNT")]
+    scale: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -109,8 +133,93 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Watch(args) => hearth_runtime::watch(&home, args.task_id, args.json)?,
         Command::Status(args) => hearth_runtime::status(&home, args.json)?,
         Command::Doctor => hearth_runtime::doctor(&home)?,
+        Command::Eval(args) => run_eval(args)?,
     }
     Ok(())
+}
+
+fn run_eval(args: EvalArgs) -> anyhow::Result<()> {
+    match args.command {
+        EvalCommand::Memory(args) => {
+            let mut report = hearth_eval::memory_bench::run()?;
+            if let Some(scale) = args.scale.as_deref() {
+                report.scale = Some(hearth_eval::memory_bench::run_scale(parse_scale(scale)?)?);
+            }
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_memory_report(&report);
+            }
+            if report.secret_leaks > 0 || report.duplicate_failures > 0 {
+                anyhow::bail!("memory benchmark invariants failed");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn parse_scale(value: &str) -> anyhow::Result<usize> {
+    let text = value.trim().to_ascii_lowercase();
+    let number = text.strip_suffix('k').unwrap_or(&text);
+    let count: usize = number
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid scale count: {value}"))?;
+    let count = if text.ends_with('k') {
+        count
+            .checked_mul(1_000)
+            .ok_or_else(|| anyhow::anyhow!("scale count is too large: {value}"))?
+    } else {
+        count
+    };
+    if count == 0 {
+        anyhow::bail!("scale count must be positive");
+    }
+    Ok(count)
+}
+
+fn print_memory_report(report: &hearth_eval::memory_bench::BenchReport) {
+    println!(
+        "memory benchmark: {} questions, {} memories, {} stored rows",
+        report.questions, report.fixture_memories, report.stored_rows
+    );
+    println!(
+        "recall@10: {:.3} (target {:.3})",
+        report.recall_at_10, report.targets.recall_at_10
+    );
+    println!(
+        "precision@5: {:.3} (target {:.3})",
+        report.precision_at_5, report.targets.precision_at_5
+    );
+    println!(
+        "recall tokens p95: {} (target {})",
+        report.recall_tokens_p95, report.targets.recall_tokens_p95
+    );
+    println!(
+        "retrieval p95: {:.1} ms (target {:.1} ms)",
+        report.retrieval_ms_p95, report.targets.retrieval_ms_p95
+    );
+    for (name, category) in &report.categories {
+        println!(
+            "  {name}: {} questions, recall@10 {:.3}, precision@5 {:.3}",
+            category.count, category.recall_at_10, category.precision_at_5
+        );
+    }
+    println!(
+        "temporal: {}/{} correct",
+        report.temporal.correct, report.temporal.count
+    );
+    println!(
+        "supersession: {}/{} correct",
+        report.supersession.correct, report.supersession.count
+    );
+    println!("duplicate failures: {}", report.duplicate_failures);
+    println!("secret leaks: {}", report.secret_leaks);
+    if let Some(scale) = &report.scale {
+        println!(
+            "scale: {} items, {} queries, p95 {:.1} ms (target {:.1} ms)",
+            scale.items, scale.queries, scale.retrieval_ms_p95, scale.target_ms
+        );
+    }
 }
 
 fn resolve_home(argument: Option<PathBuf>) -> anyhow::Result<PathBuf> {

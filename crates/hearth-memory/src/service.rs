@@ -99,16 +99,19 @@ impl MemoryService {
         }
         let tags = normalize_tags(input.tags);
         let fingerprint = fingerprint(&content);
+        let supersedes = input.supersedes;
 
-        if let Some(existing) = self.find_by_fingerprint(&fingerprint)? {
-            return self.merge(&existing, &tags, input.importance, actor);
-        }
-        if let Some(existing) = self.find_near(&content)? {
-            return self.merge(&existing, &tags, input.importance, actor);
+        // A supersession is a deliberate replacement, not a duplicate merge.
+        if supersedes.is_none() {
+            if let Some(existing) = self.find_by_fingerprint(&fingerprint)? {
+                return self.merge(&existing, &tags, input.importance, actor);
+            }
+            if let Some(existing) = self.find_near(&content)? {
+                return self.merge(&existing, &tags, input.importance, actor);
+            }
         }
 
         let now = self.session.now_micros();
-        let supersedes = input.supersedes;
         let standing = auto_standing(input.kind.as_str(), input.importance, Standing::None);
         let mut bump = standing != Standing::None;
         let mut writes = Vec::new();
@@ -984,7 +987,14 @@ fn reject_secret(content: &str) -> Result<(), MemoryError> {
             ));
         }
     }
-    for token in content.split_whitespace() {
+    let mut words = content.split_whitespace().peekable();
+    while let Some(token) = words.next() {
+        if token.eq_ignore_ascii_case("bearer") && words.peek().is_some_and(|next| next.len() >= 8)
+        {
+            return Err(MemoryError::Secret(
+                "credential-like content was refused".to_owned(),
+            ));
+        }
         if let Some((left, right)) = token.split_once(':')
             && left.len() >= 8
             && left.chars().all(|character| character.is_ascii_digit())

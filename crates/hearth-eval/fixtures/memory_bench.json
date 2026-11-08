@@ -1,0 +1,5925 @@
+{
+ "version": 1,
+ "note": "Synthetic memory recall benchmark. First 20 questions are the spot-check set.",
+ "memories": [
+  {
+   "key": "m001",
+   "content": "The primary project is Project Atlas.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 56,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m002",
+   "content": "The backup drive is labeled NEBULA-7.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 57,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m003",
+   "content": "The lab bench is on the third floor.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 58,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m004",
+   "content": "The meeting room is called Cedar.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 59,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m005",
+   "content": "The coffee supply is kept in the east cabinet.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m006",
+   "content": "The inventory code for the sensor kit is KX-14.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 61,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m007",
+   "content": "The calibration standard is batch B-209.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 62,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m008",
+   "content": "The primary language for the tooling is Rust.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 63,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m009",
+   "content": "The documentation lives in the docs folder.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m010",
+   "content": "The archive is on the shelf labeled OLD-3.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m011",
+   "content": "The test bench uses a 24 volt supply.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 66,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m012",
+   "content": "The primary display is a 27 inch panel.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 67,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m013",
+   "content": "The spare keyboard is in drawer 4.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 68,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m014",
+   "content": "The network switch is in the server closet.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 69,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m015",
+   "content": "The lab notebook color is green.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 70,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m016",
+   "content": "The safety drill is on the first Monday of the month.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 71,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m017",
+   "content": "The parts bin for screws is labeled M3.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 72,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m018",
+   "content": "The shipping address is Dock 12.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 73,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m019",
+   "content": "The inventory spreadsheet is called stock.ods.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 74,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m020",
+   "content": "The primary sensor is model S-88.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 55,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m021",
+   "content": "The reference clock is set to UTC.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 56,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m022",
+   "content": "The spare battery is in the blue case.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 57,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m023",
+   "content": "The printer is on the second floor.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 58,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m024",
+   "content": "The lab key is kept in the lockbox.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 59,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m025",
+   "content": "The project mascot is a paper crane.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m026",
+   "content": "The main whiteboard is on the north wall.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 61,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m027",
+   "content": "The tool cart is labeled CART-2.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 62,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m028",
+   "content": "The emergency contact is the front desk.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 63,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m029",
+   "content": "The backup schedule is every Friday.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m030",
+   "content": "The lab coat size is medium.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m031",
+   "content": "The parts supplier is Northwind Components.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 66,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m032",
+   "content": "The primary protocol is HTTPS.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 67,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m033",
+   "content": "The local port for the service is 8080.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 68,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m034",
+   "content": "The database file is hearth.db.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 69,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m035",
+   "content": "The log folder is called logs.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 70,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m036",
+   "content": "The workspace folder is called workspace.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 71,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m037",
+   "content": "The spill folder is called spill.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 72,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m038",
+   "content": "The media folder is called media.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 73,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m039",
+   "content": "The skills folder is called skills.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 74,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m040",
+   "content": "The backups folder is called backups.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 55,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m041",
+   "content": "The main config file is settings.json.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 56,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m042",
+   "content": "The identity file is SOUL.md.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 57,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m043",
+   "content": "The lock file is hearth.lock.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 58,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m044",
+   "content": "The socket file is hearth.sock.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 59,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m045",
+   "content": "The default timezone is Asia/Manila.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m046",
+   "content": "The default model is deepseek-v4.1-flash.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 61,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m047",
+   "content": "The default search order starts with Exa.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 62,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m048",
+   "content": "The default fetch order starts with Jina.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 63,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m049",
+   "content": "The default image model is gpt-image-2.6-sunburst.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m050",
+   "content": "The default transcription model is whisper-large-v3-turbo.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m051",
+   "content": "The default speech model is eleven_v4.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 66,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m052",
+   "content": "The default agent name is Hearth.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 67,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m053",
+   "content": "The default max turns is 30.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 68,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m054",
+   "content": "The default poll timeout is 30 seconds.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 69,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m055",
+   "content": "The default queue cap is 10.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 70,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m056",
+   "content": "The default standing memory budget is 1200 tokens.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 71,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m057",
+   "content": "The default recall budget is 900 tokens.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 72,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m058",
+   "content": "The default recall item cap is 6.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 73,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m059",
+   "content": "The default backup retention is 7 daily and 4 weekly.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 74,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "m060",
+   "content": "The default compaction threshold is 65 percent.",
+   "kind": "fact",
+   "tags": [
+    "system"
+   ],
+   "importance": 55,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p001",
+   "content": "Prefers short replies.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 90,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p002",
+   "content": "Uses metric units.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 90,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p003",
+   "content": "Prefers morning deep work.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 90,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p004",
+   "content": "Dislikes meetings before 10.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p005",
+   "content": "Prefers written summaries.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p006",
+   "content": "Likes green tea.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 66,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p007",
+   "content": "Prefers window seats.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 67,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p008",
+   "content": "Uses a standing desk.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 68,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p009",
+   "content": "Prefers dark mode.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 69,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p010",
+   "content": "Likes quiet notifications.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 70,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p011",
+   "content": "Prefers morning runs.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 71,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p012",
+   "content": "Reads before bed.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 72,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p013",
+   "content": "Prefers analog notebooks.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 73,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p014",
+   "content": "Likes blue ink.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 74,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p015",
+   "content": "Prefers early flights.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p016",
+   "content": "Avoids sugar after noon.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 76,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p017",
+   "content": "Prefers black coffee.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 77,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p018",
+   "content": "Likes citrus tea.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 78,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p019",
+   "content": "Prefers a firm mattress.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 79,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p020",
+   "content": "Uses a mechanical keyboard.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 80,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p021",
+   "content": "Prefers trackballs.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 81,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p022",
+   "content": "Likes warm lighting.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 82,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p023",
+   "content": "Prefers paper maps.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 83,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p024",
+   "content": "Avoids phone calls.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 84,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p025",
+   "content": "Prefers text messages.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p026",
+   "content": "Likes Sunday planning.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 61,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p027",
+   "content": "Prefers one-on-one meetings.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 62,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p028",
+   "content": "Likes short walks.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 63,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p029",
+   "content": "Prefers cold water.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "p030",
+   "content": "Likes instrumental music.",
+   "kind": "preference",
+   "tags": [
+    "preferences"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n001",
+   "content": "Mira handles the lab schedule.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 61,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n002",
+   "content": "Dr. Vale leads Project Atlas.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 62,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n003",
+   "content": "Jonas maintains the backup drive.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 63,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n004",
+   "content": "Priya owns the calibration log.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n005",
+   "content": "Tomas runs the Friday review.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n006",
+   "content": "Elena manages the parts inventory.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 66,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n007",
+   "content": "Ravi writes the release notes.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 67,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n008",
+   "content": "Nadia coordinates the safety drill.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 68,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n009",
+   "content": "Owen keeps the network switch.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 69,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n010",
+   "content": "Sofia runs the test bench.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 70,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n011",
+   "content": "Leo updates the documentation.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 71,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n012",
+   "content": "Hana tracks the sensor kits.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 72,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n013",
+   "content": "Iris schedules the meeting rooms.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 73,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n014",
+   "content": "Sam orders the coffee.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 74,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n015",
+   "content": "Noor maintains the archive.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n016",
+   "content": "Pavel checks the lockbox.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 76,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n017",
+   "content": "Tess prints the labels.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 77,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n018",
+   "content": "Umar reviews the protocols.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 78,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n019",
+   "content": "Vera cleans the whiteboard.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 79,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "n020",
+   "content": "Wes ships the parts.",
+   "kind": "person",
+   "tags": [
+    "people"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r001",
+   "content": "Project Atlas ships in March.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 61,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r002",
+   "content": "Project Beacon uses Rust.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 62,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r003",
+   "content": "Project Cedar has a 24 volt supply.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 63,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r004",
+   "content": "Project Delta needs the S-88 sensor.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r005",
+   "content": "Project Ember uses the green notebook.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r006",
+   "content": "Project Fern has a Friday review.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 66,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r007",
+   "content": "Project Grove is on the north wall.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 67,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r008",
+   "content": "Project Harbor uses Dock 12.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 68,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r009",
+   "content": "Project Iris is in the server closet.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 69,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r010",
+   "content": "Project Juniper uses the M3 screws.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 70,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r011",
+   "content": "Project Kestrel has a paper crane mascot.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 71,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r012",
+   "content": "Project Lumen uses the 27 inch panel.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 72,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r013",
+   "content": "Project Moss is in the east cabinet.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 73,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r014",
+   "content": "Project Nova uses batch B-209.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 74,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r015",
+   "content": "Project Orbit uses port 8080.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r016",
+   "content": "Project Pine uses the blue case.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 76,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r017",
+   "content": "Project Quartz uses HTTPS.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 77,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r018",
+   "content": "Project Reed uses the second floor.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 78,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r019",
+   "content": "Project Sage uses the medium lab coat.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 79,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "r020",
+   "content": "Project Tide uses Northwind Components.",
+   "kind": "project",
+   "tags": [
+    "projects"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t001",
+   "content": "The lab is in Building 4.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 56,
+   "valid_from": 1735689600000000,
+   "valid_to": 1782863999000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t002",
+   "content": "The lab is in Building 9.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 57,
+   "valid_from": 1782864000000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t003",
+   "content": "The project phase is design.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 58,
+   "valid_from": 1735689600000000,
+   "valid_to": 1751327999000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t004",
+   "content": "The project phase is build.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 59,
+   "valid_from": 1751328000000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t005",
+   "content": "The tool version is 1.0.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 60,
+   "valid_from": 1735689600000000,
+   "valid_to": 1751327999000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t006",
+   "content": "The tool version is 1.1.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 61,
+   "valid_from": 1751328000000000,
+   "valid_to": 1769903999000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t007",
+   "content": "The office is in Room 12.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 62,
+   "valid_from": 1735689600000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t008",
+   "content": "The office is in Room 21.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 63,
+   "valid_from": 1767225600000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t009",
+   "content": "The schedule is four days.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 64,
+   "valid_from": 1735689600000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t010",
+   "content": "The schedule is five days.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 65,
+   "valid_from": 1767225600000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t011",
+   "content": "The supplier is Northwind.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 66,
+   "valid_from": 1735689600000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t012",
+   "content": "The supplier is Southwind.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 67,
+   "valid_from": 1767225600000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t013",
+   "content": "The protocol is HTTP.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 68,
+   "valid_from": 1735689600000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t014",
+   "content": "The protocol is HTTPS.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 69,
+   "valid_from": 1767225600000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t015",
+   "content": "The storage is SQLite.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 55,
+   "valid_from": 1735689600000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t016",
+   "content": "The storage is Postgres.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 56,
+   "valid_from": 1767225600000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t017",
+   "content": "The backup is weekly.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 57,
+   "valid_from": 1735689600000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t018",
+   "content": "The backup is daily.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 58,
+   "valid_from": 1767225600000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t019",
+   "content": "The model is v1.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 59,
+   "valid_from": 1735689600000000,
+   "valid_to": 1767225599000000,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "t020",
+   "content": "The model is v2.",
+   "kind": "fact",
+   "tags": [
+    "temporal"
+   ],
+   "importance": 60,
+   "valid_from": 1767225600000000,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c001",
+   "content": "The primary database is SQLite.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c002",
+   "content": "The primary database is Postgres.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c001",
+   "duplicate_of": null
+  },
+  {
+   "key": "c003",
+   "content": "The primary language is Python.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c004",
+   "content": "The primary language is Rust.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c003",
+   "duplicate_of": null
+  },
+  {
+   "key": "c005",
+   "content": "The deployment target is the laptop.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c006",
+   "content": "The deployment target is the server.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c005",
+   "duplicate_of": null
+  },
+  {
+   "key": "c007",
+   "content": "The backup cadence is weekly.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c008",
+   "content": "The backup cadence is daily.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c007",
+   "duplicate_of": null
+  },
+  {
+   "key": "c009",
+   "content": "The main office is Room 12.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c010",
+   "content": "The main office is Room 21.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c009",
+   "duplicate_of": null
+  },
+  {
+   "key": "c011",
+   "content": "The protocol is HTTP.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c012",
+   "content": "The protocol is HTTPS.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c011",
+   "duplicate_of": null
+  },
+  {
+   "key": "c013",
+   "content": "The model is v1.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c014",
+   "content": "The model is v2.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c013",
+   "duplicate_of": null
+  },
+  {
+   "key": "c015",
+   "content": "The supplier is Northwind.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c016",
+   "content": "The supplier is Southwind.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c015",
+   "duplicate_of": null
+  },
+  {
+   "key": "c017",
+   "content": "The storage engine is SQLite.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c018",
+   "content": "The storage engine is Postgres.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c017",
+   "duplicate_of": null
+  },
+  {
+   "key": "c019",
+   "content": "The queue limit is 5.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c020",
+   "content": "The queue limit is 10.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c019",
+   "duplicate_of": null
+  },
+  {
+   "key": "c021",
+   "content": "The recall budget is 600 tokens.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c022",
+   "content": "The recall budget is 900 tokens.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c021",
+   "duplicate_of": null
+  },
+  {
+   "key": "c023",
+   "content": "The standing budget is 800 tokens.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c024",
+   "content": "The standing budget is 1200 tokens.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c023",
+   "duplicate_of": null
+  },
+  {
+   "key": "c025",
+   "content": "The search order starts with Brave.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c026",
+   "content": "The search order starts with Exa.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c025",
+   "duplicate_of": null
+  },
+  {
+   "key": "c027",
+   "content": "The fetch order starts with HTTP.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c028",
+   "content": "The fetch order starts with Jina.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c027",
+   "duplicate_of": null
+  },
+  {
+   "key": "c029",
+   "content": "The speech model is eleven_v3.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "c030",
+   "content": "The speech model is eleven_v4.",
+   "kind": "fact",
+   "tags": [
+    "contradiction"
+   ],
+   "importance": 75,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": "c029",
+   "duplicate_of": null
+  },
+  {
+   "key": "a001",
+   "content": "The user avoids crowded places.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 56,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a002",
+   "content": "The user keeps a paper journal.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 57,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a003",
+   "content": "The user prefers quiet mornings.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 58,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a004",
+   "content": "The user dislikes loud music.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 59,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a005",
+   "content": "The user enjoys long walks.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 60,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a006",
+   "content": "The user avoids spicy food.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 61,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a007",
+   "content": "The user likes old films.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 62,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a008",
+   "content": "The user prefers tea over coffee.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 63,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a009",
+   "content": "The user keeps a tidy desk.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 64,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a010",
+   "content": "The user reads science fiction.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 65,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a011",
+   "content": "The user prefers train travel.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 66,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a012",
+   "content": "The user dislikes hot weather.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 67,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a013",
+   "content": "The user enjoys cooking.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 68,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a014",
+   "content": "The user prefers handwritten notes.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 69,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "a015",
+   "content": "The user avoids late nights.",
+   "kind": "fact",
+   "tags": [
+    "paraphrase"
+   ],
+   "importance": 55,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": null
+  },
+  {
+   "key": "d001",
+   "content": "The primary project is Project Atlas.",
+   "kind": "fact",
+   "tags": [
+    "duplicates"
+   ],
+   "importance": 50,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": "m001"
+  },
+  {
+   "key": "d002",
+   "content": "The backup drive is labeled NEBULA-7.",
+   "kind": "fact",
+   "tags": [
+    "duplicates"
+   ],
+   "importance": 50,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": "m002"
+  },
+  {
+   "key": "d003",
+   "content": "The lab bench is on the third floor.",
+   "kind": "fact",
+   "tags": [
+    "duplicates"
+   ],
+   "importance": 50,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": "m003"
+  },
+  {
+   "key": "d004",
+   "content": "The meeting room is called Cedar.",
+   "kind": "fact",
+   "tags": [
+    "duplicates"
+   ],
+   "importance": 50,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": "m004"
+  },
+  {
+   "key": "d005",
+   "content": "The coffee supply is kept in the east cabinet.",
+   "kind": "fact",
+   "tags": [
+    "duplicates"
+   ],
+   "importance": 50,
+   "valid_from": null,
+   "valid_to": null,
+   "supersedes_key": null,
+   "duplicate_of": "m005"
+  }
+ ],
+ "questions": [
+  {
+   "key": "q001",
+   "question": "What is the primary project?",
+   "expected_keys": [
+    "m001"
+   ],
+   "relevant_keys": [
+    "m001",
+    "m002",
+    "m003",
+    "m004",
+    "m005"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q002",
+   "question": "What is the backup drive label?",
+   "expected_keys": [
+    "m002"
+   ],
+   "relevant_keys": [
+    "m002",
+    "m001",
+    "m003",
+    "m004",
+    "m005"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q003",
+   "question": "Where is the lab bench?",
+   "expected_keys": [
+    "m003"
+   ],
+   "relevant_keys": [
+    "m003",
+    "m001",
+    "m002",
+    "m004",
+    "m005"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q004",
+   "question": "What is the meeting room called?",
+   "expected_keys": [
+    "m004"
+   ],
+   "relevant_keys": [
+    "m004",
+    "m001",
+    "m002",
+    "m003",
+    "m005"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q005",
+   "question": "Where is the coffee supply?",
+   "expected_keys": [
+    "m005"
+   ],
+   "relevant_keys": [
+    "m005",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q006",
+   "question": "What is the sensor kit inventory code?",
+   "expected_keys": [
+    "m006"
+   ],
+   "relevant_keys": [
+    "m006",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q007",
+   "question": "Which calibration batch is the standard?",
+   "expected_keys": [
+    "m007"
+   ],
+   "relevant_keys": [
+    "m007",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q008",
+   "question": "What language is the tooling written in?",
+   "expected_keys": [
+    "m008"
+   ],
+   "relevant_keys": [
+    "m008",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q009",
+   "question": "Where does the documentation live?",
+   "expected_keys": [
+    "m009"
+   ],
+   "relevant_keys": [
+    "m009",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q010",
+   "question": "Which shelf holds the archive?",
+   "expected_keys": [
+    "m010"
+   ],
+   "relevant_keys": [
+    "m010",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q011",
+   "question": "What voltage does the test bench use?",
+   "expected_keys": [
+    "m011"
+   ],
+   "relevant_keys": [
+    "m011",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q012",
+   "question": "What size is the primary display?",
+   "expected_keys": [
+    "m012"
+   ],
+   "relevant_keys": [
+    "m012",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q013",
+   "question": "Where is the spare keyboard?",
+   "expected_keys": [
+    "m013"
+   ],
+   "relevant_keys": [
+    "m013",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q014",
+   "question": "Where is the network switch?",
+   "expected_keys": [
+    "m014"
+   ],
+   "relevant_keys": [
+    "m014",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q015",
+   "question": "What color is the lab notebook?",
+   "expected_keys": [
+    "m015"
+   ],
+   "relevant_keys": [
+    "m015",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q016",
+   "question": "When is the safety drill?",
+   "expected_keys": [
+    "m016"
+   ],
+   "relevant_keys": [
+    "m016",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q017",
+   "question": "What is the screw parts bin label?",
+   "expected_keys": [
+    "m017"
+   ],
+   "relevant_keys": [
+    "m017",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q018",
+   "question": "Which dock is the shipping address?",
+   "expected_keys": [
+    "m018"
+   ],
+   "relevant_keys": [
+    "m018",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q019",
+   "question": "What is the inventory spreadsheet called?",
+   "expected_keys": [
+    "m019"
+   ],
+   "relevant_keys": [
+    "m019",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q020",
+   "question": "What model is the primary sensor?",
+   "expected_keys": [
+    "m020"
+   ],
+   "relevant_keys": [
+    "m020",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": true
+  },
+  {
+   "key": "q021",
+   "question": "What timezone is the reference clock set to?",
+   "expected_keys": [
+    "m021"
+   ],
+   "relevant_keys": [
+    "m021",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q022",
+   "question": "Where is the spare battery?",
+   "expected_keys": [
+    "m022"
+   ],
+   "relevant_keys": [
+    "m022",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q023",
+   "question": "Where is the printer?",
+   "expected_keys": [
+    "m023"
+   ],
+   "relevant_keys": [
+    "m023",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q024",
+   "question": "Where is the lab key?",
+   "expected_keys": [
+    "m024"
+   ],
+   "relevant_keys": [
+    "m024",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q025",
+   "question": "What is the project mascot?",
+   "expected_keys": [
+    "m025"
+   ],
+   "relevant_keys": [
+    "m025",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q026",
+   "question": "Where is the main whiteboard?",
+   "expected_keys": [
+    "m026"
+   ],
+   "relevant_keys": [
+    "m026",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q027",
+   "question": "What is the tool cart label?",
+   "expected_keys": [
+    "m027"
+   ],
+   "relevant_keys": [
+    "m027",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q028",
+   "question": "Who is the emergency contact?",
+   "expected_keys": [
+    "m028"
+   ],
+   "relevant_keys": [
+    "m028",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q029",
+   "question": "When is the backup schedule?",
+   "expected_keys": [
+    "m029"
+   ],
+   "relevant_keys": [
+    "m029",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q030",
+   "question": "What size is the lab coat?",
+   "expected_keys": [
+    "m030"
+   ],
+   "relevant_keys": [
+    "m030",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q031",
+   "question": "Who is the parts supplier?",
+   "expected_keys": [
+    "m031"
+   ],
+   "relevant_keys": [
+    "m031",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q032",
+   "question": "What protocol is primary?",
+   "expected_keys": [
+    "m032"
+   ],
+   "relevant_keys": [
+    "m032",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q033",
+   "question": "What port does the local service use?",
+   "expected_keys": [
+    "m033"
+   ],
+   "relevant_keys": [
+    "m033",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q034",
+   "question": "What is the database file?",
+   "expected_keys": [
+    "m034"
+   ],
+   "relevant_keys": [
+    "m034",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q035",
+   "question": "What is the log folder called?",
+   "expected_keys": [
+    "m035"
+   ],
+   "relevant_keys": [
+    "m035",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q036",
+   "question": "What is the workspace folder called?",
+   "expected_keys": [
+    "m036"
+   ],
+   "relevant_keys": [
+    "m036",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q037",
+   "question": "What is the spill folder called?",
+   "expected_keys": [
+    "m037"
+   ],
+   "relevant_keys": [
+    "m037",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q038",
+   "question": "What is the media folder called?",
+   "expected_keys": [
+    "m038"
+   ],
+   "relevant_keys": [
+    "m038",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q039",
+   "question": "What is the skills folder called?",
+   "expected_keys": [
+    "m039"
+   ],
+   "relevant_keys": [
+    "m039",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q040",
+   "question": "What is the backups folder called?",
+   "expected_keys": [
+    "m040"
+   ],
+   "relevant_keys": [
+    "m040",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q041",
+   "question": "What is the main config file?",
+   "expected_keys": [
+    "m041"
+   ],
+   "relevant_keys": [
+    "m041",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q042",
+   "question": "What is the identity file?",
+   "expected_keys": [
+    "m042"
+   ],
+   "relevant_keys": [
+    "m042",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q043",
+   "question": "What is the lock file?",
+   "expected_keys": [
+    "m043"
+   ],
+   "relevant_keys": [
+    "m043",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q044",
+   "question": "What is the socket file?",
+   "expected_keys": [
+    "m044"
+   ],
+   "relevant_keys": [
+    "m044",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q045",
+   "question": "What is the default timezone?",
+   "expected_keys": [
+    "m045"
+   ],
+   "relevant_keys": [
+    "m045",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q046",
+   "question": "What is the default model?",
+   "expected_keys": [
+    "m046"
+   ],
+   "relevant_keys": [
+    "m046",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q047",
+   "question": "Which provider starts the search order?",
+   "expected_keys": [
+    "m047"
+   ],
+   "relevant_keys": [
+    "m047",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q048",
+   "question": "Which provider starts the fetch order?",
+   "expected_keys": [
+    "m048"
+   ],
+   "relevant_keys": [
+    "m048",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q049",
+   "question": "What is the default image model?",
+   "expected_keys": [
+    "m049"
+   ],
+   "relevant_keys": [
+    "m049",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q050",
+   "question": "What is the default transcription model?",
+   "expected_keys": [
+    "m050"
+   ],
+   "relevant_keys": [
+    "m050",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q051",
+   "question": "What is the default speech model?",
+   "expected_keys": [
+    "m051"
+   ],
+   "relevant_keys": [
+    "m051",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q052",
+   "question": "What is the default agent name?",
+   "expected_keys": [
+    "m052"
+   ],
+   "relevant_keys": [
+    "m052",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q053",
+   "question": "What is the default max turns?",
+   "expected_keys": [
+    "m053"
+   ],
+   "relevant_keys": [
+    "m053",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q054",
+   "question": "What is the default poll timeout?",
+   "expected_keys": [
+    "m054"
+   ],
+   "relevant_keys": [
+    "m054",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q055",
+   "question": "What is the default queue cap?",
+   "expected_keys": [
+    "m055"
+   ],
+   "relevant_keys": [
+    "m055",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q056",
+   "question": "What is the standing memory budget?",
+   "expected_keys": [
+    "m056"
+   ],
+   "relevant_keys": [
+    "m056",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q057",
+   "question": "What is the recall budget?",
+   "expected_keys": [
+    "m057"
+   ],
+   "relevant_keys": [
+    "m057",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q058",
+   "question": "What is the recall item cap?",
+   "expected_keys": [
+    "m058"
+   ],
+   "relevant_keys": [
+    "m058",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q059",
+   "question": "What is the backup retention?",
+   "expected_keys": [
+    "m059"
+   ],
+   "relevant_keys": [
+    "m059",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q060",
+   "question": "What is the soft compaction threshold?",
+   "expected_keys": [
+    "m060"
+   ],
+   "relevant_keys": [
+    "m060",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q061",
+   "question": "Which speech model is the default?",
+   "expected_keys": [
+    "m051"
+   ],
+   "relevant_keys": [
+    "m051",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q062",
+   "question": "What is the agent called by default?",
+   "expected_keys": [
+    "m052"
+   ],
+   "relevant_keys": [
+    "m052",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q063",
+   "question": "How many turns are allowed by default?",
+   "expected_keys": [
+    "m053"
+   ],
+   "relevant_keys": [
+    "m053",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q064",
+   "question": "How long is the default poll timeout?",
+   "expected_keys": [
+    "m054"
+   ],
+   "relevant_keys": [
+    "m054",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q065",
+   "question": "How many queued messages per chat are allowed by default?",
+   "expected_keys": [
+    "m055"
+   ],
+   "relevant_keys": [
+    "m055",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q066",
+   "question": "How many tokens are reserved for standing memory?",
+   "expected_keys": [
+    "m056"
+   ],
+   "relevant_keys": [
+    "m056",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q067",
+   "question": "How many tokens are reserved for recall?",
+   "expected_keys": [
+    "m057"
+   ],
+   "relevant_keys": [
+    "m057",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q068",
+   "question": "How many recalled items are allowed?",
+   "expected_keys": [
+    "m058"
+   ],
+   "relevant_keys": [
+    "m058",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q069",
+   "question": "How many backups are kept?",
+   "expected_keys": [
+    "m059"
+   ],
+   "relevant_keys": [
+    "m059",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q070",
+   "question": "At what percentage does soft compaction begin?",
+   "expected_keys": [
+    "m060"
+   ],
+   "relevant_keys": [
+    "m060",
+    "m001",
+    "m002",
+    "m003",
+    "m004"
+   ],
+   "category": "direct",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q071",
+   "question": "How long should replies be?",
+   "expected_keys": [
+    "p001"
+   ],
+   "relevant_keys": [
+    "p001",
+    "p002",
+    "p003",
+    "p004",
+    "p005"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q072",
+   "question": "Which measurement system is preferred?",
+   "expected_keys": [
+    "p002"
+   ],
+   "relevant_keys": [
+    "p002",
+    "p001",
+    "p003",
+    "p004",
+    "p005"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q073",
+   "question": "When is deep work preferred?",
+   "expected_keys": [
+    "p003"
+   ],
+   "relevant_keys": [
+    "p003",
+    "p001",
+    "p002",
+    "p004",
+    "p005"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q074",
+   "question": "When are meetings disliked?",
+   "expected_keys": [
+    "p004"
+   ],
+   "relevant_keys": [
+    "p004",
+    "p001",
+    "p002",
+    "p003",
+    "p005"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q075",
+   "question": "What kind of summaries are preferred?",
+   "expected_keys": [
+    "p005"
+   ],
+   "relevant_keys": [
+    "p005",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q076",
+   "question": "What tea is liked?",
+   "expected_keys": [
+    "p006"
+   ],
+   "relevant_keys": [
+    "p006",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q077",
+   "question": "Which seat is preferred?",
+   "expected_keys": [
+    "p007"
+   ],
+   "relevant_keys": [
+    "p007",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q078",
+   "question": "What desk is used?",
+   "expected_keys": [
+    "p008"
+   ],
+   "relevant_keys": [
+    "p008",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q079",
+   "question": "Which display mode is preferred?",
+   "expected_keys": [
+    "p009"
+   ],
+   "relevant_keys": [
+    "p009",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q080",
+   "question": "What notification style is liked?",
+   "expected_keys": [
+    "p010"
+   ],
+   "relevant_keys": [
+    "p010",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q081",
+   "question": "When does the user run?",
+   "expected_keys": [
+    "p011"
+   ],
+   "relevant_keys": [
+    "p011",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q082",
+   "question": "What is read before bed?",
+   "expected_keys": [
+    "p012"
+   ],
+   "relevant_keys": [
+    "p012",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q083",
+   "question": "Which notebooks are preferred?",
+   "expected_keys": [
+    "p013"
+   ],
+   "relevant_keys": [
+    "p013",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q084",
+   "question": "Which ink color is liked?",
+   "expected_keys": [
+    "p014"
+   ],
+   "relevant_keys": [
+    "p014",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q085",
+   "question": "Which flights are preferred?",
+   "expected_keys": [
+    "p015"
+   ],
+   "relevant_keys": [
+    "p015",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q086",
+   "question": "When is sugar avoided?",
+   "expected_keys": [
+    "p016"
+   ],
+   "relevant_keys": [
+    "p016",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q087",
+   "question": "How is coffee taken?",
+   "expected_keys": [
+    "p017"
+   ],
+   "relevant_keys": [
+    "p017",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q088",
+   "question": "Which tea flavor is liked?",
+   "expected_keys": [
+    "p018"
+   ],
+   "relevant_keys": [
+    "p018",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q089",
+   "question": "Which mattress is preferred?",
+   "expected_keys": [
+    "p019"
+   ],
+   "relevant_keys": [
+    "p019",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q090",
+   "question": "Which keyboard is used?",
+   "expected_keys": [
+    "p020"
+   ],
+   "relevant_keys": [
+    "p020",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q091",
+   "question": "Which pointing device is preferred?",
+   "expected_keys": [
+    "p021"
+   ],
+   "relevant_keys": [
+    "p021",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q092",
+   "question": "Which lighting is liked?",
+   "expected_keys": [
+    "p022"
+   ],
+   "relevant_keys": [
+    "p022",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q093",
+   "question": "Which maps are preferred?",
+   "expected_keys": [
+    "p023"
+   ],
+   "relevant_keys": [
+    "p023",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q094",
+   "question": "Which calls are avoided?",
+   "expected_keys": [
+    "p024"
+   ],
+   "relevant_keys": [
+    "p024",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q095",
+   "question": "Which messages are preferred?",
+   "expected_keys": [
+    "p025"
+   ],
+   "relevant_keys": [
+    "p025",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q096",
+   "question": "When is planning done?",
+   "expected_keys": [
+    "p026"
+   ],
+   "relevant_keys": [
+    "p026",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q097",
+   "question": "Which meetings are preferred?",
+   "expected_keys": [
+    "p027"
+   ],
+   "relevant_keys": [
+    "p027",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q098",
+   "question": "What kind of walks are liked?",
+   "expected_keys": [
+    "p028"
+   ],
+   "relevant_keys": [
+    "p028",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q099",
+   "question": "How is water taken?",
+   "expected_keys": [
+    "p029"
+   ],
+   "relevant_keys": [
+    "p029",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q100",
+   "question": "Which music is liked?",
+   "expected_keys": [
+    "p030"
+   ],
+   "relevant_keys": [
+    "p030",
+    "p001",
+    "p002",
+    "p003",
+    "p004"
+   ],
+   "category": "preference",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q101",
+   "question": "Who handles the lab schedule?",
+   "expected_keys": [
+    "n001"
+   ],
+   "relevant_keys": [
+    "n001",
+    "n002",
+    "n003",
+    "n004",
+    "n005"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q102",
+   "question": "Who leads Project Atlas?",
+   "expected_keys": [
+    "n002"
+   ],
+   "relevant_keys": [
+    "n002",
+    "n001",
+    "n003",
+    "n004",
+    "n005"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q103",
+   "question": "Who maintains the backup drive?",
+   "expected_keys": [
+    "n003"
+   ],
+   "relevant_keys": [
+    "n003",
+    "n001",
+    "n002",
+    "n004",
+    "n005"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q104",
+   "question": "Who owns the calibration log?",
+   "expected_keys": [
+    "n004"
+   ],
+   "relevant_keys": [
+    "n004",
+    "n001",
+    "n002",
+    "n003",
+    "n005"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q105",
+   "question": "Who runs the Friday review?",
+   "expected_keys": [
+    "n005"
+   ],
+   "relevant_keys": [
+    "n005",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q106",
+   "question": "Who manages the parts inventory?",
+   "expected_keys": [
+    "n006"
+   ],
+   "relevant_keys": [
+    "n006",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q107",
+   "question": "Who writes the release notes?",
+   "expected_keys": [
+    "n007"
+   ],
+   "relevant_keys": [
+    "n007",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q108",
+   "question": "Who coordinates the safety drill?",
+   "expected_keys": [
+    "n008"
+   ],
+   "relevant_keys": [
+    "n008",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q109",
+   "question": "Who keeps the network switch?",
+   "expected_keys": [
+    "n009"
+   ],
+   "relevant_keys": [
+    "n009",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q110",
+   "question": "Who runs the test bench?",
+   "expected_keys": [
+    "n010"
+   ],
+   "relevant_keys": [
+    "n010",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q111",
+   "question": "Who updates the documentation?",
+   "expected_keys": [
+    "n011"
+   ],
+   "relevant_keys": [
+    "n011",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q112",
+   "question": "Who tracks the sensor kits?",
+   "expected_keys": [
+    "n012"
+   ],
+   "relevant_keys": [
+    "n012",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q113",
+   "question": "Who schedules the meeting rooms?",
+   "expected_keys": [
+    "n013"
+   ],
+   "relevant_keys": [
+    "n013",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q114",
+   "question": "Who orders the coffee?",
+   "expected_keys": [
+    "n014"
+   ],
+   "relevant_keys": [
+    "n014",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q115",
+   "question": "Who maintains the archive?",
+   "expected_keys": [
+    "n015"
+   ],
+   "relevant_keys": [
+    "n015",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q116",
+   "question": "Who checks the lockbox?",
+   "expected_keys": [
+    "n016"
+   ],
+   "relevant_keys": [
+    "n016",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q117",
+   "question": "Who prints the labels?",
+   "expected_keys": [
+    "n017"
+   ],
+   "relevant_keys": [
+    "n017",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q118",
+   "question": "Who reviews the protocols?",
+   "expected_keys": [
+    "n018"
+   ],
+   "relevant_keys": [
+    "n018",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q119",
+   "question": "Who cleans the whiteboard?",
+   "expected_keys": [
+    "n019"
+   ],
+   "relevant_keys": [
+    "n019",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q120",
+   "question": "Who ships the parts?",
+   "expected_keys": [
+    "n020"
+   ],
+   "relevant_keys": [
+    "n020",
+    "n001",
+    "n002",
+    "n003",
+    "n004"
+   ],
+   "category": "person",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q121",
+   "question": "When does Project Atlas ship?",
+   "expected_keys": [
+    "r001"
+   ],
+   "relevant_keys": [
+    "r001",
+    "r002",
+    "r003",
+    "r004",
+    "r005"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q122",
+   "question": "What does Project Beacon use?",
+   "expected_keys": [
+    "r002"
+   ],
+   "relevant_keys": [
+    "r002",
+    "r001",
+    "r003",
+    "r004",
+    "r005"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q123",
+   "question": "What supply does Project Cedar have?",
+   "expected_keys": [
+    "r003"
+   ],
+   "relevant_keys": [
+    "r003",
+    "r001",
+    "r002",
+    "r004",
+    "r005"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q124",
+   "question": "Which sensor does Project Delta need?",
+   "expected_keys": [
+    "r004"
+   ],
+   "relevant_keys": [
+    "r004",
+    "r001",
+    "r002",
+    "r003",
+    "r005"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q125",
+   "question": "Which notebook does Project Ember use?",
+   "expected_keys": [
+    "r005"
+   ],
+   "relevant_keys": [
+    "r005",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q126",
+   "question": "When is the Project Fern review?",
+   "expected_keys": [
+    "r006"
+   ],
+   "relevant_keys": [
+    "r006",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q127",
+   "question": "Where is Project Grove?",
+   "expected_keys": [
+    "r007"
+   ],
+   "relevant_keys": [
+    "r007",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q128",
+   "question": "Which dock does Project Harbor use?",
+   "expected_keys": [
+    "r008"
+   ],
+   "relevant_keys": [
+    "r008",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q129",
+   "question": "Where is Project Iris?",
+   "expected_keys": [
+    "r009"
+   ],
+   "relevant_keys": [
+    "r009",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q130",
+   "question": "Which screws does Project Juniper use?",
+   "expected_keys": [
+    "r010"
+   ],
+   "relevant_keys": [
+    "r010",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q131",
+   "question": "What is the Project Kestrel mascot?",
+   "expected_keys": [
+    "r011"
+   ],
+   "relevant_keys": [
+    "r011",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q132",
+   "question": "Which panel does Project Lumen use?",
+   "expected_keys": [
+    "r012"
+   ],
+   "relevant_keys": [
+    "r012",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q133",
+   "question": "Where is Project Moss?",
+   "expected_keys": [
+    "r013"
+   ],
+   "relevant_keys": [
+    "r013",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q134",
+   "question": "Which batch does Project Nova use?",
+   "expected_keys": [
+    "r014"
+   ],
+   "relevant_keys": [
+    "r014",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q135",
+   "question": "Which port does Project Orbit use?",
+   "expected_keys": [
+    "r015"
+   ],
+   "relevant_keys": [
+    "r015",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q136",
+   "question": "Which case does Project Pine use?",
+   "expected_keys": [
+    "r016"
+   ],
+   "relevant_keys": [
+    "r016",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q137",
+   "question": "Which protocol does Project Quartz use?",
+   "expected_keys": [
+    "r017"
+   ],
+   "relevant_keys": [
+    "r017",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q138",
+   "question": "Where is Project Reed?",
+   "expected_keys": [
+    "r018"
+   ],
+   "relevant_keys": [
+    "r018",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q139",
+   "question": "Which lab coat does Project Sage use?",
+   "expected_keys": [
+    "r019"
+   ],
+   "relevant_keys": [
+    "r019",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q140",
+   "question": "Which supplier does Project Tide use?",
+   "expected_keys": [
+    "r020"
+   ],
+   "relevant_keys": [
+    "r020",
+    "r001",
+    "r002",
+    "r003",
+    "r004"
+   ],
+   "category": "project",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q141",
+   "question": "Where is the lab?",
+   "expected_keys": [
+    "t001"
+   ],
+   "relevant_keys": [
+    "t001"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1772323200000000,
+   "spot_check": false
+  },
+  {
+   "key": "q142",
+   "question": "Where is the lab?",
+   "expected_keys": [
+    "t002"
+   ],
+   "relevant_keys": [
+    "t002"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1785542400000000,
+   "spot_check": false
+  },
+  {
+   "key": "q143",
+   "question": "What is the project phase?",
+   "expected_keys": [
+    "t003"
+   ],
+   "relevant_keys": [
+    "t003"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1740787200000000,
+   "spot_check": false
+  },
+  {
+   "key": "q144",
+   "question": "What is the project phase?",
+   "expected_keys": [
+    "t004"
+   ],
+   "relevant_keys": [
+    "t004"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1756684800000000,
+   "spot_check": false
+  },
+  {
+   "key": "q145",
+   "question": "What is the tool version?",
+   "expected_keys": [
+    "t005"
+   ],
+   "relevant_keys": [
+    "t005"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1738368000000000,
+   "spot_check": false
+  },
+  {
+   "key": "q146",
+   "question": "What is the tool version?",
+   "expected_keys": [
+    "t006"
+   ],
+   "relevant_keys": [
+    "t006"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1761955200000000,
+   "spot_check": false
+  },
+  {
+   "key": "q147",
+   "question": "Where is the office?",
+   "expected_keys": [
+    "t007"
+   ],
+   "relevant_keys": [
+    "t007"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1746057600000000,
+   "spot_check": false
+  },
+  {
+   "key": "q148",
+   "question": "Where is the office?",
+   "expected_keys": [
+    "t008"
+   ],
+   "relevant_keys": [
+    "t008"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1769904000000000,
+   "spot_check": false
+  },
+  {
+   "key": "q149",
+   "question": "What is the schedule?",
+   "expected_keys": [
+    "t009"
+   ],
+   "relevant_keys": [
+    "t009"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1754006400000000,
+   "spot_check": false
+  },
+  {
+   "key": "q150",
+   "question": "What is the schedule?",
+   "expected_keys": [
+    "t010"
+   ],
+   "relevant_keys": [
+    "t010"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1772323200000000,
+   "spot_check": false
+  },
+  {
+   "key": "q151",
+   "question": "Who is the supplier?",
+   "expected_keys": [
+    "t011"
+   ],
+   "relevant_keys": [
+    "t011"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1748736000000000,
+   "spot_check": false
+  },
+  {
+   "key": "q152",
+   "question": "Who is the supplier?",
+   "expected_keys": [
+    "t012"
+   ],
+   "relevant_keys": [
+    "t012"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1775001600000000,
+   "spot_check": false
+  },
+  {
+   "key": "q153",
+   "question": "What is the protocol?",
+   "expected_keys": [
+    "t013"
+   ],
+   "relevant_keys": [
+    "t013"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1751328000000000,
+   "spot_check": false
+  },
+  {
+   "key": "q154",
+   "question": "What is the protocol?",
+   "expected_keys": [
+    "t014"
+   ],
+   "relevant_keys": [
+    "t014"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1777593600000000,
+   "spot_check": false
+  },
+  {
+   "key": "q155",
+   "question": "What is the storage?",
+   "expected_keys": [
+    "t015"
+   ],
+   "relevant_keys": [
+    "t015"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1756684800000000,
+   "spot_check": false
+  },
+  {
+   "key": "q156",
+   "question": "What is the storage?",
+   "expected_keys": [
+    "t016"
+   ],
+   "relevant_keys": [
+    "t016"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1780272000000000,
+   "spot_check": false
+  },
+  {
+   "key": "q157",
+   "question": "How often is the backup?",
+   "expected_keys": [
+    "t017"
+   ],
+   "relevant_keys": [
+    "t017"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1759276800000000,
+   "spot_check": false
+  },
+  {
+   "key": "q158",
+   "question": "How often is the backup?",
+   "expected_keys": [
+    "t018"
+   ],
+   "relevant_keys": [
+    "t018"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1782864000000000,
+   "spot_check": false
+  },
+  {
+   "key": "q159",
+   "question": "What is the model version?",
+   "expected_keys": [
+    "t019"
+   ],
+   "relevant_keys": [
+    "t019"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1761955200000000,
+   "spot_check": false
+  },
+  {
+   "key": "q160",
+   "question": "What is the model version?",
+   "expected_keys": [
+    "t020"
+   ],
+   "relevant_keys": [
+    "t020"
+   ],
+   "category": "temporal",
+   "as_of_micros": 1785542400000000,
+   "spot_check": false
+  },
+  {
+   "key": "q161",
+   "question": "What is the primary database?",
+   "expected_keys": [
+    "c002"
+   ],
+   "relevant_keys": [
+    "c002",
+    "c004",
+    "c006",
+    "c008",
+    "c010"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q162",
+   "question": "What is the primary language?",
+   "expected_keys": [
+    "c004"
+   ],
+   "relevant_keys": [
+    "c004",
+    "c002",
+    "c006",
+    "c008",
+    "c010"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q163",
+   "question": "What is the deployment target?",
+   "expected_keys": [
+    "c006"
+   ],
+   "relevant_keys": [
+    "c006",
+    "c002",
+    "c004",
+    "c008",
+    "c010"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q164",
+   "question": "What is the backup cadence?",
+   "expected_keys": [
+    "c008"
+   ],
+   "relevant_keys": [
+    "c008",
+    "c002",
+    "c004",
+    "c006",
+    "c010"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q165",
+   "question": "What is the main office?",
+   "expected_keys": [
+    "c010"
+   ],
+   "relevant_keys": [
+    "c010",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q166",
+   "question": "What is the protocol?",
+   "expected_keys": [
+    "c012"
+   ],
+   "relevant_keys": [
+    "c012",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q167",
+   "question": "What is the model?",
+   "expected_keys": [
+    "c014"
+   ],
+   "relevant_keys": [
+    "c014",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q168",
+   "question": "Who is the supplier?",
+   "expected_keys": [
+    "c016"
+   ],
+   "relevant_keys": [
+    "c016",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q169",
+   "question": "What is the storage engine?",
+   "expected_keys": [
+    "c018"
+   ],
+   "relevant_keys": [
+    "c018",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q170",
+   "question": "What is the queue limit?",
+   "expected_keys": [
+    "c020"
+   ],
+   "relevant_keys": [
+    "c020",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q171",
+   "question": "What is the recall budget?",
+   "expected_keys": [
+    "c022"
+   ],
+   "relevant_keys": [
+    "c022",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q172",
+   "question": "What is the standing budget?",
+   "expected_keys": [
+    "c024"
+   ],
+   "relevant_keys": [
+    "c024",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q173",
+   "question": "Which provider starts the search order?",
+   "expected_keys": [
+    "c026"
+   ],
+   "relevant_keys": [
+    "c026",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q174",
+   "question": "Which provider starts the fetch order?",
+   "expected_keys": [
+    "c028"
+   ],
+   "relevant_keys": [
+    "c028",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q175",
+   "question": "What is the speech model?",
+   "expected_keys": [
+    "c030"
+   ],
+   "relevant_keys": [
+    "c030",
+    "c002",
+    "c004",
+    "c006",
+    "c008"
+   ],
+   "category": "contradiction",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q176",
+   "question": "Does the user like busy venues?",
+   "expected_keys": [
+    "a001"
+   ],
+   "relevant_keys": [
+    "a001",
+    "a002",
+    "a003",
+    "a004",
+    "a005"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q177",
+   "question": "What does the user write in?",
+   "expected_keys": [
+    "a002"
+   ],
+   "relevant_keys": [
+    "a002",
+    "a001",
+    "a003",
+    "a004",
+    "a005"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q178",
+   "question": "How does the user like mornings?",
+   "expected_keys": [
+    "a003"
+   ],
+   "relevant_keys": [
+    "a003",
+    "a001",
+    "a002",
+    "a004",
+    "a005"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q179",
+   "question": "What music does the user dislike?",
+   "expected_keys": [
+    "a004"
+   ],
+   "relevant_keys": [
+    "a004",
+    "a001",
+    "a002",
+    "a003",
+    "a005"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q180",
+   "question": "Does the user like short strolls?",
+   "expected_keys": [
+    "a005"
+   ],
+   "relevant_keys": [
+    "a005",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q181",
+   "question": "What food does the user avoid?",
+   "expected_keys": [
+    "a006"
+   ],
+   "relevant_keys": [
+    "a006",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q182",
+   "question": "What films does the user enjoy?",
+   "expected_keys": [
+    "a007"
+   ],
+   "relevant_keys": [
+    "a007",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q183",
+   "question": "Which drink does the user favor?",
+   "expected_keys": [
+    "a008"
+   ],
+   "relevant_keys": [
+    "a008",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q184",
+   "question": "How does the user keep the desk?",
+   "expected_keys": [
+    "a009"
+   ],
+   "relevant_keys": [
+    "a009",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q185",
+   "question": "What books does the user read?",
+   "expected_keys": [
+    "a010"
+   ],
+   "relevant_keys": [
+    "a010",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q186",
+   "question": "How does the user like to travel?",
+   "expected_keys": [
+    "a011"
+   ],
+   "relevant_keys": [
+    "a011",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q187",
+   "question": "What weather does the user dislike?",
+   "expected_keys": [
+    "a012"
+   ],
+   "relevant_keys": [
+    "a012",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q188",
+   "question": "Does the user like preparing meals?",
+   "expected_keys": [
+    "a013"
+   ],
+   "relevant_keys": [
+    "a013",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q189",
+   "question": "How does the user take notes?",
+   "expected_keys": [
+    "a014"
+   ],
+   "relevant_keys": [
+    "a014",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q190",
+   "question": "Does the user stay up late?",
+   "expected_keys": [
+    "a015"
+   ],
+   "relevant_keys": [
+    "a015",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q191",
+   "question": "Does the user like bustling locations?",
+   "expected_keys": [
+    "a001"
+   ],
+   "relevant_keys": [
+    "a001",
+    "a002",
+    "a003",
+    "a004",
+    "a005"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q192",
+   "question": "What does the user use for notes?",
+   "expected_keys": [
+    "a014"
+   ],
+   "relevant_keys": [
+    "a014",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q193",
+   "question": "Which drink does the user choose?",
+   "expected_keys": [
+    "a008"
+   ],
+   "relevant_keys": [
+    "a008",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q194",
+   "question": "Does the user prefer trains?",
+   "expected_keys": [
+    "a011"
+   ],
+   "relevant_keys": [
+    "a011",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q195",
+   "question": "What books does the user enjoy?",
+   "expected_keys": [
+    "a010"
+   ],
+   "relevant_keys": [
+    "a010",
+    "a001",
+    "a002",
+    "a003",
+    "a004"
+   ],
+   "category": "paraphrase",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q196",
+   "question": "What is the primary project?",
+   "expected_keys": [
+    "d001"
+   ],
+   "relevant_keys": [
+    "d001",
+    "m001"
+   ],
+   "category": "duplicate",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q197",
+   "question": "What is the backup drive label?",
+   "expected_keys": [
+    "d002"
+   ],
+   "relevant_keys": [
+    "d002",
+    "m002"
+   ],
+   "category": "duplicate",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q198",
+   "question": "Where is the lab bench?",
+   "expected_keys": [
+    "d003"
+   ],
+   "relevant_keys": [
+    "d003",
+    "m003"
+   ],
+   "category": "duplicate",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q199",
+   "question": "What is the meeting room called?",
+   "expected_keys": [
+    "d004"
+   ],
+   "relevant_keys": [
+    "d004",
+    "m004"
+   ],
+   "category": "duplicate",
+   "as_of_micros": null,
+   "spot_check": false
+  },
+  {
+   "key": "q200",
+   "question": "Where is the coffee supply?",
+   "expected_keys": [
+    "d005"
+   ],
+   "relevant_keys": [
+    "d005",
+    "m005"
+   ],
+   "category": "duplicate",
+   "as_of_micros": null,
+   "spot_check": false
+  }
+ ],
+ "secrets": [
+  "sk-live-abcdefghijklmnop",
+  "ghp_abcdefghijklmnopqrstuvwxyz",
+  "xoxb-1234567890-abcdefghij",
+  "AKIAABCDEFGHIJKLMNOP",
+  "123456789:AAFabcdefghijklmnopqrstuvwxyz",
+  "api_key=abcdefgh12345678",
+  "password=hunter2hunter2",
+  "token=secretvalue123",
+  "secret=topsecretvalue",
+  "Bearer abcdefghijklmnop"
+ ]
+}
