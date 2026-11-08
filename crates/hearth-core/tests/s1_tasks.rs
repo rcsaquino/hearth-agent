@@ -340,3 +340,48 @@ fn a_retryable_failure_requeues_with_a_delay_and_resets_attempt() {
     assert_eq!(claimed.id, task.id);
     assert_eq!(claimed.attempt, 1);
 }
+
+#[test]
+fn a_non_retryable_failure_settles_the_task_as_failed() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({"n": 1})))
+        .expect("create task");
+    let claimed = session
+        .claim_task("worker-a", 60_000_000)
+        .expect("claim task")
+        .expect("a task is runnable");
+    let failed = session
+        .finish_task(
+            &claimed.id,
+            "worker-a",
+            StepOutput::Failed {
+                error: json!({"code": "fatal"}),
+                retryable: false,
+            },
+        )
+        .expect("non-retryable failure");
+    assert_eq!(failed.status, TaskStatus::Failed);
+    assert_eq!(failed.result, Some(json!({"code": "fatal"})));
+    assert_eq!(failed.terminal_at, Some(clock.now()));
+    assert!(failed.lease_owner.is_none());
+    assert!(failed.lease_until.is_none());
+    assert!(failed.next_wake_at.is_none());
+
+    assert!(
+        session
+            .claim_task("worker-b", 60_000_000)
+            .expect("claim failed task")
+            .is_none()
+    );
+    assert_eq!(
+        session
+            .task(&task.id)
+            .expect("read")
+            .expect("exists")
+            .status,
+        TaskStatus::Failed
+    );
+}
