@@ -1256,6 +1256,60 @@ impl Session {
         })?)
     }
 
+    /// Write one global meta value without a conversation commit.
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<(), CoreError> {
+        let key = key.to_owned();
+        let value = value.to_owned();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            writer.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key.as_str(), value.as_str()),
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Whether a non-terminal task of one kind exists.
+    pub fn has_open_task(&self, kind: &str) -> Result<bool, CoreError> {
+        let found: Option<i64> = self.storage.read(|reader| {
+            reader.query_optional(
+                "SELECT 1 FROM tasks WHERE kind = ? \
+                 AND status IN ('pending', 'running', 'asleep') LIMIT 1",
+                (kind,),
+                |row| row.get(0),
+            )
+        })?;
+        Ok(found.is_some())
+    }
+
+    /// Submissions that settled after `since`, oldest first.
+    pub fn submissions_settled_since(&self, since: i64) -> Result<Vec<Submission>, CoreError> {
+        let sql = format!(
+            "{SUBMISSION_SELECT} WHERE settled_at IS NOT NULL AND settled_at > ? \
+             ORDER BY settled_at, id"
+        );
+        let raw: Vec<RawSubmission> = self.storage.read(|reader| {
+            reader.query(&sql, (since,), |row| {
+                Ok(RawSubmission {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    request_id: row.get(2)?,
+                    kind: row.get(3)?,
+                    content_json: row.get(4)?,
+                    status: row.get(5)?,
+                    answer_entry_id: row.get(6)?,
+                    error_json: row.get(7)?,
+                    created_at: row.get(8)?,
+                    settled_at: row.get(9)?,
+                })
+            })
+        })?;
+        raw.into_iter()
+            .map(RawSubmission::into_submission)
+            .collect()
+    }
+
     pub fn telegram_offset(&self) -> Result<i64, CoreError> {
         let value: Option<String> = self.storage.read(|reader| {
             reader.query_optional(
