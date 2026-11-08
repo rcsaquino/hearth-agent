@@ -64,3 +64,32 @@ fn a_save_records_an_effect_intent() {
     assert_eq!(effect.task_id, None);
     assert_eq!(effect.settled_at, None);
 }
+
+#[test]
+fn a_duplicate_effect_key_reuses_the_existing_effect() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation_id = conversation(session);
+
+    let first = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({"n": 1}))),
+        )
+        .expect("first save");
+    let second = session
+        .save(
+            Save::new(&conversation_id)
+                .effect(EffectIntent::new("file_write", "write-1", json!({"n": 2}))),
+        )
+        .expect("second save");
+
+    assert_eq!(first.effect_ids, vec!["id-2".to_owned()]);
+    assert_eq!(second.effect_ids, vec!["id-2".to_owned()]);
+    let effect = session
+        .effect("id-2")
+        .expect("read effect")
+        .expect("effect exists");
+    assert_eq!(effect.payload["n"], 1, "the first intent wins");
+    assert_eq!(session.effect("id-3").expect("read missing"), None);
+}
