@@ -409,3 +409,68 @@ fn malformed_sse_is_a_protocol_error() {
     server.request();
     server.finish();
 }
+
+#[test]
+fn assistant_tool_calls_and_tool_results_translate() {
+    let server = FakeServer::start(vec![TestResponse::sse(&[
+        r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#,
+    ])]);
+    let request = ChatRequest {
+        model: "test-model".to_owned(),
+        messages: vec![
+            ChatMessage {
+                role: Role::Assistant,
+                blocks: vec![
+                    ContentBlock::Text("calling".to_owned()),
+                    ContentBlock::ToolCall(hearth_model::ToolCall {
+                        id: "call_1".to_owned(),
+                        name: "files".to_owned(),
+                        arguments: json!({"path": "a.txt"}),
+                    }),
+                ],
+            },
+            ChatMessage {
+                role: Role::Tool,
+                blocks: vec![ContentBlock::ToolResult {
+                    call_id: "call_1".to_owned(),
+                    content: "result".to_owned(),
+                }],
+            },
+        ],
+        tools: Vec::new(),
+        temperature: None,
+        max_tokens: None,
+        session_id: None,
+    };
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let events: Vec<StreamEvent> = provider
+        .stream(request)
+        .expect("stream")
+        .collect::<Result<_, _>>()
+        .expect("events");
+    assert_eq!(
+        events,
+        vec![
+            StreamEvent::TextDelta("ok".to_owned()),
+            StreamEvent::Done {
+                finish_reason: Some("stop".to_owned())
+            },
+        ]
+    );
+    let captured = server.request();
+    let messages = captured.body["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(messages[0]["content"], "calling");
+    assert_eq!(messages[0]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(messages[0]["tool_calls"][0]["type"], "function");
+    assert_eq!(messages[0]["tool_calls"][0]["function"]["name"], "files");
+    assert_eq!(
+        messages[0]["tool_calls"][0]["function"]["arguments"],
+        "{\"path\":\"a.txt\"}"
+    );
+    assert_eq!(messages[1]["role"], "tool");
+    assert_eq!(messages[1]["tool_call_id"], "call_1");
+    assert_eq!(messages[1]["content"], "result");
+    server.finish();
+}
