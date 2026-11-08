@@ -31,6 +31,10 @@ enum Command {
     Prompt(PromptArgs),
     /// Check settings, database, and lock without printing secrets.
     Doctor,
+    /// Back up the database into the home backups folder.
+    Backup,
+    /// Restore the database from a backup. Stop the daemon first.
+    Restore(RestoreArgs),
     /// Inspect or edit the skill library.
     Skills(SkillsArgs),
     /// Run the offline evaluation suite.
@@ -120,6 +124,12 @@ struct PromptArgs {
     /// Print the OpenAI-compatible wire body without sending it.
     #[arg(long)]
     wire: bool,
+}
+
+#[derive(Debug, clap::Args)]
+struct RestoreArgs {
+    /// Backup file to restore.
+    backup: PathBuf,
 }
 
 #[derive(Debug, clap::Args)]
@@ -228,6 +238,20 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             hearth_runtime::skills::run_cli(&home, command)?;
         }
         Command::Doctor => hearth_runtime::doctor(&home)?,
+        Command::Backup => {
+            let report = hearth_runtime::backup::backup(&home)?;
+            println!("backup: {}", report.path.display());
+            for path in report.removed {
+                println!("pruned: {}", path.display());
+            }
+        }
+        Command::Restore(args) => {
+            let report = hearth_runtime::backup::restore(&home, &args.backup)?;
+            println!("restored: {}", report.restored.display());
+            if let Some(pre_restore) = report.pre_restore {
+                println!("pre-restore: {}", pre_restore.display());
+            }
+        }
         Command::Eval(args) => run_eval(args)?,
     }
     Ok(())
