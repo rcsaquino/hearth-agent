@@ -52,15 +52,32 @@ impl TelegramSender {
     /// Deliver one final answer.
     pub fn send_reply(&self, chat_id: i64, markdown: &str) -> Result<SendOutcome, TelegramError> {
         if rich_fits(markdown) {
-            self.limiter.wait(&*self.sleeper);
-            match self.client.send_rich_message(chat_id, markdown) {
-                Ok(()) => return Ok(SendOutcome::Rich),
-                Err(TelegramError::Api {
-                    code: Some(code), ..
-                }) if (400..500).contains(&code) && code != 429 => {
-                    return self.send_fallback(chat_id, markdown);
+            let mut attempts = 0;
+            loop {
+                self.limiter.wait(&*self.sleeper);
+                match self.client.send_rich_message(chat_id, markdown) {
+                    Ok(()) => return Ok(SendOutcome::Rich),
+                    Err(
+                        error @ TelegramError::Api {
+                            code: Some(429),
+                            retry_after,
+                            ..
+                        },
+                    ) => {
+                        if attempts >= 2 {
+                            return Err(error);
+                        }
+                        self.sleeper
+                            .sleep(Duration::from_secs(retry_after.unwrap_or(1)));
+                        attempts += 1;
+                    }
+                    Err(TelegramError::Api {
+                        code: Some(code), ..
+                    }) if (400..500).contains(&code) => {
+                        return self.send_fallback(chat_id, markdown);
+                    }
+                    Err(error) => return Err(error),
                 }
-                Err(error) => return Err(error),
             }
         }
         self.send_fallback(chat_id, markdown)
