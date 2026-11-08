@@ -866,3 +866,29 @@ fn finishing_a_task_records_the_transition_commit() {
         assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
     }
 }
+
+#[test]
+fn recovery_records_a_requeue_commit() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 1_000)
+        .expect("claim task")
+        .expect("task is runnable");
+    clock.advance(2_000);
+
+    let report = session.recover_tasks().expect("recover tasks");
+    assert_eq!(report.requeued, 1);
+
+    let latest = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("recovery records a commit");
+    assert_eq!(latest.seq, 3);
+    assert_eq!(latest.kind, "task.recover");
+    assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
+}
