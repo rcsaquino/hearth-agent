@@ -36,12 +36,10 @@ fn submit(args: &[String]) -> Result<()> {
     let conversation = args.get(3).context("missing conversation id")?;
     let request_id = args.get(4).context("missing request id")?;
     let harness = Harness::open(&home)?;
-    let result = harness.session().submit(
-        conversation,
-        request_id,
-        "input",
-        json!({"text": "hello"}),
-    )?;
+    let result =
+        harness
+            .session()
+            .submit(conversation, request_id, "input", json!({"text": "hello"}))?;
     println!("created={}", result.created);
     Ok(())
 }

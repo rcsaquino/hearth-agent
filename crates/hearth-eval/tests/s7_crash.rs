@@ -183,13 +183,11 @@ fn a_crash_during_an_effect_replays_it_once() {
         let harness = Harness::open(home.path()).expect("open harness");
         let commit = harness
             .session()
-            .save(
-                Save::new(&conversation).effect(EffectIntent::new(
-                    "file_write",
-                    "s7-effect",
-                    serde_json::json!({"path": "s7.txt", "content": "hello"}),
-                )),
-            )
+            .save(Save::new(&conversation).effect(EffectIntent::new(
+                "file_write",
+                "s7-effect",
+                serde_json::json!({"path": "s7.txt", "content": "hello"}),
+            )))
             .expect("save effect intent");
         commit.effect_ids[0].clone()
     };
@@ -228,11 +226,7 @@ fn a_crash_during_an_effect_replays_it_once() {
         assert_eq!(commit.kind, "effect.started");
     }
 
-    let retry = run(
-        home.path(),
-        &["effects", home_text, workspace_text],
-        None,
-    );
+    let retry = run(home.path(), &["effects", home_text, workspace_text], None);
     assert!(
         retry.status.success(),
         "the effect retry failed: {}",
