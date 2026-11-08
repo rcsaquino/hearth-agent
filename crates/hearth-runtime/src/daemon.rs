@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::Path;
 
 use hearth_config::ConfigError;
-use hearth_storage::StorageError;
+use hearth_core::{CoreError, Harness};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use thiserror::Error;
@@ -13,7 +13,7 @@ pub enum DaemonError {
     #[error(transparent)]
     Config(#[from] ConfigError),
     #[error(transparent)]
-    Storage(#[from] StorageError),
+    Core(#[from] CoreError),
     #[error("another hearth daemon is already running (pid {0})")]
     AlreadyRunning(u32),
     #[error("another hearth daemon is already running")]
@@ -43,7 +43,14 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     writeln!(lock, "{}", std::process::id())?;
     lock.flush()?;
 
-    let _connection = hearth_storage::open(&home.join("hearth.db"))?;
+    let harness = Harness::open(home)?;
+    let recovery = harness.session().recover_tasks()?;
+    tracing::info!(
+        requeued = recovery.requeued,
+        poisoned = recovery.poisoned,
+        woken = recovery.woken,
+        "task recovery complete"
+    );
 
     tracing::info!(
         pid = std::process::id(),
@@ -54,6 +61,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     if let Some(signal) = signals.forever().next() {
         tracing::info!(signal, "hearth daemon stopping");
     }
+    drop(harness);
     Ok(())
 }
 

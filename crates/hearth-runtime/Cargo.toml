@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 hearth-config = { path = "../hearth-config" }
+hearth-core = { path = "../hearth-core" }
 hearth-storage = { version = "0.1.0", path = "../hearth-storage" }
 serde_json = "1.0.154"
 signal-hook = "0.4.6"

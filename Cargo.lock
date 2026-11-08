@@ -274,6 +274,7 @@ name = "hearth-runtime"
 version = "0.1.0"
 dependencies = [
  "hearth-config",
+ "hearth-core",
  "hearth-storage",
  "serde_json",
  "signal-hook",
