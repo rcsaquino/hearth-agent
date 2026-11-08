@@ -341,4 +341,23 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - The agent turn limit counts provider requests. Reaching it saves a notice,
   settles the submission unanswered with reason `turn_limit`, and fails the task.
 - The shell timeout kills the shell process; a process group kill is deferred.
-- Web search, web fetch, and the message tool are deferred.
+- Web fetch and the message tool are deferred.
+
+## 2026-11-08: M2c-1 web search
+
+- Exa is the zero-config provider. It uses the keyless MCP search endpoint by
+  default and switches to the REST search endpoint when an Exa API key is
+  configured.
+- Brave, DeepSeek, Firecrawl, and TinyFish are included only when their API key is
+  present and non-empty. The provider order comes from `web.search.order`; a
+  provider failure falls through to the next one.
+- The tool runs at most `web.search.parallel` queries at a time, requests
+  `web.search.results` per query, deduplicates by URL in query order, and returns
+  at most `web.search.max_results`.
+- There is no answer synthesis and no page scraping. Results are title, URL,
+  snippet, and date.
+- A partial failure returns the successful results plus an `errors` array. A total
+  failure returns the first provider error and is retryable only when every
+  failure was retryable.
+- Provider errors contain a status and a short body excerpt, never headers or
+  credentials. Tests use local fake servers only.
