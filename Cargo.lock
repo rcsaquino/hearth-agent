@@ -434,7 +434,9 @@ version = "0.1.0"
 name = "hearth-tools"
 version = "0.1.0"
 dependencies = [
+ "hearth-model",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

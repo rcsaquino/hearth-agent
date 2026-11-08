@@ -92,9 +92,10 @@ impl EffectWorker {
     fn execute(&self, effect: &Effect) -> Result<Value, ToolError> {
         match effect.kind.as_str() {
             "file_write" => self.files.write(&effect.payload),
-            other => Err(ToolError::Invalid(format!(
-                "unsupported effect kind: {other}"
-            ))),
+            other => Err(ToolError::invalid(
+                "unsupported_effect",
+                format!("unsupported effect kind: {other}"),
+            )),
         }
     }
 }

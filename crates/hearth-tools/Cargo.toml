@@ -7,6 +7,7 @@ rust-version.workspace = true
 authors.workspace = true
 
 [dependencies]
+hearth-model = { path = "../hearth-model" }
 serde_json = "1"
 thiserror = "2"
 
