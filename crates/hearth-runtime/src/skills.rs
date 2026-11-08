@@ -303,6 +303,37 @@ impl SkillLibrary {
         Ok(Some(skill))
     }
 
+    /// Record the outcome of using a learned skill. A success resets the
+    /// consecutive-failure counter; the load already counted the use.
+    pub fn record_outcome(&self, name: &str, success: bool) -> Result<Option<Skill>, SkillError> {
+        let Some(mut skill) = self.find_learned(name)? else {
+            return Ok(None);
+        };
+        if success {
+            skill.successes = skill.successes.saturating_add(1);
+            skill.failures = 0;
+        } else {
+            skill.failures = skill.failures.saturating_add(1);
+        }
+        skill.updated = now();
+        skill.last_used = Some(now());
+        write_skill(&skill)?;
+        self.append_changelog(&skill, if success { "success" } else { "failure" })?;
+        Ok(Some(skill))
+    }
+
+    /// Change the lifecycle status of one learned skill.
+    pub fn set_status(&self, name: &str, status: SkillStatus) -> Result<Skill, SkillError> {
+        let Some(mut skill) = self.find_learned(name)? else {
+            return Err(SkillError::NotFound(name.to_owned()));
+        };
+        skill.status = status;
+        skill.updated = now();
+        write_skill(&skill)?;
+        self.append_changelog(&skill, status.as_str())?;
+        Ok(skill)
+    }
+
     /// Save a new learned skill or a new version of an existing one.
     pub fn save_learned(&self, save: SkillSave) -> Result<Skill, SkillError> {
         let name = save.name.clone();
