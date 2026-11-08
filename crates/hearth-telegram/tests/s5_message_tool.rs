@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -128,6 +128,20 @@ impl hearth_telegram::Sleeper for NoopSleeper {
 
 fn sender(base: &str) -> TelegramSender {
     TelegramSender::new(client(base), Arc::new(NoopSleeper))
+}
+
+#[derive(Default)]
+struct RecordingSleeper {
+    sleeps: Mutex<Vec<Duration>>,
+}
+
+impl hearth_telegram::Sleeper for RecordingSleeper {
+    fn sleep(&self, duration: Duration) {
+        self.sleeps
+            .lock()
+            .expect("sleeps")
+            .push(duration);
+    }
 }
 
 #[test]
@@ -370,4 +384,35 @@ fn the_message_tool_carries_a_thread_id() {
     let body = text(&requests[0].body);
     assert!(body.contains("name=\"message_thread_id\""));
     assert!(body.contains("9"));
+}
+
+#[test]
+fn message_tool_sends_wait_for_the_sender_limiter() {
+    let workspace = TempDir::new().expect("workspace");
+    let spill = TempDir::new().expect("spill");
+    let outbound = TempDir::new().expect("outbound");
+    file(workspace.path(), "one.png", b"ONE");
+    file(workspace.path(), "two.png", b"TWO");
+    let (base, server) = bot_server(vec![single(401), single(402)]);
+    let sleeper = Arc::new(RecordingSleeper::default());
+    let tool = MessageTool::new(
+        TelegramSender::new(client(&base), sleeper.clone()),
+        42,
+        None,
+        workspace.path(),
+        spill.path(),
+        outbound.path(),
+        None,
+    );
+
+    tool.call(&json!({"path": "one.png"})).expect("first send");
+    tool.call(&json!({"path": "two.png"})).expect("second send");
+    let requests = server.join().expect("server");
+    assert_eq!(requests.len(), 2);
+
+    let sleeps = sleeper.sleeps.lock().expect("sleeps");
+    assert!(
+        sleeps.iter().any(|duration| *duration >= Duration::from_millis(33)),
+        "message sends did not share the sender limiter: {sleeps:?}"
+    );
 }
