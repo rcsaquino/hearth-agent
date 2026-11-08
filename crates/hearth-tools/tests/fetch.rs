@@ -111,7 +111,11 @@ fn target(server: &Server, path: &str) -> String {
 fn jina_is_tried_first_and_labels_untrusted_content() {
     let jina = serve(vec![reply(200, "text/markdown", "# Hello\n\nWorld")]);
     let provider = Arc::new(JinaFetch::new(jina.base.clone(), None).expect("jina"));
-    let tool = WebFetchTool::new(vec![provider], false);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let fallback = Arc::new(CountingProvider {
+        calls: Arc::clone(&calls),
+    });
+    let tool = WebFetchTool::new(vec![provider, fallback], false);
 
     let output = tool
         .call(&json!({"url": "https://93.184.216.34/page"}))
@@ -129,6 +133,7 @@ fn jina_is_tried_first_and_labels_untrusted_content() {
     );
     assert!(output.content.contains("# Hello"));
     assert!(output.content.contains("World"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "the fallback ran");
 
     let captured = jina.thread.join().expect("jina thread");
     assert_eq!(captured.len(), 1);

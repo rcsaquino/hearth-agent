@@ -379,3 +379,8 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
 - The specification was bumped to Draft 0.4 for this change.
 - The TinyFish, Firecrawl, and DeepSeek fetch providers are accepted by the settings
   now and are implemented in M2c-2b.
+
+New dependencies for the fetch work: reqwest gained the gzip and brotli
+features for compressed pages, html2text extracts readable HTML, and
+pdf-extract extracts PDF text. They are confined to hearth-tools and covered by
+local fake-server and fixture tests.
