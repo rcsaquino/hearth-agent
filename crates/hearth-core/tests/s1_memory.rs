@@ -1,4 +1,4 @@
-use hearth_core::{Harness, MemoryChange, MemoryWrite, NewMemory, Save};
+use hearth_core::{CoreError, Harness, MemoryChange, MemoryWrite, NewMemory, Save};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -124,4 +124,95 @@ fn forget_removes_the_search_row_and_keeps_the_tombstone() {
         1
     );
     assert_eq!(count(session, "SELECT COUNT(*) FROM memory_events"), 2);
+}
+
+#[test]
+fn latest_user_entry_id_tracks_the_newest_user_entry() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("conversation");
+    assert!(
+        session
+            .latest_user_entry_id(&conversation.id)
+            .expect("latest")
+            .is_none()
+    );
+    session
+        .submit(&conversation.id, "req-1", "input", json!({"text": "one"}))
+        .expect("first");
+    let first = session
+        .latest_user_entry_id(&conversation.id)
+        .expect("latest first")
+        .expect("first entry");
+    session
+        .submit(&conversation.id, "req-2", "input", json!({"text": "two"}))
+        .expect("second");
+    let second = session
+        .latest_user_entry_id(&conversation.id)
+        .expect("latest second")
+        .expect("second entry");
+    assert_ne!(first, second);
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(second, history.last().expect("last entry").id);
+    assert_eq!(history.last().expect("last entry").kind, "user");
+}
+
+#[test]
+fn a_save_updates_meta_only_when_the_expected_value_matches() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("conversation");
+
+    session
+        .save(Save::new(&conversation.id).meta("standing_version", None, "1"))
+        .expect("create meta");
+    assert_eq!(
+        session.meta_value("standing_version").expect("read"),
+        Some("1".to_owned())
+    );
+
+    let error = session
+        .save(Save::new(&conversation.id).meta("standing_version", Some("0".to_owned()), "2"))
+        .expect_err("stale meta must fail");
+    assert!(matches!(error, CoreError::MetaVersion { .. }));
+    assert_eq!(
+        session.meta_value("standing_version").expect("read"),
+        Some("1".to_owned())
+    );
+
+    session
+        .save(Save::new(&conversation.id).meta("standing_version", Some("1".to_owned()), "2"))
+        .expect("update meta");
+    assert_eq!(
+        session.meta_value("standing_version").expect("read"),
+        Some("2".to_owned())
+    );
+}
+
+#[test]
+fn a_meta_mismatch_rolls_back_a_memory_write() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("conversation");
+    let item = memory(session, "Sam likes coffee", "fp-coffee");
+
+    let error = session
+        .save(
+            Save::new(&conversation.id)
+                .memory(MemoryWrite::new(MemoryChange::Add(item), "agent"))
+                .meta("standing_version", Some("9".to_owned()), "10"),
+        )
+        .expect_err("meta mismatch must abort");
+    assert!(matches!(error, CoreError::MetaVersion { .. }));
+    assert_eq!(count(session, "SELECT COUNT(*) FROM memory_items"), 0);
+    assert_eq!(
+        session.meta_value("standing_version").expect("read"),
+        None
+    );
 }
