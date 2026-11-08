@@ -546,7 +546,7 @@ impl HelperPool {
             if eta_rx
                 .recv_timeout(Duration::from_secs(expected.max(0) as u64))
                 .is_err()
-                && eta_parent != ""
+                && !eta_parent.is_empty()
             {
                 let text = format!("Helper {eta_task} is taking longer than expected.");
                 let _ = send_notice(
