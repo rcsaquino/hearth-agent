@@ -63,7 +63,10 @@ impl Server {
                     Ok((mut stream, _)) => {
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                         let request = read_request(&mut stream);
-                        thread_requests.lock().expect("requests").push(request.clone());
+                        thread_requests
+                            .lock()
+                            .expect("requests")
+                            .push(request.clone());
                         let reply = reply(&request);
                         let header = format!(
                             "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -152,7 +155,10 @@ fn normal_reply(request: &Recorded) -> Reply {
         return Reply::json(json!({"ok": true}));
     }
     if request.method == "GET" && request.path.contains("/tabs/tab-1/screenshot") {
-        return Reply::bytes("image/png", vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+        return Reply::bytes(
+            "image/png",
+            vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+        );
     }
     Reply::json(json!({"error": "not found"}))
 }
@@ -207,7 +213,10 @@ fn saves_a_screenshot_inside_the_workspace() {
     let file = home.path().join("shots/page.png");
     assert!(file.is_file());
     let bytes = std::fs::read(&file).expect("read image");
-    assert_eq!(&bytes[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+    assert_eq!(
+        &bytes[..8],
+        &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
