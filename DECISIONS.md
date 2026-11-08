@@ -220,3 +220,20 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   the daemon joins it before dropping the Harness and releasing the lock.
 - The workspace root is `agent.workspace` when configured, resolved relative to the
   home, otherwise `$HEARTH_HOME/workspace`.
+
+## 2026-11-08: M1c crash suite
+
+- `HEARTH_CRASH_AT` names one crash point and is inert otherwise. `crash_if` aborts
+  with `std::process::abort()`.
+- Covered points: `before_commit` (the transaction is open and no commit exists),
+  `after_commit` (the commit is durable and the caller never returns), and
+  `during_effect` (the file is written, the effect is still started, and no outcome
+  is saved).
+- `mid_stream` is deferred to M2, when provider streaming exists.
+- The S7 suite runs a separate `crash-driver` process in `hearth-eval`, never the
+  test process, and sets the child's working directory to the temp home so a core
+  dump cannot dirty the repository.
+- S7 results: `before_commit` leaves no entry and no commit, and the retry uses
+  sequence 1; `after_commit` preserves one submission and a repeated request id is
+  harmless; `during_effect` leaves a started effect and a written file, and restart
+  requeues and replays it idempotently with attempts 2.
