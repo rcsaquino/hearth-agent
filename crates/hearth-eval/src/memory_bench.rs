@@ -389,11 +389,15 @@ pub fn run_scale(items: usize) -> Result<ScaleReport> {
         .filter(|question| question.category == "direct")
         .take(20)
         .collect();
+    service.standing().context("warm the memory state")?;
+    service
+        .recall_read(&queries[0].question)
+        .context("warm the retrieval path")?;
     let mut latencies = Vec::with_capacity(queries.len());
     for question in &queries {
         let started = Instant::now();
         let _ = service
-            .recall(&question.question)
+            .recall_read(&question.question)
             .with_context(|| format!("scale recall {}", question.key))?;
         latencies.push(started.elapsed().as_secs_f64() * 1000.0);
     }

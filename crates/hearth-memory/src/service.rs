@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::constants::{
     IMPORTANCE_WEIGHT, NEAR_DUPLICATE, PROMOTE_IMPORTANCE, RECENCY_HALF_LIFE_DAYS, RECENCY_WEIGHT,
-    RRF_K, STALENESS_WEIGHT, TRIVIAL,
+    RRF_K, STALENESS_WEIGHT, STOPWORDS, TRIVIAL,
 };
 use crate::types::{
     MemoryError, MemoryItem, MemoryKind, MemoryStats, MemoryStatus, SourceKind, Standing,
@@ -372,21 +372,30 @@ impl MemoryService {
     /// The current standing-memory block and its version.
     pub fn standing(&self) -> Result<StandingMemory, MemoryError> {
         let now = self.session.now_micros();
-        let sql = format!(
+        let promoted_sql = format!(
             "{MEMORY_SELECT} WHERE status = 'active' \
              AND (valid_from IS NULL OR valid_from <= ?) \
              AND (valid_to IS NULL OR valid_to > ?) \
-             AND (standing IN ('pinned','promoted') \
-                  OR (importance >= {PROMOTE_IMPORTANCE} \
-                      AND kind IN ('rule','preference','person'))) \
-             ORDER BY CASE standing WHEN 'pinned' THEN 0 \
-                      WHEN 'promoted' THEN 1 ELSE 2 END, \
+             AND standing IN ('pinned','promoted') \
+             ORDER BY CASE standing WHEN 'pinned' THEN 0 ELSE 1 END, \
                       importance DESC, COALESCE(last_used_at, 0) DESC, created_at"
         );
-        let raw: Vec<RawMemory> =
-            self.read(|reader| reader.query(&sql, (now, now), |row| Ok(RawMemory::from_row(row))))?;
+        let promotable_sql = format!(
+            "{MEMORY_SELECT} WHERE status = 'active' \
+             AND (valid_from IS NULL OR valid_from <= ?) \
+             AND (valid_to IS NULL OR valid_to > ?) \
+             AND standing = 'none' AND importance >= {PROMOTE_IMPORTANCE} \
+             AND kind IN ('rule','preference','person') \
+             ORDER BY importance DESC, COALESCE(last_used_at, 0) DESC, created_at"
+        );
+        let promoted: Vec<RawMemory> = self.read(|reader| {
+            reader.query(&promoted_sql, (now, now), |row| Ok(RawMemory::from_row(row)))
+        })?;
+        let promotable: Vec<RawMemory> = self.read(|reader| {
+            reader.query(&promotable_sql, (now, now), |row| Ok(RawMemory::from_row(row)))
+        })?;
         let mut candidates = Vec::new();
-        for row in raw {
+        for row in promoted.into_iter().chain(promotable) {
             candidates.push(row.into_item()?);
         }
 
@@ -480,7 +489,35 @@ impl MemoryService {
     }
 
     /// Retrieve a small, diverse set of memories relevant to the input.
+    /// This also records last use and is the model-facing path.
     pub fn recall(&self, query: &str) -> Result<Vec<MemoryItem>, MemoryError> {
+        let mut selected = self.recall_read(query)?;
+        if !selected.is_empty() {
+            let now = self.session.now_micros();
+            let writes: Vec<MemoryWrite> = selected
+                .iter()
+                .map(|item| {
+                    MemoryWrite::new(
+                        MemoryChange::Update(MemoryUpdate {
+                            id: item.id.clone(),
+                            last_used_at: Some(now),
+                            ..MemoryUpdate::default()
+                        }),
+                        "session",
+                    )
+                })
+                .collect();
+            self.session.save_memory(writes)?;
+            for item in &mut selected {
+                item.last_used_at = Some(now);
+            }
+        }
+        Ok(selected)
+    }
+
+    /// Retrieve memory without recording last use. Used by latency checks and
+    /// callers that batch their own touch.
+    pub fn recall_read(&self, query: &str) -> Result<Vec<MemoryItem>, MemoryError> {
         if trivial(query) {
             return Ok(Vec::new());
         }
@@ -546,6 +583,11 @@ impl MemoryService {
             if selected.len() >= self.policy.recall_max_items {
                 break;
             }
+            // Standing memory is already in the L3 prompt. Keep it out of the
+            // recall selection so it cannot crowd query-specific matches.
+            if item.standing != Standing::None {
+                continue;
+            }
             if kind_counts.get(&item.kind).copied().unwrap_or(0) >= 2 {
                 continue;
             }
@@ -565,25 +607,6 @@ impl MemoryService {
             selected.push(item);
         }
 
-        if !selected.is_empty() {
-            let writes: Vec<MemoryWrite> = selected
-                .iter()
-                .map(|item| {
-                    MemoryWrite::new(
-                        MemoryChange::Update(MemoryUpdate {
-                            id: item.id.clone(),
-                            last_used_at: Some(now),
-                            ..MemoryUpdate::default()
-                        }),
-                        "session",
-                    )
-                })
-                .collect();
-            self.session.save_memory(writes)?;
-            for item in &mut selected {
-                item.last_used_at = Some(now);
-            }
-        }
         Ok(selected)
     }
 
@@ -673,7 +696,7 @@ impl MemoryService {
     fn tag_matches(&self, query: &str) -> Result<Vec<MemoryItem>, MemoryError> {
         let tags: Vec<String> = tokens(query)
             .into_iter()
-            .filter(|token| token.len() >= 3)
+            .filter(|token| token.len() >= 3 && !STOPWORDS.contains(&token.as_str()))
             .collect();
         if tags.is_empty() {
             return Ok(Vec::new());
@@ -1001,6 +1024,7 @@ fn jaccard(left: &BTreeSet<String>, right: &BTreeSet<String>) -> f64 {
 fn fts_query(query: &str) -> String {
     tokens(query)
         .into_iter()
+        .filter(|token| !STOPWORDS.contains(&token.as_str()))
         .map(|token| format!("\"{token}\""))
         .collect::<Vec<_>>()
         .join(" OR ")

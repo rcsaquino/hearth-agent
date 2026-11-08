@@ -126,13 +126,15 @@ keys.
   the memory library.
 
 The exact DDL is the versioned set under `crates/hearth-storage/migrations/`
-(`0001.sql`, `0002.sql`), applied by `MIGRATION_0001` and `MIGRATION_0002`. The
+(`0001.sql`, `0002.sql`, `0003.sql`), applied by the matching migrations. The
 migrations are the executable schema authority; if this document and a migration
 disagree, the migration wins. `memory_items` also has a `fingerprint` column and
 index for exact-duplicate detection, and `effects` has a `UNIQUE (kind, key)`
-constraint. Migration 0002 rebuilds `memory_fts` with the porter stemmer.
+constraint. Migration 0002 rebuilds `memory_fts` with the porter stemmer. Migration 0003 adds
+partial indexes for active standing rows and promotable candidates.
 
 ## Indexes
 
 `entries(conversation_id, seq)`, `tasks(status, next_wake_at)`, `submissions(status)`,
-`memory_items(status, kind)`, `usage_events(ts)`, `effects(status)`.
+`memory_items(status, kind)`, `usage_events(ts)`, `effects(status)`, plus the
+partial `memory_items_active_standing` and `memory_items_promotable` indexes.

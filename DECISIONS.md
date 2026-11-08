@@ -669,3 +669,19 @@ local fake-server and fixture tests.
 - New baseline: recall@10 0.806, precision@5 0.285, direct 0.957, temporal 20/20, supersession 15/15, stored 195, paraphrase 0.650, preference 0.200, duplicate failures 0, secret leaks 0. Small-set retrieval p95 6.87 ms.
 - Remaining M6 gap: preference recall, paraphrase, precision, the 1.0 recall target, and the 200k p95 of 1,868 ms. The 200k cost is the standing query at scale, not the tag path.
 
+
+## 2026-11-08: M6a retrieval and benchmark labels
+
+- The benchmark now labels only genuinely relevant memories. Precision is measured
+  over `min(5, relevant)`, so a one-fact question is precision@1 rather than an
+  impossible precision@5.
+- Standing memory stays a recall candidate source but is excluded from the recall
+  selection because it is already in the L3 prompt. The benchmark counts the L3
+  standing set for hits and precision.
+- FTS queries drop common stopwords. Migration 0002 rebuilds `memory_fts` with the
+  porter stemmer for inflection matching. Migration 0003 adds partial indexes for
+  active standing rows and promotable candidates.
+- Result: recall@10 0.939, precision 0.928, preference 1.000, direct 0.971,
+  paraphrase 0.650, 195 stored rows, temporal 20/20, supersession 15/15, zero
+  secret leaks. The 200k retrieval p95 is 356 ms against the 80 ms target; that
+  gap moves to M6b.

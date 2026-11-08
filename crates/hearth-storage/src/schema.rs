@@ -4,3 +4,6 @@ pub const MIGRATION_0001: &str = include_str!("../migrations/0001.sql");
 
 /// Migration 0002 rebuilds memory search with the porter stemmer.
 pub const MIGRATION_0002: &str = include_str!("../migrations/0002.sql");
+
+/// Migration 0003 indexes standing selection and promotable candidates.
+pub const MIGRATION_0003: &str = include_str!("../migrations/0003.sql");
