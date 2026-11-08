@@ -287,3 +287,34 @@ fn tool_call_deltas_assemble_into_one_call() {
     server.request();
     server.finish();
 }
+
+#[test]
+fn usage_chunk_maps_every_token_field() {
+    let server = FakeServer::start(vec![TestResponse::sse(&[
+        r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cached_tokens":40},"cache_creation_input_tokens":10,"completion_tokens_details":{"reasoning_tokens":5}}}"#,
+    ])]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let events: Vec<StreamEvent> = provider
+        .stream(request())
+        .expect("stream")
+        .collect::<Result<_, _>>()
+        .expect("events");
+    assert_eq!(
+        events,
+        vec![
+            StreamEvent::Usage(hearth_model::Usage {
+                input_tokens: 100,
+                cache_read_tokens: 40,
+                cache_write_tokens: 10,
+                output_tokens: 20,
+                reasoning_tokens: 5,
+            }),
+            StreamEvent::Done {
+                finish_reason: Some("stop".to_owned())
+            },
+        ]
+    );
+    server.request();
+    server.finish();
+}
