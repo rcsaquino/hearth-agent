@@ -733,11 +733,7 @@ fn a_busy_attachment_is_not_downloaded() {
     let report = poller.poll_once().expect("poll");
     assert_eq!(report.busy, 1);
     let requests = api.requests();
-    assert!(
-        requests
-            .iter()
-            .all(|request| request.method != "getFile")
-    );
+    assert!(requests.iter().all(|request| request.method != "getFile"));
     assert!(
         requests
             .iter()

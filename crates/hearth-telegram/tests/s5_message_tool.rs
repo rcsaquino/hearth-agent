@@ -137,10 +137,7 @@ struct RecordingSleeper {
 
 impl hearth_telegram::Sleeper for RecordingSleeper {
     fn sleep(&self, duration: Duration) {
-        self.sleeps
-            .lock()
-            .expect("sleeps")
-            .push(duration);
+        self.sleeps.lock().expect("sleeps").push(duration);
     }
 }
 
@@ -412,7 +409,9 @@ fn message_tool_sends_wait_for_the_sender_limiter() {
 
     let sleeps = sleeper.sleeps.lock().expect("sleeps");
     assert!(
-        sleeps.iter().any(|duration| *duration >= Duration::from_millis(33)),
+        sleeps
+            .iter()
+            .any(|duration| *duration >= Duration::from_millis(33)),
         "message sends did not share the sender limiter: {sleeps:?}"
     );
 }

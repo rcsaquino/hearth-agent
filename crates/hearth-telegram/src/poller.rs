@@ -175,11 +175,7 @@ impl TelegramPoller {
                 }
             };
 
-            if self
-                .session
-                .queued_submission_count(&conversation.id)?
-                >= MAX_QUEUED_PER_CHAT
-            {
+            if self.session.queued_submission_count(&conversation.id)? >= MAX_QUEUED_PER_CHAT {
                 let notify = self
                     .busy_notified
                     .lock()
