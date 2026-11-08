@@ -18,6 +18,11 @@ fn memory_scale_200k() {
     let report = hearth_eval::memory_bench::run_scale(200_000).expect("scale benchmark");
     assert_eq!(report.items, 200_000);
     assert_eq!(report.queries, 20);
+    assert!(
+        report.retrieval_ms_p95 <= 80.0,
+        "200k retrieval p95 was {} ms; {report:#?}",
+        report.retrieval_ms_p95
+    );
     println!("{report:#?}");
 }
 
