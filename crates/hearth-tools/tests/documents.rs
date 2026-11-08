@@ -189,3 +189,90 @@ fn rejects_unsupported_corrupt_and_empty_documents() {
         .expect_err("missing document");
     assert_eq!(missing.code, "not_found");
 }
+
+#[test]
+fn creates_and_round_trips_each_document_format() {
+    let (_directory, workspace, spill, media) = roots();
+    let documents = tool(&workspace, &spill, &media);
+    for (format, path) in [
+        ("pdf", "made/sample.pdf"),
+        ("docx", "made/sample.docx"),
+        ("pptx", "made/sample.pptx"),
+        ("xlsx", "made/sample.xlsx"),
+    ] {
+        let created = documents
+            .call(&json!({
+                "action": "create",
+                "format": format,
+                "path": path,
+                "title": "Created Title",
+                "content": "First line\nSecond line"
+            }))
+            .unwrap_or_else(|error| panic!("create {format}: {}", error.message));
+        assert!(created.content.contains(path), "{}", created.content);
+        assert!(!created.is_error);
+        let file = workspace.join(path);
+        assert!(file.is_file(), "missing {}", file.display());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&file).expect("mode").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{format} mode was {mode:o}");
+        }
+        let extracted = documents
+            .call(&json!({"action": "extract", "path": path}))
+            .unwrap_or_else(|error| panic!("extract {format}: {}", error.message));
+        assert!(
+            extracted.content.contains("Created Title"),
+            "{format} lost the title: {}",
+            extracted.content
+        );
+        assert!(
+            extracted.content.contains("First line"),
+            "{format} lost the body: {}",
+            extracted.content
+        );
+    }
+}
+
+#[test]
+fn rejects_bad_document_creation_requests() {
+    let (_directory, workspace, spill, media) = roots();
+    let documents = tool(&workspace, &spill, &media);
+
+    let format = documents
+        .call(&json!({"action": "create", "format": "txt", "path": "a.txt", "content": "x"}))
+        .expect_err("unsupported create format");
+    assert_eq!(format.code, "unsupported_format");
+
+    let escape = documents
+        .call(&json!({"action": "create", "format": "pdf", "path": "../out.pdf", "content": "x"}))
+        .expect_err("create escape");
+    assert!(
+        escape.code == "invalid_path" || escape.code == "path_escape",
+        "{}",
+        escape.code
+    );
+
+    let content = documents
+        .call(&json!({"action": "create", "format": "pdf", "path": "a.pdf"}))
+        .expect_err("missing content");
+    assert_eq!(content.code, "invalid_arguments");
+}
+
+#[test]
+fn overwrites_an_existing_document() {
+    let (_directory, workspace, spill, media) = roots();
+    let documents = tool(&workspace, &spill, &media);
+    documents
+        .call(&json!({"action": "create", "format": "pdf", "path": "same.pdf", "content": "First version"}))
+        .expect("first create");
+    documents
+        .call(&json!({"action": "create", "format": "pdf", "path": "same.pdf", "content": "Second version"}))
+        .expect("second create");
+    let extracted = documents
+        .call(&json!({"action": "extract", "path": "same.pdf"}))
+        .expect("extract");
+    assert!(extracted.content.contains("Second version"));
+    assert!(!extracted.content.contains("First version"));
+}
