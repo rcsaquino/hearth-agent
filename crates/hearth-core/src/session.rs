@@ -96,10 +96,31 @@ impl Session {
         transport: &str,
         transport_key: &str,
     ) -> Result<Conversation, CoreError> {
+        self.create_conversation_record(title, transport, transport_key, None)
+    }
+
+    /// Create a conversation linked to a parent conversation.
+    pub fn create_conversation_with_parent(
+        &self,
+        title: &str,
+        transport: &str,
+        transport_key: &str,
+        parent_id: &str,
+    ) -> Result<Conversation, CoreError> {
+        self.create_conversation_record(title, transport, transport_key, Some(parent_id))
+    }
+
+    fn create_conversation_record(
+        &self,
+        title: &str,
+        transport: &str,
+        transport_key: &str,
+        parent_id: Option<&str>,
+    ) -> Result<Conversation, CoreError> {
         let now = self.clock.now_micros();
         let conversation = Conversation {
             id: self.ids.new_id(),
-            parent_id: None,
+            parent_id: parent_id.map(str::to_owned),
             parent_entry_id: None,
             title: title.to_owned(),
             transport: transport.to_owned(),
@@ -113,9 +134,10 @@ impl Session {
             writer.execute(
                 "INSERT INTO conversations (id, parent_id, parent_entry_id, title, transport, \
                  transport_key, created_at, updated_at, archived) \
-                 VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, 0)",
+                 VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 0)",
                 (
                     insert.id.as_str(),
+                    insert.parent_id.as_deref(),
                     insert.title.as_str(),
                     insert.transport.as_str(),
                     insert.transport_key.as_str(),
@@ -913,6 +935,18 @@ impl Session {
             }
         }
         Ok(counts)
+    }
+
+    /// Count pending and running tasks of one kind.
+    pub fn active_task_count(&self, kind: &str) -> Result<usize, CoreError> {
+        let count: i64 = self.storage.read(|reader| {
+            reader.query_row(
+                "SELECT COUNT(*) FROM tasks WHERE kind = ? AND status IN ('pending','running')",
+                (kind,),
+                |row| row.get(0),
+            )
+        })?;
+        Ok(count as usize)
     }
 
     /// Sum usage recorded at or after `ts` in UTC microseconds.
@@ -1735,6 +1769,66 @@ impl Session {
             })
         })?;
         raw.map(RawTask::into_task).transpose()
+    }
+
+    /// List tasks of one kind, newest first.
+    pub fn tasks_by_kind(&self, kind: &str) -> Result<Vec<Task>, CoreError> {
+        let sql = format!("{TASK_SELECT} WHERE kind = ? ORDER BY created_at DESC, id DESC");
+        let raw: Vec<RawTask> = self.storage.read(|reader| {
+            reader.query(&sql, (kind,), |row| {
+                Ok(RawTask {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    parent_task_id: row.get(2)?,
+                    kind: row.get(3)?,
+                    version: row.get(4)?,
+                    status: row.get(5)?,
+                    phase: row.get(6)?,
+                    attempt: row.get(7)?,
+                    input_json: row.get(8)?,
+                    checkpoint_json: row.get(9)?,
+                    result_json: row.get(10)?,
+                    lease_owner: row.get(11)?,
+                    lease_until: row.get(12)?,
+                    next_wake_at: row.get(13)?,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
+                    terminal_at: row.get(16)?,
+                })
+            })
+        })?;
+        raw.into_iter().map(RawTask::into_task).collect()
+    }
+
+    /// Abort a pending, running, or sleeping task exactly once.
+    pub fn abort_task(&self, task_id: &str, result: Value) -> Result<Task, CoreError> {
+        let now = self.clock.now_micros();
+        let task_id = task_id.to_owned();
+        self.storage.write(move |writer| -> Result<Task, CoreError> {
+            let task = load_task(writer, &task_id)?
+                .ok_or_else(|| CoreError::TaskNotFound(task_id.clone()))?;
+            if task.status.is_terminal() {
+                return Ok(task);
+            }
+            let result = serde_json::to_string(&result)
+                .map_err(|error| CoreError::Invalid(error.to_string()))?;
+            let changed = writer.execute(
+                "UPDATE tasks SET status = 'aborted', result_json = ?, terminal_at = ?, \
+                 lease_owner = NULL, lease_until = NULL, next_wake_at = NULL, updated_at = ? \
+                 WHERE id = ? AND status IN ('pending','running','asleep')",
+                (result, now, now, task_id.as_str()),
+            )?;
+            if changed == 1 {
+                record_commit(
+                    writer,
+                    now,
+                    task.conversation_id.as_deref(),
+                    Some(task_id.as_str()),
+                    "task.abort",
+                )?;
+            }
+            load_task(writer, &task_id)?.ok_or(CoreError::TaskNotFound(task_id))
+        })
     }
 
     /// Claim the oldest runnable task.
