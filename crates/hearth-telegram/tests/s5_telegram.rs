@@ -435,3 +435,96 @@ fn a_reaction_failure_does_not_block_admission() {
     drop(poller);
     api.stop();
 }
+
+struct RecordingStop {
+    calls: Mutex<Vec<i64>>,
+}
+
+impl hearth_telegram::StopHandler for RecordingStop {
+    fn stop(&self, chat_id: i64) -> bool {
+        self.calls.lock().expect("stop calls").push(chat_id);
+        true
+    }
+}
+
+#[test]
+fn a_stop_update_calls_the_handler_and_creates_no_submission() {
+    let api = FakeApi::start(vec![update(60, 1, 20, 42, json!("stop"))]);
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let client =
+        TelegramClient::with_base_url("123:fake", api.base_url.clone()).expect("telegram client");
+    let stop = Arc::new(RecordingStop {
+        calls: Mutex::new(Vec::new()),
+    });
+    let poller = TelegramPoller::new(
+        client,
+        harness.session().clone(),
+        vec![42],
+        vec![],
+        0,
+        InboundMedia::new(home.path().join("media/inbound")),
+        None,
+        Some(stop.clone()),
+    );
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.stopped, 1);
+    assert_eq!(report.admitted, 0);
+    assert_eq!(report.next_offset, 61);
+    assert_eq!(*stop.calls.lock().expect("stop calls"), vec![1]);
+    let session = harness.session();
+    assert_eq!(session.telegram_offset().expect("offset"), 61);
+    assert!(session.telegram_update_seen(60).expect("seen"));
+    assert!(
+        session
+            .submission_by_request_id("tg:1:20")
+            .expect("submission")
+            .is_none(),
+        "a stop update must not create a submission"
+    );
+    let methods: Vec<String> = api
+        .requests()
+        .iter()
+        .map(|request| request.method.clone())
+        .collect();
+    assert!(
+        !methods.iter().any(|method| method == "setMessageReaction"),
+        "a stop update must not react: {methods:?}"
+    );
+
+    let replay = poller.poll_once().expect("replay poll");
+    assert_eq!(replay.stopped, 0);
+    assert_eq!(replay.duplicates, 1);
+    assert_eq!(*stop.calls.lock().expect("stop calls"), vec![1]);
+    api.stop();
+}
+
+#[test]
+fn an_unauthorized_stop_does_not_call_the_handler() {
+    let api = FakeApi::start(vec![update(61, 1, 21, 99, json!("stop"))]);
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let client =
+        TelegramClient::with_base_url("123:fake", api.base_url.clone()).expect("telegram client");
+    let stop = Arc::new(RecordingStop {
+        calls: Mutex::new(Vec::new()),
+    });
+    let poller = TelegramPoller::new(
+        client,
+        harness.session().clone(),
+        vec![42],
+        vec![],
+        0,
+        InboundMedia::new(home.path().join("media/inbound")),
+        None,
+        Some(stop.clone()),
+    );
+
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.stopped, 0);
+    assert_eq!(report.ignored, 1);
+    assert!(stop.calls.lock().expect("stop calls").is_empty());
+    assert_eq!(harness.session().telegram_offset().expect("offset"), 62);
+    api.stop();
+}
