@@ -171,3 +171,42 @@ fn the_request_carries_the_model_tools_and_session() {
     assert_eq!(prompt.request.temperature, None);
     assert_eq!(prompt.request.max_tokens, None);
 }
+
+#[test]
+fn the_audit_document_has_five_segments() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(Save::new(&conversation.id).entry("user", serde_json::json!({"text": "hello"})))
+        .expect("save user entry");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL TEXT".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME NOTE".to_owned(),
+        })
+        .expect("build prompt");
+
+    assert_eq!(prompt.document["identity"], "SOUL TEXT");
+    assert!(
+        prompt.document["operation"]
+            .as_str()
+            .expect("operation segment")
+            .contains("Operation")
+    );
+    assert_eq!(prompt.document["tools"], serde_json::json!([]));
+    assert_eq!(
+        prompt.document["transcript"][0]["role"],
+        serde_json::json!("user")
+    );
+    assert_eq!(
+        prompt.document["transcript"][0]["blocks"][0]["text"],
+        serde_json::json!("hello")
+    );
+    assert_eq!(prompt.document["runtime"], "RUNTIME NOTE");
+}
