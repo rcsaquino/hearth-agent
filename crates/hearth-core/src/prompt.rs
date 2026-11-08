@@ -49,8 +49,37 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         blocks: vec![ContentBlock::Text(input.runtime_note.clone())],
     });
 
+    let transcript: Vec<Value> = history
+        .iter()
+        .filter_map(message_for_entry)
+        .map(|message| {
+            json!({
+                "role": role_str(message.role),
+                "blocks": message.blocks.iter().map(block_json).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let tools: Vec<Value> = input
+        .tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        })
+        .collect();
+    let document = json!({
+        "identity": input.soul,
+        "operation": OPERATION,
+        "tools": tools,
+        "transcript": transcript,
+        "runtime": input.runtime_note,
+    });
+
     let request = ChatRequest {
-        model: input.model.clone(),
+        model: input.model,
         messages,
         tools: input.tools,
         temperature: None,
@@ -58,10 +87,34 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         session_id: Some(input.conversation_id),
     };
 
-    Ok(Prompt {
-        request,
-        document: json!({}),
-    })
+    Ok(Prompt { request, document })
+}
+
+fn role_str(role: Role) -> &'static str {
+    match role {
+        Role::System => "system",
+        Role::User => "user",
+        Role::Assistant => "assistant",
+        Role::Tool => "tool",
+    }
+}
+
+fn block_json(block: &ContentBlock) -> Value {
+    match block {
+        ContentBlock::Text(text) => json!({"type": "text", "text": text}),
+        ContentBlock::Thinking(text) => json!({"type": "thinking", "text": text}),
+        ContentBlock::ToolCall(call) => json!({
+            "type": "tool_call",
+            "id": call.id,
+            "name": call.name,
+            "arguments": call.arguments,
+        }),
+        ContentBlock::ToolResult { call_id, content } => json!({
+            "type": "tool_result",
+            "call_id": call_id,
+            "content": content,
+        }),
+    }
 }
 
 /// Map one permanent entry to a chat message.
