@@ -985,3 +985,23 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   media group; the browser remains an honest empty placeholder.
 - The 100-turn token benchmark uses an empty optional-group registry because it
   measures core prompt cost, not optional tools.
+
+## 2026-11-09: M8c-2b browser and document creation
+
+- The optional browser group now ships a real `browser` tool against the local
+  Camofox REST API. The base URL comes from `CAMOFOX_BASE_URL` and defaults to
+  `http://127.0.0.1:9377`; tests use a local fake server and no live browser.
+  Actions are open, read, click, type, and screenshot. The session label is the
+  non-sensitive `hearth`. A snapshot is capped at 100,000 characters, and
+  screenshots are written inside the workspace at 0600. A missing service is a
+  retryable `browser_unavailable`; a timeout is `browser_timeout`.
+- The `documents` group now creates minimal PDF, DOCX, PPTX, and XLSX files from
+  a title and text content. Output stays inside the workspace, parent directories
+  are created, files are 0600, and an existing file is truncated and replaced.
+  Creation is deliberately plain: one page, one slide, or one sheet with the
+  title and lines. The generated files round-trip through the extractor.
+- No new dependencies were added for either feature. The PDF writer is minimal
+  and local; DOCX, PPTX, and XLSX reuse `zip` and `quick-xml`.
+- Browser, documents, and media remain lazy groups: their schemas enter a request
+  only after `tool_search` selects the group, and the core tool budget is
+  unchanged.
