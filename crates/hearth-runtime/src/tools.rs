@@ -526,7 +526,8 @@ mod core_budget_tests {
         assert!(media_group.available());
         assert_eq!(media_group.specs()[0].name, "media");
         let browser = built.groups.get("browser").expect("browser group");
-        assert!(!browser.available());
+        assert!(browser.available());
+        assert_eq!(browser.specs()[0].name, "browser");
 
         let empty = HashSet::new();
         assert!(built.groups.selected_specs(&empty).is_empty());
@@ -539,7 +540,7 @@ mod core_budget_tests {
         assert!(
             !core_names
                 .iter()
-                .any(|name| name == "documents" || name == "media"),
+                .any(|name| name == "documents" || name == "media" || name == "browser"),
             "{core_names:?}"
         );
 
@@ -547,6 +548,9 @@ mod core_budget_tests {
         selected.insert("documents".to_owned());
         let specs = built.groups.selected_specs(&selected);
         assert!(specs.iter().any(|spec| spec.name == "documents"));
+        selected.insert("browser".to_owned());
+        let specs = built.groups.selected_specs(&selected);
+        assert!(specs.iter().any(|spec| spec.name == "browser"));
         let outcome =
             built
                 .groups
