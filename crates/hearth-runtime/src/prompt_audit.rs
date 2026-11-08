@@ -74,6 +74,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
         None,
         Some(Arc::clone(&memory)),
         None,
+        None,
     )
     .map_err(|error| PromptError::Invalid(error.to_string()))?;
 

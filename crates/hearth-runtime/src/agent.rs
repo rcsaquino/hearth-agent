@@ -69,6 +69,7 @@ pub struct Agent {
     pricing: Pricing,
     config: AgentConfig,
     memory: Option<Arc<MemoryService>>,
+    extract: bool,
     reservations: Mutex<HashSet<String>>,
     budget: ContextBudget,
     groups: Option<Arc<ToolGroups>>,
@@ -89,6 +90,7 @@ impl Agent {
             pricing,
             config,
             memory: None,
+            extract: true,
             reservations: Mutex::new(HashSet::new()),
             budget: ContextBudget::default(),
             groups: None,
@@ -105,6 +107,12 @@ impl Agent {
     /// Attach the memory library to this agent.
     pub fn with_memory(mut self, memory: Arc<MemoryService>) -> Self {
         self.memory = Some(memory);
+        self
+    }
+
+    /// Do not extract memory after this agent's runs.
+    pub fn without_extraction(mut self) -> Self {
+        self.extract = false;
         self
     }
 
@@ -710,6 +718,9 @@ impl Agent {
     }
 
     fn extract_memory(&self, submission: &Submission, answer_entry_id: &str) {
+        if !self.extract {
+            return;
+        }
         let Some(memory) = &self.memory else {
             return;
         };

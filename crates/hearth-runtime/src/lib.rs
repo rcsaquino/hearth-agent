@@ -25,7 +25,7 @@ pub use compaction::{CompactionError, Compactor};
 pub use daemon::{DaemonError, daemon};
 pub use doctor::{DoctorError, doctor};
 pub use effect_worker::EffectWorker;
-pub use helpers::{HelperControls, TaskTool};
+pub use helpers::{HelperConfig, HelperControls, HelperPool, TaskTool};
 pub use events::{EventBus, EventSink, NoopSink, RunEvent};
 pub use init::{InitError, InitOptions, init};
 pub use ipc::{IpcError, StatusContext, serve, status, watch};

@@ -17,6 +17,7 @@ use hearth_tools::{
 };
 use thiserror::Error;
 
+use crate::helpers::{HelperControls, TaskTool};
 use crate::scheduler::ScheduleTool;
 use crate::tool_groups::{ToolGroups, ToolSearchTool};
 
@@ -29,6 +30,14 @@ pub struct MessageTarget {
     pub thread_id: Option<i64>,
     pub outbound: PathBuf,
     pub speaker: Option<Arc<dyn Speaker>>,
+}
+
+/// Helper spawning values attached to one tool registry.
+pub struct TaskTarget {
+    pub depth: u8,
+    pub controls: Arc<HelperControls>,
+    pub max_depth: u8,
+    pub max_concurrent: u8,
 }
 
 /// The core tools plus the lazy group registry.
@@ -84,6 +93,7 @@ pub fn build_tools(
     message: Option<MessageTarget>,
     memory: Option<Arc<MemoryService>>,
     memory_source: Option<MemorySource>,
+    task: Option<TaskTarget>,
 ) -> Result<BuiltTools, ToolBuildError> {
     let groups = Arc::new(ToolGroups::default_groups());
     let selection = Arc::new(Mutex::new(HashSet::new()));
@@ -115,11 +125,25 @@ pub fn build_tools(
             target.speaker,
         )));
         tools.push(Arc::new(ScheduleTool::new(
-            target.session,
-            target.conversation_id,
+            target.session.clone(),
+            target.conversation_id.clone(),
             target.chat_id,
             target.thread_id,
         )));
+        if let Some(task) = task
+            && task.depth < task.max_depth
+        {
+            tools.push(Arc::new(TaskTool::new(
+                target.session.clone(),
+                target.conversation_id.clone(),
+                target.chat_id,
+                target.thread_id,
+                task.depth,
+                task.controls,
+                task.max_depth,
+                task.max_concurrent,
+            )));
+        }
     }
     Ok(BuiltTools {
         core: ToolRegistry::new(tools),
@@ -322,6 +346,7 @@ mod core_budget_tests {
             &spill,
             Some(target),
             Some(memory),
+            None,
             None,
         )
         .expect("tools");

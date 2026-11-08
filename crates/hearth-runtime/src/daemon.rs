@@ -30,8 +30,9 @@ use crate::compaction::Compactor;
 use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::ipc::{self, StatusContext};
+use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
-use crate::tools::{MessageTarget, build_tools, memory_policy};
+use crate::tools::{MessageTarget, TaskTarget, build_tools, memory_policy};
 use hearth_memory::{MemoryService, MemorySource};
 
 #[derive(Debug, Error)]
@@ -159,6 +160,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         let scheduler_shutdown = Arc::clone(&shutdown);
         let scheduler = runtime.scheduler;
         telegram_handles.push(thread::spawn(move || scheduler.run(scheduler_shutdown)));
+        telegram_handles.extend(runtime.helpers.spawn_workers(Arc::clone(&shutdown)));
         tracing::info!("telegram poller, worker, and scheduler started");
     }
 
@@ -191,6 +193,7 @@ struct TelegramRuntime {
     poller: TelegramPoller,
     worker: TelegramWorker,
     scheduler: Scheduler,
+    helpers: HelperPool,
 }
 
 impl TelegramRuntime {
@@ -257,6 +260,7 @@ impl TelegramRuntime {
             Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
         );
         let sender = TelegramSender::new(client.clone(), Arc::new(SystemSleeper));
+        let helper_controls = Arc::new(HelperControls::new());
         let registry = Arc::new(TaskRegistry::new().register(
             "reminder",
             Arc::new(ReminderHandler::new(session.clone(), sender.clone())),
@@ -274,6 +278,26 @@ impl TelegramRuntime {
             settings.compaction.keep_recent_tokens,
         );
         let pricing = crate::tools::pricing_from_settings(&settings);
+        let helper_config = Arc::new(HelperConfig {
+            settings: Arc::clone(&settings),
+            session: session.clone(),
+            provider: Arc::clone(&provider),
+            sender: sender.clone(),
+            speaker: speaker.clone(),
+            memory: Arc::clone(&memory),
+            soul: soul.clone(),
+            workspace: workspace.clone(),
+            spill: spill.clone(),
+            outbound: home.join("media/outbound"),
+            model: models.model.clone(),
+            provider_name: models.kind.clone(),
+            max_turns: settings.agent.max_turns,
+            budget,
+            pricing: pricing.clone(),
+            events: Arc::clone(&events) as Arc<dyn crate::events::EventSink>,
+            owner: format!("helper:{}", std::process::id()),
+        });
+        let helpers = HelperPool::new(helper_config, Arc::clone(&helper_controls));
         let worker = TelegramWorker {
             settings: Arc::clone(&settings),
             session,
@@ -292,12 +316,14 @@ impl TelegramRuntime {
             pricing,
             pid: std::process::id(),
             cancellations,
+            helper_controls,
             events,
         };
         Ok(Self {
             poller,
             worker,
             scheduler,
+            helpers,
         })
     }
 }
@@ -320,6 +346,7 @@ struct TelegramWorker {
     pricing: Pricing,
     pid: u32,
     cancellations: Arc<CancellationRegistry>,
+    helper_controls: Arc<HelperControls>,
     events: Arc<EventBus>,
 }
 
@@ -519,6 +546,12 @@ impl TelegramWorker {
             Some(target),
             Some(Arc::clone(&self.memory)),
             memory_source,
+            Some(TaskTarget {
+                depth: 0,
+                controls: Arc::clone(&self.helper_controls),
+                max_depth: self.settings.tasks.max_depth,
+                max_concurrent: self.settings.tasks.max_concurrent,
+            }),
         ) {
             Ok(tools) => tools,
             Err(error) => {

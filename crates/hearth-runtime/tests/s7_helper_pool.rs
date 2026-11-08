@@ -1,6 +1,5 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 

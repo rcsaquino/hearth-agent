@@ -102,6 +102,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
             None,
             Some(Arc::clone(&memory)),
             memory_source,
+            None,
         )?;
         let agent = Agent::new(
             session.clone(),
