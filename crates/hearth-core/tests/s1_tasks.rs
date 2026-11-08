@@ -892,3 +892,38 @@ fn recovery_records_a_requeue_commit() {
     assert_eq!(latest.kind, "task.recover");
     assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
 }
+
+#[test]
+fn recovery_records_a_poison_commit() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    let task = session
+        .create_task(NewTask::new("test", 1, "start", json!({})))
+        .expect("create task");
+    session
+        .claim_task("worker-a", 1_000)
+        .expect("first claim")
+        .expect("task is runnable");
+    clock.advance(2_000);
+    assert_eq!(
+        session.recover_tasks().expect("first recovery").requeued,
+        1
+    );
+    session
+        .claim_task("worker-a", 1_000)
+        .expect("second claim")
+        .expect("task is runnable");
+    clock.advance(2_000);
+
+    let report = session.recover_tasks().expect("second recovery");
+    assert_eq!(report.poisoned, 1);
+
+    let latest = session
+        .latest_commit()
+        .expect("latest commit")
+        .expect("poisoning records a commit");
+    assert_eq!(latest.seq, 5);
+    assert_eq!(latest.kind, "task.poison");
+    assert_eq!(latest.task_id.as_deref(), Some(task.id.as_str()));
+}
