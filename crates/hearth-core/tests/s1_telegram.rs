@@ -234,3 +234,36 @@ fn the_next_queued_telegram_submission_skips_local_submissions() {
         "a settled telegram submission must not be returned"
     );
 }
+
+#[test]
+fn a_control_update_is_recorded_once_without_a_submission() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let update = TelegramUpdate {
+        update_id: 50,
+        chat_id: 1,
+        message_id: 20,
+    };
+
+    assert!(
+        session
+            .record_telegram_update(update, 51)
+            .expect("record update"),
+        "the first insert should be new"
+    );
+    assert_eq!(session.telegram_offset().expect("offset"), 51);
+    assert!(session.telegram_update_seen(50).expect("seen"));
+
+    assert!(
+        !session
+            .record_telegram_update(update, 52)
+            .expect("duplicate record"),
+        "the second insert should be a duplicate"
+    );
+    assert_eq!(
+        session.telegram_offset().expect("offset"),
+        51,
+        "a duplicate update must not advance the stored offset"
+    );
+}
