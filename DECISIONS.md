@@ -463,3 +463,24 @@ local fake-server and fixture tests.
   media transfer.
 - New dependencies: reqwest multipart, image, and base64 in `hearth-model`; time in
   `hearth-telegram`.
+
+## 2026-11-08: Telegram outbound media (M3b-2b)
+
+- File sends use Bot API multipart. A single photo, document, video, or voice note
+  uses its matching method with the `chat_id`, an optional caption, and the file
+  part named after the method.
+- Two to ten compatible photos or videos go as one `sendMediaGroup`. The media
+  JSON references `attach://fileN` and the parts are named `file0`, `file1`, and so
+  on. A caption is placed on the first album item only.
+- Mixed groups and document or voice groups are sent individually. A caption is
+  attached only to the first item.
+- Captions are sent only when the caller explicitly supplies a non-empty caption.
+- The message tool resolves files through the workspace and spill roots. Path
+  escapes, missing files, more than ten paths, using both `path` and `paths`, and
+  empty arguments are rejected.
+- Voice replies are synthesized only when `speech` is present. The OGG/Opus output
+  is written under `media/outbound` at mode `0600` before sending. With no
+  configured speaker, speech is a clear error.
+- ElevenLabs defaults are `eleven_v4` and `opus_48000_64`; the client posts to
+  `/v1/text-to-speech/<voice>?output_format=<format>` with `xi-api-key`.
+- New dependency: reqwest multipart in `hearth-telegram`.
