@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::header::{HeaderName, HeaderValue};
+use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use serde_json::{Value, json};
 
 use crate::provider::{Provider, ProviderError, ProviderStream, Sleeper, SystemSleeper};
@@ -207,6 +207,23 @@ impl Provider for OpenAiCompatibleProvider {
                 Ok(response) => {
                     let status = response.status();
                     if status.is_success() {
+                        let content_type = response
+                            .headers()
+                            .get(CONTENT_TYPE)
+                            .and_then(|value| value.to_str().ok())
+                            .unwrap_or_default()
+                            .to_owned();
+                        if !content_type
+                            .trim_start()
+                            .to_ascii_lowercase()
+                            .starts_with("text/event-stream")
+                        {
+                            let body = response.text().unwrap_or_default();
+                            let snippet: String = body.chars().take(200).collect();
+                            return Err(ProviderError::Protocol(format!(
+                                "provider returned {content_type:?} instead of an event stream: {snippet}"
+                            )));
+                        }
                         return Ok(Box::new(OpenAiStream::new(response)));
                     }
                     let retryable = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504);
