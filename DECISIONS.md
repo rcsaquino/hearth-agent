@@ -495,3 +495,20 @@ local fake-server and fixture tests.
   answer is delivered.
 - A normal answer is sent with the rich-first sender; a notice is sent when the run
   settles unanswered. A failed send leaves the durable answer in the record.
+
+## 2026-11-08: Telegram delivery effects (M3c-2a)
+
+- Every final Telegram send is a `telegram.send` effect with key
+  `tg:<submission_id>` and payload
+  `{ chat_id, thread_id, markdown, submission_id }`.
+- The intent is saved before the send. A Rich or Fallback send settles it done.
+  An uncertain send becomes Unknown. A definitive rejection becomes Failed.
+- Telegram sends are at-most-once. The effect worker never executes a
+  `telegram.send` intent, and on recovery it marks a started one Unknown instead
+  of failing or retrying it.
+- Before a queued submission runs, the worker recovers at most one Intent or
+  Unknown `telegram.send` for that chat. It sends
+  `Recovered reply:\n\n<markdown>` and marks the effect done, unknown, or failed.
+  A recovery failure does not block the new submission.
+- `Session::mark_effect_done`, `mark_effect_failed`, `mark_effect_unknown`, and
+  `effects_awaiting_delivery` support this recovery path.
