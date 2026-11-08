@@ -601,11 +601,7 @@ fn beginning_a_settled_submission_is_rejected() {
         .submit(&conversation.id, "req-1", "input", json!({"text": "hello"}))
         .expect("submit");
     session
-        .settle(
-            &submitted.submission.id,
-            SubmissionStatus::Done,
-            None,
-        )
+        .settle(&submitted.submission.id, SubmissionStatus::Done, None)
         .expect("settle");
 
     let error = session

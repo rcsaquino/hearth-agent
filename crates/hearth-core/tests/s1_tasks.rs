@@ -1041,11 +1041,18 @@ fn a_checkpoint_updates_a_running_task_and_records_a_commit() {
         .expect("task is claimable");
 
     let updated = session
-        .checkpoint_task(&task.id, "worker-a", json!({"turn": 2, "prompt_hash": "abc"}))
+        .checkpoint_task(
+            &task.id,
+            "worker-a",
+            json!({"turn": 2, "prompt_hash": "abc"}),
+        )
         .expect("checkpoint task");
     assert_eq!(updated.status, TaskStatus::Running);
     assert_eq!(updated.lease_owner.as_deref(), Some("worker-a"));
-    assert_eq!(updated.checkpoint, Some(json!({"turn": 2, "prompt_hash": "abc"})));
+    assert_eq!(
+        updated.checkpoint,
+        Some(json!({"turn": 2, "prompt_hash": "abc"}))
+    );
 
     let commit = session
         .latest_commit()
