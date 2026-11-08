@@ -211,6 +211,15 @@ impl SkillLibrary {
     /// The prompt skill index: active skills, capped at 300 tokens and 50 lines.
     /// Learned skills that no longer fit are archived. User skills are read-only.
     pub fn index(&self) -> Result<String, SkillError> {
+        self.build_index(true)
+    }
+
+    /// A read-only version of the index for auditing; never archives.
+    pub fn read_index(&self) -> Result<String, SkillError> {
+        self.build_index(false)
+    }
+
+    fn build_index(&self, archive: bool) -> Result<String, SkillError> {
         let skills = self.load_all()?;
         let mut users: Vec<Skill> = skills
             .iter()
@@ -250,14 +259,18 @@ impl SkillLibrary {
         }
         for mut skill in learned {
             if active >= INDEX_MAX_ACTIVE {
-                self.archive_for_index(&mut skill)?;
+                if archive {
+                    self.archive_for_index(&mut skill)?;
+                }
                 continue;
             }
             let line = skill.index_line();
             let mut candidate = lines.clone();
             candidate.push(line);
             if hearth_model::estimate_tokens(&candidate.join("\n")) > INDEX_MAX_TOKENS {
-                self.archive_for_index(&mut skill)?;
+                if archive {
+                    self.archive_for_index(&mut skill)?;
+                }
                 continue;
             }
             lines = candidate;

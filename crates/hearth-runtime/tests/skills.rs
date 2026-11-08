@@ -123,6 +123,23 @@ fn the_index_archives_low_success_learned_skills_over_the_cap() {
         );
     }
     let library = SkillLibrary::new(home.path());
+    let read_only = library.read_index().expect("read index");
+    assert!(
+        library
+            .load_all()
+            .expect("load")
+            .iter()
+            .all(|skill| skill.status != SkillStatus::Archived),
+        "read_index must not archive"
+    );
+    assert!(
+        read_only
+            .lines()
+            .filter(|line| line.starts_with("- "))
+            .count()
+            <= 50,
+        "read_index exceeded the count cap"
+    );
     let index = library.index().expect("index");
     let lines = index.lines().filter(|line| line.starts_with("- ")).count();
     assert!(lines <= 50, "index has {lines} lines");

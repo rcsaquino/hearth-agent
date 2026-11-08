@@ -864,3 +864,14 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   next agent boundary. There is no separate hard total-token meter in v1.
 - Helper agents skip post-run memory extraction; their working clutter must not
   become long-term memory.
+
+## 2026-11-09: Skills (M7c-1)
+
+- User-made skills live in `$HEARTH_HOME/skills/` as `SKILL.md` inside a named directory or as a flat `<name>.md`. They are read-only to Hearth. Learned skills live in `skills/learned/<name>.md` with frontmatter, versions in `skills/learned/.history/<name>/vN.md`, and a `CHANGELOG.md`.
+- Frontmatter is parsed conservatively without a YAML dependency. Missing closing fences, unknown statuses, and non-numeric counters are errors. User skills may omit frontmatter; the file name and first body line provide the name and description.
+- The prompt skills index contains active skills only, capped at 300 estimated tokens and 50 active skills across user and learned. Learned skills over the cap are archived by lowest success rate, then least recently used; user skills are never archived. The index is the L4 prompt layer, the M5a `skills` segment, and the M5c `skills` prefix part.
+- The `skill` tool loads, saves, and archives. Load records uses and last_used for learned skills. Save and archive only apply to `skills/learned/`; a user skill rejects both. Save increments the version, copies the old version into history, and appends the changelog. New learned skills are drafts; the review in M7c-2 promotes, revises, quarantines, and archives them.
+- `hearth skills list|show|history|diff|stats` is read-only. The diff is a line comparison of two preserved versions.
+- The tool is registered in local chat, the Telegram daemon worker, and the prompt-audit tool set. Helper subagents keep their restricted tool subset and do not get the skill tool.
+- Skill review and the nightly maintenance schedules are M7c-2, not this slice.
+- Unrelated test fix: the memory as-of test could place the new fact on the same microsecond as the observation boundary under load; the test now sets valid_from strictly after the boundary.
