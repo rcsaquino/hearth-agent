@@ -741,3 +741,93 @@ fn a_cancelled_run_before_the_stream_settles_cancelled() {
         "no provider call should mean no usage row"
     );
 }
+
+struct CancelDuringProvider {
+    cancel: Arc<AtomicBool>,
+    requests: Mutex<usize>,
+}
+
+impl Provider for CancelDuringProvider {
+    fn stream(&self, _request: ChatRequest) -> Result<ProviderStream, ProviderError> {
+        *self.requests.lock().expect("request lock") += 1;
+        let events = vec![
+            Ok(StreamEvent::TextDelta("partial".to_owned())),
+            Ok(StreamEvent::Usage(Usage {
+                input_tokens: 10,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                output_tokens: 5,
+                reasoning_tokens: 0,
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("stop".to_owned()),
+            }),
+        ];
+        Ok(Box::new(CancelAfterFirst {
+            events: events.into_iter(),
+            cancel: Arc::clone(&self.cancel),
+            first: true,
+        }))
+    }
+}
+
+struct CancelAfterFirst {
+    events: std::vec::IntoIter<Result<StreamEvent, ProviderError>>,
+    cancel: Arc<AtomicBool>,
+    first: bool,
+}
+
+impl Iterator for CancelAfterFirst {
+    type Item = Result<StreamEvent, ProviderError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.first {
+            self.first = false;
+            self.cancel.store(true, Ordering::Relaxed);
+        }
+        self.events.next()
+    }
+}
+
+#[test]
+fn a_run_cancelled_during_the_stream_discards_the_answer_and_records_usage() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let provider = Arc::new(CancelDuringProvider {
+        cancel: Arc::clone(&cancel),
+        requests: Mutex::new(0),
+    });
+    let agent = agent(home.path(), &harness, provider.clone(), Pricing::default());
+
+    let outcome = agent
+        .run_submission_with_cancel(&submission.id, cancel)
+        .expect("run submission");
+
+    assert_eq!(outcome.submission.status, SubmissionStatus::Cancelled);
+    assert_eq!(outcome.notice.as_deref(), Some("Stopped."));
+    assert!(outcome.answer_entry_id.is_none());
+    assert_eq!(*provider.requests.lock().expect("request lock"), 1);
+    let history = harness.session().history(&conversation).expect("history");
+    assert_eq!(history.len(), 2, "history was {history:?}");
+    assert_eq!(history[1].kind, "notice");
+    assert_eq!(history[1].content["text"], "Stopped.");
+    assert!(
+        !history.iter().any(|entry| entry.kind == "assistant"),
+        "an assistant entry was saved: {history:?}"
+    );
+    let usage = harness
+        .session()
+        .latest_usage()
+        .expect("usage")
+        .expect("usage row");
+    assert_eq!(usage.input_tokens, 10);
+    assert_eq!(usage.output_tokens, 5);
+    let task = harness
+        .session()
+        .task(&outcome.task_id)
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::Aborted);
+}
