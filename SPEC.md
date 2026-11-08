@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.3, plain-language edition
+**Status:** Draft 0.4, plain-language edition
 **Date:** 2026-11-08
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -1180,23 +1180,34 @@ with confirmation tiers and Telegram buttons, is deferred to 1.1.
   head, tail, byte count, and path, and can read more with `files`.
 - Tool results include duration and a stable call id.
 
-### 9.5 Web search
+### 9.5 Web search and fetch
 
 **In plain terms.** Search works out of the box through Exa, with no key. Brave,
 DeepSeek, Firecrawl, and TinyFish are optional alternatives, tried in the configured
-order.
+order. Fetch uses the same fallback idea: Jina Reader first, then a direct HTTP or
+HTTPS fetch.
 
 - The first entry in `web.search.order` is the main provider; later entries are
   fallbacks. A provider with no key is skipped. Exa needs no key.
 - One call accepts one or more queries, runs at most `web.search.parallel` (3) at a
   time, requests `web.search.results` results each (5 by default), then dedupes by
   URL, merges, and returns at most `web.search.max_results` (10).
-- Results are title, URL, snippet, and date. There is no answer synthesis, no
+- Search results are title, URL, snippet, and date. There is no answer synthesis, no
   scraping, no cookies, and no MCP client beyond Exa's search endpoint.
-- `web_fetch` extracts readable text or PDF text. It refuses private and link-local
-  addresses, follows at most 3 redirects, and caps the page at 2 MB.
-- If every provider fails, the tool returns the first error and the call fails
-  cleanly; it never silently returns nothing.
+- **Fetch order.** `web.fetch.order` defaults to `["jina", "http"]`. The allowed
+  providers are `jina`, `http`, `https`, `tinyfish`, `firecrawl`, and `deepseek`.
+  `http` and `https` name the same direct fetcher; if both appear, the first is
+  used. Jina, `http`, and `https` need no key; the other three are skipped without
+  one.
+- **Fetch providers.** Jina Reader returns readable Markdown. TinyFish, Firecrawl,
+  and DeepSeek return extracted page text. The direct fetcher extracts HTML to text
+  and PDFs to text, follows at most 3 redirects, caps the page at 2 MB, and refuses
+  private and link-local addresses. Every fetch provider validates the target URL
+  before it is used.
+- **Untrusted content.** Fetch output is labeled as untrusted web content. The
+  model treats it as data, never as instructions.
+- If every search or fetch provider fails, the tool returns the first error and the
+  call fails cleanly; it never silently returns nothing.
 
 ### 9.6 Skills and self-improvement
 
@@ -1337,6 +1348,15 @@ code.
         "firecrawl": { "api_key": "${FIRECRAWL_API_KEY}" },
         "tinyfish": { "api_key": "${TINYFISH_API_KEY}" }
       }
+    },
+    "fetch": {
+      "order": ["jina", "http"],
+      "providers": {
+        "jina": {},
+        "tinyfish": { "api_key": "${TINYFISH_API_KEY}" },
+        "firecrawl": { "api_key": "${FIRECRAWL_API_KEY}" },
+        "deepseek": { "api_key": "${DEEPSEEK_API_KEY}" }
+      }
     }
   }
 }
@@ -1389,6 +1409,11 @@ Optional overrides, only when needed:
 - `web.search.parallel` is 1 to 3, `web.search.results` is 1 to 20, and
   `web.search.max_results` is 1 to 50. A provider with no key is skipped, not an
   error.
+- `web.fetch.order` must be a non-empty list of `jina`, `http`, `https`, `tinyfish`,
+  `firecrawl`, or `deepseek`; unknown names are rejected. `http` and `https` are
+  aliases for one direct fetcher. A fetch provider with no key is skipped except
+  `jina`, `http`, and `https`. Provider names under `web.fetch.providers` follow the
+  same list.
 - `tasks.max_concurrent` is 1 to 8, `tasks.max_depth` is 1 or 2, and the retention
   values are positive.
 - `models.session_header` is optional and names a header sent with the conversation
@@ -1761,6 +1786,7 @@ install contains nothing personal.
 | Search results per query | 5 | 9.5 |
 | Search results returned | 10 at most | 9.5 |
 | Search order | Exa, then Brave, DeepSeek, Firecrawl, TinyFish | 9.5 |
+| Fetch order | Jina, then direct HTTP/HTTPS | 9.5 |
 | Memory decay | 5% per 90 days, floor 15 | 7.6 |
 | Archive threshold | 3 years unused and importance below 20 | 7.6 |
 | Nightly consolidation | 03:30 local time | 7.3 |

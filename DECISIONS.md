@@ -361,3 +361,21 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   failure was retryable.
 - Provider errors contain a status and a short body excerpt, never headers or
   credentials. Tests use local fake servers only.
+
+## 2026-11-08: Web fetch provider chain (sir-directed)
+
+- Sir directed web fetch to use an ordered fallback chain like web search.
+- The default `web.fetch.order` is `["jina", "http"]`: Jina Reader free first, then
+  the direct HTTP/HTTPS fetcher.
+- Allowed fetch providers are `jina`, `http`, `https`, `tinyfish`, `firecrawl`, and
+  `deepseek`. `http` and `https` are aliases for one direct fetcher; the first one in
+  the order is used.
+- `jina`, `http`, and `https` need no key. The other three are skipped when their key
+  is absent.
+- Every provider validates the target URL against private and link-local addresses.
+  The direct fetcher also follows at most three redirects, caps the page at 2 MB,
+  extracts HTML and PDF text, and has no cookies.
+- The tool labels every result as untrusted web content.
+- The specification was bumped to Draft 0.4 for this change.
+- The TinyFish, Firecrawl, and DeepSeek fetch providers are accepted by the settings
+  now and are implemented in M2c-2b.
