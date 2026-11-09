@@ -4,6 +4,7 @@ mod budget;
 mod clock;
 mod compaction;
 mod error;
+mod guidance;
 mod model;
 mod prompt;
 pub mod secrets;
@@ -20,6 +21,10 @@ pub use compaction::{
     CompactionPlan, plan as plan_compaction, summary_content, summary_first_kept, summary_text,
 };
 pub use error::CoreError;
+pub use guidance::{
+    AGENTS_GUIDANCE_FILE, Guidance, HEARTH_GUIDANCE_FILE, MAX_GUIDANCE_FILE_BYTES,
+    MAX_GUIDANCE_TOTAL_BYTES, load as load_guidance,
+};
 pub use model::{
     Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,
     EffectStatus, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewEntry, NewMemory,
