@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-for file in README.md QUICKSTART.md SECURITY.md CONTRIBUTING.md LICENSE; do
+for file in README.md QUICKSTART.md SECURITY.md CONTRIBUTING.md AGENTS.md LICENSE; do
     if [ ! -s "$file" ]; then
         echo "docs check: $file is missing or empty" >&2
         exit 1
@@ -30,7 +30,7 @@ if [ ! -s packaging/hearth.service ]; then
 fi
 
 credential_pattern='(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|[0-9]{8,10}:[A-Za-z0-9_-]{30,}|AKIA[0-9A-Z]{16})'
-if grep -nE -- "$credential_pattern" README.md QUICKSTART.md SECURITY.md CONTRIBUTING.md >/dev/null 2>&1; then
+if grep -nE -- "$credential_pattern" README.md QUICKSTART.md SECURITY.md CONTRIBUTING.md AGENTS.md >/dev/null 2>&1; then
     echo "docs check: a credential-shaped value appears in the docs" >&2
     exit 1
 fi

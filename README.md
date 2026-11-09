@@ -89,6 +89,7 @@ content and attachments pass through Telegram.
 - [QUICKSTART.md](QUICKSTART.md) for setup and first use.
 - [SECURITY.md](SECURITY.md) for the trust model and secret handling.
 - [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
+- [AGENTS.md](AGENTS.md) for coding agents working in this repository.
 - [SPEC.md](SPEC.md) for the binding product definition.
 - [DECISIONS.md](DECISIONS.md) for implementation decisions and deviations.
 

@@ -2,7 +2,9 @@
 
 Hearth is a local-first Rust project. The product definition is
 [SPEC.md](SPEC.md). Implementation choices and deviations are recorded in
-[DECISIONS.md](DECISIONS.md).
+[DECISIONS.md](DECISIONS.md). Coding agents should also read
+[AGENTS.md](AGENTS.md), which has the build, test, architecture, and safety rules
+in a compact form.
 
 ## Build and test
 
