@@ -226,6 +226,7 @@ fn system_document(
     Ok(prompt.document)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn preview_document(
     settings: &Settings,
     session: &hearth_core::Session,
