@@ -236,3 +236,41 @@ fn media_paths_stay_confined() {
         .expect_err("escape");
     assert_eq!(error.code, "invalid_path");
 }
+
+#[test]
+fn a_configured_speaker_teaches_elevenlabs_tags() {
+    let (_directory, workspace, spill, media, outbound) = roots();
+    let speaker = SpeechClient::new(
+        "http://127.0.0.1:1",
+        "key",
+        "voice",
+        "eleven_v4",
+        "opus_48000_64",
+    )
+    .expect("speech client");
+    let tool = MediaTool::new(
+        None,
+        None,
+        Some(Arc::new(speaker)),
+        &workspace,
+        &spill,
+        &media,
+        &outbound,
+    );
+    let spec = tool.spec();
+    assert!(spec.description.contains("Eleven"), "{}", spec.description);
+    assert!(spec.description.contains("[warm"), "{}", spec.description);
+    let text = spec.parameters["properties"]["text"]["description"]
+        .as_str()
+        .expect("text description");
+    assert!(text.contains("Eleven"), "{text}");
+    assert!(text.contains("[warm"), "{text}");
+}
+
+#[test]
+fn a_media_tool_without_speech_does_not_mention_tags() {
+    let (_directory, workspace, spill, media, outbound) = roots();
+    let tool = MediaTool::new(None, None, None, &workspace, &spill, &media, &outbound);
+    let spec = tool.spec();
+    assert!(!spec.description.contains("[warm"), "{}", spec.description);
+}

@@ -115,3 +115,16 @@ fn a_speech_server_failure_is_retryable_for_429() {
     assert!(matches!(error, MediaError::Response { status: 429, .. }));
     assert!(error.retryable());
 }
+
+#[test]
+fn speech_preserves_elevenlabs_audio_tags() {
+    let (base, captured, server) = fake_elevenlabs(200, b"OggS".to_vec());
+    let client =
+        SpeechClient::new(&base, "key", "voice", "eleven_v4", "opus_48000_64").expect("client");
+    let script = "[warm, composed voice] Good evening. [softly] It is done. [laughs]";
+    client.speak(script).expect("speak");
+    let request = captured.recv().expect("captured");
+    server.join().expect("server");
+    let body: serde_json::Value = serde_json::from_slice(&request.body).expect("json body");
+    assert_eq!(body["text"], script);
+}

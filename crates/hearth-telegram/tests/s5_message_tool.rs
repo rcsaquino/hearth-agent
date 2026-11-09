@@ -415,3 +415,53 @@ fn message_tool_sends_wait_for_the_sender_limiter() {
         "message sends did not share the sender limiter: {sleeps:?}"
     );
 }
+
+#[test]
+fn a_configured_speaker_teaches_elevenlabs_tags() {
+    let workspace = TempDir::new().expect("workspace");
+    let spill = TempDir::new().expect("spill");
+    let outbound = TempDir::new().expect("outbound");
+    let speaker = SpeechClient::new(
+        "http://127.0.0.1:1",
+        "key",
+        "voice",
+        "eleven_v4",
+        "opus_48000_64",
+    )
+    .expect("speech client");
+    let tool = MessageTool::new(
+        sender("http://127.0.0.1:1"),
+        42,
+        None,
+        workspace.path(),
+        spill.path(),
+        outbound.path(),
+        Some(Arc::new(speaker)),
+    );
+    let spec = tool.spec();
+    assert!(spec.description.contains("Eleven"), "{}", spec.description);
+    assert!(spec.description.contains("[warm"), "{}", spec.description);
+    let speech = spec.parameters["properties"]["speech"]["description"]
+        .as_str()
+        .expect("speech description");
+    assert!(speech.contains("Eleven"), "{speech}");
+    assert!(speech.contains("[warm"), "{speech}");
+}
+
+#[test]
+fn a_message_tool_without_speech_does_not_mention_tags() {
+    let workspace = TempDir::new().expect("workspace");
+    let spill = TempDir::new().expect("spill");
+    let outbound = TempDir::new().expect("outbound");
+    let tool = MessageTool::new(
+        sender("http://127.0.0.1:1"),
+        42,
+        None,
+        workspace.path(),
+        spill.path(),
+        outbound.path(),
+        None,
+    );
+    let spec = tool.spec();
+    assert!(!spec.description.contains("[warm"), "{}", spec.description);
+}
