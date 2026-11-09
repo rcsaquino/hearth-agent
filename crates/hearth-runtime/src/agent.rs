@@ -38,6 +38,7 @@ pub struct AgentConfig {
     pub tools: ToolRegistry,
     pub spill_dir: PathBuf,
     pub voice_tags: bool,
+    pub guidance: String,
 }
 
 /// The outcome of one submission.
@@ -314,6 +315,7 @@ impl Agent {
                 standing_version,
                 recall,
                 skills_index: self.skills_index(),
+                guidance: self.config.guidance.clone(),
                 runtime_note,
             },
             &history,
@@ -500,6 +502,7 @@ impl Agent {
                 standing_version,
                 recall,
                 skills_index: self.skills_index(),
+                guidance: self.config.guidance.clone(),
                 runtime_note: runtime_note.clone(),
             };
             let mut recall_text = recall;

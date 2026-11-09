@@ -29,6 +29,7 @@ pub struct PromptInput {
     pub standing_version: u64,
     pub recall: String,
     pub skills_index: String,
+    pub guidance: String,
     pub runtime_note: String,
 }
 
@@ -126,6 +127,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         tokens_for(&tools_text),
         tokens_for(&input.standing),
         tokens_for(&input.skills_index),
+        tokens_for(&input.guidance),
         tokens_for(&transcript_text),
         tokens_for(&input.recall),
         tokens_for(&input.runtime_note),
@@ -140,6 +142,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         hash_part(&format!("{}\n{}", input.standing, input.standing_version)),
     );
     prefix_parts.insert("skills".to_owned(), hash_part(&skills_text));
+    prefix_parts.insert("guidance".to_owned(), hash_part(&input.guidance));
     let prefix_hash = hash_part(
         &prefix_parts
             .iter()
@@ -153,6 +156,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "tools": tools,
         "standing_memory": input.standing,
         "skills_index": input.skills_index,
+        "guidance": input.guidance,
         "recall": input.recall,
         "transcript": transcript,
         "runtime": input.runtime_note,
@@ -166,6 +170,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             "tools": tokens.tools,
             "standing": tokens.standing,
             "skills": tokens.skills,
+            "guidance": tokens.guidance,
             "transcript": tokens.transcript,
             "recall": tokens.recall,
             "runtime": tokens.runtime,
@@ -213,6 +218,7 @@ pub fn prefix_cause(previous: Option<&Value>, current: &BTreeMap<String, String>
             "tools" => "tools",
             "standing" => "standing memory",
             "skills" => "skills index",
+            "guidance" => "AGENTS.md/HEARTH.md",
             _ => part.as_str(),
         };
         causes.push(label.to_owned());

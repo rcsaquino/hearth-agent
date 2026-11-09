@@ -161,6 +161,7 @@ fn tool_search_loads_a_group_for_the_next_request() {
             tools: core,
             spill_dir: home.path().join("spill"),
             voice_tags: false,
+            guidance: String::new(),
         },
     )
     .with_groups(Arc::clone(&groups), Arc::clone(&selection));

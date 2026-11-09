@@ -104,6 +104,7 @@ fn agent_with(
             tools,
             spill_dir: home.join("spill"),
             voice_tags: false,
+            guidance: String::new(),
         },
     )
 }
@@ -1826,6 +1827,7 @@ fn elevenlabs_voice_tags_are_in_the_runtime_note() {
             tools: ToolRegistry::default(),
             spill_dir: home.path().join("spill"),
             voice_tags: true,
+            guidance: String::new(),
         },
     );
     let outcome = agent.run_submission(&submission.id).expect("run");

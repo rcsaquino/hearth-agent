@@ -164,6 +164,7 @@ pub fn run() -> Result<TokensReport> {
             tools,
             spill_dir: spill.clone(),
             voice_tags: false,
+            guidance: String::new(),
         },
     )
     .with_memory(memory.clone())
@@ -227,6 +228,7 @@ pub fn run() -> Result<TokensReport> {
                 standing_version: standing.version,
                 recall: recall_text,
                 skills_index: String::new(),
+                guidance: String::new(),
                 runtime_note,
             },
             &history,

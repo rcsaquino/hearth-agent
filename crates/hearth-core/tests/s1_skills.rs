@@ -11,6 +11,7 @@ fn input(conversation_id: &str, skills_index: &str) -> PromptInput {
         standing_version: 1,
         recall: String::new(),
         skills_index: skills_index.to_owned(),
+        guidance: String::new(),
         runtime_note: "RUNTIME NOTE".to_owned(),
     }
 }

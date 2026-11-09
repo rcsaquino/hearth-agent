@@ -156,6 +156,7 @@ fn agent(home: &std::path::Path, harness: &Harness, provider: Arc<dyn Provider>)
             tools: ToolRegistry::new(vec![Arc::new(Echo)]),
             spill_dir: home.join("spill"),
             voice_tags: false,
+            guidance: String::new(),
         },
     )
 }

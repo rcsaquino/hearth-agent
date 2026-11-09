@@ -75,6 +75,7 @@ fn agent(args: &[String]) -> Result<()> {
         tools: ToolRegistry::new(vec![]),
         spill_dir: home.join("spill"),
         voice_tags: false,
+        guidance: String::new(),
     };
     let agent = Agent::new(
         session,

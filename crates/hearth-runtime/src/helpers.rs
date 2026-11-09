@@ -563,6 +563,7 @@ impl HelperPool {
                 tools: built.core,
                 spill_dir: self.config.spill.clone(),
                 voice_tags: self.config.voice_tags,
+                guidance: String::new(),
             },
         )
         .with_memory(Arc::clone(&self.config.memory))

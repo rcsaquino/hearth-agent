@@ -126,6 +126,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
                 tools: built.core,
                 spill_dir: spill.clone(),
                 voice_tags: voice_tags(&settings),
+                guidance: String::new(),
             },
         )
         .with_memory(Arc::clone(&memory))

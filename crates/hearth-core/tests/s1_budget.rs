@@ -51,7 +51,7 @@ fn segment_budgets_match_the_spec() {
 
 #[test]
 fn token_counts_sum_and_report_the_fixed_overhead() {
-    let counts = TokenCounts::new(10, 20, 30, 40, 0, 50, 60, 70);
+    let counts = TokenCounts::new(10, 20, 30, 40, 0, 0, 50, 60, 70);
     assert_eq!(counts.total, 280);
     assert_eq!(counts.fixed, 170);
     assert!(counts.over_budget().is_empty());
@@ -59,6 +59,6 @@ fn token_counts_sum_and_report_the_fixed_overhead() {
 
 #[test]
 fn an_over_budget_segment_is_named() {
-    let counts = TokenCounts::new(900, 20, 30, 40, 0, 50, 60, 70);
+    let counts = TokenCounts::new(900, 20, 30, 40, 0, 0, 50, 60, 70);
     assert_eq!(counts.over_budget(), vec!["identity"]);
 }

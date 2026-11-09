@@ -155,6 +155,7 @@ fn agent(
             tools: ToolRegistry::default(),
             spill_dir: home.path().join("spill"),
             voice_tags: false,
+            guidance: String::new(),
         },
     )
     .with_budget(budget)

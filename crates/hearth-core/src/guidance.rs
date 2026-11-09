@@ -75,7 +75,7 @@ pub fn load(home: &Path, workspace: &Path) -> Guidance {
 }
 
 fn read_guidance(path: &Path) -> (String, bool) {
-    let mut file = match File::open(path) {
+    let file = match File::open(path) {
         Ok(file) => file,
         Err(_) => return (String::new(), false),
     };

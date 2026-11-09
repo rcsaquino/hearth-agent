@@ -130,6 +130,7 @@ fn the_agent_indexes_skills_and_can_load_one() {
             tools,
             spill_dir: home.path().join("spill"),
             voice_tags: false,
+            guidance: String::new(),
         },
     )
     .with_skills(Arc::clone(&library));

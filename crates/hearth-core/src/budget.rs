@@ -79,6 +79,7 @@ pub struct TokenCounts {
     pub tools: u64,
     pub standing: u64,
     pub skills: u64,
+    pub guidance: u64,
     pub transcript: u64,
     pub recall: u64,
     pub runtime: u64,
@@ -95,19 +96,28 @@ impl TokenCounts {
         tools: u64,
         standing: u64,
         skills: u64,
+        guidance: u64,
         transcript: u64,
         recall: u64,
         runtime: u64,
     ) -> Self {
-        let total =
-            identity + operation + tools + standing + skills + transcript + recall + runtime;
-        let fixed = identity + operation + tools + standing + skills + runtime;
+        let total = identity
+            + operation
+            + tools
+            + standing
+            + skills
+            + guidance
+            + transcript
+            + recall
+            + runtime;
+        let fixed = identity + operation + tools + standing + skills + guidance + runtime;
         Self {
             identity,
             operation,
             tools,
             standing,
             skills,
+            guidance,
             transcript,
             recall,
             runtime,

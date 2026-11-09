@@ -632,6 +632,7 @@ impl TelegramWorker {
                 tools: built.core,
                 spill_dir: self.spill.clone(),
                 voice_tags: self.voice_tags,
+                guidance: String::new(),
             },
         )
         .with_memory(Arc::clone(&self.memory))
