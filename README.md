@@ -99,3 +99,10 @@ Telegram.
 - [SCHEMA.md](SCHEMA.md) for the storage columns and migration map.
 - [SPEC.md](SPEC.md) for the binding product definition.
 - [DECISIONS.md](DECISIONS.md) for implementation decisions and deviations.
+
+## Support
+
+If Hearth is useful to you, you can support its development on
+[Ko-fi](https://ko-fi.com/rcsaquino).
+
+<a href='https://ko-fi.com/rcsaquino' target='_blank'><img height='72' style='border:0px;height:72px;' src='https://storage.ko-fi.com/cdn/kofi2.png?v=3' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
