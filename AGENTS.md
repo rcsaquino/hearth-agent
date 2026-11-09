@@ -1,5 +1,7 @@
 # AGENTS.md
 
+## Project overview
+
 Hearth is a local-first, single-user personal agent written in Rust. One daemon
 owns a SQLite record, runs the agent loop, and talks to one Telegram bot. The
 binding product definition is [SPEC.md](SPEC.md); implementation choices and
@@ -60,10 +62,10 @@ Additional checks:
 ./scripts/secret-scan.sh           # tree and history credential scan
 ```
 
-`scripts/secret-scan.sh` uses a private deny-list outside the tree at
-`/root/.hearth-public-denylist`. When that file is absent the public scan exits
-2 by design; the acceptance script supplies an empty temporary list and still
-runs the credential-pattern scan. Never add the deny-list to the repository.
+`scripts/secret-scan.sh` uses a private deny-list outside the tree, named by
+`HEARTH_PUBLIC_DENYLIST`. When it is absent the public scan exits 2 by design;
+the acceptance script supplies an empty temporary list and still runs the
+credential-pattern scan. Never add the deny-list to the repository.
 
 Benchmarks, after a build:
 
@@ -85,6 +87,21 @@ cargo test -p hearth-telegram --test s5_telegram
 cargo test -p hearth-runtime --test s6_secrets
 cargo test -p hearth-cli --test s8_telegram_daemon
 ```
+
+## Build and release
+
+```bash
+cargo build --release
+./scripts/package.sh x86_64-unknown-linux-gnu
+./scripts/test-scripts.sh
+```
+
+`scripts/package.sh` writes `dist/hearth-<version>-<target>.tar.gz` with the
+binary, docs, unit file, and SHA-256. The default target is
+`x86_64-unknown-linux-gnu`; build aarch64 only when the target toolchain is
+installed. `packaging/hearth.service` is the user unit; `hearth service install`
+writes and enables it. Do not enable or start the unit against the host in tests,
+and do not push or publish the tarball without explicit approval.
 
 ## Test-first workflow
 

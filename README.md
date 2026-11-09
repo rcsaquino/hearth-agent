@@ -15,8 +15,9 @@ executable authority. This tree is the local 1.0 implementation.
 - Remembers facts, preferences, people, projects, and past work in a local
   library with full-text search, provenance, and maintenance.
 - Reads your standing rules from `HEARTH.md` and project rules from `AGENTS.md`.
-- Runs an agent loop with tools: files, shell, web search, web fetch, memory,
-  skills, reminders, helpers, and Telegram files or voice.
+- Runs an agent loop with tools: files, shell, web search, web fetch, documents,
+  media, browser, memory, skills, reminders, helpers, and Telegram files or
+  voice.
 - Speaks Telegram natively: text, images, documents, voice notes, albums, and
   rich replies.
 - Provides a local line-based chat, live run watch, status, prompt audit, usage
@@ -30,8 +31,8 @@ executable authority. This tree is the local 1.0 implementation.
 - A Telegram bot token and your numeric Telegram user id.
 - An OpenAI-compatible provider: base URL, API key, and model name.
 - Optional: Groq for transcription, ElevenLabs for speech, OpenRouter for
-  images, and Brave, DeepSeek, Firecrawl, or TinyFish for search fallbacks. Exa
-  search works without a key.
+  images, Camofox for browsing, and Brave, DeepSeek, Firecrawl, or TinyFish for
+  search fallbacks. Exa search works without a key.
 
 ## Quick start
 
@@ -40,8 +41,11 @@ cargo build --release
 ./target/release/hearth init
 ./target/release/hearth doctor
 ./target/release/hearth service install
-./target/release/hearth daemon
+systemctl --user start hearth
 ```
+
+For a foreground run instead of the service, use
+`./target/release/hearth daemon`.
 
 Then open your bot in Telegram and send a message. Hearth answers only the
 allowed user ids.
@@ -63,13 +67,13 @@ Hearth is a Rust workspace with narrow crate boundaries:
 | Crate | Responsibility |
 |---|---|
 | `hearth-config` | Strict settings parsing, validation, and environment references. |
-| `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, compaction, memory records. |
+| `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, guidance, compaction, memory records. |
 | `hearth-storage` | SQLite connections, migrations, snapshots, full-text search. |
 | `hearth-model` | OpenAI-compatible streaming, tool calls, usage, pricing, media clients. |
-| `hearth-memory` | Memory store, dedupe, standing memory, recall, extraction, consolidation. |
-| `hearth-tools` | Files, shell, web search, web fetch, workspace confinement, spill. |
+| `hearth-memory` | Memory store, dedupe, standing memory, recall, extraction, consolidation, episodes. |
+| `hearth-tools` | Files, shell, web search, web fetch, documents, media, browser, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, the message tool. |
-| `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket, CLI wiring. |
+| `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, maintenance, watch socket, CLI wiring. |
 | `hearth-cli` | The `hearth` binary and its subcommands. |
 | `hearth-eval` | Offline memory and token benchmarks and crash tooling. |
 
@@ -79,10 +83,12 @@ are compiled capabilities, not a runtime plugin system.
 
 ## Security
 
-Hearth is built for one user on one machine. It runs tools without approval
-prompts and does not sandbox the shell. Read [SECURITY.md](SECURITY.md) before
-giving it data you care about. Telegram is a third-party transport: message
-content and attachments pass through Telegram.
+> [!WARNING]
+> Hearth runs tools without approval prompts and does not sandbox the shell. Read
+> [SECURITY.md](SECURITY.md) before giving it data you care about.
+
+Telegram is a third-party transport: message content and attachments pass through
+Telegram.
 
 ## Documentation
 
@@ -90,9 +96,6 @@ content and attachments pass through Telegram.
 - [SECURITY.md](SECURITY.md) for the trust model and secret handling.
 - [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
 - [AGENTS.md](AGENTS.md) for coding agents working in this repository.
+- [SCHEMA.md](SCHEMA.md) for the storage columns and migration map.
 - [SPEC.md](SPEC.md) for the binding product definition.
 - [DECISIONS.md](DECISIONS.md) for implementation decisions and deviations.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
