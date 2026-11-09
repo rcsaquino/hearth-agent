@@ -46,13 +46,9 @@ impl FakeApi {
             thread::spawn(move || {
                 while !shutdown.load(Ordering::Relaxed) {
                     match listener.accept() {
-                        Ok((stream, _)) => handle_connection(
-                            stream,
-                            &requests,
-                            &updates,
-                            &shutdown,
-                            one_per_poll,
-                        ),
+                        Ok((stream, _)) => {
+                            handle_connection(stream, &requests, &updates, &shutdown, one_per_poll)
+                        }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(5));
                         }

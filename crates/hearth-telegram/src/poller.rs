@@ -236,12 +236,6 @@ impl TelegramPoller {
                 continue;
             }
             report.admitted += 1;
-            if let Err(error) =
-                self.client
-                    .set_message_reaction(message.chat.id, message.message_id, "👀")
-            {
-                tracing::warn!(%error, "telegram reaction failed");
-            }
         }
         Ok(report)
     }

@@ -455,24 +455,6 @@ impl TelegramClient {
         }
         Ok(bytes)
     }
-
-    /// Acknowledge one message with an emoji reaction.
-    pub fn set_message_reaction(
-        &self,
-        chat_id: i64,
-        message_id: i64,
-        emoji: &str,
-    ) -> Result<(), TelegramError> {
-        self.call(
-            "setMessageReaction",
-            json!({
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "reaction": [{"type": "emoji", "emoji": emoji}],
-            }),
-        )?;
-        Ok(())
-    }
 }
 
 fn transport_error(error: reqwest::Error) -> TelegramError {
