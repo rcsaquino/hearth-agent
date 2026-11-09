@@ -21,7 +21,7 @@ trap cleanup EXIT
 "$BIN" init --non-interactive --home "$HOME_DIR" \
   --telegram-token fake-token --allowed-user-id 1 \
   --base-url http://127.0.0.1:9/v1 --api-key fake-key \
-  --model test-model --agent-name Hearth --user-name Tester \
+  --model test-model --agent-name Hearth \
   --timezone UTC >/dev/null
 
 # Remove Telegram so the soak never contacts a real service.
