@@ -114,6 +114,9 @@ impl Transcriber for TranscriptionClient {
     }
 }
 
+/// Guidance for writing ElevenLabs speech with audio tags.
+pub const ELEVENLABS_TAG_GUIDANCE: &str = "Use sparse Eleven v4 audio tags in square brackets, such as [warm, composed voice], [softly], [laughs], or [whispers], where they fit. Never use SSML, and never read the tags aloud.";
+
 /// Turns text into an OGG/Opus voice reply.
 pub trait Speaker: Send + Sync {
     /// Return the audio bytes for one text.

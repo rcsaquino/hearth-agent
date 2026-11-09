@@ -47,10 +47,18 @@ impl MessageTool {
 
 impl Tool for MessageTool {
     fn spec(&self) -> ToolSpec {
+        let mut description = "Send files, an album, or a voice reply to the user. Use voice only when the user explicitly asks for it."
+            .to_owned();
+        let mut speech = "Text to synthesize as a voice reply".to_owned();
+        if self.speaker.is_some() {
+            description.push(' ');
+            description.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
+            speech.push_str(". ");
+            speech.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
+        }
         ToolSpec {
             name: "message".to_owned(),
-            description: "Send files, an album, or a voice reply to the user. Use voice only when the user explicitly asks for it."
-                .to_owned(),
+            description,
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -62,7 +70,7 @@ impl Tool for MessageTool {
                         "description": "Two to ten compatible files for an album"
                     },
                     "caption": {"type": "string", "description": "Only when the user asked for a caption"},
-                    "speech": {"type": "string", "description": "Text to synthesize as a voice reply"}
+                    "speech": {"type": "string", "description": speech}
                 }
             }),
         }

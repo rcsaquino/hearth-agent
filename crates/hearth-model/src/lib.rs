@@ -8,7 +8,10 @@ mod provider;
 mod types;
 
 pub use estimate::estimate_tokens;
-pub use media::{ImageClient, MediaError, Speaker, SpeechClient, Transcriber, TranscriptionClient};
+pub use media::{
+    ELEVENLABS_TAG_GUIDANCE, ImageClient, MediaError, Speaker, SpeechClient, Transcriber,
+    TranscriptionClient,
+};
 pub use openai::OpenAiCompatibleProvider;
 pub use price::{Price, Pricing};
 pub use provider::{Provider, ProviderError, ProviderStream, Sleeper, SystemSleeper};

@@ -74,9 +74,18 @@ impl MediaTool {
 
 impl Tool for MediaTool {
     fn spec(&self) -> ToolSpec {
+        let mut description = "Generate an image, transcribe an audio file, or synthesize a voice reply using the configured media services."
+            .to_owned();
+        let mut text = "Text for the speak action".to_owned();
+        if self.speaker.is_some() {
+            description.push(' ');
+            description.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
+            text.push_str(". ");
+            text.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
+        }
         ToolSpec {
             name: "media".to_owned(),
-            description: "Generate an image, transcribe an audio file, or synthesize a voice reply using the configured media services.".to_owned(),
+            description,
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -84,7 +93,7 @@ impl Tool for MediaTool {
                     "prompt": {"type": "string"},
                     "size": {"type": "string"},
                     "path": {"type": "string"},
-                    "text": {"type": "string"}
+                    "text": {"type": "string", "description": text}
                 },
                 "required": ["action"]
             }),
