@@ -25,6 +25,15 @@ use crate::scheduler::ScheduleTool;
 use crate::skills::{SkillLibrary, SkillTool};
 use crate::tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
 
+/// True when speech is configured for ElevenLabs.
+pub fn voice_tags(settings: &Settings) -> bool {
+    settings
+        .media
+        .as_ref()
+        .and_then(|media| media.tts.as_ref())
+        .is_some_and(|tts| tts.kind.as_deref() == Some("elevenlabs"))
+}
+
 /// The Telegram values needed for the message tool.
 pub struct MessageTarget {
     pub session: Session,

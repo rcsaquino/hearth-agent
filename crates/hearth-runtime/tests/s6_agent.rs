@@ -103,6 +103,7 @@ fn agent_with(
             max_turns,
             tools,
             spill_dir: home.join("spill"),
+            voice_tags: false,
         },
     )
 }

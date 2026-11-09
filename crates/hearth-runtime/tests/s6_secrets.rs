@@ -97,6 +97,7 @@ fn config(home: &std::path::Path, tools: ToolRegistry) -> AgentConfig {
         max_turns: 4,
         tools,
         spill_dir: home.join("spill"),
+        voice_tags: false,
     }
 }
 

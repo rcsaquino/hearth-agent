@@ -129,6 +129,7 @@ fn the_agent_indexes_skills_and_can_load_one() {
             max_turns: 6,
             tools,
             spill_dir: home.path().join("spill"),
+            voice_tags: false,
         },
     )
     .with_skills(Arc::clone(&library));

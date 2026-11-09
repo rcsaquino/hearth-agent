@@ -163,6 +163,7 @@ pub fn run() -> Result<TokensReport> {
             max_turns: 30,
             tools,
             spill_dir: spill.clone(),
+            voice_tags: false,
         },
     )
     .with_memory(memory.clone())

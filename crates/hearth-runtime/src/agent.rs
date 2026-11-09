@@ -37,6 +37,7 @@ pub struct AgentConfig {
     pub max_turns: u32,
     pub tools: ToolRegistry,
     pub spill_dir: PathBuf,
+    pub voice_tags: bool,
 }
 
 /// The outcome of one submission.

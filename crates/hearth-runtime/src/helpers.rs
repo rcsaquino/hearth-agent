@@ -345,6 +345,7 @@ pub struct HelperConfig {
     pub media: ToolMediaRoots,
     pub model: String,
     pub provider_name: String,
+    pub voice_tags: bool,
     pub max_turns: u32,
     pub budget: ContextBudget,
     pub pricing: Pricing,
@@ -561,6 +562,7 @@ impl HelperPool {
                 max_turns: self.config.max_turns,
                 tools: built.core,
                 spill_dir: self.config.spill.clone(),
+                voice_tags: self.config.voice_tags,
             },
         )
         .with_memory(Arc::clone(&self.config.memory))

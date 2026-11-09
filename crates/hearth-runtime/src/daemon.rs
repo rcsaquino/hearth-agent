@@ -38,7 +38,9 @@ use crate::maintenance::{
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
 use crate::skill_review::{SkillReviewHandler, SkillReviewer};
 use crate::skills::SkillLibrary;
-use crate::tools::{MessageTarget, TaskTarget, ToolMediaRoots, build_tools, memory_policy};
+use crate::tools::{
+    MessageTarget, TaskTarget, ToolMediaRoots, build_tools, memory_policy, voice_tags,
+};
 use hearth_memory::{MemoryService, MemorySource};
 
 #[derive(Debug, Error)]
@@ -337,6 +339,7 @@ impl TelegramRuntime {
             },
             model: models.model.clone(),
             provider_name: models.kind.clone(),
+            voice_tags: voice_tags(&settings),
             max_turns: settings.agent.max_turns,
             budget,
             pricing: pricing.clone(),
@@ -362,6 +365,7 @@ impl TelegramRuntime {
             },
             model: models.model.clone(),
             provider_name: models.kind.clone(),
+            voice_tags: voice_tags(&settings),
             max_turns: settings.agent.max_turns,
             budget,
             pricing,
@@ -394,6 +398,7 @@ struct TelegramWorker {
     media: ToolMediaRoots,
     model: String,
     provider_name: String,
+    voice_tags: bool,
     max_turns: u32,
     budget: ContextBudget,
     pricing: Pricing,
@@ -626,6 +631,7 @@ impl TelegramWorker {
                 max_turns: self.max_turns,
                 tools: built.core,
                 spill_dir: self.spill.clone(),
+                voice_tags: self.voice_tags,
             },
         )
         .with_memory(Arc::clone(&self.memory))

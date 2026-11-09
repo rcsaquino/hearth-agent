@@ -154,6 +154,7 @@ fn agent(
             max_turns: 4,
             tools: ToolRegistry::default(),
             spill_dir: home.path().join("spill"),
+            voice_tags: false,
         },
     )
     .with_budget(budget)

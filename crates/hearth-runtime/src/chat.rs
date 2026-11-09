@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use crate::agent::{Agent, AgentConfig};
 use crate::skills::SkillLibrary;
 use crate::tools::{
-    ToolBuildError, ToolMediaRoots, build_tools, memory_policy, pricing_from_settings,
+    ToolBuildError, ToolMediaRoots, build_tools, memory_policy, pricing_from_settings, voice_tags,
 };
 
 /// A failure that stopped local chat.
@@ -125,6 +125,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
                 max_turns: settings.agent.max_turns,
                 tools: built.core,
                 spill_dir: spill.clone(),
+                voice_tags: voice_tags(&settings),
             },
         )
         .with_memory(Arc::clone(&memory))
