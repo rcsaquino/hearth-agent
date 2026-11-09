@@ -334,7 +334,7 @@ fn the_daemon_answers_a_telegram_message() {
     let answer = wait_for_answer(&telegram_state);
     assert!(answer.contains("Telegram answer"), "answer was {answer:?}");
     assert!(telegram_state.typing.load(Ordering::SeqCst) > 0);
-    assert!(telegram_state.reactions.load(Ordering::SeqCst) > 0);
+    assert_eq!(telegram_state.reactions.load(Ordering::SeqCst), 0);
 
     daemon.stop();
     telegram_state.stop.store(true, Ordering::SeqCst);
@@ -429,7 +429,7 @@ fn the_daemon_recovers_an_uncertain_telegram_answer() {
         rich[1]
     );
     assert!(telegram_state.typing.load(Ordering::SeqCst) > 0);
-    assert!(telegram_state.reactions.load(Ordering::SeqCst) > 0);
+    assert_eq!(telegram_state.reactions.load(Ordering::SeqCst), 0);
 
     daemon.stop();
     telegram_state.stop.store(true, Ordering::SeqCst);
@@ -653,7 +653,7 @@ fn the_daemon_stops_an_active_run() {
         "the daemon did not stop the run: {rich:?}"
     );
     assert!(telegram.state.typing.load(Ordering::SeqCst) > 0);
-    assert_eq!(telegram.state.reactions.load(Ordering::SeqCst), 1);
+    assert_eq!(telegram.state.reactions.load(Ordering::SeqCst), 0);
 
     daemon.stop();
     drop(telegram);

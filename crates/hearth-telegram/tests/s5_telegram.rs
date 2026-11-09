@@ -19,7 +19,6 @@ struct Request {
 struct FakeApi {
     base_url: String,
     requests: Arc<Mutex<Vec<Request>>>,
-    reaction_fails: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -39,12 +38,10 @@ impl FakeApi {
         let address = listener.local_addr().expect("address");
         let requests = Arc::new(Mutex::new(Vec::new()));
         let updates = Arc::new(Mutex::new(updates));
-        let reaction_fails = Arc::new(AtomicBool::new(false));
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread = {
             let requests = Arc::clone(&requests);
             let updates = Arc::clone(&updates);
-            let reaction_fails = Arc::clone(&reaction_fails);
             let shutdown = Arc::clone(&shutdown);
             thread::spawn(move || {
                 while !shutdown.load(Ordering::Relaxed) {
@@ -53,7 +50,6 @@ impl FakeApi {
                             stream,
                             &requests,
                             &updates,
-                            &reaction_fails,
                             &shutdown,
                             one_per_poll,
                         ),
@@ -68,14 +64,9 @@ impl FakeApi {
         Self {
             base_url: format!("http://{address}"),
             requests,
-            reaction_fails,
             shutdown,
             thread: Some(thread),
         }
-    }
-
-    fn fail_reactions(&self, fail: bool) {
-        self.reaction_fails.store(fail, Ordering::Relaxed);
     }
 
     fn requests(&self) -> Vec<Request> {
@@ -94,7 +85,6 @@ fn handle_connection(
     stream: TcpStream,
     requests: &Arc<Mutex<Vec<Request>>>,
     updates: &Arc<Mutex<Vec<Value>>>,
-    reaction_fails: &Arc<AtomicBool>,
     shutdown: &Arc<AtomicBool>,
     one_per_poll: bool,
 ) {
@@ -167,12 +157,6 @@ fn handle_connection(
                 updates.lock().expect("updates").clone()
             };
             json!({"ok": true, "result": result})
-        } else if method == "setMessageReaction" {
-            if reaction_fails.load(Ordering::Relaxed) {
-                json!({"ok": false, "error_code": 500, "description": "synthetic reaction failure"})
-            } else {
-                json!({"ok": true, "result": true})
-            }
         } else {
             json!({"ok": true, "result": true})
         };
@@ -277,12 +261,9 @@ fn an_authorized_text_update_is_admitted() {
         .iter()
         .map(|request| request.method.as_str())
         .collect();
-    assert_eq!(methods, vec!["getUpdates", "setMessageReaction"]);
+    assert_eq!(methods, vec!["getUpdates"]);
     assert_eq!(requests[0].body["offset"], 0);
     assert_eq!(requests[0].body["allowed_updates"][0], "message");
-    assert_eq!(requests[1].body["chat_id"], 1);
-    assert_eq!(requests[1].body["message_id"], 10);
-    assert_eq!(requests[1].body["reaction"][0]["emoji"], "👀");
 
     drop(poller);
     api.stop();
@@ -368,7 +349,7 @@ fn a_replayed_update_is_not_admitted_twice() {
         .iter()
         .filter(|request| request.method == "setMessageReaction")
         .count();
-    assert_eq!(reaction_count, 1);
+    assert_eq!(reaction_count, 0);
     let offsets: Vec<i64> = api
         .requests()
         .iter()
@@ -447,26 +428,6 @@ fn a_non_text_update_is_ignored() {
             .conversation_by_transport("telegram", "1:0")
             .expect("lookup")
             .is_none()
-    );
-
-    drop(poller);
-    api.stop();
-}
-
-#[test]
-fn a_reaction_failure_does_not_block_admission() {
-    let api = FakeApi::start(vec![update(42, 1, 10, 42, json!("hello"))]);
-    api.fail_reactions(true);
-    let (_home, harness, poller) = setup(&api, vec![42], vec![]);
-
-    let report = poller.poll_once().expect("poll");
-    assert_eq!(report.admitted, 1);
-    assert!(
-        harness
-            .session()
-            .submission_by_request_id("tg:1:10")
-            .expect("submission")
-            .is_some()
     );
 
     drop(poller);
@@ -691,7 +652,7 @@ fn a_queue_below_the_cap_admits_and_clears_the_busy_flag() {
         .iter()
         .filter(|request| request.method == "setMessageReaction")
         .count();
-    assert_eq!(reactions, 1);
+    assert_eq!(reactions, 0);
     drop(poller);
     api.stop();
 }
