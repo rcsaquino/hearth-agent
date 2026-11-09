@@ -1801,3 +1801,46 @@ fn an_oversized_prompt_settles_with_a_budget_notice() {
         task.result
     );
 }
+
+#[test]
+fn elevenlabs_voice_tags_are_in_the_runtime_note() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("hello".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let agent = Agent::new(
+        harness.session().clone(),
+        provider.clone(),
+        Pricing::default(),
+        AgentConfig {
+            soul: "You are a test soul.".to_owned(),
+            model: "test-model".to_owned(),
+            provider_name: "scripted".to_owned(),
+            owner: "test-owner".to_owned(),
+            max_turns: 2,
+            tools: ToolRegistry::default(),
+            spill_dir: home.path().join("spill"),
+            voice_tags: true,
+        },
+    );
+    let outcome = agent.run_submission(&submission.id).expect("run");
+    assert_eq!(outcome.answer_text.as_deref(), Some("hello"));
+    let requests = provider.requests();
+    let runtime = requests[0].messages.last().expect("runtime note");
+    let text = runtime
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(text.contains("Eleven"), "runtime note was {text:?}");
+    assert!(text.contains("[warm"), "runtime note was {text:?}");
+}
