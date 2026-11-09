@@ -1846,3 +1846,40 @@ fn elevenlabs_voice_tags_are_in_the_runtime_note() {
     assert!(text.contains("Eleven"), "runtime note was {text:?}");
     assert!(text.contains("[warm"), "runtime note was {text:?}");
 }
+
+#[test]
+fn project_guidance_reaches_the_prompt() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("hello".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let agent = Agent::new(
+        harness.session().clone(),
+        provider.clone(),
+        Pricing::default(),
+        AgentConfig {
+            soul: "You are a test soul.".to_owned(),
+            model: "test-model".to_owned(),
+            provider_name: "scripted".to_owned(),
+            owner: "test-owner".to_owned(),
+            max_turns: 2,
+            tools: ToolRegistry::default(),
+            spill_dir: home.path().join("spill"),
+            voice_tags: false,
+            guidance: "PROJECT RULES".to_owned(),
+        },
+    );
+    agent.run_submission(&submission.id).expect("run");
+    let requests = provider.requests();
+    let found = requests[0].messages.iter().any(|message| {
+        message.blocks.iter().any(
+            |block| matches!(block, ContentBlock::Text(text) if text.contains("PROJECT RULES")),
+        )
+    });
+    assert!(found, "the project guidance did not reach the prompt");
+}

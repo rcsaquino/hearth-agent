@@ -424,6 +424,8 @@ fn init_creates_a_working_home() {
             & 0o777;
         assert_eq!(mode, 0o600, "settings mode was {mode:o}");
     }
+    let guidance = std::fs::read_to_string(home.path().join("HEARTH.md")).expect("HEARTH.md");
+    assert!(guidance.is_empty(), "a new HEARTH.md must be empty");
 
     for directory in [
         "workspace",
@@ -1847,5 +1849,33 @@ fn backup_and_restore_work_through_the_cli() {
             .expect("lookup")
             .is_none(),
         "the post-backup conversation survived the restore"
+    );
+}
+
+#[test]
+fn prompt_preview_reads_home_and_project_guidance() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    std::fs::write(home.path().join("HEARTH.md"), "HOME RULE").expect("home rules");
+    std::fs::create_dir_all(home.path().join("workspace")).expect("workspace");
+    std::fs::write(home.path().join("workspace/AGENTS.md"), "PROJECT RULE").expect("project rules");
+    let output = hearth()
+        .arg("prompt")
+        .arg("--preview")
+        .arg("hello")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run prompt");
+    assert!(
+        output.status.success(),
+        "prompt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("HOME RULE"), "missing home rules: {text}");
+    assert!(
+        text.contains("PROJECT RULE"),
+        "missing project rules: {text}"
     );
 }

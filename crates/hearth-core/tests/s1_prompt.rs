@@ -601,3 +601,121 @@ fn the_prefix_hash_tracks_only_the_stable_layers() {
     assert_eq!(first.prefix_hash, runtime.prefix_hash);
     assert!(prefix_cause(Some(&json!(first.prefix_parts)), &runtime.prefix_parts).is_empty());
 }
+
+#[test]
+fn project_instructions_are_a_system_message_between_operation_and_standing() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            standing: "STANDING".to_owned(),
+            standing_version: 1,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: "PROJECT RULES".to_owned(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+
+    let position = prompt
+        .request
+        .messages
+        .iter()
+        .position(|message| text_of(message).contains("PROJECT RULES"))
+        .expect("project instructions message");
+    assert_eq!(prompt.request.messages[position].role, Role::System);
+    assert!(
+        text_of(&prompt.request.messages[position]).starts_with("## Project instructions"),
+        "unexpected guidance message: {:?}",
+        text_of(&prompt.request.messages[position])
+    );
+    let operation = prompt
+        .request
+        .messages
+        .iter()
+        .position(|message| text_of(message).contains("Operation"))
+        .expect("operation");
+    let standing = prompt
+        .request
+        .messages
+        .iter()
+        .position(|message| text_of(message).contains("Standing memory"))
+        .expect("standing");
+    assert!(operation < position, "guidance must follow the operation");
+    assert!(position < standing, "guidance must precede standing memory");
+    assert!(prompt.tokens.guidance > 0);
+    assert_eq!(prompt.document["guidance"], "PROJECT RULES");
+    assert!(prompt.document["tokens"]["guidance"].as_u64().unwrap_or(0) > 0);
+    assert!(prompt.document["prefix_parts"]["guidance"].is_string());
+}
+
+#[test]
+fn request_from_document_restores_project_instructions() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            standing: String::new(),
+            standing_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: "PROJECT RULES".to_owned(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("build prompt");
+    let rebuilt =
+        hearth_core::request_from_document(&prompt.document).expect("rebuild the request");
+    assert!(
+        rebuilt
+            .messages
+            .iter()
+            .any(|message| text_of(message).contains("PROJECT RULES")),
+        "the rebuilt request lost the project instructions"
+    );
+}
+
+#[test]
+fn the_prefix_hash_tracks_guidance() {
+    use hearth_core::prefix_cause;
+
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    let build = |guidance: &str| {
+        session
+            .build_prompt(PromptInput {
+                soul: "SOUL".to_owned(),
+                conversation_id: conversation.id.clone(),
+                model: "test-model".to_owned(),
+                tools: Vec::new(),
+                standing: String::new(),
+                standing_version: 0,
+                recall: String::new(),
+                skills_index: String::new(),
+                guidance: guidance.to_owned(),
+                runtime_note: "RUNTIME".to_owned(),
+            })
+            .expect("build prompt")
+    };
+    let first = build("ONE RULE");
+    let second = build("ANOTHER RULE");
+    assert_ne!(first.prefix_hash, second.prefix_hash);
+    let causes = prefix_cause(Some(&json!(first.prefix_parts)), &second.prefix_parts);
+    assert_eq!(causes, vec!["AGENTS.md/HEARTH.md"]);
+}
