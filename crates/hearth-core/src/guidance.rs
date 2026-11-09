@@ -1,5 +1,7 @@
 //! Rules from the Hearth home and the directories above the workspace.
 
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// The rules file in the Hearth home.
@@ -21,6 +23,88 @@ pub struct Guidance {
 
 /// Read `HEARTH.md` from the home and every `AGENTS.md` from the filesystem
 /// root down to the workspace. Missing files are skipped.
-pub fn load(_home: &Path, _workspace: &Path) -> Guidance {
-    Guidance::default()
+pub fn load(home: &Path, workspace: &Path) -> Guidance {
+    let mut sources: Vec<(&str, PathBuf)> = Vec::new();
+    let hearth = home.join(HEARTH_GUIDANCE_FILE);
+    if hearth.is_file() {
+        sources.push(("Hearth home", hearth));
+    }
+
+    let workspace = if workspace.is_absolute() {
+        workspace.to_path_buf()
+    } else {
+        std::path::absolute(workspace).unwrap_or_else(|_| workspace.to_path_buf())
+    };
+    let mut directories: Vec<PathBuf> = workspace.ancestors().map(Path::to_path_buf).collect();
+    directories.reverse();
+    for directory in directories {
+        let agents = directory.join(AGENTS_GUIDANCE_FILE);
+        if agents.is_file() {
+            sources.push(("Project", agents));
+        }
+    }
+
+    let mut guidance = Guidance::default();
+    for (label, path) in sources {
+        let (content, file_truncated) = read_guidance(&path);
+        let content = content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        if file_truncated {
+            guidance.truncated = true;
+        }
+        let header = format!("### {label}: {}\n\n", path.display());
+        let remaining = MAX_GUIDANCE_TOTAL_BYTES.saturating_sub(guidance.text.len() + header.len());
+        if content.len() > remaining {
+            let partial = truncate_to(content, remaining);
+            guidance.text.push_str(&header);
+            guidance.text.push_str(partial);
+            guidance.text.push_str("\n\n[guidance truncated at 32 KB]");
+            guidance.truncated = true;
+            guidance.files.push(path);
+            break;
+        }
+        guidance.text.push_str(&header);
+        guidance.text.push_str(content);
+        guidance.text.push_str("\n\n");
+        guidance.files.push(path);
+    }
+    guidance.text = guidance.text.trim_end().to_owned();
+    guidance
+}
+
+fn read_guidance(path: &Path) -> (String, bool) {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => return (String::new(), false),
+    };
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_GUIDANCE_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return (String::new(), false);
+    }
+    let truncated = bytes.len() > MAX_GUIDANCE_FILE_BYTES as usize;
+    if truncated {
+        bytes.truncate(MAX_GUIDANCE_FILE_BYTES as usize);
+    }
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    if truncated {
+        text.push_str("\n\n[truncated at 16 KB]");
+    }
+    (text, truncated)
+}
+
+fn truncate_to(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
