@@ -34,12 +34,17 @@ impl MessageTool {
         outbound: impl Into<PathBuf>,
         speaker: Option<Arc<dyn Speaker>>,
     ) -> Self {
+        let outbound = outbound.into();
+        let media_root = outbound
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| outbound.clone());
         Self {
             sender,
             chat_id,
             thread_id,
-            workspace: Workspace::new(workspace, spill),
-            outbound: outbound.into(),
+            workspace: Workspace::with_media(workspace, spill, media_root),
+            outbound,
             speaker,
         }
     }
@@ -62,12 +67,12 @@ impl Tool for MessageTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "One file inside the workspace"},
+                    "path": {"type": "string", "description": "One file inside the workspace or a generated or inbound media file"},
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},
                         "maxItems": 10,
-                        "description": "Two to ten compatible files for an album"
+                        "description": "Two to ten compatible files from the workspace or media"
                     },
                     "caption": {"type": "string", "description": "Only when the user asked for a caption"},
                     "speech": {"type": "string", "description": speech}
