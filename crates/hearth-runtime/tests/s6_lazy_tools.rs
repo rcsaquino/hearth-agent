@@ -205,3 +205,39 @@ fn tool_search_loads_a_group_for_the_next_request() {
         .expect("submission");
     assert_eq!(answer.status, hearth_core::SubmissionStatus::Done);
 }
+
+#[test]
+fn tool_search_matches_words_in_a_group_description() {
+    let groups = ToolGroups::new(vec![
+        ToolGroup::new(
+            "media",
+            "Generate images, transcribe audio, and synthesize speech.",
+            vec![Arc::new(Echo)],
+        ),
+        ToolGroup::new(
+            "documents",
+            "Read and write PDF, DOCX, PPTX, and XLSX files.",
+            vec![Arc::new(Other)],
+        ),
+    ]);
+
+    let found = groups.search("image generation create picture");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].name, "media");
+    assert_eq!(groups.search("").len(), 2);
+    assert!(groups.search("unrelated").is_empty());
+}
+
+#[test]
+fn tool_search_names_available_groups() {
+    let groups = Arc::new(ToolGroups::new(vec![ToolGroup::new(
+        "media",
+        "Generate images, transcribe audio, and synthesize speech.",
+        vec![Arc::new(Echo)],
+    )]));
+    let selection = Arc::new(Mutex::new(HashSet::new()));
+    let tool = ToolSearchTool::new(groups, selection);
+    let description = tool.spec().description;
+    assert!(description.contains("media"), "{description}");
+    assert!(description.contains("images"), "{description}");
+}

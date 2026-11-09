@@ -260,6 +260,62 @@ fn a_mixed_group_is_sent_individually() {
 }
 
 #[test]
+fn a_generated_media_file_is_sent_from_the_outbound_directory() {
+    let workspace = TempDir::new().expect("workspace");
+    let spill = TempDir::new().expect("spill");
+    let media = TempDir::new().expect("media");
+    let outbound = media.path().join("outbound");
+    std::fs::create_dir_all(&outbound).expect("outbound");
+    let image = file(&outbound, "cat.png", b"CAT");
+    let (base, server) = bot_server(vec![single(601)]);
+    let tool = MessageTool::new(
+        sender(&base),
+        42,
+        None,
+        workspace.path(),
+        spill.path(),
+        outbound.as_path(),
+        None,
+    );
+
+    let output = tool
+        .call(&json!({"path": image.to_string_lossy()}))
+        .expect("send generated image");
+    assert!(output.content.contains("601"));
+
+    let requests = server.join().expect("server");
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].path.ends_with("/sendPhoto"));
+    assert!(body_contains(&requests[0].body, b"CAT"));
+}
+
+#[test]
+fn a_message_path_outside_the_workspace_and_media_is_rejected() {
+    let workspace = TempDir::new().expect("workspace");
+    let spill = TempDir::new().expect("spill");
+    let media = TempDir::new().expect("media");
+    let outbound = media.path().join("outbound");
+    std::fs::create_dir_all(&outbound).expect("outbound");
+    let outside = TempDir::new().expect("outside");
+    let secret = file(outside.path(), "secret.txt", b"SECRET");
+    let (base, _server) = bot_server(vec![single(701)]);
+    let tool = MessageTool::new(
+        sender(&base),
+        42,
+        None,
+        workspace.path(),
+        spill.path(),
+        outbound.as_path(),
+        None,
+    );
+
+    let error = tool
+        .call(&json!({"path": secret.to_string_lossy()}))
+        .expect_err("outside path must fail");
+    assert!(format!("{error}").contains("escape"), "{error}");
+}
+
+#[test]
 fn speech_is_written_and_sent_as_a_voice_note() {
     let workspace = TempDir::new().expect("workspace");
     let spill = TempDir::new().expect("spill");
