@@ -339,6 +339,7 @@ pub struct HelperConfig {
     pub speaker: Option<Arc<dyn Speaker>>,
     pub memory: Arc<MemoryService>,
     pub soul: String,
+    pub home: PathBuf,
     pub workspace: PathBuf,
     pub spill: PathBuf,
     pub outbound: PathBuf,
@@ -563,7 +564,8 @@ impl HelperPool {
                 tools: built.core,
                 spill_dir: self.config.spill.clone(),
                 voice_tags: self.config.voice_tags,
-                guidance: String::new(),
+                guidance: hearth_core::load_guidance(&self.config.home, &self.config.workspace)
+                    .text,
             },
         )
         .with_memory(Arc::clone(&self.config.memory))

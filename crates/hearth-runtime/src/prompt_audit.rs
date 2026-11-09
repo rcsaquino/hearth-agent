@@ -69,6 +69,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     let secrets = secret_values(&settings);
     let soul = read_soul(home, &settings);
     let (workspace, spill) = workspace_paths(home, &settings);
+    let guidance = hearth_core::load_guidance(home, &workspace).text;
     let media = ToolMediaRoots {
         inbound: home.join("media/inbound"),
         outbound: home.join("media/outbound"),
@@ -87,7 +88,15 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
     .map_err(|error| PromptError::Invalid(error.to_string()))?;
 
     if options.system {
-        let document = system_document(&settings, &session, &memory, &built.core, &soul, &skills)?;
+        let document = system_document(
+            &settings,
+            &session,
+            &memory,
+            &built.core,
+            &soul,
+            &skills,
+            &guidance,
+        )?;
         let output = if options.json {
             serde_json::to_string_pretty(&document).unwrap_or_else(|_| document.to_string())
         } else {
@@ -106,6 +115,7 @@ pub fn prompt(home: &Path, options: PromptOptions) -> Result<(), PromptError> {
             &soul,
             &skills,
             &text,
+            &guidance,
         )?;
         if options.wire {
             let body = wire_body(&settings, &request)?;
@@ -186,6 +196,7 @@ fn system_document(
     tools: &hearth_tools::ToolRegistry,
     soul: &str,
     skills: &SkillLibrary,
+    guidance: &str,
 ) -> Result<Value, PromptError> {
     let standing = memory.standing().ok();
     let standing_text = standing
@@ -206,7 +217,7 @@ fn system_document(
             standing_version,
             recall: String::new(),
             skills_index: skills.read_index().unwrap_or_default(),
-            guidance: String::new(),
+            guidance: guidance.to_owned(),
             runtime_note: "system prefix".to_owned(),
         },
         &[],
@@ -223,6 +234,7 @@ fn preview_document(
     soul: &str,
     skills: &SkillLibrary,
     text: &str,
+    guidance: &str,
 ) -> Result<(hearth_model::ChatRequest, Value), PromptError> {
     let conversation = session.latest_conversation()?;
     let conversation_id = conversation
@@ -267,7 +279,7 @@ fn preview_document(
             standing_version,
             recall,
             skills_index: skills.read_index().unwrap_or_default(),
-            guidance: String::new(),
+            guidance: guidance.to_owned(),
             runtime_note: "preview".to_owned(),
         },
         &history,
@@ -302,11 +314,18 @@ fn wire_body(
 fn system_text(document: &Value) -> String {
     let tools = serde_json::to_string_pretty(&document["tools"])
         .unwrap_or_else(|_| document["tools"].to_string());
+    let guidance = document["guidance"].as_str().unwrap_or_default();
+    let guidance_section = if guidance.trim().is_empty() {
+        String::new()
+    } else {
+        format!("## Project instructions\n{guidance}\n\n")
+    };
     format!(
-        "## Identity\n{}\n\n## Operation\n{}\n\n## Tools\n{}\n\n## Standing memory\n{}\n\n## Skills\n{}",
+        "## Identity\n{}\n\n## Operation\n{}\n\n## Tools\n{}\n\n{}## Standing memory\n{}\n\n## Skills\n{}",
         document["identity"].as_str().unwrap_or_default(),
         document["operation"].as_str().unwrap_or_default(),
         tools,
+        guidance_section,
         document["standing_memory"].as_str().unwrap_or_default(),
         document["skills_index"].as_str().unwrap_or_default()
     )

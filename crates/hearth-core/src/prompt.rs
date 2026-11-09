@@ -53,6 +53,15 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             input.soul, OPERATION
         ))],
     });
+    if !input.guidance.trim().is_empty() {
+        messages.push(ChatMessage {
+            role: Role::System,
+            blocks: vec![ContentBlock::Text(format!(
+                "## Project instructions\n\n{}",
+                input.guidance
+            ))],
+        });
+    }
     if !input.standing.trim().is_empty() {
         messages.push(ChatMessage {
             role: Role::System,
@@ -387,6 +396,10 @@ pub fn request_from_document(document: &Value) -> Option<ChatRequest> {
     let conversation_id = document.get("session_id")?.as_str()?.to_owned();
     let identity = document.get("identity")?.as_str()?;
     let operation = document.get("operation")?.as_str()?;
+    let guidance = document
+        .get("guidance")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let standing = document
         .get("standing_memory")
         .and_then(Value::as_str)
@@ -416,6 +429,14 @@ pub fn request_from_document(document: &Value) -> Option<ChatRequest> {
         role: Role::System,
         blocks: vec![ContentBlock::Text(format!("{identity}\n\n{operation}"))],
     }];
+    if !guidance.trim().is_empty() {
+        messages.push(ChatMessage {
+            role: Role::System,
+            blocks: vec![ContentBlock::Text(format!(
+                "## Project instructions\n\n{guidance}"
+            ))],
+        });
+    }
     if !standing.trim().is_empty() {
         messages.push(ChatMessage {
             role: Role::System,

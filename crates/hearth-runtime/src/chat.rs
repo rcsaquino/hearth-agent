@@ -102,6 +102,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         let memory_source = session
             .latest_user_entry_id(&conversation.id)?
             .map(MemorySource::user);
+        let guidance = hearth_core::load_guidance(home, &workspace).text;
         let built = build_tools(
             &settings,
             &workspace,
@@ -126,7 +127,7 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
                 tools: built.core,
                 spill_dir: spill.clone(),
                 voice_tags: voice_tags(&settings),
-                guidance: String::new(),
+                guidance,
             },
         )
         .with_memory(Arc::clone(&memory))

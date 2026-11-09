@@ -139,6 +139,11 @@ pub fn init_with_io<R: BufRead, W: Write>(
         soul.write_all(hearth_core::default_soul(&agent_name).as_bytes())?;
         soul.flush()?;
     }
+    let guidance_path = home.join(hearth_core::HEARTH_GUIDANCE_FILE);
+    if !guidance_path.exists() {
+        let mut guidance = open_settings(&guidance_path)?;
+        guidance.flush()?;
+    }
 
     let mut models = json!({
         "kind": "openai-compatible",

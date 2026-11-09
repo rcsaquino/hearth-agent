@@ -330,6 +330,7 @@ impl TelegramRuntime {
             speaker: speaker.clone(),
             memory: Arc::clone(&memory),
             soul: soul.clone(),
+            home: home.to_path_buf(),
             workspace: workspace.clone(),
             spill: spill.clone(),
             outbound: home.join("media/outbound"),
@@ -356,6 +357,7 @@ impl TelegramRuntime {
             sender,
             speaker,
             soul,
+            home: home.to_path_buf(),
             workspace,
             spill,
             outbound: home.join("media/outbound"),
@@ -392,6 +394,7 @@ struct TelegramWorker {
     sender: TelegramSender,
     speaker: Option<Arc<dyn Speaker>>,
     soul: String,
+    home: PathBuf,
     workspace: PathBuf,
     spill: PathBuf,
     outbound: PathBuf,
@@ -632,7 +635,7 @@ impl TelegramWorker {
                 tools: built.core,
                 spill_dir: self.spill.clone(),
                 voice_tags: self.voice_tags,
-                guidance: String::new(),
+                guidance: hearth_core::load_guidance(&self.home, &self.workspace).text,
             },
         )
         .with_memory(Arc::clone(&self.memory))
