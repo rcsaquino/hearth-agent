@@ -282,17 +282,26 @@ impl Agent {
         }
     }
 
+    fn runtime_note(&self, conversation_id: &str) -> String {
+        let now = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| "unknown time".to_owned());
+        let mut note = format!(
+            "Current time: {now}. Conversation: {conversation_id}. Model: {}.",
+            self.config.model
+        );
+        if self.config.voice_tags {
+            note.push(' ');
+            note.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
+        }
+        note
+    }
+
     /// Compact after a settled turn when the visible prompt exceeds the soft
     /// threshold. The answer is already durable and delivered before this runs.
     pub fn compact_soft(&self, conversation_id: &str) -> Result<bool, AgentError> {
         let history = self.session.history_for_prompt(conversation_id)?;
-        let now = OffsetDateTime::now_utc()
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| "unknown time".to_owned());
-        let runtime_note = format!(
-            "Current time: {now}. Conversation: {conversation_id}. Model: {}.",
-            self.config.model
-        );
+        let runtime_note = self.runtime_note(conversation_id);
         let (standing, recall, standing_version) =
             self.memory_context(latest_user_text(&history).as_deref());
         let prompt = build_prompt(
@@ -475,13 +484,7 @@ impl Agent {
                 "turn_started",
                 json!({"turn": turn}),
             );
-            let now = OffsetDateTime::now_utc()
-                .format(&Rfc3339)
-                .unwrap_or_else(|_| "unknown time".to_owned());
-            let runtime_note = format!(
-                "Current time: {now}. Conversation: {}. Model: {}.",
-                submission.conversation_id, self.config.model
-            );
+            let runtime_note = self.runtime_note(&submission.conversation_id);
             let history = self
                 .session
                 .history_for_prompt(&submission.conversation_id)?;
