@@ -349,6 +349,38 @@ fn doctor_refuses_settings_that_are_not_0600() {
 }
 
 #[test]
+fn doctor_rejects_the_removed_user_name() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path());
+    write_settings(
+        home.path(),
+        r#"{
+            "identity": {"agent_name": "Hearth", "user_name": "User", "timezone": "UTC"},
+            "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
+            "models": {
+                "kind": "openai-compatible",
+                "base_url": "https://example.com/v1",
+                "api_key": "fake",
+                "model": "fake-model"
+            }
+        }"#,
+    );
+    let output = hearth()
+        .arg("doctor")
+        .arg("--home")
+        .arg(home.path())
+        .output()
+        .expect("run hearth");
+    assert!(!output.status.success(), "user_name must be rejected");
+    let text = String::from_utf8_lossy(&output.stderr);
+    let line = text.trim();
+    assert!(
+        line.to_lowercase().contains("unknown"),
+        "unexpected message: {line}"
+    );
+}
+
+#[test]
 fn init_creates_a_working_home() {
     let home = tempfile::TempDir::new().expect("temp home");
     let output = hearth()
@@ -376,7 +408,7 @@ fn init_creates_a_working_home() {
     let settings = std::fs::read_to_string(&settings_path).expect("read settings");
     let json: serde_json::Value = serde_json::from_str(&settings).expect("settings JSON");
     assert_eq!(json["identity"]["agent_name"], "Hearth");
-    assert_eq!(json["identity"]["user_name"], "User");
+    assert!(json["identity"].get("user_name").is_none(), "user_name should be gone");
     assert_eq!(json["telegram"]["allowed_user_ids"][0], 42);
     assert_eq!(json["models"]["session_header"], "x-opencode-session");
 
@@ -469,7 +501,7 @@ fn init_creates_the_default_soul() {
     assert!(soul.contains("# Voice"), "missing Voice section");
     assert!(soul.contains("# Rules"), "missing Rules section");
     assert!(soul.contains("Hearth"), "missing agent name");
-    assert!(soul.contains("User"), "missing user name");
+    assert!(!soul.contains("for User"), "default soul should not use user_name");
 
     #[cfg(unix)]
     {
