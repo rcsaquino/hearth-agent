@@ -65,16 +65,28 @@ impl ToolGroups {
         self.groups.get(name)
     }
 
-    /// Groups matching a case-insensitive query. An empty query returns all.
+    /// Groups matching any word in the query. An empty query returns all.
     pub fn search(&self, query: &str) -> Vec<&ToolGroup> {
-        let query = query.trim().to_ascii_lowercase();
+        let terms: Vec<String> = query
+            .split_whitespace()
+            .map(|term| {
+                term.trim_matches(|character: char| !character.is_alphanumeric())
+                    .to_ascii_lowercase()
+            })
+            .filter(|term| term.chars().count() >= 2)
+            .collect();
         self.groups
             .values()
             .map(|group| group.as_ref())
             .filter(|group| {
-                query.is_empty()
-                    || group.name.to_ascii_lowercase().contains(&query)
-                    || group.description.to_ascii_lowercase().contains(&query)
+                if terms.is_empty() {
+                    return true;
+                }
+                let name = group.name.to_ascii_lowercase();
+                let description = group.description.to_ascii_lowercase();
+                terms
+                    .iter()
+                    .any(|term| name.contains(term) || description.contains(term))
             })
             .collect()
     }
@@ -140,13 +152,26 @@ impl ToolSearchTool {
 
 impl Tool for ToolSearchTool {
     fn spec(&self) -> ToolSpec {
+        let mut description = "Find optional tool groups and load a group's schemas for this run. Use select to make a group's tools callable."
+            .to_owned();
+        let groups = self.groups.search("");
+        if !groups.is_empty() {
+            let index = groups
+                .iter()
+                .map(|group| format!("{}: {}", group.name, group.description))
+                .collect::<Vec<_>>()
+                .join("; ");
+            description.push_str(" Available groups: ");
+            description.push_str(&index);
+            description.push('.');
+        }
         ToolSpec {
             name: "tool_search".to_owned(),
-            description: "Find optional tool groups and load a group's schemas for this run. Use select to make a group's tools callable.".to_owned(),
+            description,
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Words to match group names and descriptions"},
+                    "query": {"type": "string", "description": "Short words to match group names and descriptions"},
                     "select": {"type": "string", "description": "An exact group name to load"}
                 }
             }),
