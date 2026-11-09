@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.7, plain-language edition
+**Status:** Draft 0.8, plain-language edition
 **Date:** 2026-11-09
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -11,6 +11,8 @@
 ## A note on language
 
 Draft 0.5 adds the optional `telegram.base_url` override for local Bot API servers and self-hosted proxies.
+
+Draft 0.8 records the first feedback slice: a message is acknowledged by the typing indicator, not a reaction; `identity.user_name` is removed; the speech tools teach the model Eleven v4 audio tags; and `HEARTH.md` plus project `AGENTS.md` files are included in the prompt as project instructions.
 
 This document has two readers: the user, who wants to understand what Hearth is,
 and the builder or AI, who must make it real without guessing.
@@ -335,6 +337,7 @@ The default home is `~/.hearth`. `HEARTH_HOME` or `--home` can move it.
 | `hearth.lock` | The single-user lock. | Only when the daemon is stopped. |
 | `hearth.sock` | The private command socket. | Only when the daemon is stopped. |
 | `SOUL.md` | Identity, voice, and standing character. Editable by the user. | No. Without it, Hearth loses its personality. |
+| `HEARTH.md` | The user's rules and workspace guidance. Editable; may be empty. | No. These are the user's standing instructions. |
 | `workspace/` | Default sandbox and durable output files. | Only after checking what is inside. |
 | `skills/` | User-made Markdown procedures. Read-only to Hearth. | No. These are authored workflows. |
 | `skills/learned/` | Learned skills, versions, and changelog. | Yes, but Hearth loses what it learned. |
@@ -356,6 +359,10 @@ Temporary work goes to `$TMPDIR/hearth-*`. It may vanish at any time. Nothing
 durable belongs there.
 
 `SOUL.md` is plain Markdown with three sections: Identity, Voice, and Rules.
+`HEARTH.md` holds the user's rules and workspace guidance; it is read on every run
+and may be empty. Hearth also reads every `AGENTS.md` from the filesystem root down
+to the workspace, most specific last. `SOUL.md` is who Hearth is; `HEARTH.md` and
+`AGENTS.md` are what the user wants it to do.
 
 ### 3.2 Which setting wins
 
@@ -385,10 +392,10 @@ be mode `0600`; the daemon refuses to start otherwise.
 **In plain terms.** Setup should take minutes and require no file editing.
 
 - `hearth init` asks for the Telegram bot token, the user's numeric Telegram id,
-  the provider URL, API key, and model, and sets the agent name, user name, and
-  timezone from system defaults. It creates the home folder, writes `settings.json`
-  with mode `0600`, runs migrations, and tests the Telegram token and one provider
-  request before exiting. If the user ID is unknown, it prints the one-minute
+  the provider URL, API key, and model, and sets the agent name and timezone from
+  system defaults. It creates the home folder, writes `settings.json` with mode
+  `0600`, creates `SOUL.md` and an empty `HEARTH.md`, runs migrations, and tests the
+  Telegram token and one provider request before exiting. If the user ID is unknown, it prints the one-minute
   `@userinfobot` step. It sets `models.session_header` automatically when the
   provider URL is opencode-go.
 - It then offers optional blocks for image generation, transcription, speech, and
@@ -603,6 +610,10 @@ The rules:
   Base64 image data (a text form of binary data) is never stored in the database.
 - The model's private reasoning blocks may be stored but are not replayed unless
   the provider and model support them.
+- `HEARTH.md` and the workspace's `AGENTS.md` chain become one
+  "Project instructions" system message after the operation layer and before
+  standing memory. The files are read at run start, capped, and shown by
+  `hearth prompt`.
 
 ### 5.3 Tools
 
@@ -698,6 +709,7 @@ Every request is assembled in the same order:
 |---|---|---|---|
 | L0 identity | `SOUL.md`, voice, hard rules | Stable | 800 tokens |
 | L1 operation | Tool policy, safety, formatting | Stable | 500 |
+| L1b project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | 32 KB text |
 | L2 tools | Core tool schemas | Stable | 1200 |
 | L3 standing memory | Pinned rules and facts, versioned | Rare | 1200 |
 | L4 skills index | Skill names and one-line descriptions | Rare | 300 |
@@ -705,8 +717,8 @@ Every request is assembled in the same order:
 | L6 recall | Memory retrieved for this input | Every turn | 900 |
 | L7 runtime | Time, chat, budget, model | Every turn | 150 |
 
-L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, tools,
-standing memory, or skills change. L5 is append-only, so the provider's prefix cache
+L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
+guidance files, tools, standing memory, or skills change. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
 message; it never rewrites the prefix. L7 is the last system note.
 
@@ -1058,7 +1070,6 @@ getUpdates(offset, timeout=poll_timeout, allowed_updates=[message, callback_quer
   -> dedupe update_id (unique insert, same save as the submission)
   -> download attachments
   -> save submission with request_id tg:<chat>:<message_id>
-  -> acknowledge with a reaction
   -> persist the offset only after the submission save
 ```
 
@@ -1067,7 +1078,9 @@ between Telegram's response and the save replays the update; the dedupe row make
 the second attempt do nothing. The offset is saved in the same transaction as
 processing, so it never advances past work that was not saved yet.
 
-Ordering is preserved per chat. A chat's submissions execute in save order.
+Ordering is preserved per chat. A chat's submissions execute in save order. The
+daemon shows the typing indicator while a run is active; it does not add a seen
+reaction to the message.
 
 ### 8.3 How replies look
 
@@ -1106,6 +1119,10 @@ Ordering is preserved per chat. A chat's submissions execute in save order.
   with the voice and model from settings, returned as OGG/Opus. They are sent only
   when the user explicitly asks for voice. This is a behavioral rule in `SOUL.md`
   and standing memory, not merely a transport feature.
+- When `media.tts.kind` is `elevenlabs`, the speech tools tell the model to use
+  sparse Eleven v4 audio tags in square brackets, for example
+  `[warm, composed voice]` or `[softly]`. The tags are sent to ElevenLabs verbatim;
+  no SSML is used.
 
 ### 8.5 No commands
 
@@ -1297,7 +1314,6 @@ code.
 {
   "identity": {
     "agent_name": "Hearth",
-    "user_name": "User",
     "timezone": "UTC"
   },
   "telegram": {
@@ -1370,8 +1386,11 @@ code.
 
 That is a complete install with every optional block enabled. The minimum is
 `identity`, `telegram`, and `models`. It uses `deepseek-v4.1-flash` on opencode-go;
-change the model in one line. `SOUL.md` defaults to `$HEARTH_HOME/SOUL.md`. The workspace,
-polling, context budgets, memory budgets, and logging all have defaults.
+change the model in one line. `SOUL.md` defaults to `$HEARTH_HOME/SOUL.md`.
+`HEARTH.md` in the home holds rules and workspace guidance; it is created empty and
+is not a JSON setting. Project `AGENTS.md` files are read from the filesystem root
+down to the workspace. The workspace, polling, context budgets, memory budgets, and
+logging all have defaults.
 
 The three `media` blocks are optional and independent. Present means enabled. The
 defaults are OpenRouter for images, Groq for transcription, and ElevenLabs for
@@ -1406,7 +1425,8 @@ Optional overrides, only when needed:
 
 ### 10.2 What is checked
 
-- Unknown fields are rejected, to catch typos.
+- Unknown fields are rejected, to catch typos. `identity` has no `user_name`; an old
+  settings file that still contains it is rejected.
 - Telegram is enabled when `telegram.bot_token` is present. Then
   `allowed_user_ids` must be non-empty. `telegram.base_url`, when present, must be
   an http or https URL.
@@ -1417,7 +1437,8 @@ Optional overrides, only when needed:
   `compaction.hard_compact`, which must be below 1. `compaction.keep_recent_tokens`
   must be positive.
 - Each `media` block is optional and enabled only when present. A block missing
-  `api_key` or `model` is rejected; `tts` also requires `voice_id`.
+  `api_key` or `model` is rejected; `tts` also requires `voice_id`. When `tts.kind`
+  is `elevenlabs`, the speech tools guide the model to use Eleven v4 audio tags.
 - `media.*.kind` must be a supported kind, and `base_url`, when present, must use
   `https`.
 - `web.search.order` must be a non-empty list of `exa`, `brave`, `deepseek`,

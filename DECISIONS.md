@@ -1018,3 +1018,16 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   explain the option.
 - The Telegram poller no longer sends a seen reaction. The typing indicator is the
   only acknowledgement; a reaction added noise to every message.
+
+- ElevenLabs speech keeps the model's text verbatim, including square-bracket
+  audio tags. The message and media tool descriptions and the agent runtime note
+  now teach sparse Eleven v4 tags such as `[warm, composed voice]` and `[softly]`
+  when TTS is configured. No SSML.
+- Guidance files: `HEARTH.md` is read from the home, then every `AGENTS.md` from
+  the filesystem root down to the workspace, most specific last. Each file is
+  capped at 16 KB and the combined text at 32 KB. The prompt gets one
+  `## Project instructions` system message after the operation layer. The files
+  are read at agent construction so edits apply on the next run. Nested
+  `AGENTS.md` files below the workspace are not auto-loaded.
+- `SPEC.md` is bumped to Draft 0.8 to record this feedback slice. The user's direct
+  request is the approval; no unapproved deviation is introduced.

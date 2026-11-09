@@ -53,13 +53,25 @@ hearth init --non-interactive \
 ```
 
 `hearth init` creates `~/.hearth`, writes `settings.json` with mode `0600`,
-creates `SOUL.md`, and opens the database. Values written as `${NAME}` are
-expanded from the environment when Hearth runs.
+creates `SOUL.md` and an empty `HEARTH.md`, and opens the database. Values written
+as `${NAME}` are expanded from the environment when Hearth runs.
 
 If your gateway routes requests by session, set `models.session_header` to the
 header it expects, for example `x-opencode-session`; Hearth sends the
 conversation id in that header. `hearth init` adds it automatically for
 opencode-go URLs. Leave it out for providers that do not need it.
+
+### Guidance files
+
+- `HEARTH.md` in the home holds your rules and workspace guidance. Edit it freely;
+  it is read on every run and starts empty. It is for instructions, not identity.
+- `AGENTS.md` files hold project rules. Hearth reads every `AGENTS.md` from the
+  filesystem root down to the workspace, most specific last. Put the project file at
+  the workspace root or above it.
+- Nested `AGENTS.md` files below the workspace are not loaded automatically. Ask
+  Hearth to read one if a subproject has its own rules.
+- `SOUL.md` holds Hearth's identity and voice. `HEARTH.md` and `AGENTS.md` tell it
+  what to do.
 
 ## 5. Check the install
 

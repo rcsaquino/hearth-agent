@@ -14,6 +14,7 @@ executable authority. This tree is the local 1.0 implementation.
 - Keeps an append-only conversation record that survives crashes and restarts.
 - Remembers facts, preferences, people, projects, and past work in a local
   library with full-text search, provenance, and maintenance.
+- Reads your standing rules from `HEARTH.md` and project rules from `AGENTS.md`.
 - Runs an agent loop with tools: files, shell, web search, web fetch, memory,
   skills, reminders, helpers, and Telegram files or voice.
 - Speaks Telegram natively: text, images, documents, voice notes, albums, and

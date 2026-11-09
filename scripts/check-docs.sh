@@ -11,7 +11,7 @@ for file in README.md QUICKSTART.md SECURITY.md CONTRIBUTING.md LICENSE; do
     fi
 done
 
-for placeholder in USER_NAME 123456789 example.com '~/.hearth'; do
+for placeholder in 123456789 example.com '~/.hearth'; do
     if ! grep -q -- "$placeholder" README.md QUICKSTART.md SECURITY.md; then
         echo "docs check: placeholder $placeholder is missing from the docs" >&2
         exit 1
