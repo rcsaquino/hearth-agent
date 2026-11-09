@@ -196,9 +196,6 @@ struct InitArgs {
     /// Agent name.
     #[arg(long)]
     agent_name: Option<String>,
-    /// User name.
-    #[arg(long)]
-    user_name: Option<String>,
     /// IANA timezone name.
     #[arg(long)]
     timezone: Option<String>,
@@ -228,7 +225,6 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 api_key: args.api_key,
                 model: args.model,
                 agent_name: args.agent_name,
-                user_name: args.user_name,
                 timezone: args.timezone,
             },
         )?,

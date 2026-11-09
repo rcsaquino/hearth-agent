@@ -1,8 +1,7 @@
 # Hearth Quick Start
 
 This walks through a first install with one Telegram bot and one
-OpenAI-compatible model provider. Replace `USER_NAME`, `123456789`,
-`~/.hearth`, and `example.com` with your own values.
+OpenAI-compatible model provider. Replace `123456789`, `~/.hearth`, and `example.com` with your own values.
 
 ## 1. Create the Telegram bot
 
@@ -50,13 +49,17 @@ hearth init --non-interactive \
   --api-key '${PROVIDER_API_KEY}' \
   --model 'your-model-name' \
   --agent-name Hearth \
-  --user-name USER_NAME \
   --timezone UTC
 ```
 
 `hearth init` creates `~/.hearth`, writes `settings.json` with mode `0600`,
 creates `SOUL.md`, and opens the database. Values written as `${NAME}` are
 expanded from the environment when Hearth runs.
+
+If your gateway routes requests by session, set `models.session_header` to the
+header it expects, for example `x-opencode-session`; Hearth sends the
+conversation id in that header. `hearth init` adds it automatically for
+opencode-go URLs. Leave it out for providers that do not need it.
 
 ## 5. Check the install
 

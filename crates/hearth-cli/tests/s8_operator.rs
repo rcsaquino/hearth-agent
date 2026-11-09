@@ -139,7 +139,7 @@ fn doctor_rejects_an_unknown_setting() {
     write_settings(
         home.path(),
         r#"{
-            "identity": {"agent_name": "Hearth", "user_name": "User", "timezone": "UTC"},
+            "identity": {"agent_name": "Hearth", "timezone": "UTC"},
             "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
             "models": {
                 "kind": "openai-compatible",
@@ -175,7 +175,6 @@ fn doctor_accepts_a_complete_settings_file() {
         r#"{
             "identity": {
                 "agent_name": "Hearth",
-                "user_name": "User",
                 "timezone": "UTC"
             },
             "telegram": {
@@ -251,7 +250,7 @@ fn doctor_names_a_missing_environment_variable() {
     write_settings(
         home.path(),
         r#"{
-            "identity": {"agent_name": "Hearth", "user_name": "User", "timezone": "UTC"},
+            "identity": {"agent_name": "Hearth", "timezone": "UTC"},
             "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
             "models": {
                 "kind": "openai-compatible",
@@ -285,7 +284,7 @@ fn doctor_resolves_environment_references() {
     write_settings(
         home.path(),
         r#"{
-            "identity": {"agent_name": "Hearth", "user_name": "User", "timezone": "UTC"},
+            "identity": {"agent_name": "Hearth", "timezone": "UTC"},
             "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
             "models": {
                 "kind": "openai-compatible",
@@ -315,7 +314,7 @@ fn doctor_refuses_settings_that_are_not_0600() {
     write_settings(
         home.path(),
         r#"{
-            "identity": {"agent_name": "Hearth", "user_name": "User", "timezone": "UTC"},
+            "identity": {"agent_name": "Hearth", "timezone": "UTC"},
             "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
             "models": {
                 "kind": "openai-compatible",
@@ -408,7 +407,10 @@ fn init_creates_a_working_home() {
     let settings = std::fs::read_to_string(&settings_path).expect("read settings");
     let json: serde_json::Value = serde_json::from_str(&settings).expect("settings JSON");
     assert_eq!(json["identity"]["agent_name"], "Hearth");
-    assert!(json["identity"].get("user_name").is_none(), "user_name should be gone");
+    assert!(
+        json["identity"].get("user_name").is_none(),
+        "user_name should be gone"
+    );
     assert_eq!(json["telegram"]["allowed_user_ids"][0], 42);
     assert_eq!(json["models"]["session_header"], "x-opencode-session");
 
@@ -501,7 +503,10 @@ fn init_creates_the_default_soul() {
     assert!(soul.contains("# Voice"), "missing Voice section");
     assert!(soul.contains("# Rules"), "missing Rules section");
     assert!(soul.contains("Hearth"), "missing agent name");
-    assert!(!soul.contains("for User"), "default soul should not use user_name");
+    assert!(
+        !soul.contains("for User"),
+        "default soul should not use user_name"
+    );
 
     #[cfg(unix)]
     {
@@ -824,7 +829,7 @@ fn doctor_reports_the_lock_state() {
 
 fn base_settings() -> serde_json::Value {
     serde_json::json!({
-        "identity": {"agent_name": "Hearth", "user_name": "User", "timezone": "UTC"},
+        "identity": {"agent_name": "Hearth", "timezone": "UTC"},
         "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
         "models": {
             "kind": "openai-compatible",

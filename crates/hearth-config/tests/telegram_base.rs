@@ -9,7 +9,6 @@ fn base() -> serde_json::Value {
     json!({
         "identity": {
             "agent_name": "Hearth",
-            "user_name": "User",
             "timezone": "UTC"
         },
         "telegram": {

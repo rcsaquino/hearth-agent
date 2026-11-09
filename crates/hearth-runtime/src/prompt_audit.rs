@@ -158,9 +158,8 @@ fn read_soul(home: &Path, settings: &Settings) -> String {
         Some(path) => home.join(path),
         None => home.join("SOUL.md"),
     };
-    std::fs::read_to_string(path).unwrap_or_else(|_| {
-        hearth_core::default_soul(&settings.identity.agent_name, &settings.identity.user_name)
-    })
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|_| hearth_core::default_soul(&settings.identity.agent_name))
 }
 
 fn workspace_paths(home: &Path, settings: &Settings) -> (PathBuf, PathBuf) {

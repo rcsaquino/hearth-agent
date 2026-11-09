@@ -43,7 +43,6 @@ fn init_home(home: &std::path::Path, provider_base: &str) {
             api_key: Some("fake-key".to_owned()),
             model: Some("fake-model".to_owned()),
             agent_name: Some("Hearth".to_owned()),
-            user_name: Some("User".to_owned()),
             timezone: Some("UTC".to_owned()),
         },
     )

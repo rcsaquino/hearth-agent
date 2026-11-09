@@ -1005,3 +1005,16 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Browser, documents, and media remain lazy groups: their schemas enter a request
   only after `tool_search` selects the group, and the core tool budget is
   unchanged.
+
+## 2026-11-09: Feedback slice 1 (sir's direct request)
+
+- `identity.user_name` is removed. It only fed the default `SOUL.md`, and a real
+  `SOUL.md` supersedes it. This is a breaking settings change: a file that still
+  has `user_name` is rejected as an unknown field. The development home was
+  updated. The default soul is now name-neutral.
+- `models.session_header` stays. It names an optional request header carrying the
+  conversation id for provider session affinity, cache routing, or tracing. The
+  init path still sets `x-opencode-session` for opencode-go URLs; the docs now
+  explain the option.
+- The Telegram poller no longer sends a seen reaction. The typing indicator is the
+  only acknowledgement; a reaction added noise to every message.

@@ -6,7 +6,7 @@ use tempfile::TempDir;
 #[test]
 fn interactive_init_accepts_defaults_and_never_echoes_secrets() {
     let home = TempDir::new().expect("temp home");
-    let input = "fake-token\n123\nhttps://example.com/v1\nfake-key\nfake-model\n\n\nUTC\nn\nn\nn\n";
+    let input = "fake-token\n123\nhttps://example.com/v1\nfake-key\nfake-model\n\nUTC\nn\nn\nn\n";
     let mut reader = Cursor::new(input.as_bytes());
     let mut output = Vec::new();
     init_with_io(
@@ -24,7 +24,6 @@ fn interactive_init_accepts_defaults_and_never_echoes_secrets() {
     let models = settings.models.as_ref().expect("models");
     assert_eq!(models.model, "fake-model");
     assert_eq!(settings.identity.agent_name, "Hearth");
-    assert_eq!(settings.identity.user_name, "User");
     assert_eq!(settings.identity.timezone, "UTC");
     assert!(settings.media.is_none());
 

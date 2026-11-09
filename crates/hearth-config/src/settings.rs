@@ -34,8 +34,6 @@ pub struct Settings {
 pub struct Identity {
     #[serde(default = "default_agent_name")]
     pub agent_name: String,
-    #[serde(default = "default_user_name")]
-    pub user_name: String,
     #[serde(default = "default_timezone")]
     pub timezone: String,
     #[serde(default)]
@@ -46,7 +44,6 @@ impl Default for Identity {
     fn default() -> Self {
         Self {
             agent_name: default_agent_name(),
-            user_name: default_user_name(),
             timezone: default_timezone(),
             soul_file: None,
         }
@@ -330,10 +327,6 @@ impl Default for Logging {
 
 fn default_agent_name() -> String {
     "Hearth".to_owned()
-}
-
-fn default_user_name() -> String {
-    "User".to_owned()
 }
 
 fn default_timezone() -> String {

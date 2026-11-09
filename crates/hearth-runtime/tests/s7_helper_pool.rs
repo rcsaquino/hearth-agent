@@ -55,7 +55,7 @@ impl Provider for ScriptedProvider {
 
 fn settings() -> Settings {
     serde_json::from_value(json!({
-        "identity": {"agent_name": "Hearth", "user_name": "Sam", "timezone": "UTC"},
+        "identity": {"agent_name": "Hearth", "timezone": "UTC"},
         "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]},
         "models": {
             "kind": "openai-compatible",

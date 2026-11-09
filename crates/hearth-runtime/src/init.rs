@@ -16,7 +16,6 @@ pub struct InitOptions {
     pub api_key: Option<String>,
     pub model: Option<String>,
     pub agent_name: Option<String>,
-    pub user_name: Option<String>,
     pub timezone: Option<String>,
 }
 
@@ -93,12 +92,6 @@ pub fn init_with_io<R: BufRead, W: Write>(
                 options.agent_name = Some(value);
             }
         }
-        if options.user_name.is_none() {
-            let value = prompt(reader, writer, "User name [User]: ")?;
-            if !value.is_empty() {
-                options.user_name = Some(value);
-            }
-        }
         if options.timezone.is_none() {
             let value = prompt(reader, writer, "Timezone [system]: ")?;
             if !value.is_empty() {
@@ -116,7 +109,6 @@ pub fn init_with_io<R: BufRead, W: Write>(
     let api_key = required(options.api_key, "api key", "--api-key")?;
     let model = required(options.model, "model", "--model")?;
     let agent_name = options.agent_name.unwrap_or_else(|| "Hearth".to_owned());
-    let user_name = options.user_name.unwrap_or_else(|| "User".to_owned());
     let timezone = options
         .timezone
         .or_else(system_timezone)
@@ -144,7 +136,7 @@ pub fn init_with_io<R: BufRead, W: Write>(
     let soul_path = home.join("SOUL.md");
     if !soul_path.exists() {
         let mut soul = open_settings(&soul_path)?;
-        soul.write_all(hearth_core::default_soul(&agent_name, &user_name).as_bytes())?;
+        soul.write_all(hearth_core::default_soul(&agent_name).as_bytes())?;
         soul.flush()?;
     }
 
@@ -160,7 +152,6 @@ pub fn init_with_io<R: BufRead, W: Write>(
     let mut value = json!({
         "identity": {
             "agent_name": agent_name,
-            "user_name": user_name,
             "timezone": timezone,
         },
         "telegram": {

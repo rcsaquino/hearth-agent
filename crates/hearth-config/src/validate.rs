@@ -47,7 +47,6 @@ impl Settings {
     /// Validate the shape of a parsed settings file.
     pub fn validate(&self) -> Result<(), ConfigError> {
         require("identity.agent_name", &self.identity.agent_name)?;
-        require("identity.user_name", &self.identity.user_name)?;
         require("identity.timezone", &self.identity.timezone)?;
         if let Some(path) = &self.identity.soul_file {
             require("identity.soul_file", &path.to_string_lossy())?;

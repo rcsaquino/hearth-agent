@@ -254,9 +254,8 @@ impl TelegramRuntime {
             Some(path) => home.join(path),
             None => home.join("SOUL.md"),
         };
-        let soul = std::fs::read_to_string(&soul_path).unwrap_or_else(|_| {
-            hearth_core::default_soul(&settings.identity.agent_name, &settings.identity.user_name)
-        });
+        let soul = std::fs::read_to_string(&soul_path)
+            .unwrap_or_else(|_| hearth_core::default_soul(&settings.identity.agent_name));
 
         let media = settings.media.clone().unwrap_or_default();
         let transcriber = build_transcriber(&media)?;

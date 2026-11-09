@@ -59,9 +59,8 @@ pub fn chat(home: &Path) -> Result<(), ChatError> {
         Some(path) => home.join(path),
         None => home.join("SOUL.md"),
     };
-    let soul = std::fs::read_to_string(&soul_path).unwrap_or_else(|_| {
-        hearth_core::default_soul(&settings.identity.agent_name, &settings.identity.user_name)
-    });
+    let soul = std::fs::read_to_string(&soul_path)
+        .unwrap_or_else(|_| hearth_core::default_soul(&settings.identity.agent_name));
 
     let workspace = match settings.agent.workspace.clone() {
         Some(path) if path.is_absolute() => path,
