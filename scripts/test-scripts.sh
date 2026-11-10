@@ -76,6 +76,21 @@ if printf '%s' "$output" | grep -q 'sk-test-planted-credential-value'; then
     exit 1
 fi
 
+mkdir -p "$work/ci-repo"
+(
+    cd "$work/ci-repo"
+    git init -q
+    git config user.name "Hearth Test"
+    git config user.email "hearth-test@example.com"
+    printf 'ordinary notes\n' > notes.txt
+    git add notes.txt
+    git commit -qm initial
+    if ! PUBLIC_DENYLIST="" "$root/scripts/ci-secret-scan.sh" >/dev/null 2>&1; then
+        echo "CI secret scan failed without a deny-list secret" >&2
+        exit 1
+    fi
+)
+
 cd "$root"
 target="${1:-x86_64-unknown-linux-gnu}"
 "$root/scripts/package.sh" "$target"
