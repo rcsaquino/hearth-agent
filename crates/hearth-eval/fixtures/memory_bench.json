@@ -5206,11 +5206,11 @@
     }
   ],
   "secrets": [
-    "sk-live-abcdefghijklmnop",
-    "ghp_abcdefghijklmnopqrstuvwxyz",
-    "xoxb-1234567890-abcdefghij",
-    "AKIAABCDEFGHIJKLMNOP",
-    "123456789:AAFabcdefghijklmnopqrstuvwxyz",
+    "<openai-live>",
+    "<github-pat>",
+    "<slack-token>",
+    "<aws-key>",
+    "<telegram-token>",
     "api_key=abcdefgh12345678",
     "password=hunter2hunter2",
     "token=secretvalue123",

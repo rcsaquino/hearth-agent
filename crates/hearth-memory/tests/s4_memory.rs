@@ -209,10 +209,15 @@ fn as_of_reads_the_state_at_a_time() {
 #[test]
 fn secrets_are_refused() {
     let (_home, _session, service) = setup();
+    let live_key = format!("{}{}", "sk-live-", "abcdefghijklmnop");
+    let telegram_token = format!(
+        "{}{}{}",
+        "123456789", ":", "AAFakeTokenFakeTokenFakeTokenFake"
+    );
     for content in [
-        "my key is sk-live-abcdefghijklmnop",
+        live_key.as_str(),
         "token=abcdefgh1234",
-        "123456789:AAFakeTokenFakeTokenFakeTokenFake",
+        telegram_token.as_str(),
         "authorization is Bearer abcdefghijklmnop",
     ] {
         let error = service

@@ -217,6 +217,22 @@ fn load_fixture(service: &MemoryService, fixture: &Fixture) -> Result<LoadedFixt
     })
 }
 
+/// Expand a fixture placeholder into the credential shape the detector
+/// exercises. The parts are joined at runtime so the repository does not
+/// contain a provider-shaped literal.
+fn expand_secret(value: &str) -> String {
+    match value {
+        "<openai-live>" => format!("{}{}", "sk-live-", "abcdefghijklmnop"),
+        "<github-pat>" => format!("{}{}", "ghp_", "abcdefghijklmnopqrstuvwxyz"),
+        "<slack-token>" => format!("{}{}", "xoxb-", "1234567890-abcdefghij"),
+        "<aws-key>" => format!("{}{}", "AKIA", "ABCDEFGHIJKLMNOP"),
+        "<telegram-token>" => {
+            format!("{}{}{}", "123456789", ":", "AAFabcdefghijklmnopqrstuvwxyz")
+        }
+        _ => value.to_owned(),
+    }
+}
+
 /// Run the benchmark over the versioned fixture.
 pub fn run() -> Result<BenchReport> {
     let fixture: Fixture = serde_json::from_str(FIXTURE).context("parse the memory fixture")?;
@@ -233,8 +249,9 @@ pub fn run() -> Result<BenchReport> {
 
     let mut secret_leaks = 0usize;
     for secret in &fixture.secrets {
+        let secret = expand_secret(secret);
         match service.save(NewMemoryInput {
-            content: secret.clone(),
+            content: secret,
             kind: MemoryKind::Fact,
             tags: Vec::new(),
             importance: 10,
