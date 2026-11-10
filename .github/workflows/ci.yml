@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -15,9 +18,4 @@ jobs:
       - name: Secret scan
         env:
           PUBLIC_DENYLIST: ${{ secrets.HEARTH_PUBLIC_DENYLIST }}
-        run: |
-          if [ -n "$PUBLIC_DENYLIST" ]; then
-            printf '%s\n' "$PUBLIC_DENYLIST" > "$RUNNER_TEMP/hearth-public-denylist"
-            export HEARTH_PUBLIC_DENYLIST="$RUNNER_TEMP/hearth-public-denylist"
-          fi
-          ./scripts/secret-scan.sh
+        run: ./scripts/ci-secret-scan.sh
