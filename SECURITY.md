@@ -67,10 +67,8 @@ kept beside the restored database. Media is not included in a database snapshot.
 
 ## Reporting a problem
 
-This is a local, source-distributed project. Report security issues privately to
-the maintainer rather than in a public issue. A placeholder contact is
-`security@example.com`; replace it with the project's real private channel before
-any public release.
+Report security issues privately through the repository's Security tab using
+GitHub private vulnerability reporting. Do not open a public issue.
 
 ## Public release
 

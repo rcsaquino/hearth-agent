@@ -7,7 +7,13 @@ Hearth account, no telemetry, and no hosted storage.
 
 The full behavior and design are defined in [SPEC.md](SPEC.md); the storage
 columns are defined in [SCHEMA.md](SCHEMA.md), with the migrations as the
-executable authority. This tree is the local 1.0 implementation.
+executable authority. This tree is the pre-1.0 implementation.
+
+## Project status
+
+Hearth is pre-1.0. The current release targets Linux x86_64; aarch64 builds
+from source. The public API and settings may change. The bounded soak and local
+acceptance matrix pass; a seven-day real-time soak is still pending.
 
 ## What it does
 
