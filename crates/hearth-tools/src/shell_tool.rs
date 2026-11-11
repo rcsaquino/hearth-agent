@@ -1,6 +1,8 @@
 //! The shell tool: commands in the workspace with a bounded wait.
 
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -60,15 +62,17 @@ impl Tool for ShellTool {
             None => self.workspace.resolve_workspace_directory(".")?,
         };
 
-        let mut child = Command::new("sh")
+        let mut process = Command::new("sh");
+        process
             .arg("-c")
             .arg(command)
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(ToolError::from)?;
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        process.process_group(0);
+        let mut child = process.spawn().map_err(ToolError::from)?;
         let stdout = child
             .stdout
             .take()
@@ -85,6 +89,16 @@ impl Tool for ShellTool {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() >= deadline => {
+                    #[cfg(unix)]
+                    {
+                        // The child leads its own process group. Kill the group so a
+                        // grandchild cannot keep the capture pipes open past the timeout.
+                        let _ = Command::new("kill")
+                            .arg("-KILL")
+                            .arg("--")
+                            .arg(format!("-{}", child.id()))
+                            .status();
+                    }
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = stdout_reader.join();

@@ -1031,3 +1031,12 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   `AGENTS.md` files below the workspace are not auto-loaded.
 - `SPEC.md` is bumped to Draft 0.8 to record this feedback slice. The user's direct
   request is the approval; no unapproved deviation is introduced.
+
+## 2026-11-11: Shell timeout process group
+
+- The shell tool now places the command in its own process group and kills the
+  group on timeout. This closes the previously deferred process-group item: a
+  grandchild that inherited the capture pipe can no longer delay a timed-out
+  command. The group kill uses the system `kill` command, so no new dependency is
+  added. The timeout regression test uses `sleep 5 & wait` so it exercises the
+  grandchild case deterministically.
