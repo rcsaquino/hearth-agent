@@ -18,7 +18,7 @@ pub enum BackupError {
     Storage(#[from] hearth_storage::StorageError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("database not found at {0}; run hearth init")]
+    #[error("database not found at {0}; run `hearth` to set up the home")]
     MissingDatabase(PathBuf),
     #[error("backup not found: {0}")]
     MissingBackup(PathBuf),

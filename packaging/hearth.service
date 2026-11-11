@@ -5,7 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/hearth daemon --home %h/.hearth
+Environment="HEARTH_DAEMON=1"
+Environment="HEARTH_HOME=%h/.hearth"
+ExecStart=/usr/local/bin/hearth
 Restart=on-failure
 RestartSec=5
 

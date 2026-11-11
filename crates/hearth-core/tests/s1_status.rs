@@ -64,18 +64,17 @@ fn status_reads_count_tasks_and_sum_usage() {
                 output_tokens: 5,
                 reasoning_tokens: 0,
             },
-            cost_micros: 42,
             latency_ms: 10,
         })
         .expect("record usage");
 
     let totals = session.usage_totals_since(0).expect("totals");
     assert_eq!(totals.input_tokens, 10);
+    assert_eq!(totals.output_tokens, 5);
     assert_eq!(totals.cache_read_tokens, 4);
-    assert_eq!(totals.cost_micros, 42);
     let future = session.usage_totals_since(i64::MAX).expect("future totals");
     assert_eq!(future.input_tokens, 0);
-    assert_eq!(future.cost_micros, 0);
+    assert_eq!(future.output_tokens, 0);
 
     assert_eq!(session.memory_item_count().expect("memory count"), 0);
 }

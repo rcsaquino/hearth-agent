@@ -193,7 +193,7 @@ fn the_prompt_starts_with_the_summary_and_excludes_covered_entries() {
         transcript.iter().any(|message| message["role"] == "system"
             && message["blocks"][0]["text"]
                 .as_str()
-                .is_some_and(|text| text.contains("Summary of earlier conversation"))),
+                .is_some_and(|text| text.contains("<summary_of_earlier_conversation>"))),
         "the summary message is missing: {transcript:?}"
     );
     assert!(

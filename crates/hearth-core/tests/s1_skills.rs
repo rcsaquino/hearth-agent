@@ -46,13 +46,13 @@ fn the_skills_index_is_a_prompt_layer_after_standing() {
         .request
         .messages
         .iter()
-        .position(|message| text(message).contains("## Standing memory"))
+        .position(|message| text(message).contains("<standing_memory>"))
         .expect("standing layer");
     let skills = prompt
         .request
         .messages
         .iter()
-        .position(|message| text(message).contains("## Skills"))
+        .position(|message| text(message).contains("<skills>"))
         .expect("skills layer");
     let runtime = prompt
         .request

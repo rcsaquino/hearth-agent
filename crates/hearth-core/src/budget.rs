@@ -2,8 +2,6 @@
 
 /// The identity layer budget.
 pub const SEGMENT_IDENTITY: u64 = 800;
-/// The operation layer budget.
-pub const SEGMENT_OPERATION: u64 = 500;
 /// The tool schema budget.
 pub const SEGMENT_TOOLS: u64 = 1_200;
 /// The standing memory budget.
@@ -60,7 +58,7 @@ impl ContextBudget {
 
 impl Default for ContextBudget {
     fn default() -> Self {
-        Self::new(128_000, 8_192, 0.65, 0.85, 24_000)
+        Self::new(128_000, 32_000, 0.65, 0.85, 20_000)
     }
 }
 
@@ -75,7 +73,6 @@ fn fraction(total: u64, fraction: f64) -> u64 {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TokenCounts {
     pub identity: u64,
-    pub operation: u64,
     pub tools: u64,
     pub standing: u64,
     pub skills: u64,
@@ -92,7 +89,6 @@ impl TokenCounts {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         identity: u64,
-        operation: u64,
         tools: u64,
         standing: u64,
         skills: u64,
@@ -101,19 +97,10 @@ impl TokenCounts {
         recall: u64,
         runtime: u64,
     ) -> Self {
-        let total = identity
-            + operation
-            + tools
-            + standing
-            + skills
-            + guidance
-            + transcript
-            + recall
-            + runtime;
-        let fixed = identity + operation + tools + standing + skills + guidance + runtime;
+        let total = identity + tools + standing + skills + guidance + transcript + recall + runtime;
+        let fixed = identity + tools + standing + skills + guidance + runtime;
         Self {
             identity,
-            operation,
             tools,
             standing,
             skills,
@@ -131,9 +118,6 @@ impl TokenCounts {
         let mut over = Vec::new();
         if self.identity > SEGMENT_IDENTITY {
             over.push("identity");
-        }
-        if self.operation > SEGMENT_OPERATION {
-            over.push("operation");
         }
         if self.tools > SEGMENT_TOOLS {
             over.push("tools");

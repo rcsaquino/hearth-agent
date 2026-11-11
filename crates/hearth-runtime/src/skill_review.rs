@@ -6,9 +6,7 @@ use std::time::Instant;
 
 use hearth_core::{CoreError, Entry, NewUsage, Session, SubmissionStatus, parse_blocks};
 use hearth_memory::{MemoryError, MemoryService};
-use hearth_model::{
-    ChatMessage, ChatRequest, ContentBlock, Pricing, Provider, Role, StreamEvent, Usage,
-};
+use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::{Value, json};
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -63,36 +61,29 @@ pub enum SkillReviewError {
 pub struct SkillReviewer {
     session: Session,
     provider: Arc<dyn Provider>,
-    pricing: Pricing,
     memory: Arc<MemoryService>,
     skills: Arc<SkillLibrary>,
     model: String,
     provider_name: String,
-    max_tokens: u32,
 }
 
 impl SkillReviewer {
     /// Build a reviewer.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         session: Session,
         provider: Arc<dyn Provider>,
-        pricing: Pricing,
         memory: Arc<MemoryService>,
         skills: Arc<SkillLibrary>,
         model: String,
         provider_name: String,
-        max_tokens: u32,
     ) -> Self {
         Self {
             session,
             provider,
-            pricing,
             memory,
             skills,
             model,
             provider_name,
-            max_tokens,
         }
     }
 
@@ -256,7 +247,7 @@ impl SkillReviewer {
             ],
             tools: Vec::new(),
             temperature: None,
-            max_tokens: Some(self.max_tokens),
+            max_tokens: None,
             session_id: Some("skill.review".to_owned()),
         };
         Ok((user_text, request))
@@ -401,11 +392,6 @@ impl SkillReviewer {
         usage: Usage,
         latency_ms: i64,
     ) -> Result<(), SkillReviewError> {
-        let cost_micros = self
-            .pricing
-            .price(&self.model)
-            .map(|price| price.cost_micros(&usage))
-            .unwrap_or(0);
         self.session.record_usage(NewUsage {
             task_id: Some(task_id.to_owned()),
             conversation_id: None,
@@ -413,7 +399,6 @@ impl SkillReviewer {
             model: self.model.clone(),
             kind: "skill.review".to_owned(),
             usage,
-            cost_micros,
             latency_ms,
         })?;
         Ok(())

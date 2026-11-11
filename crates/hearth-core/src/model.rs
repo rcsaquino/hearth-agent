@@ -195,7 +195,6 @@ pub struct NewUsage {
     pub model: String,
     pub kind: String,
     pub usage: Usage,
-    pub cost_micros: i64,
     pub latency_ms: i64,
 }
 
@@ -214,7 +213,6 @@ pub struct UsageEvent {
     pub cache_write_tokens: i64,
     pub output_tokens: i64,
     pub reasoning_tokens: i64,
-    pub cost_micros: i64,
     pub latency_ms: i64,
 }
 
@@ -229,8 +227,8 @@ pub struct TaskCounts {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct UsageTotals {
     pub input_tokens: i64,
+    pub output_tokens: i64,
     pub cache_read_tokens: i64,
-    pub cost_micros: i64,
 }
 
 /// One saved prompt text.

@@ -11,13 +11,6 @@ use crate::model::Entry;
 use crate::session::Session;
 use uuid::Uuid;
 
-/// The operation layer, kept short and stable.
-pub const OPERATION: &str = "## Operation\n\n\
-You act for one user on one local machine. Tools run without approval prompts. \
-Use tools when they help, keep answers plain and brief, and never reveal secrets. \
-Use the message tool to send files, and use voice only when the user explicitly \
-asks for voice.";
-
 /// Inputs for one assembled prompt.
 #[derive(Debug, Clone)]
 pub struct PromptInput {
@@ -48,16 +41,13 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     let mut messages = Vec::with_capacity(history.len() + 4);
     messages.push(ChatMessage {
         role: Role::System,
-        blocks: vec![ContentBlock::Text(format!(
-            "{}\n\n{}",
-            input.soul, OPERATION
-        ))],
+        blocks: vec![ContentBlock::Text(input.soul.clone())],
     });
     if !input.guidance.trim().is_empty() {
         messages.push(ChatMessage {
             role: Role::System,
             blocks: vec![ContentBlock::Text(format!(
-                "## Project instructions\n\n{}",
+                "<project_instructions>\n{}\n</project_instructions>",
                 input.guidance
             ))],
         });
@@ -66,7 +56,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         messages.push(ChatMessage {
             role: Role::System,
             blocks: vec![ContentBlock::Text(format!(
-                "## Standing memory\n\n{}",
+                "<standing_memory>\n{}\n</standing_memory>",
                 input.standing
             ))],
         });
@@ -75,7 +65,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         messages.push(ChatMessage {
             role: Role::System,
             blocks: vec![ContentBlock::Text(format!(
-                "## Skills\n\n{}",
+                "<skills>\n{}\n</skills>",
                 input.skills_index
             ))],
         });
@@ -88,7 +78,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             messages.push(ChatMessage {
                 role: Role::System,
                 blocks: vec![ContentBlock::Text(format!(
-                    "## Relevant memory\n\n{}",
+                    "<relevant_memory>\n{}\n</relevant_memory>",
                     input.recall
                 ))],
             });
@@ -132,7 +122,6 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         .map_err(|error| CoreError::Invalid(error.to_string()))?;
     let tokens = TokenCounts::new(
         tokens_for(&input.soul),
-        tokens_for(OPERATION),
         tokens_for(&tools_text),
         tokens_for(&input.standing),
         tokens_for(&input.skills_index),
@@ -144,7 +133,6 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     let skills_text = input.skills_index.clone();
     let mut prefix_parts = BTreeMap::new();
     prefix_parts.insert("identity".to_owned(), hash_part(&input.soul));
-    prefix_parts.insert("operation".to_owned(), hash_part(OPERATION));
     prefix_parts.insert("tools".to_owned(), hash_part(&tools_text));
     prefix_parts.insert(
         "standing".to_owned(),
@@ -161,7 +149,6 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     );
     let document = json!({
         "identity": input.soul,
-        "operation": OPERATION,
         "tools": tools,
         "standing_memory": input.standing,
         "skills_index": input.skills_index,
@@ -175,7 +162,6 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "prefix_parts": prefix_parts,
         "tokens": {
             "identity": tokens.identity,
-            "operation": tokens.operation,
             "tools": tokens.tools,
             "standing": tokens.standing,
             "skills": tokens.skills,
@@ -223,7 +209,6 @@ pub fn prefix_cause(previous: Option<&Value>, current: &BTreeMap<String, String>
         }
         let label = match part.as_str() {
             "identity" => "SOUL.md",
-            "operation" => "operation",
             "tools" => "tools",
             "standing" => "standing memory",
             "skills" => "skills index",
@@ -282,7 +267,7 @@ pub fn message_for_entry(entry: &Entry) -> Option<ChatMessage> {
         return Some(ChatMessage {
             role: Role::System,
             blocks: vec![ContentBlock::Text(format!(
-                "## Summary of earlier conversation\n\n{text}"
+                "<summary_of_earlier_conversation>\n{text}\n</summary_of_earlier_conversation>"
             ))],
         });
     }
@@ -388,121 +373,4 @@ pub fn estimate_content(value: &Value) -> i64 {
 pub fn build_for(session: &Session, input: PromptInput) -> Result<Prompt, CoreError> {
     let history = session.history_for_prompt(&input.conversation_id)?;
     build(input, &history)
-}
-
-/// Rebuild the provider-neutral request from a saved prompt audit document.
-pub fn request_from_document(document: &Value) -> Option<ChatRequest> {
-    let model = document.get("model")?.as_str()?.to_owned();
-    let conversation_id = document.get("session_id")?.as_str()?.to_owned();
-    let identity = document.get("identity")?.as_str()?;
-    let operation = document.get("operation")?.as_str()?;
-    let guidance = document
-        .get("guidance")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let standing = document
-        .get("standing_memory")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let recall = document
-        .get("recall")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let runtime = document
-        .get("runtime")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let tools = document
-        .get("tools")?
-        .as_array()?
-        .iter()
-        .map(|tool| {
-            Some(ToolSpec {
-                name: tool.get("name")?.as_str()?.to_owned(),
-                description: tool.get("description")?.as_str()?.to_owned(),
-                parameters: tool.get("parameters")?.clone(),
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-
-    let mut messages = vec![ChatMessage {
-        role: Role::System,
-        blocks: vec![ContentBlock::Text(format!("{identity}\n\n{operation}"))],
-    }];
-    if !guidance.trim().is_empty() {
-        messages.push(ChatMessage {
-            role: Role::System,
-            blocks: vec![ContentBlock::Text(format!(
-                "## Project instructions\n\n{guidance}"
-            ))],
-        });
-    }
-    if !standing.trim().is_empty() {
-        messages.push(ChatMessage {
-            role: Role::System,
-            blocks: vec![ContentBlock::Text(format!(
-                "## Standing memory\n\n{standing}"
-            ))],
-        });
-    }
-    let skills_index = document
-        .get("skills_index")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if !skills_index.trim().is_empty() {
-        messages.push(ChatMessage {
-            role: Role::System,
-            blocks: vec![ContentBlock::Text(format!("## Skills\n\n{skills_index}"))],
-        });
-    }
-    let transcript = document.get("transcript")?.as_array()?;
-    let parsed: Vec<ChatMessage> = transcript
-        .iter()
-        .filter_map(|message| {
-            let role = match message.get("role")?.as_str()? {
-                "system" => Role::System,
-                "user" => Role::User,
-                "assistant" => Role::Assistant,
-                "tool" => Role::Tool,
-                _ => return None,
-            };
-            let blocks = message
-                .get("blocks")?
-                .as_array()?
-                .iter()
-                .flat_map(parse_blocks)
-                .collect();
-            Some(ChatMessage { role, blocks })
-        })
-        .collect();
-    let newest_user = parsed
-        .iter()
-        .rposition(|message| message.role == Role::User);
-    for (index, message) in parsed.into_iter().enumerate() {
-        if Some(index) == newest_user && !recall.trim().is_empty() {
-            messages.push(ChatMessage {
-                role: Role::System,
-                blocks: vec![ContentBlock::Text(format!(
-                    "## Relevant memory\n\n{recall}"
-                ))],
-            });
-        }
-        messages.push(message);
-    }
-    messages.push(ChatMessage {
-        role: Role::System,
-        blocks: vec![ContentBlock::Text(runtime.to_owned())],
-    });
-
-    Some(ChatRequest {
-        model,
-        messages,
-        tools,
-        temperature: None,
-        max_tokens: document
-            .get("max_tokens")
-            .and_then(Value::as_u64)
-            .map(|value| value.min(u32::MAX as u64) as u32),
-        session_id: Some(conversation_id),
-    })
 }

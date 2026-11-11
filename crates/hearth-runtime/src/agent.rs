@@ -12,9 +12,7 @@ use hearth_core::{
     plan_compaction, prefix_cause,
 };
 use hearth_memory::MemoryService;
-use hearth_model::{
-    ContentBlock, Pricing, Provider, ProviderError, StreamEvent, ToolCall, ToolSpec, Usage,
-};
+use hearth_model::{ContentBlock, Provider, ProviderError, StreamEvent, ToolCall, ToolSpec, Usage};
 use hearth_tools::{ToolError, ToolRegistry};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -68,7 +66,6 @@ pub enum AgentError {
 pub struct Agent {
     session: Session,
     provider: Arc<dyn Provider>,
-    pricing: Pricing,
     config: AgentConfig,
     memory: Option<Arc<MemoryService>>,
     skills: Option<Arc<crate::skills::SkillLibrary>>,
@@ -81,16 +78,10 @@ pub struct Agent {
 
 impl Agent {
     /// Build an agent.
-    pub fn new(
-        session: Session,
-        provider: Arc<dyn Provider>,
-        pricing: Pricing,
-        config: AgentConfig,
-    ) -> Self {
+    pub fn new(session: Session, provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
         Self {
             session,
             provider,
-            pricing,
             config,
             memory: None,
             skills: None,
@@ -256,13 +247,10 @@ impl Agent {
         Compactor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            self.pricing.clone(),
             self.memory.clone(),
             self.config.model.clone(),
             self.config.provider_name.clone(),
             self.config.owner.clone(),
-            self.budget.reserve,
-            self.budget.max_output_tokens,
         )
     }
 
@@ -544,9 +532,6 @@ impl Agent {
             if !over.is_empty() {
                 tracing::warn!(segments = ?over, "prompt segment over budget");
             }
-            let max_tokens = self.budget.max_output_tokens.min(u32::MAX as u64) as u32;
-            prompt.request.max_tokens = Some(max_tokens);
-            prompt.document["max_tokens"] = json!(max_tokens);
             let prompt_text = serde_json::to_string(&prompt.document)
                 .map_err(|error| AgentError::Invalid(error.to_string()))?;
             let prompt_hash = self.session.save_prompt_blob(&prompt_text)?;
@@ -632,19 +617,13 @@ impl Agent {
                     Err(error) => {
                         let latency_ms = started.elapsed().as_millis() as i64;
                         if has_usage(usage) {
-                            let cost_micros = self.record_usage(
+                            self.record_usage(
                                 &claimed.id,
                                 &submission.conversation_id,
                                 usage,
                                 latency_ms,
                             )?;
-                            emit_usage(
-                                events,
-                                &claimed.id,
-                                &submission.conversation_id,
-                                usage,
-                                cost_micros,
-                            );
+                            emit_usage(events, &claimed.id, &submission.conversation_id, usage);
                         }
                         if !overflow_attempted && is_context_overflow(&error) {
                             overflow_attempted = true;
@@ -664,15 +643,8 @@ impl Agent {
                 }
             }
             let latency_ms = started.elapsed().as_millis() as i64;
-            let cost_micros =
-                self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
-            emit_usage(
-                events,
-                &claimed.id,
-                &submission.conversation_id,
-                usage,
-                cost_micros,
-            );
+            self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
+            emit_usage(events, &claimed.id, &submission.conversation_id, usage);
             self.session
                 .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
             if cancel.load(Ordering::Relaxed) {
@@ -774,7 +746,6 @@ impl Agent {
         let extractor = MemoryExtractor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            self.pricing.clone(),
             Arc::clone(memory),
             self.config.model.clone(),
             self.config.provider_name.clone(),
@@ -934,12 +905,7 @@ impl Agent {
         conversation_id: &str,
         usage: Usage,
         latency_ms: i64,
-    ) -> Result<i64, AgentError> {
-        let cost_micros = self
-            .pricing
-            .price(&self.config.model)
-            .map(|price| price.cost_micros(&usage))
-            .unwrap_or(0);
+    ) -> Result<(), AgentError> {
         self.session.record_usage(NewUsage {
             task_id: Some(task_id.to_owned()),
             conversation_id: Some(conversation_id.to_owned()),
@@ -947,10 +913,9 @@ impl Agent {
             model: self.config.model.clone(),
             kind: "chat".to_owned(),
             usage,
-            cost_micros,
             latency_ms,
         })?;
-        Ok(cost_micros)
+        Ok(())
     }
 
     fn settle_cancelled(
@@ -1268,13 +1233,7 @@ fn emit(
     });
 }
 
-fn emit_usage(
-    events: &dyn EventSink,
-    task_id: &str,
-    conversation_id: &str,
-    usage: Usage,
-    cost_micros: i64,
-) {
+fn emit_usage(events: &dyn EventSink, task_id: &str, conversation_id: &str, usage: Usage) {
     emit(
         events,
         task_id,
@@ -1284,7 +1243,6 @@ fn emit_usage(
             "input_tokens": usage.input_tokens,
             "cache_read_tokens": usage.cache_read_tokens,
             "output_tokens": usage.output_tokens,
-            "cost_micros": cost_micros,
         }),
     );
 }

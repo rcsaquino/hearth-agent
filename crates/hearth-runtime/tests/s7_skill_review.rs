@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use hearth_core::{ClaimedTask, Harness, NewTask, Save, Session, StepOutput, SubmissionStatus};
 use hearth_memory::MemoryService;
-use hearth_model::{
-    ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent, Usage,
-};
+use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, Usage};
 use hearth_runtime::TaskHandler;
 use hearth_runtime::skill_review::{ReviewReport, SkillReviewHandler, SkillReviewer};
 use hearth_runtime::skills::{SkillLibrary, SkillSave, SkillStatus};
@@ -65,12 +63,10 @@ fn reviewer(session: &Session, home: &Path, response: &str) -> (Arc<Scripted>, S
     let reviewer = SkillReviewer::new(
         session.clone(),
         scripted.clone(),
-        Pricing::default(),
         memory,
         library,
         "model".to_owned(),
         "openai-compatible".to_owned(),
-        1024,
     );
     (scripted, reviewer)
 }
@@ -193,7 +189,9 @@ fn a_review_creates_a_skill_with_three_evidence_runs() {
         "{}",
         prompt.text
     );
-    assert_eq!(scripted.requests.lock().expect("requests").len(), 1);
+    let requests = scripted.requests.lock().expect("requests");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].max_tokens, None);
 }
 
 #[test]

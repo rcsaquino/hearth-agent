@@ -1,28 +1,38 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use hearth_config::SETTINGS_FILE;
+use hearth_config::{Daemon, SETTINGS_FILE};
 use serde_json::{Value, json};
 use thiserror::Error;
 
-/// Inputs for `hearth init`.
-#[derive(Debug, Default)]
+/// Inputs for creating a home.
+#[derive(Debug, Clone, Default)]
 pub struct InitOptions {
-    pub non_interactive: bool,
-    pub telegram_token: Option<String>,
+    pub telegram_token: String,
     pub allowed_user_ids: Vec<i64>,
-    pub base_url: Option<String>,
-    pub api_key: Option<String>,
-    pub model: Option<String>,
-    pub agent_name: Option<String>,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub thinking: String,
+    pub agent_name: String,
     pub timezone: Option<String>,
+    pub media: Option<Value>,
+    pub context_window: Option<u64>,
+    pub daemon: Daemon,
+}
+
+/// What init created.
+#[derive(Debug, Clone)]
+pub struct InitReport {
+    pub home: PathBuf,
+    pub settings: PathBuf,
+    pub database: PathBuf,
+    pub schema_version: i64,
 }
 
 #[derive(Debug, Error)]
 pub enum InitError {
-    #[error("{0} is required; pass {1}")]
-    Missing(&'static str, &'static str),
     #[error("{0}")]
     Invalid(String),
     #[error("settings.json already exists at {0}; refusing to overwrite")]
@@ -36,83 +46,8 @@ pub enum InitError {
 }
 
 /// Create a home folder, settings file, directory layout, and database.
-pub fn init(home: &Path, options: InitOptions) -> Result<(), InitError> {
-    let mut reader = std::io::stdin().lock();
-    let mut writer = std::io::stdout().lock();
-    init_with_io(home, options, &mut reader, &mut writer)
-}
-
-/// Create a home folder using an injected reader and writer.
-pub fn init_with_io<R: BufRead, W: Write>(
-    home: &Path,
-    mut options: InitOptions,
-    reader: &mut R,
-    writer: &mut W,
-) -> Result<(), InitError> {
-    let mut media: Option<Value> = None;
-    if !options.non_interactive {
-        if options
-            .telegram_token
-            .as_deref()
-            .is_none_or(|value| value.is_empty())
-        {
-            options.telegram_token = Some(prompt(reader, writer, "Telegram bot token: ")?);
-        }
-        if options.allowed_user_ids.is_empty() {
-            let value = prompt(reader, writer, "Allowed Telegram user id: ")?;
-            let id = value.parse::<i64>().map_err(|_| {
-                InitError::Invalid(format!("allowed user id must be a number: {value}"))
-            })?;
-            options.allowed_user_ids = vec![id];
-        }
-        if options
-            .base_url
-            .as_deref()
-            .is_none_or(|value| value.is_empty())
-        {
-            options.base_url = Some(prompt(reader, writer, "Provider base URL: ")?);
-        }
-        if options
-            .api_key
-            .as_deref()
-            .is_none_or(|value| value.is_empty())
-        {
-            options.api_key = Some(prompt(reader, writer, "Provider API key: ")?);
-        }
-        if options
-            .model
-            .as_deref()
-            .is_none_or(|value| value.is_empty())
-        {
-            options.model = Some(prompt(reader, writer, "Model: ")?);
-        }
-        if options.agent_name.is_none() {
-            let value = prompt(reader, writer, "Agent name [Hearth]: ")?;
-            if !value.is_empty() {
-                options.agent_name = Some(value);
-            }
-        }
-        if options.timezone.is_none() {
-            let value = prompt(reader, writer, "Timezone [system]: ")?;
-            if !value.is_empty() {
-                options.timezone = Some(value);
-            }
-        }
-        media = prompt_media(reader, writer)?;
-    }
-
-    let token = required(options.telegram_token, "telegram token", "--telegram-token")?;
-    if options.allowed_user_ids.is_empty() {
-        return Err(InitError::Missing("allowed user id", "--allowed-user-id"));
-    }
-    let base_url = required(options.base_url, "base URL", "--base-url")?;
-    let api_key = required(options.api_key, "api key", "--api-key")?;
-    let model = required(options.model, "model", "--model")?;
-    let agent_name = options.agent_name.unwrap_or_else(|| "Hearth".to_owned());
-    let timezone = options
-        .timezone
-        .or_else(system_timezone)
-        .unwrap_or_else(|| "UTC".to_owned());
+pub fn init(home: &Path, options: InitOptions) -> Result<InitReport, InitError> {
+    validate(&options)?;
 
     fs::create_dir_all(home)?;
     for directory in [
@@ -136,7 +71,7 @@ pub fn init_with_io<R: BufRead, W: Write>(
     let soul_path = home.join("SOUL.md");
     if !soul_path.exists() {
         let mut soul = open_settings(&soul_path)?;
-        soul.write_all(hearth_core::default_soul(&agent_name).as_bytes())?;
+        soul.write_all(hearth_core::default_soul(&options.agent_name).as_bytes())?;
         soul.flush()?;
     }
     let guidance_path = home.join(hearth_core::HEARTH_GUIDANCE_FILE);
@@ -145,29 +80,46 @@ pub fn init_with_io<R: BufRead, W: Write>(
         guidance.flush()?;
     }
 
+    let timezone = options
+        .timezone
+        .clone()
+        .or_else(system_timezone)
+        .unwrap_or_else(|| "UTC".to_owned());
     let mut models = json!({
         "kind": "openai-compatible",
-        "base_url": base_url,
-        "api_key": api_key,
-        "model": model,
+        "base_url": options.base_url,
+        "api_key": options.api_key,
+        "model": options.model,
+        "thinking": options.thinking,
     });
-    if base_url.contains("opencode-go") || base_url.contains("opencode.ai/inference/go") {
+    if let Some(window) = options.context_window {
+        models["context_window"] = json!(window);
+    }
+    if models["base_url"]
+        .as_str()
+        .is_some_and(|url| url.contains("opencode-go") || url.contains("opencode.ai/inference/go"))
+    {
         models["session_header"] = json!("x-opencode-session");
     }
     let mut value = json!({
         "identity": {
-            "agent_name": agent_name,
+            "agent_name": options.agent_name,
             "timezone": timezone,
         },
         "telegram": {
-            "bot_token": token,
+            "bot_token": options.telegram_token,
             "allowed_user_ids": options.allowed_user_ids,
         },
         "models": models,
+        "daemon": {
+            "start": options.daemon.start,
+            "keep_running": options.daemon.keep_running,
+        },
     });
-    if let Some(media) = media {
+    if let Some(media) = options.media {
         value["media"] = media;
     }
+    let value = hearth_config::compact_settings(&value);
     let text = serde_json::to_string_pretty(&value).expect("settings are JSON values");
 
     let mut file = open_settings(&settings_path)?;
@@ -181,118 +133,51 @@ pub fn init_with_io<R: BufRead, W: Write>(
     let database = home.join("hearth.db");
     hearth_storage::open(&database)?;
 
-    writeln!(writer, "created {}", home.display())?;
-    writeln!(writer, "settings: {} (mode 0600)", settings_path.display())?;
-    writeln!(
-        writer,
-        "database: {} (schema {})",
-        database.display(),
-        hearth_storage::SCHEMA_VERSION
-    )?;
-    writeln!(
-        writer,
-        "next: hearth doctor --live --home {}",
-        home.display()
-    )?;
-    Ok(())
-}
-
-fn prompt<R: BufRead, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    label: &str,
-) -> Result<String, InitError> {
-    write!(writer, "{label}")?;
-    writer.flush()?;
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    Ok(line.trim().to_owned())
-}
-
-fn yes<R: BufRead, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    label: &str,
-) -> Result<bool, InitError> {
-    let answer = prompt(reader, writer, label)?;
-    Ok(matches!(answer.to_ascii_lowercase().as_str(), "y" | "yes"))
-}
-
-fn prompt_media<R: BufRead, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-) -> Result<Option<Value>, InitError> {
-    let mut media = serde_json::Map::new();
-    if yes(reader, writer, "Configure image generation? [y/N] ")? {
-        let api_key = prompt(reader, writer, "Image API key: ")?;
-        let model = prompt(
-            reader,
-            writer,
-            "Image model [openai/gpt-image-2.6-sunburst]: ",
-        )?;
-        let model = if model.is_empty() {
-            "openai/gpt-image-2.6-sunburst".to_owned()
-        } else {
-            model
-        };
-        media.insert(
-            "image".to_owned(),
-            json!({"kind": "openrouter-images", "api_key": api_key, "model": model}),
-        );
-    }
-    if yes(reader, writer, "Configure transcription? [y/N] ")? {
-        let api_key = prompt(reader, writer, "Transcription API key: ")?;
-        let model = prompt(
-            reader,
-            writer,
-            "Transcription model [whisper-large-v3-turbo]: ",
-        )?;
-        let model = if model.is_empty() {
-            "whisper-large-v3-turbo".to_owned()
-        } else {
-            model
-        };
-        media.insert(
-            "stt".to_owned(),
-            json!({"kind": "groq", "api_key": api_key, "model": model}),
-        );
-    }
-    if yes(reader, writer, "Configure speech? [y/N] ")? {
-        let api_key = prompt(reader, writer, "Speech API key: ")?;
-        let voice_id = prompt(reader, writer, "Speech voice id: ")?;
-        let model = prompt(reader, writer, "Speech model [eleven_v4]: ")?;
-        let model = if model.is_empty() {
-            "eleven_v4".to_owned()
-        } else {
-            model
-        };
-        media.insert(
-            "tts".to_owned(),
-            json!({
-                "kind": "elevenlabs",
-                "api_key": api_key,
-                "voice_id": voice_id,
-                "model": model,
-                "output_format": "opus_48000_64",
-            }),
-        );
-    }
-    Ok(if media.is_empty() {
-        None
-    } else {
-        Some(Value::Object(media))
+    Ok(InitReport {
+        home: home.to_path_buf(),
+        settings: settings_path,
+        database,
+        schema_version: hearth_storage::SCHEMA_VERSION,
     })
 }
 
-fn required(
-    value: Option<String>,
-    label: &'static str,
-    flag: &'static str,
-) -> Result<String, InitError> {
-    match value {
-        Some(value) if !value.is_empty() => Ok(value),
-        _ => Err(InitError::Missing(label, flag)),
+fn validate(options: &InitOptions) -> Result<(), InitError> {
+    if options.telegram_token.trim().is_empty() {
+        return Err(invalid("telegram bot token is required"));
     }
+    if options.allowed_user_ids.is_empty() {
+        return Err(invalid("at least one Telegram user id is required"));
+    }
+    if !(options.base_url.starts_with("https://") || options.base_url.starts_with("http://")) {
+        return Err(invalid(
+            "provider base URL must start with http:// or https://",
+        ));
+    }
+    if options.api_key.trim().is_empty() {
+        return Err(invalid("provider API key is required"));
+    }
+    if options.model.trim().is_empty() {
+        return Err(invalid("model is required"));
+    }
+    if options.agent_name.trim().is_empty() {
+        return Err(invalid("agent name is required"));
+    }
+    if !matches!(
+        options.thinking.as_str(),
+        "default" | "off" | "low" | "medium" | "high" | "xhigh" | "max"
+    ) {
+        return Err(invalid(
+            "thinking must be one of default, off, low, medium, high, xhigh, or max",
+        ));
+    }
+    if !matches!(options.daemon.start.as_str(), "tui" | "login" | "startup") {
+        return Err(invalid("daemon start must be tui, login, or startup"));
+    }
+    Ok(())
+}
+
+fn invalid(message: &str) -> InitError {
+    InitError::Invalid(message.to_owned())
 }
 
 fn system_timezone() -> Option<String> {

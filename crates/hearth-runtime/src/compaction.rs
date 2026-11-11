@@ -8,9 +8,7 @@ use hearth_core::{
     TerminalOutcome, parse_blocks, summary_content,
 };
 use hearth_memory::MemoryService;
-use hearth_model::{
-    ChatMessage, ChatRequest, ContentBlock, Pricing, Provider, Role, StreamEvent, Usage,
-};
+use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::json;
 use thiserror::Error;
 
@@ -39,39 +37,29 @@ pub enum CompactionError {
 pub struct Compactor {
     session: Session,
     provider: Arc<dyn Provider>,
-    pricing: Pricing,
     memory: Option<Arc<MemoryService>>,
     model: String,
     provider_name: String,
     owner: String,
-    reserve_tokens: u64,
-    max_output_tokens: u64,
 }
 
 impl Compactor {
     /// Build a compactor.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         session: Session,
         provider: Arc<dyn Provider>,
-        pricing: Pricing,
         memory: Option<Arc<MemoryService>>,
         model: String,
         provider_name: String,
         owner: String,
-        reserve_tokens: u64,
-        max_output_tokens: u64,
     ) -> Self {
         Self {
             session,
             provider,
-            pricing,
             memory,
             model,
             provider_name,
             owner,
-            reserve_tokens,
-            max_output_tokens,
         }
     }
 
@@ -121,7 +109,7 @@ impl Compactor {
             ],
             tools: Vec::new(),
             temperature: None,
-            max_tokens: Some(self.summary_max_tokens()),
+            max_tokens: None,
             session_id: Some(conversation_id.to_owned()),
         };
         let prompt_text = format!("{instruction}\n\n{range}");
@@ -196,7 +184,6 @@ impl Compactor {
         let extractor = MemoryExtractor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            self.pricing.clone(),
             Arc::clone(memory),
             self.model.clone(),
             self.provider_name.clone(),
@@ -209,14 +196,6 @@ impl Compactor {
         }
     }
 
-    fn summary_max_tokens(&self) -> u32 {
-        let by_reserve = (self.reserve_tokens as f64 * 0.8).floor() as u64;
-        by_reserve
-            .min(self.max_output_tokens)
-            .max(1)
-            .min(u32::MAX as u64) as u32
-    }
-
     fn record_usage(
         &self,
         task_id: &str,
@@ -224,11 +203,6 @@ impl Compactor {
         usage: Usage,
         latency_ms: i64,
     ) -> Result<(), CompactionError> {
-        let cost_micros = self
-            .pricing
-            .price(&self.model)
-            .map(|price| price.cost_micros(&usage))
-            .unwrap_or(0);
         self.session.record_usage(NewUsage {
             task_id: Some(task_id.to_owned()),
             conversation_id: Some(conversation_id.to_owned()),
@@ -236,7 +210,6 @@ impl Compactor {
             model: self.model.clone(),
             kind: "compaction".to_owned(),
             usage,
-            cost_micros,
             latency_ms,
         })?;
         Ok(())

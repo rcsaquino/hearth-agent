@@ -7,7 +7,7 @@ use std::time::Duration;
 use hearth_config::Settings;
 use hearth_core::{ContextBudget, Harness};
 use hearth_memory::MemoryService;
-use hearth_model::{ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent};
+use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent};
 use hearth_runtime::{
     HelperConfig, HelperControls, HelperPool, NoopSink, TaskTool, ToolMediaRoots,
 };
@@ -145,7 +145,6 @@ fn helper_config(
         voice_tags: false,
         max_turns: 10,
         budget: ContextBudget::default(),
-        pricing: Pricing::new(),
         events: Arc::new(NoopSink),
         owner: "helper-test".to_owned(),
     })
@@ -258,7 +257,6 @@ fn a_helper_runs_and_reports_without_the_parent_transcript() {
         voice_tags: false,
         max_turns: 10,
         budget: ContextBudget::default(),
-        pricing: Pricing::new(),
         events: Arc::new(NoopSink),
         owner: "helper-test".to_owned(),
     });
@@ -350,7 +348,6 @@ fn a_missing_report_file_is_written_with_private_mode() {
         voice_tags: false,
         max_turns: 10,
         budget: ContextBudget::default(),
-        pricing: Pricing::new(),
         events: Arc::new(NoopSink),
         owner: "helper-test".to_owned(),
     });
@@ -384,7 +381,7 @@ fn a_slow_helper_sends_one_eta_and_one_settle_notice() {
     let (_helper_id, task_id) = seed_helper(session, &parent);
     let (base, sent, telegram) = fake_telegram_many(2);
     let provider =
-        Arc::new(ScriptedProvider::new("Slow report.").with_delay(Duration::from_millis(200)));
+        Arc::new(ScriptedProvider::new("Slow report.").with_delay(Duration::from_millis(1_200)));
     let memory = Arc::new(MemoryService::new(session.clone()));
     let config = helper_config(
         &home,

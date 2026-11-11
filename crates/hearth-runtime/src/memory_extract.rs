@@ -10,15 +10,12 @@ use hearth_core::{
 use hearth_memory::{
     MemoryKind, MemoryPatch, MemoryService, NewMemoryInput, SourceKind, is_trivial,
 };
-use hearth_model::{
-    ChatMessage, ChatRequest, ContentBlock, Pricing, Provider, Role, StreamEvent, Usage,
-};
+use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::{Value, json};
 use thiserror::Error;
 
 const MAX_OPERATIONS: usize = 3;
 const VIEW_TOKEN_CAP: usize = 2000;
-const EXTRACTION_MAX_TOKENS: u32 = 1024;
 
 const INSTRUCTION: &str = "You extract durable memory from a completed run. \
 Return valid JSON only: {\"operations\":[...]}. \
@@ -47,7 +44,6 @@ pub enum MemoryExtractError {
 pub struct MemoryExtractor {
     session: Session,
     provider: Arc<dyn Provider>,
-    pricing: Pricing,
     memory: Arc<MemoryService>,
     model: String,
     provider_name: String,
@@ -59,7 +55,6 @@ impl MemoryExtractor {
     pub fn new(
         session: Session,
         provider: Arc<dyn Provider>,
-        pricing: Pricing,
         memory: Arc<MemoryService>,
         model: String,
         provider_name: String,
@@ -68,7 +63,6 @@ impl MemoryExtractor {
         Self {
             session,
             provider,
-            pricing,
             memory,
             model,
             provider_name,
@@ -124,7 +118,7 @@ impl MemoryExtractor {
             ],
             tools: Vec::new(),
             temperature: None,
-            max_tokens: Some(EXTRACTION_MAX_TOKENS),
+            max_tokens: None,
             session_id: Some(conversation_id.to_owned()),
         };
         let prompt_text = format!("{INSTRUCTION}\n\n{user_text}");
@@ -356,12 +350,7 @@ impl MemoryExtractor {
         conversation_id: &str,
         usage: Usage,
         latency_ms: i64,
-    ) -> Result<i64, MemoryExtractError> {
-        let cost_micros = self
-            .pricing
-            .price(&self.model)
-            .map(|price| price.cost_micros(&usage))
-            .unwrap_or(0);
+    ) -> Result<(), MemoryExtractError> {
         self.session.record_usage(NewUsage {
             task_id: Some(task_id.to_owned()),
             conversation_id: Some(conversation_id.to_owned()),
@@ -369,10 +358,9 @@ impl MemoryExtractor {
             model: self.model.clone(),
             kind: "memory.extract".to_owned(),
             usage,
-            cost_micros,
             latency_ms,
         })?;
-        Ok(cost_micros)
+        Ok(())
     }
 
     fn fail_task(&self, task_id: &str, message: &str) -> Result<(), CoreError> {

@@ -33,9 +33,8 @@ are structured and exclude message bodies by default.
 - Prefer environment references such as `${TELEGRAM_BOT_TOKEN}` over inline
   values in `settings.json`.
 - Credentials are not written to prompts, memory, or transcripts by Hearth, and
-  error messages, `hearth status`, `hearth prompt`, and the live watch redact
-  configured secret values.
-- `hearth prompt` and `hearth watch` are local views. Treat their output as
+  error messages and the TUI views redact configured secret values.
+- The Activity, Prompt, and Doctor tabs are local views. Treat their output as
   sensitive anyway.
 - The token and API keys are not committed. The repository's local scan checks
   the tree and history for common credential patterns and for a private

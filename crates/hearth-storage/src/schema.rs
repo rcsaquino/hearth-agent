@@ -10,3 +10,6 @@ pub const MIGRATION_0003: &str = include_str!("../migrations/0003.sql");
 
 /// Migration 0004 limits FTS reindexing to content and tags updates.
 pub const MIGRATION_0004: &str = include_str!("../migrations/0004.sql");
+
+/// Migration 0005 removes token cost accounting.
+pub const MIGRATION_0005: &str = include_str!("../migrations/0005.sql");

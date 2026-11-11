@@ -6,6 +6,17 @@
 
 use serde_json::{Map, Value};
 
+/// The shortest configured value that is treated as a credential.
+///
+/// Shorter values are placeholders such as `-`, `none`, or `1`. Replacing them
+/// across prompt or event text would corrupt ordinary output.
+pub const MIN_SECRET_LENGTH: usize = 8;
+
+/// Whether a configured value is long enough to redact as a credential.
+pub fn is_redactable_value(value: &str) -> bool {
+    value.chars().count() >= MIN_SECRET_LENGTH
+}
+
 /// Whether the text contains a credential-shaped token.
 pub fn contains_secret(content: &str) -> bool {
     let lower = content.to_ascii_lowercase();
@@ -115,7 +126,7 @@ fn credential_value(word: &str) -> Option<&str> {
     let trimmed = word.trim_matches(|character: char| {
         !character.is_ascii_alphanumeric() && character != '-' && character != '_'
     });
-    if trimmed.len() >= 8 && !trimmed.starts_with('$') {
+    if trimmed.len() >= MIN_SECRET_LENGTH && !trimmed.starts_with('$') {
         Some(trimmed)
     } else {
         None
@@ -138,7 +149,7 @@ fn key_value_secret(word: &str) -> Option<(&str, &str)> {
     let value = right.trim_matches(|character: char| {
         character == '"' || character == '\'' || character == ',' || character == ';'
     });
-    if value.len() < 8 || value.starts_with('$') {
+    if value.len() < MIN_SECRET_LENGTH || value.starts_with('$') {
         return None;
     }
     Some((left, right))

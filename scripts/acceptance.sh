@@ -22,13 +22,17 @@ cargo test -p hearth-runtime --test s7_scheduler
 echo "== telegram fake end to end =="
 cargo test -p hearth-cli --test s8_telegram_daemon
 
+echo "== daemon lifecycle and tui state =="
+cargo test -p hearth-cli --test daemon_lifecycle
+cargo test -p hearth-cli --lib
+
 echo "== memory benchmark =="
-./target/debug/hearth eval memory --json >/dev/null
+cargo test -p hearth-eval --test memory_bench
 
 echo "== prompt cache and overhead =="
-./target/debug/hearth eval tokens --json >/dev/null
+cargo test -p hearth-eval --test tokens_bench
 
-echo "== backup, restore, doctor, restart soak =="
+echo "== backup, doctor, and restart soak =="
 ./scripts/soak.sh
 
 echo "== secrets =="

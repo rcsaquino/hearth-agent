@@ -9,11 +9,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use hearth_core::{CoreError, Session};
+use hearth_core::{CoreError, Session, UsageTotals};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
-use time::OffsetDateTime;
+use time::{Duration as TimeDuration, OffsetDateTime};
 
 use crate::events::EventBus;
 
@@ -149,13 +149,18 @@ fn handle_connection(
 }
 
 fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
-    let midnight = OffsetDateTime::now_utc()
-        .date()
-        .midnight()
-        .assume_utc()
-        .unix_timestamp()
-        * 1_000_000;
-    let totals = context.session.usage_totals_since(midnight)?;
+    let now = OffsetDateTime::now_utc();
+    let midnight = now.date().midnight().assume_utc();
+    let today = context
+        .session
+        .usage_totals_since(timestamp_micros(midnight))?;
+    let week = context
+        .session
+        .usage_totals_since(timestamp_micros(now - TimeDuration::days(7)))?;
+    let month = context
+        .session
+        .usage_totals_since(timestamp_micros(now - TimeDuration::days(30)))?;
+    let total = context.session.usage_totals_since(0)?;
     let counts = context.session.task_counts()?;
     let memory = context.session.memory_item_count()?;
     let standing_version = context.memory.standing_version().unwrap_or(0);
@@ -166,9 +171,9 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         .meta_value("last_skill_review_changes")?
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0);
-    let denominator = totals.input_tokens + totals.cache_read_tokens;
+    let denominator = today.input_tokens + today.cache_read_tokens;
     let cache_hit_rate = if denominator > 0 {
-        totals.cache_read_tokens as f64 / denominator as f64
+        today.cache_read_tokens as f64 / denominator as f64
     } else {
         0.0
     };
@@ -177,9 +182,15 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         "uptime_seconds": context.started.elapsed().as_secs(),
         "tasks_running": counts.running,
         "tasks_asleep": counts.asleep,
-        "today_cost_micros": totals.cost_micros,
-        "cache_read_tokens": totals.cache_read_tokens,
-        "input_tokens": totals.input_tokens,
+        "usage": {
+            "today": usage_value(today),
+            "week": usage_value(week),
+            "month": usage_value(month),
+            "total": usage_value(total),
+        },
+        "cache_read_tokens": today.cache_read_tokens,
+        "input_tokens": today.input_tokens,
+        "output_tokens": today.output_tokens,
         "cache_hit_rate": cache_hit_rate,
         "memory_items": memory,
         "standing_memory_version": standing_version,
@@ -187,6 +198,18 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         "last_skill_review": last_skill_review,
         "last_skill_review_changes": last_skill_review_changes,
     }))
+}
+
+fn usage_value(totals: UsageTotals) -> Value {
+    json!({
+        "input_tokens": totals.input_tokens,
+        "output_tokens": totals.output_tokens,
+        "cache_read_tokens": totals.cache_read_tokens,
+    })
+}
+
+fn timestamp_micros(value: OffsetDateTime) -> i64 {
+    value.unix_timestamp_nanos().div_euclid(1_000) as i64
 }
 
 fn write_line(stream: &mut UnixStream, value: &Value) -> Result<(), IpcError> {
@@ -205,12 +228,37 @@ fn write_error(stream: &mut UnixStream, message: &str) -> Result<(), IpcError> {
 /// Connect to a running daemon.
 fn connect(home: &Path) -> Result<UnixStream, IpcError> {
     let path = socket_path(home);
-    UnixStream::connect(&path)
-        .map_err(|error| IpcError::Daemon(format!("{} ({error})", path.display())))
+    let stream = UnixStream::connect(&path)
+        .map_err(|error| IpcError::Daemon(format!("{} ({error})", path.display())))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    Ok(stream)
 }
 
-/// Watch live events from a running daemon.
-pub fn watch(home: &Path, task_id: Option<String>, json: bool) -> Result<(), IpcError> {
+/// Read the status object from a running daemon.
+pub fn read_status(home: &Path) -> Result<Value, IpcError> {
+    let mut stream = connect(home)?;
+    writeln!(stream, "{}", json!({"v": 1, "cmd": "status"}))?;
+    stream.flush()?;
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    let value: Value = serde_json::from_str(line.trim())
+        .map_err(|error| IpcError::Protocol(format!("invalid status reply: {error}")))?;
+    if value["ok"] != true {
+        return Err(IpcError::Protocol(
+            value["error"]
+                .as_str()
+                .unwrap_or("status was refused")
+                .to_owned(),
+        ));
+    }
+    Ok(value["status"].clone())
+}
+
+/// Open the live event stream from a running daemon.
+///
+/// The returned reader blocks while the stream is idle; drop it to detach.
+pub fn open_watch(home: &Path, task_id: Option<String>) -> Result<BufReader<UnixStream>, IpcError> {
     let mut stream = connect(home)?;
     let request = json!({"v": 1, "cmd": "watch", "task_id": task_id});
     writeln!(stream, "{request}")?;
@@ -228,122 +276,6 @@ pub fn watch(home: &Path, task_id: Option<String>, json: bool) -> Result<(), Ipc
                 .to_owned(),
         ));
     }
-    if json {
-        println!("{}", line.trim());
-    } else {
-        println!("[watch] connected");
-    }
-    for line in reader.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        if json {
-            println!("{line}");
-            continue;
-        }
-        print_human_event(&line);
-    }
-    Ok(())
-}
-
-fn print_human_event(line: &str) {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
-        println!("{line}");
-        return;
-    };
-    let kind = value["kind"].as_str().unwrap_or_default();
-    let data = &value["data"];
-    match kind {
-        "text_delta" => {
-            print!("{}", data["text"].as_str().unwrap_or_default());
-            let _ = std::io::stdout().flush();
-        }
-        "thinking_delta" => {
-            print!("[thinking] {}", data["text"].as_str().unwrap_or_default());
-            let _ = std::io::stdout().flush();
-        }
-        "tool_call_started" => println!(
-            "\n[tool] {} {}",
-            data["name"].as_str().unwrap_or_default(),
-            data["arguments"].as_str().unwrap_or_default()
-        ),
-        "tool_result" => println!(
-            "\n[result] {}",
-            data["content"].as_str().unwrap_or_default()
-        ),
-        "usage" => println!(
-            "\n[usage] input={} cache={} output={} cost_micros={}",
-            data["input_tokens"],
-            data["cache_read_tokens"],
-            data["output_tokens"],
-            data["cost_micros"]
-        ),
-        "run_started" => println!("\n[run] started"),
-        "turn_started" => println!("[run] turn {}", data["turn"]),
-        "task_step" => println!(
-            "[run] {} step {}",
-            data["phase"].as_str().unwrap_or_default(),
-            data["turn"]
-        ),
-        "run_settled" => println!(
-            "\n[settled] {}",
-            data["status"].as_str().unwrap_or_default()
-        ),
-        _ => println!("[{kind}] {data}"),
-    }
-}
-
-/// Ask a running daemon for its status.
-pub fn status(home: &Path, json: bool) -> Result<(), IpcError> {
-    let mut stream = connect(home)?;
-    writeln!(stream, "{}", json!({"v": 1, "cmd": "status"}))?;
-    stream.flush()?;
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    let value: Value = serde_json::from_str(line.trim())
-        .map_err(|error| IpcError::Protocol(format!("invalid status reply: {error}")))?;
-    if value["ok"] != true {
-        return Err(IpcError::Protocol(
-            value["error"]
-                .as_str()
-                .unwrap_or("status was refused")
-                .to_owned(),
-        ));
-    }
-    let status = &value["status"];
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(status).unwrap_or_else(|_| status.to_string())
-        );
-        return Ok(());
-    }
-    println!("model: {}", status["model"].as_str().unwrap_or_default());
-    println!("uptime: {}s", status["uptime_seconds"]);
-    println!(
-        "tasks: {} running, {} asleep",
-        status["tasks_running"], status["tasks_asleep"]
-    );
-    if let Some(value) = status["last_consolidation"].as_str() {
-        println!("last consolidation: {value}");
-    }
-    if let Some(value) = status["last_skill_review"].as_str() {
-        println!("last skill review: {value}");
-    }
-    println!(
-        "last review changes: {}",
-        status["last_skill_review_changes"]
-    );
-    println!(
-        "today cost: {:.4}",
-        status["today_cost_micros"].as_i64().unwrap_or(0) as f64 / 1_000_000.0
-    );
-    println!(
-        "cache hit: {:.1}%",
-        status["cache_hit_rate"].as_f64().unwrap_or(0.0) * 100.0
-    );
-    println!("memory items: {}", status["memory_items"]);
-    Ok(())
+    reader.get_ref().set_read_timeout(None)?;
+    Ok(reader)
 }

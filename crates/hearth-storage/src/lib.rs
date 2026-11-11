@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
 /// The schema version this build understands.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 pub use backup::{snapshot, verify};
 pub use storage::{Reader, Storage, Writer};
@@ -71,6 +71,7 @@ pub fn open(path: &Path) -> Result<Connection, StorageError> {
 /// Open a database without creating or changing it.
 pub fn open_read_only(path: &Path) -> Result<Connection, StorageError> {
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(connection)
 }
 
@@ -98,6 +99,7 @@ pub fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
         (1, schema::MIGRATION_0002, 2),
         (2, schema::MIGRATION_0003, 3),
         (3, schema::MIGRATION_0004, 4),
+        (4, schema::MIGRATION_0005, 5),
     ] {
         if current != from {
             continue;

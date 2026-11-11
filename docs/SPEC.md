@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.8, plain-language edition
-**Date:** 2026-11-09
+**Status:** Draft 0.19, plain-language edition
+**Date:** 2026-11-11
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -10,7 +10,25 @@
 
 ## A note on language
 
+Draft 0.19 removes token pricing and cost tracking entirely. Usage keeps token counts and latency only. Draft 0.18 still covers the plain-text prompt skip, recent-activity seconds, bounded Prompt scrolling, Settings cleanup, media reset behavior, and the fixed SOUL.md path.
+
+Draft 0.17 removes the editable soul-file setting (SOUL.md is always `$HEARTH_HOME/SOUL.md`), removes the duplicate Settings key hints, keeps media rows visible when reset, and drops the redundant web search/fetch heading.
+
+Draft 0.15 raises the default output reserve to 32,000 and recent-token keep to 20,000, makes fetched models.dev limits the persisted reset defaults, has `r` fetch them when no cached lookup exists, adds space above the Settings tip, and orders the tabs Overview, Activity, Memory, Skills, Prompt, Doctor, Settings.
+
+Draft 0.14 polishes the settings and onboarding surfaces: the timezone is a picker, the selected row shows its full tip, Workspace names the default folder, the separate Files tab is gone, the context window is labeled local, models.dev can fill the context window, the ETA reminder is measured in seconds, empty media drafts do not disappear, and onboarding skips disabled optional-service rows.
+
+Draft 0.13 shows every setting inline on the final Settings tab, marks changed rows, adds a reset-to-default key, keeps only non-default values in `settings.json`, combines the Overview cards, and makes daemon shutdown and TUI close responsive. It also moves SOUL.md and HEARTH.md editing into Settings; the separate Files tab is gone.
+
 Draft 0.5 adds the optional `telegram.base_url` override for local Bot API servers and self-hosted proxies.
+
+Draft 0.12 leaves generation settings at the provider's defaults. Hearth sends no `max_tokens` and no sampling parameters; only `models.thinking` is sent, as `reasoning_effort` or DeepSeek's `thinking` toggle for off. `models.max_output_tokens` remains a local context-budget reserve and is never sent to the provider.
+
+Draft 0.11 polishes the settings surface: a fresh home records `SOUL.md` as the identity file, the default run limit is 120 model requests, web search and fetch order are toggled and moved instead of typed, web provider API keys have masked form fields, and editing a setting shows a field-specific tooltip.
+
+Draft 0.10 makes the TUI the complete customization surface: editable SOUL.md and HEARTH.md files, an all-settings form with optional media setup and a raw JSON fallback, a read-only saved-memory browser, and user-skill creation and editing. Every settings save is validated before the file is written atomically with mode 0600.
+
+Draft 0.9 records the TUI usability pass and two additional thinking levels. The tagline is "A durable personal agent, built with Rust." The terminal palette has stronger contrast, form fields are visually distinct, onboarding explains terminal paste shortcuts, the Activity feed coalesces stream deltas into readable rows, the Prompt tab renders every prompt layer with token counts, and a daemon stop waits for the writer lock before the TUI exits.
 
 Draft 0.8 records the first feedback slice: a message is acknowledged by the typing indicator, not a reaction; `identity.user_name` is removed; the speech tools teach the model Eleven v4 audio tags; and `HEARTH.md` plus project `AGENTS.md` files are included in the prompt as project instructions.
 
@@ -147,7 +165,7 @@ Hearth:
 - runs durable background tasks that survive restarts, crashes, and reboots;
 - uses tools such as files, shell, web, documents, media, and scheduling under a
   configurable policy;
-- keeps its transcript, memory, task state, and cost ledger in one local database;
+- keeps its transcript, memory, task state, and usage ledger in one local database;
 - stays affordable by caching, budgeting, compacting, and retrieving instead of
   stuffing everything into every request.
 
@@ -259,37 +277,38 @@ tested and reasoned about alone. The names are literal.
 | `hearth-config` | Reads, validates, and reloads `settings.json`. Interpolates environment variables. |
 | `hearth-core` | The permanent record: entries, saves, documents, submissions, tasks, scheduler, and prompt assembly. |
 | `hearth-storage` | Owns SQLite connections, migrations, full-text search, and backups. |
-| `hearth-model` | Talks to providers: streaming, tool calls, retries, token estimates, pricing, and the media clients (image, transcription, speech). |
+| `hearth-model` | Talks to providers: streaming, tool calls, retries, token estimates, and the media clients (image, transcription, speech). |
 | `hearth-memory` | Extraction, deduplication, retrieval, standing memory, consolidation, forgetting. |
 | `hearth-tools` | The built-in tools, output spill, and workspace confinement. |
 | `hearth-telegram` | The Bot API client, polling, rendering, and attachments. |
-| `hearth-runtime` | Wires everything together: daemon, agent loop, commands, notifications, shutdown. |
-| `hearth-cli` | The `hearth` binary and its subcommands. |
+| `hearth-runtime` | Wires everything together: daemon, agent loop, notifications, shutdown. |
+| `hearth-cli` | The `hearth` binary and the terminal application. |
 | `hearth-eval` | Golden conversations, recall benchmarks, and crash injection. Development only. |
 
 The main public interfaces are `Harness` (open the system and run work), `Session`
 (the single writer), `Storage` (a database backend), `Provider` (a model service),
 and `Memory` (the memory subsystem). Tests attach at these boundaries.
 
-### 2.3 The commands
+### 2.3 The application
 
-There is one binary, `hearth`.
+There is one binary, `hearth`, and one user-facing entry: running it opens the
+terminal application. There are no subcommands or flags.
 
-| Command | What it does |
+| Area | What it does |
 |---|---|
-| `hearth init` | Creates the home folder and a working settings file. |
-| `hearth daemon` | Runs the long-lived agent. |
-| `hearth chat` | Starts a minimal line-based local conversation using the same core. |
-| `hearth doctor` | Checks settings, database, providers, and Telegram without printing secrets. |
-| `hearth prompt [--last\|--json\|--wire]` | Prints the exact prompt sent to the provider. |
-| `hearth service install\|status` | Installs or checks the systemd user unit. |
-| `hearth status` | Asks a running daemon for its state. |
-| `hearth watch [task-id] [--json]` | Follows a live run or task event stream. |
-| `hearth memory search\|get\|save\|forget\|stats\|as_of` | Inspects or edits memory. |
-| `hearth skills list\|show\|history\|diff\|stats` | Inspects or edits the skill library. |
-| `hearth stats` | Shows usage and cost summaries. |
-| `hearth backup` / `hearth restore` | Makes or restores a consistent database snapshot. |
-| `hearth eval` | Runs the offline evaluation suite. |
+| Onboarding | First run replaces `hearth init`: bot token, user id, provider, API key, model picker, thinking, agent name, optional media, start mode, keep-running. |
+| Overview | Runtime, model, thinking, context, turn limit, usage and cache, tasks, memory, Telegram, providers, media, workspace, and recent activity. |
+| Activity | The live event stream from the daemon, with coalesced stream deltas and a readable event detail. |
+| Memory | Browse and search saved memory records. |
+| Skills | Browse skills; create and edit user skills; learned skills stay read-only. |
+| Prompt | The newest saved prompt document and every XML section, with token counts and a raw JSON view. |
+| Doctor | Offline and live checks. |
+| Settings | The last tab. Every option is shown inline, with SOUL.md and HEARTH.md actions, daemon controls, a raw JSON editor, changed-row markers, and reset to default. |
+
+The TUI is a control plane. Conversations happen in Telegram; the TUI configures,
+observes, audits, and controls the daemon. A TUI-started daemon runs detached from
+the terminal. Closing the TUI signals a daemon it owns and exits without waiting
+for it to release the lock; the Stop action still waits for a clean stop.
 
 ### 2.4 One user at a time
 
@@ -301,22 +320,21 @@ open the database while the daemon runs, but it never writes.
 Clients talk to the daemon over the socket in versioned JSON lines: one request
 object and one response object per line.
 
-### 2.5 Watching a run
+### 2.5 Observing a run
 
-The daemon publishes a live event stream on the private socket. `hearth watch`
+The daemon publishes a live event stream on the private socket. The Activity tab
 follows it.
 
-- `hearth watch` attaches to the active run. `hearth watch <task-id>` attaches to a
-  helper or scheduled task. `--json` emits one object per line.
+- Activity attaches to the active run and shows helper or scheduled task events
+  inline.
 - Events: run started, turn started, thinking delta when the provider exposes it,
   text delta, tool call start, tool result, task step, usage update, and run settled.
 - Tool arguments and results are truncated and secrets are redacted. Thinking is
   shown live only; it is never replayed from storage.
-- The stream is read-only. Detaching does not cancel work. Attaching late shows
-  events from that point; entries and tool results hold the earlier record.
-- Telegram shows only the final answer. The live stream is for the local terminal.
-- `hearth watch` is for observing. `hearth prompt` is for auditing what the model
-  saw.
+- The stream is read-only. Closing the TUI does not cancel work. Attaching late
+  shows events from that point; entries and tool results hold the earlier record.
+- Telegram shows only the final answer. Activity is for the local terminal.
+- Activity is for observing. The Prompt tab is for auditing what the model saw.
 
 ---
 
@@ -328,7 +346,7 @@ says what is safe to remove.
 
 ### 3.1 The home folder
 
-The default home is `~/.hearth`. `HEARTH_HOME` or `--home` can move it.
+The default home is `~/.hearth`. `HEARTH_HOME` can move it.
 
 | Path | What it holds | Safe to delete? |
 |---|---|---|
@@ -391,21 +409,33 @@ be mode `0600`; the daemon refuses to start otherwise.
 
 **In plain terms.** Setup should take minutes and require no file editing.
 
-- `hearth init` asks for the Telegram bot token, the user's numeric Telegram id,
-  the provider URL, API key, and model, and sets the agent name and timezone from
-  system defaults. It creates the home folder, writes `settings.json` with mode
-  `0600`, creates `SOUL.md` and an empty `HEARTH.md`, runs migrations, and tests the
-  Telegram token and one provider request before exiting. If the user ID is unknown, it prints the one-minute
-  `@userinfobot` step. It sets `models.session_header` automatically when the
+- Running `hearth` for the first time opens the setup wizard. It shows the
+  `@BotFather` bot-token steps and the `@userinfobot` numeric-id steps, then asks
+  for both values.
+- It offers a provider menu: DeepSeek, OpenCode, OpenCode Go, Command Code, or
+  another OpenAI-compatible endpoint. A preset supplies the base URL; the last
+  choice asks for one. It shows a provider-specific key hint, then calls the
+  OpenAI-compatible `GET {base_url}/models` and lists the ids. The user searches
+  and chooses, or types a name when the list cannot be loaded.
+- It asks for the default thinking level: provider default, off, low, medium,
+  high, xhigh, or max. The choice is stored as `models.thinking`.
+- The timezone is not prompted. It comes from `TZ`, the `/etc/localtime` target,
+  `/etc/timezone`, then UTC.
+- It asks for the agent name, then offers optional media blocks. Image generation
+  asks for an OpenRouter key and model; transcription asks for a Groq key; speech
+  asks for an ElevenLabs key. Each can be skipped.
+- It asks when the daemon should start: when Hearth opens (default), at login, or
+  at startup. Startup uses systemd user linger; if linger cannot be enabled, the
+  TUI shows the exact command. It also asks whether a TUI-started daemon should
+  keep running after the window closes.
+- It creates the home folder, writes `settings.json` with mode `0600`, keeping only
+  values that differ from the defaults, creates `SOUL.md` and an empty `HEARTH.md`,
+  and runs migrations. It sets `models.session_header` automatically when the
   provider URL is opencode-go.
-- It then offers optional blocks for image generation, transcription, speech, and
-  alternative search providers. Each can be skipped, and keys are requested only when
-  enabled. Web search itself needs no key.
-- It prints what it created, what it tested, and the next command.
-- `--non-interactive` accepts the same values as flags or `${ENV}` references. A
-  missing or invalid value fails with the exact fix.
-- `hearth doctor` repeats the checks and explains every failure in one sentence.
-- `hearth service install` writes and enables the systemd user unit.
+- It applies the start mode and starts or attaches to the daemon.
+- The Doctor tab repeats the checks and explains every failure in one sentence.
+- Settings changes are written atomically with mode `0600`; a start-mode change
+  restarts the daemon.
 - Every value remains editable in `settings.json`, including `identity.timezone`.
 
 ---
@@ -547,7 +577,7 @@ Each tool and effect kind declares a retry policy:
 | `at_most_once` | Mark `unknown`, do not retry, notify the user. |
 | `never_retry` | Mark `unknown`, require explicit user action to retry. |
 
-Model generation is `safe`; the only side effect is cost. Telegram sends are
+Model generation is `safe`; it has no local side effects beyond recorded usage. Telegram sends are
 `at_most_once`. If delivery is uncertain, the durable answer is delivered once as a
 "recovered reply" notice on the next successful interaction rather than silently
 duplicated.
@@ -590,7 +620,7 @@ admit input -> submission queued -> generation task
 ```
 
 A run ends when the model returns a final answer with no tool calls, the turn limit
-is reached, the task fails, or the user cancels. The default turn limit is 30 and is
+is reached, the task fails, or the user cancels. The default turn limit is 120 and is
 configurable. Hitting the limit produces a final `notice` entry and an `unanswered`
 submission with reason `turn_limit`.
 
@@ -611,9 +641,9 @@ The rules:
 - The model's private reasoning blocks may be stored but are not replayed unless
   the provider and model support them.
 - `HEARTH.md` and the workspace's `AGENTS.md` chain become one
-  "Project instructions" system message after the operation layer and before
-  standing memory. The files are read at run start, capped, and shown by
-  `hearth prompt`.
+  `<project_instructions>` system message after the identity message and before
+  standing memory. The files are read at run start, capped, and shown in the
+  Prompt tab.
 
 ### 5.3 Tools
 
@@ -650,7 +680,7 @@ helper gets:
 The defaults are four helpers at once, two levels deep (a helper
 may spawn one more), and retention of 30 days or the newest 25 runs. When a helper
 settles, the user gets one notice with the outcome and the report path. If it runs
-past its expected duration, one reminder is sent. A kill cancels the task, aborts any in-flight request, and settles silently.
+past its expected duration plus the configured delay, one reminder is sent. A kill cancels the task, aborts any in-flight request, and settles silently.
 
 The child runs like any conversation. Its final message is the report: it is saved
 as an entry in the parent and delivered to the user.
@@ -673,7 +703,7 @@ Triggers:
 - a provider overflow error.
 
 Range selection walks backward from the newest entry, adding estimated tokens until
-`keep_recent_tokens` (default 24,000) is reached, then cuts at the next user or
+`keep_recent_tokens` (default 20,000) is reached, then cuts at the next user or
 assistant entry. A cut never lands on a tool result or a system entry, and an
 assistant message keeps its tool results.
 
@@ -683,8 +713,7 @@ tool results truncated. It must preserve decisions, open threads, names, dates, 
 user preferences. A summary entry records `covers` (first and last sequence number)
 and `first_kept`. Summaries may summarize earlier summaries.
 
-Compaction uses the configured model, caps output at
-`min(0.8 * reserve_tokens, model_max_output)`, and records its own usage.
+Compaction uses the configured model, sends no output cap, and records its own usage.
 
 Idle compaction handles at most one conversation per idle period, most recently
 active first. It runs only when that conversation has no active run or queued
@@ -708,8 +737,7 @@ Every request is assembled in the same order:
 | Layer | Content | How often it changes | Budget |
 |---|---|---|---|
 | L0 identity | `SOUL.md`, voice, hard rules | Stable | 800 tokens |
-| L1 operation | Tool policy, safety, formatting | Stable | 500 |
-| L1b project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | 32 KB text |
+| L1 project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | 32 KB text |
 | L2 tools | Core tool schemas | Stable | 1200 |
 | L3 standing memory | Pinned rules and facts, versioned | Rare | 1200 |
 | L4 skills index | Skill names and one-line descriptions | Rare | 300 |
@@ -721,6 +749,11 @@ L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
 guidance files, tools, standing memory, or skills change. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
 message; it never rewrites the prefix. L7 is the last system note.
+
+Each section after identity is wrapped in an XML tag: `<project_instructions>`,
+`<standing_memory>`, `<skills>`, `<relevant_memory>`, and
+`<summary_of_earlier_conversation>`. The default `SOUL.md` uses `<identity>`,
+`<voice>`, and `<rules>`.
 
 ### 6.2 The budget
 
@@ -743,6 +776,12 @@ runtime first shrinks recall and tool output, then compacts, then fails with a c
 budget error. Estimates use a real tokenizer where available and a characters/4
 heuristic with a 10% margin otherwise.
 
+`configured_output` comes from `models.max_output_tokens` and is a local reserve
+only. Hearth does not send `max_tokens`, temperature, or other sampling parameters;
+the provider and model keep their own defaults. The one generation control Hearth
+sets is the reasoning level from `models.thinking` (`reasoning_effort`, or DeepSeek's
+`thinking` toggle for off).
+
 ### 6.3 Cost rules
 
 1. **Stable prefix, changing suffix.** Anything that changes per turn goes last.
@@ -751,7 +790,7 @@ heuristic with a 10% margin otherwise.
 3. **Bounded by default.** Inline tool output is capped at 4,000 tokens and spills
    to a file. Prompts carry no duplicates and no filler.
 4. **Bounded housekeeping.** Extraction, summaries, titles, and classification get
-   tight token caps.
+   narrow instructions and bounded inputs.
 
 ### 6.4 Reusing the provider's cache
 
@@ -774,11 +813,11 @@ The details:
 
 One model is configured under `models` and used for everything: conversation, tool
 use, memory extraction, summaries, titles, and classification. There is no second
-routing path. The usage ledger and `hearth status` record the provider and model
+routing path. The usage ledger and the TUI Overview record the provider and model
 that served each request.
 
-Housekeeping stays cheap by capping output and bounding the work, not by switching
-models.
+Housekeeping stays cheap by bounding the work, not by switching models or changing
+the provider's generation defaults.
 
 ### 6.6 Auditing the prompt
 
@@ -787,19 +826,11 @@ preambles and no server-side additions.
 
 - The exact prompt text is saved in `prompt_blobs` before the request and linked from
   the generation checkpoint.
-- `hearth prompt --last` prints the full text of the most recent request.
-- `hearth prompt <entry-id>` prints the prompt used for that entry's request.
-- `hearth prompt --json` prints the same content as segments: identity (`SOUL.md`),
-  operation, tools (name, description, schema), standing memory, skills index,
-  transcript, recall, and runtime note, with token counts per segment.
-- `hearth prompt --system` prints the stable prefix only: identity, operation, tools,
-  standing memory, and skills index. This is the system prompt in the strict sense
-  and it always works, even with no request history.
-- `hearth prompt --preview "text"` assembles the exact prompt for a hypothetical next
-  message without calling the provider.
-- `hearth prompt --wire` shows the provider-specific translation, including message
-  roles and tool-call encoding.
-- The view is read-only and redacts configured secrets.
+- The Prompt tab reads the newest saved document read-only and renders every XML
+  section: identity (`SOUL.md`), project guidance, tools, standing memory, skills
+  index, relevant memory, transcript, and the runtime note. It shows per-section
+  token counts and also offers the raw JSON.
+- The view is read-only. Saved prompt content is redacted by the save path.
 - Prompt blobs are pruned after 30 days by default.
 
 ---
@@ -861,7 +892,7 @@ Three supporting pieces:
 - **No embeddings.** Hearth does not compute or store embeddings. Retrieval is
   lexical: full-text search plus tags, recency, and importance. Memory
   stays one local database with no second model, no extra service, and no index to
-  rebuild. The cost is weaker recall on paraphrase, which 7.8 measures separately.
+  rebuild. The tradeoff is weaker recall on paraphrase, which 7.8 measures separately.
 - **Events.** `memory_events` is an append-only audit trail of memory changes.
 
 ### 7.3 How memories get in
@@ -1022,7 +1053,6 @@ The benchmark includes:
 
 - 200 curated recall questions over synthetic years of conversation;
 - precision and recall targets;
-- token cost per answer;
 - contradiction and supersession cases;
 - temporal queries;
 - paraphrase cases, where the same fact is stored under different words, reported
@@ -1136,9 +1166,7 @@ handles it with tools or says why it cannot.
   Preferences are saved as standing memory.
 - Compaction runs automatically at the thresholds in 5.5. There is no manual
   trigger.
-- For daemon status, the agent runs the local `hearth status` command.
-- The local CLI keeps its own commands for maintenance. They never depend on the
-  chat.
+- The TUI Overview shows the daemon state; the agent has no command-line tool.
 
 ### 8.6 When something fails
 
@@ -1281,7 +1309,7 @@ still grows in bounded steps.
 It is a scheduled background task, not a helper and not part of a conversation. It
 catches up on the next start if the machine was asleep, and it never blocks a user
 turn. It sends no Telegram message; the result appears in the changelog and in
-`hearth status` as the last review time and change count.
+the TUI Overview as the last review time and change count.
 
 Rules:
 
@@ -1293,11 +1321,11 @@ Rules:
   When over, archive the lowest success rate, then the least recently used.
 - Every version is kept under `skills/learned/.history/`, and every change is
   appended to `skills/learned/CHANGELOG.md`.
-- `hearth skills list|show|history|diff` and `hearth skills stats` expose the library.
+- The TUI Skills tab exposes the library read-only: bodies, history, and counts.
   The `skill` tool loads a body by name, records the outcome, and can save or archive
   a skill.
-- The skills index is the only prompt component the skill loop writes. `hearth prompt
-  --system` shows it, and a loaded body appears in the transcript.
+- The skills index is the only prompt component the skill loop writes. The Prompt
+  tab shows it, and a loaded body appears in the transcript.
 
 ---
 
@@ -1327,9 +1355,8 @@ code.
     "api_key": "${OPENCODE_API_KEY}",
     "model": "deepseek-v4.1-flash",
     "context_window": 128000,
-    "max_output_tokens": 8192,
+    "max_output_tokens": 32000,
     "session_header": "x-opencode-session",
-    "pricing": {}
   },
   "media": {
     "image": {
@@ -1355,7 +1382,7 @@ code.
     "max_depth": 2,
     "retention_days": 30,
     "retention_runs": 25,
-    "eta_reminder_minutes": 10
+    "eta_reminder_seconds": 1
   },
   "web": {
     "search": {
@@ -1386,7 +1413,7 @@ code.
 
 That is a complete install with every optional block enabled. The minimum is
 `identity`, `telegram`, and `models`. It uses `deepseek-v4.1-flash` on opencode-go;
-change the model in one line. `SOUL.md` defaults to `$HEARTH_HOME/SOUL.md`.
+change the model in one line. `SOUL.md` is always `$HEARTH_HOME/SOUL.md`.
 `HEARTH.md` in the home holds rules and workspace guidance; it is created empty and
 is not a JSON setting. Project `AGENTS.md` files are read from the filesystem root
 down to the workspace. The workspace, polling, context budgets, memory budgets, and
@@ -1399,22 +1426,25 @@ provider endpoint when needed.
 
 The `tasks` block is optional; the values shown are the defaults. The `web` block is
 optional too. Exa is the zero-config default; the other providers are used only when
-their key is present.
+their key is present. In the TUI, search and fetch order are provider rows rather
+than text fields: Enter turns a provider on or off, Shift+Up and Shift+Down move it,
+and the last enabled provider cannot be turned off. Each keyed provider has a masked
+API key row, so a key can be added without editing JSON.
 
 Optional overrides, only when needed:
 
 | Key | Default | Purpose |
 |---|---|---|
-| `identity.soul_file` | `$HEARTH_HOME/SOUL.md` | Alternate identity file |
 | `agent.workspace` | `$HEARTH_HOME/workspace` | Tool sandbox |
-| `agent.max_turns` | `30` | Run limit |
+| `agent.max_turns` | `120` | Run limit |
 | `compaction.idle_minutes` | `60` | Idle time before auto compaction |
 | `compaction.idle_min_tokens` | `100000` | Minimum context for idle compaction |
 | `compaction.soft_compact` | `0.65` | Soft compaction fraction of usable context |
 | `compaction.hard_compact` | `0.85` | Hard compaction fraction of usable context |
-| `compaction.keep_recent_tokens` | `24000` | Recent tokens kept through compaction |
-| `models.context_window` | `128000` | Model context window in tokens |
-| `models.max_output_tokens` | `8192` | Reply tokens reserved from the window |
+| `compaction.keep_recent_tokens` | `20000` | Recent tokens kept through compaction |
+| `models.context_window` | `128000` | Model context window in tokens; a local value that models.dev can refresh |
+| `models.max_output_tokens` | `32000` | Local reply reserve; not sent |
+| `tasks.eta_reminder_seconds` | `1` | Delay after a task’s expected finish before its reminder |
 | `memory.standing_max_tokens` | `1200` | Standing-memory budget |
 | `memory.recall_max_tokens` | `900` | Per-turn recall budget |
 | `media.image.model` | `openai/gpt-image-2.6-sunburst` | Image model |
@@ -1448,21 +1478,30 @@ Optional overrides, only when needed:
   error.
 - `web.fetch.order` must be a non-empty list of `jina`, `http`, `https`, `tinyfish`,
   `firecrawl`, or `deepseek`; unknown names are rejected. `http` and `https` are
-  aliases for one direct fetcher. A fetch provider with no key is skipped except
-  `jina`, `http`, and `https`. Provider names under `web.fetch.providers` follow the
-  same list.
+  aliases for one direct fetcher; the picker shows only Direct HTTP and `https`
+  remains accepted for existing files. A fetch provider with no key is skipped
+  except `jina`, `http`, and `https`. Provider names under `web.fetch.providers`
+  follow the same list.
 - `tasks.max_concurrent` is 1 to 8, `tasks.max_depth` is 1 or 2, and the retention
-  values are positive.
+  values are positive. `tasks.eta_reminder_seconds` is a non-negative delay after the
+  expected finish; the default is 1 and the old `eta_reminder_minutes` key is accepted
+  but ignored.
 - `models.session_header` is optional and names a header sent with the conversation
   id, for gateways that route by session.
-- `models.pricing` is optional. Each entry gives input, cache read, cache write,
-  output, and reasoning micros per million tokens; values must not be negative. A
-  model that is not listed is unpriced: tokens are recorded and cost is zero.
+- `models.thinking` is optional and is one of `default`, `off`, `low`, `medium`,
+  `high`, `xhigh`, or `max`. `default` leaves the provider's own thinking behavior
+  unchanged. `low`, `medium`, `high`, `xhigh`, and `max` become
+  `reasoning_effort`; `off` becomes `reasoning_effort: none`, except on DeepSeek
+  URLs, which use the `thinking` toggle instead.
+- `daemon.start` is `tui` (start when Hearth opens), `login` (systemd user unit at
+  login), or `startup` (user unit plus linger at boot). `daemon.keep_running`
+  controls whether a TUI-started daemon survives the window closing.
 - Missing sections take defaults, versioned with the binary. An empty file parses but
   cannot run a conversation until `models` is defined.
 - Inline secrets are permitted, but environment references are recommended.
-- Logs, error messages, `hearth status`, and the audit trail redact anything matching
-  configured secret patterns and any value of a known credential field.
+- Logs, error messages, the TUI views, and the audit trail redact anything matching
+  configured secret patterns and any configured credential value of 8 or more
+  characters. Shorter values are placeholders and are left alone.
 
 ---
 
@@ -1493,17 +1532,18 @@ The exact schema is in `SCHEMA.md`. The tables are `meta`, `commits`,
 ### 11.3 Backups and retention
 
 - Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly.
-- `hearth backup` performs the same operation on demand.
 - Media can be pruned by age, with missing references reported.
-- `hearth doctor` verifies integrity, schema version, lock state, settings, and
+- The Doctor tab verifies integrity, schema version, lock state, settings, and
   provider credentials without printing secrets.
 
 ### 11.4 Install and service
 
-One binary at `/usr/local/bin/hearth`, a systemd user unit named `hearth.service`
-that runs `hearth daemon` and restarts on failure, and data in `~/.hearth`. Release
-binaries cover Linux x86_64 and aarch64 with published SHA-256 checksums, so no Rust
-toolchain is needed.
+One binary at `/usr/local/bin/hearth`. The systemd user unit named
+`hearth.service` sets `HEARTH_DAEMON=1` and `HEARTH_HOME`, runs the binary with
+no arguments, and restarts on failure. The TUI Settings tab installs or removes
+the unit and applies the login or startup mode; startup uses
+`loginctl enable-linger`. Release binaries cover Linux x86_64 and aarch64 with
+published SHA-256 checksums, so no Rust toolchain is needed.
 
 ---
 
@@ -1537,26 +1577,24 @@ still holds.
 
 ## 13. Watching the Cost
 
-**In plain terms.** Every model call is metered. The user can see what a day cost,
-which model spent it, and how much of the prompt was served from cache.
+**In plain terms.** Every model call is metered by tokens. The user can see input,
+output, cache, and latency totals.
 
 - Structured JSON logs with timing records for each submission, run, turn, task
   step, provider request, and tool call. Message content is off by default; ids and
   token counts are on.
-- The usage ledger records input, cache read, cache write, output, reasoning,
-  latency, and computed cost for every model request. Media calls (image,
-  transcription, speech) are recorded in the same ledger.
-- `hearth status` shows model, context used and usable, cache hit rate, memory item
-  count, standing-memory version, tasks running and asleep, last skill review,
-  today's cost, and uptime.
-- `hearth watch` follows a live run or task; logs and the usage ledger keep the
+- The usage ledger records input, cache read, cache write, output, reasoning, and
+  latency for every model request. Media calls (image, transcription, speech) are
+  recorded in the same ledger.
+- The Overview tab combines runtime (daemon, model, thinking, provider, context,
+  turn limit, workspace), usage and cache hit rate for today, the last week, the
+  last month, and all time, work and memory (tasks, helpers, memory items, standing
+  version, budgets, maintenance, skill review), provider connections, and recent
+  activity. Each usage period shows input tokens, output tokens, and cache reads.
+- The Activity tab follows a live run or task; logs and the usage ledger keep the
   durable record.
-- `hearth stats` aggregates by day, model, and task kind. The ledger does not carry a
+- The usage ledger aggregates by day, model, and task kind. It does not carry a
   per-tool column, so tool-level totals are not claimed.
-- Budget enforcement warns at `warn_at`, stops new generation at the daily limit when
-  `hard_stop` is true, and tells the user the remaining reset time.
-- Pricing comes from a model registry with per-model overrides. Unknown models record
-  tokens but no cost, and show as `unpriced`.
 
 ---
 
@@ -1574,7 +1612,7 @@ Reference host: 4 CPU cores, 8 GB RAM, SSD.
 | Save time, 95th percentile | 15 ms or less | Most saves finish before a person notices. |
 | Memory retrieval, 200k items | 80 ms or less | Recall is fast even after years. |
 | Time to first token, excluding provider | 300 ms or less | Hearth's own overhead is small. |
-| Fixed prompt overhead | 4.5k tokens or less | The standing cost per turn stays bounded. |
+| Fixed prompt overhead | 4.5k tokens or less | The standing token overhead per turn stays bounded. |
 | Prompt cache hit, consecutive turns | 80% or more of prefix tokens | The provider reuses most of the stable prefix. |
 | Annual database size | 2 GB or less | Years of personal use fit on a small disk. |
 
@@ -1735,7 +1773,7 @@ defines the suites that must pass before release.
 3. A scheduled reminder survives a restart and fires once.
 4. The memory benchmark meets the targets in 7.8.
 5. Prompt cache hit and fixed overhead meet section 14.
-6. `hearth doctor`, backup, and restore pass on a clean host.
+6. The Doctor tab and the backup/restore checks pass on a clean host.
 7. No secret appears in logs, memory, or transcripts across the adversarial test
    suite.
 
@@ -1800,12 +1838,12 @@ install contains nothing personal.
 | Database mode | `0600` | 11.1 |
 | Save durability | `synchronous=FULL` | 4.4 |
 | Read connections | 4 | 11.1 |
-| Turn limit | 30 | 5.1 |
+| Turn limit | 120 | 5.1 |
 | Context window | 128,000 tokens | 6.2 |
-| Reserved reply | 8,192 tokens | 6.2 |
+| Reserved reply | 32,000 tokens local reserve | 6.2 |
 | Soft compaction | 65% of usable context | 5.5 |
 | Hard compaction | 85% of usable context | 5.5 |
-| Keep recent tokens | 24,000 | 5.5 |
+| Keep recent tokens | 20,000 | 5.5 |
 | Inline tool output cap | 4,000 tokens | 6.3 |
 | Standing memory | 1,200 tokens | 6.1, 7.5 |
 | Recall budget | 900 tokens, 6 items | 6.1, 7.4 |
@@ -1819,9 +1857,8 @@ install contains nothing personal.
 | Helpers at once | 4 | 5.4 |
 | Helper depth | 2 | 5.4 |
 | Helper retention | 30 days or newest 25 runs | 5.4 |
-| ETA reminder | 10 minutes past expectation | 5.4 |
+| ETA reminder | 1 second after expectation | 5.4 |
 | Tool schema budget | 1,200 tokens | 6.1, 9.1 |
-| Model pricing | per-model micros map; absent is unpriced | 13 |
 | Skills index | 300 tokens, 50 active | 6.1, 9.6 |
 | Skill review | 04:30 local time, 0 to 3 new skills | 9.6 |
 | Learned skills | `skills/learned/` | 9.6 |

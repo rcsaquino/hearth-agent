@@ -67,11 +67,11 @@ Additional checks:
 the acceptance script supplies an empty temporary list and still runs the
 credential-pattern scan. Never add the deny-list to the repository.
 
-Benchmarks, after a build:
+Benchmarks, from the workspace:
 
 ```bash
-./target/debug/hearth eval memory --json
-./target/debug/hearth eval tokens --json
+cargo test -p hearth-eval --test memory_bench
+cargo test -p hearth-eval --test tokens_bench
 ```
 
 The memory benchmark must keep recall@10 at or above 0.90 and zero secret leaks.
@@ -86,6 +86,8 @@ cargo test -p hearth-core --test s1_prompt
 cargo test -p hearth-telegram --test s5_telegram
 cargo test -p hearth-runtime --test s6_secrets
 cargo test -p hearth-cli --test s8_telegram_daemon
+cargo test -p hearth-cli --lib
+cargo test -p hearth-cli --test daemon_lifecycle
 ```
 
 ## Build and release
@@ -99,7 +101,7 @@ cargo build --release
 `scripts/package.sh` writes `dist/hearth-<version>-<target>.tar.gz` with the
 binary, docs, unit file, and SHA-256. The default target is
 `x86_64-unknown-linux-gnu`; build aarch64 only when the target toolchain is
-installed. `packaging/hearth.service` is the user unit; `hearth service install`
+installed. `packaging/hearth.service` is the user unit; the TUI Settings tab
 writes and enables it. Do not enable or start the unit against the host in tests,
 and do not push or publish the tarball without explicit approval.
 
@@ -141,12 +143,15 @@ nonblocking accept so a failed test cannot hang the suite.
 | `hearth-memory` | Memory store, dedupe, standing memory, recall, extraction, consolidation. |
 | `hearth-tools` | Files, shell, web search, web fetch, documents, media, browser, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, and the message tool. |
-| `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket, CLI wiring. |
-| `hearth-cli` | The `hearth` binary and subcommands. |
+| `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket. |
+| `hearth-cli` | The `hearth` binary and the ratatui terminal application. |
 | `hearth-eval` | Offline memory and token benchmarks and crash tooling. |
 
 Key invariants:
 
+- The only user-facing entry is `hearth`, which opens the TUI. `HEARTH_DAEMON=1`
+  is the internal daemon child mode used by the TUI and the systemd unit. The TUI
+  never opens a database writer; onboarding runs `init` once before any daemon.
 - One writer thread owns SQLite writes; readers use a small pool. Every durable
   change goes through one save path with a monotonic sequence.
 - Task transitions are saves. Heartbeats are not. Leases, retries, poison, and
@@ -154,8 +159,8 @@ Key invariants:
 - Telegram sends use at-most-once delivery effects. An uncertain send becomes
   Unknown and is recovered, never silently duplicated.
 - Prompt layers have fixed budgets and a prefix hash. Changes to the identity,
-  operation, tools, guidance, standing memory, or skills must be visible in the
-  prompt audit and must name the changed layer.
+  tools, guidance, standing memory, or skills must be visible in the Prompt tab
+  and must name the changed layer.
 - Guidance comes from `HEARTH.md` in the home and `AGENTS.md` from the filesystem
   root down to the workspace. Each file is capped at 16 KB and the total at 32 KB.
 - Memory is lexical: FTS5 with porter stemming, RRF k=60, 0.85 Jaccard dedupe, and

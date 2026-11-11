@@ -8,9 +8,7 @@ use std::time::Duration;
 use hearth_config::Settings;
 use hearth_core::Session;
 use hearth_memory::{MemoryPolicy, MemoryService, MemorySource, MemoryTool};
-use hearth_model::{
-    ImageClient, Price, Pricing, Speaker, SpeechClient, Transcriber, TranscriptionClient,
-};
+use hearth_model::{ImageClient, Speaker, SpeechClient, Transcriber, TranscriptionClient};
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
     BraveSearch, BrowserTool, DeepSeekFetch, DeepSeekSearch, DocumentsTool, ExaSearch, FetchError,
@@ -74,26 +72,6 @@ pub enum ToolBuildError {
     Search(#[from] SearchError),
     #[error(transparent)]
     Fetch(#[from] FetchError),
-}
-
-/// Read per-model prices from settings. Unknown models stay unpriced.
-pub fn pricing_from_settings(settings: &Settings) -> Pricing {
-    let mut pricing = Pricing::new();
-    if let Some(models) = &settings.models {
-        for (model, price) in &models.pricing {
-            pricing.insert(
-                model.clone(),
-                Price {
-                    input: price.input,
-                    cache_read: price.cache_read,
-                    cache_write: price.cache_write,
-                    output: price.output,
-                    reasoning: price.reasoning,
-                },
-            );
-        }
-    }
-    pricing
 }
 
 /// Read the memory budgets from settings.

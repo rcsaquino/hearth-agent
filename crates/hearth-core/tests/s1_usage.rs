@@ -31,7 +31,6 @@ fn recording_usage_keeps_every_field() {
                 output_tokens: 30,
                 reasoning_tokens: 7,
             },
-            cost_micros: 1234,
             latency_ms: 250,
         })
         .expect("record usage");
@@ -44,7 +43,6 @@ fn recording_usage_keeps_every_field() {
     assert_eq!(recorded.cache_write_tokens, 5);
     assert_eq!(recorded.output_tokens, 30);
     assert_eq!(recorded.reasoning_tokens, 7);
-    assert_eq!(recorded.cost_micros, 1234);
     assert_eq!(recorded.latency_ms, 250);
 
     let read = session.usage_for_task(&task.id).expect("read usage");
@@ -73,7 +71,6 @@ fn the_latest_usage_row_is_available() {
             model: "test-model".to_owned(),
             kind: "chat".to_owned(),
             usage: Usage::default(),
-            cost_micros: 0,
             latency_ms: 1,
         })
         .expect("record usage");

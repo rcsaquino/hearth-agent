@@ -1,6 +1,8 @@
 use std::fs;
 
-use hearth_runtime::service::{ServiceError, install_at, status_at};
+use hearth_runtime::service::{
+    ServiceError, apply_start_mode_at, install_at, status_at, uninstall_at,
+};
 use tempfile::TempDir;
 
 #[test]
@@ -11,7 +13,15 @@ fn install_writes_a_unit_and_is_idempotent() {
     let text = fs::read_to_string(&first.unit).expect("read unit");
     assert!(text.contains("[Service]"), "unit is {text}");
     assert!(text.contains("ExecStart="));
-    assert!(text.contains("daemon --home"));
+    assert!(text.contains("Environment=\"HEARTH_DAEMON=1\""));
+    assert!(
+        text.contains("Environment=\"HEARTH_HOME="),
+        "unit is {text}"
+    );
+    assert!(
+        !text.contains("--home"),
+        "the unit must not use the removed CLI flag: {text}"
+    );
     assert!(text.contains("Restart=on-failure"));
     assert!(text.contains("WantedBy=default.target"));
 
@@ -40,4 +50,50 @@ fn status_reports_installed_and_missing() {
     let installed = status_at(config.path()).expect("status");
     assert!(installed.installed);
     assert_eq!(installed.unit, config.path().join("hearth.service"));
+}
+
+#[test]
+fn start_modes_write_the_env_unit_and_report_linger() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+
+    let login =
+        apply_start_mode_at(home.path(), config.path(), "login", false).expect("login mode");
+    assert!(login.installed);
+    assert!(!login.linger);
+    let text = fs::read_to_string(&login.unit).expect("unit");
+    assert!(text.contains("Environment=\"HEARTH_DAEMON=1\""));
+    assert!(text.contains("Environment=\"HEARTH_HOME="));
+    assert!(!text.contains("--home"));
+
+    let startup =
+        apply_start_mode_at(home.path(), config.path(), "startup", false).expect("startup mode");
+    assert!(startup.installed);
+    assert!(startup.linger);
+    assert!(startup.unit.is_file());
+
+    let tui = apply_start_mode_at(home.path(), config.path(), "tui", false).expect("tui mode");
+    assert!(!tui.installed);
+    assert!(!tui.linger);
+    assert!(!tui.unit.exists());
+
+    let error = apply_start_mode_at(home.path(), config.path(), "sometimes", false)
+        .expect_err("unknown mode");
+    assert!(matches!(error, ServiceError::Config(_)));
+}
+
+#[test]
+fn uninstall_removes_the_unit_and_is_idempotent() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    install_at(home.path(), config.path(), false, false).expect("install");
+
+    let removed = uninstall_at(config.path(), false).expect("uninstall");
+    assert!(removed.removed);
+    assert_eq!(removed.unit, config.path().join("hearth.service"));
+    assert!(!removed.unit.exists());
+    assert!(!status_at(config.path()).expect("status").installed);
+
+    let again = uninstall_at(config.path(), false).expect("idempotent uninstall");
+    assert!(!again.removed);
 }

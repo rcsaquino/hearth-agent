@@ -98,12 +98,20 @@ impl TelegramClient {
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value, TelegramError> {
-        let response = self
-            .http
-            .post(self.url(method))
-            .json(&params)
-            .send()
-            .map_err(transport_error)?;
+        self.call_with_timeout(method, params, None)
+    }
+
+    fn call_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Value, TelegramError> {
+        let mut request = self.http.post(self.url(method)).json(&params);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let response = request.send().map_err(transport_error)?;
         let status = response.status();
         let body = response
             .text()
@@ -170,13 +178,16 @@ impl TelegramClient {
         timeout: u32,
         allowed_updates: &[&str],
     ) -> Result<Vec<Update>, TelegramError> {
-        let result = self.call(
+        let request_timeout =
+            std::time::Duration::from_secs(u64::from(timeout).saturating_add(2).max(2));
+        let result = self.call_with_timeout(
             "getUpdates",
             json!({
                 "offset": offset,
                 "timeout": timeout,
                 "allowed_updates": allowed_updates,
             }),
+            Some(request_timeout),
         )?;
         serde_json::from_value(result).map_err(|error| TelegramError::Protocol {
             method: "getUpdates".to_owned(),

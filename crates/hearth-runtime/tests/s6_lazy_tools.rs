@@ -151,7 +151,6 @@ fn tool_search_loads_a_group_for_the_next_request() {
     let agent = Agent::new(
         harness.session().clone(),
         provider.clone(),
-        hearth_model::Pricing::default(),
         AgentConfig {
             soul: "test soul".to_owned(),
             model: "test-model".to_owned(),

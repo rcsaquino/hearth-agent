@@ -11,8 +11,8 @@ use hearth_memory::{
     MemoryKind, MemoryService, MemorySource, MemoryStatus, MemoryTool, SourceKind,
 };
 use hearth_model::{
-    ChatRequest, ContentBlock, Price, Pricing, Provider, ProviderError, ProviderStream, Role,
-    StreamEvent, ToolCall, Usage,
+    ChatRequest, ContentBlock, Provider, ProviderError, ProviderStream, Role, StreamEvent,
+    ToolCall, Usage,
 };
 use hearth_runtime::{Agent, AgentConfig, AgentError, EventSink, RunEvent};
 use hearth_tools::{FileTool, Tool, ToolRegistry};
@@ -87,14 +87,12 @@ fn agent_with(
     home: &Path,
     harness: &Harness,
     provider: Arc<dyn Provider>,
-    pricing: Pricing,
     max_turns: u32,
     tools: ToolRegistry,
 ) -> Agent {
     Agent::new(
         harness.session().clone(),
         provider,
-        pricing,
         AgentConfig {
             soul: "You are a test soul.".to_owned(),
             model: "test-model".to_owned(),
@@ -109,13 +107,8 @@ fn agent_with(
     )
 }
 
-fn agent<P: Provider + 'static>(
-    home: &Path,
-    harness: &Harness,
-    provider: Arc<P>,
-    pricing: Pricing,
-) -> Agent {
-    agent_with(home, harness, provider, pricing, 4, ToolRegistry::default())
+fn agent<P: Provider + 'static>(home: &Path, harness: &Harness, provider: Arc<P>) -> Agent {
+    agent_with(home, harness, provider, 4, ToolRegistry::default())
 }
 
 #[test]
@@ -136,19 +129,7 @@ fn a_plain_answer_settles_the_submission_and_records_usage() {
             finish_reason: Some("stop".to_owned()),
         }),
     ])]));
-    let mut pricing = Pricing::default();
-    pricing.insert(
-        "test-model",
-        Price {
-            input: 1_000_000,
-            cache_read: 0,
-            cache_write: 0,
-            output: 4_000_000,
-            reasoning: 0,
-        },
-    );
-
-    let outcome = agent(home.path(), &harness, Arc::clone(&provider), pricing)
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -187,7 +168,6 @@ fn a_plain_answer_settles_the_submission_and_records_usage() {
     assert_eq!(usage[0].model, "test-model");
     assert_eq!(usage[0].input_tokens, 10);
     assert_eq!(usage[0].output_tokens, 5);
-    assert_eq!(usage[0].cost_micros, 30);
     assert!(usage[0].latency_ms >= 0);
 
     let prompt = harness
@@ -201,6 +181,8 @@ fn a_plain_answer_settles_the_submission_and_records_usage() {
     let requests = provider.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].model, "test-model");
+    assert_eq!(requests[0].max_tokens, None);
+    assert_eq!(requests[0].temperature, None);
     assert_eq!(
         requests[0].session_id.as_deref(),
         Some(conversation.as_str())
@@ -218,7 +200,7 @@ fn a_provider_error_settles_unanswered_with_a_notice() {
         retryable: false,
     })]));
 
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -264,7 +246,7 @@ fn a_running_generation_task_makes_the_agent_busy() {
         .expect("task is claimable");
 
     let provider = Arc::new(ScriptedProvider::new(vec![]));
-    let error = agent(home.path(), &harness, provider, Pricing::default())
+    let error = agent(home.path(), &harness, provider)
         .run_submission(&submission.id)
         .expect_err("a busy conversation must be rejected");
     assert!(matches!(error, AgentError::Busy));
@@ -301,7 +283,7 @@ fn an_unknown_tool_call_is_reported_and_the_run_continues() {
         ]),
     ]));
 
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -337,7 +319,7 @@ fn a_thinking_only_response_settles_unanswered() {
         }),
     ])]));
 
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -405,7 +387,7 @@ fn two_concurrent_runs_cannot_enter_one_conversation() {
         started: Mutex::new(started_tx),
         release: Mutex::new(release_rx),
     });
-    let agent = Arc::new(agent(home.path(), &harness, provider, Pricing::default()));
+    let agent = Arc::new(agent(home.path(), &harness, provider));
 
     let first_id = first.id.clone();
     let runner = Arc::clone(&agent);
@@ -484,16 +466,9 @@ fn a_files_tool_call_is_executed_and_paired() {
         ]),
     ]));
 
-    let outcome = agent_with(
-        home.path(),
-        &harness,
-        provider.clone(),
-        Pricing::default(),
-        4,
-        tools,
-    )
-    .run_submission(&submission.id)
-    .expect("run submission");
+    let outcome = agent_with(home.path(), &harness, provider.clone(), 4, tools)
+        .run_submission(&submission.id)
+        .expect("run submission");
 
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
     assert_eq!(outcome.answer_text.as_deref(), Some("read it"));
@@ -557,16 +532,9 @@ fn a_large_file_read_spills_and_can_be_read_back() {
         ]),
     ]));
 
-    let outcome = agent_with(
-        home.path(),
-        &harness,
-        provider,
-        Pricing::default(),
-        4,
-        tools,
-    )
-    .run_submission(&submission.id)
-    .expect("run submission");
+    let outcome = agent_with(home.path(), &harness, provider, 4, tools)
+        .run_submission(&submission.id)
+        .expect("run submission");
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 
     let history = harness.session().history(&conversation).expect("history");
@@ -620,16 +588,9 @@ fn the_turn_limit_stops_a_tool_loop() {
         }),
     ])]));
 
-    let outcome = agent_with(
-        home.path(),
-        &harness,
-        provider.clone(),
-        Pricing::default(),
-        1,
-        tools,
-    )
-    .run_submission(&submission.id)
-    .expect("run submission");
+    let outcome = agent_with(home.path(), &harness, provider.clone(), 1, tools)
+        .run_submission(&submission.id)
+        .expect("run submission");
 
     assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
     assert_eq!(
@@ -689,16 +650,9 @@ fn a_pending_tool_call_is_replayed_before_the_next_request() {
         }),
     ])]));
 
-    let outcome = agent_with(
-        home.path(),
-        &harness,
-        provider.clone(),
-        Pricing::default(),
-        4,
-        tools,
-    )
-    .run_submission(&submission.id)
-    .expect("run submission");
+    let outcome = agent_with(home.path(), &harness, provider.clone(), 4, tools)
+        .run_submission(&submission.id)
+        .expect("run submission");
 
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
     assert_eq!(outcome.answer_text.as_deref(), Some("recovered"));
@@ -727,7 +681,7 @@ fn a_cancelled_run_before_the_stream_settles_cancelled() {
     let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![Ok(
         StreamEvent::TextDelta("never".to_owned()),
     )])]));
-    let agent = agent(home.path(), &harness, provider.clone(), Pricing::default());
+    let agent = agent(home.path(), &harness, provider.clone());
     let cancel = Arc::new(AtomicBool::new(true));
 
     let outcome = agent
@@ -811,7 +765,7 @@ fn a_run_cancelled_during_the_stream_discards_the_answer_and_records_usage() {
         cancel: Arc::clone(&cancel),
         requests: Mutex::new(0),
     });
-    let agent = agent(home.path(), &harness, provider.clone(), Pricing::default());
+    let agent = agent(home.path(), &harness, provider.clone());
 
     let outcome = agent
         .run_submission_with_cancel(&submission.id, cancel)
@@ -883,7 +837,7 @@ fn a_text_run_emits_live_events_in_order() {
         }),
     ])]));
     let sink = Arc::new(RecordingSink::default());
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .run_submission_with_events(
             &submission.id,
             Arc::new(AtomicBool::new(false)),
@@ -917,7 +871,7 @@ fn a_cancelled_run_emits_a_settled_event() {
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(Vec::new()));
     let sink = Arc::new(RecordingSink::default());
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .run_submission_with_events(
             &submission.id,
             Arc::new(AtomicBool::new(true)),
@@ -964,20 +918,13 @@ fn a_tool_run_emits_start_and_result_events() {
         ]),
     ]));
     let sink = Arc::new(RecordingSink::default());
-    let outcome = agent_with(
-        home.path(),
-        &harness,
-        provider,
-        Pricing::default(),
-        4,
-        tools,
-    )
-    .run_submission_with_events(
-        &submission.id,
-        Arc::new(AtomicBool::new(false)),
-        sink.clone(),
-    )
-    .expect("run");
+    let outcome = agent_with(home.path(), &harness, provider, 4, tools)
+        .run_submission_with_events(
+            &submission.id,
+            Arc::new(AtomicBool::new(false)),
+            sink.clone(),
+        )
+        .expect("run");
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
     let kinds = event_kinds(&sink);
     assert!(
@@ -1127,15 +1074,10 @@ fn the_agent_injects_standing_and_recall_memory() {
         text_script("Dark roast."),
         noop_script(),
     ]));
-    let outcome = agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_memory(Arc::clone(&memory))
-    .run_submission(&submission.id)
-    .expect("run");
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Dark roast."));
 
     let requests = provider.requests();
@@ -1144,13 +1086,13 @@ fn the_agent_injects_standing_and_recall_memory() {
     assert!(
         texts
             .iter()
-            .any(|text| text.contains("Standing memory") && text.contains("Use metric units")),
+            .any(|text| text.contains("<standing_memory>") && text.contains("Use metric units")),
         "missing standing: {texts:?}"
     );
     assert!(
         texts
             .iter()
-            .any(|text| text.contains("Relevant memory") && text.contains("dark roast coffee")),
+            .any(|text| text.contains("<relevant_memory>") && text.contains("dark roast coffee")),
         "missing recall: {texts:?}"
     );
 }
@@ -1176,25 +1118,20 @@ fn a_trivial_message_gets_standing_but_no_recall() {
         .expect("recall memory");
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
-    agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_memory(memory)
-    .run_submission(&submission.id)
-    .expect("run");
+    agent(home.path(), &harness, Arc::clone(&provider))
+        .with_memory(memory)
+        .run_submission(&submission.id)
+        .expect("run");
 
     let requests = provider.requests();
     let request = requests.last().expect("request");
     let texts: Vec<String> = request.messages.iter().map(message_text).collect();
     assert!(
-        texts.iter().any(|text| text.contains("Standing memory")),
+        texts.iter().any(|text| text.contains("<standing_memory>")),
         "missing standing: {texts:?}"
     );
     assert!(
-        !texts.iter().any(|text| text.contains("Relevant memory")),
+        !texts.iter().any(|text| text.contains("<relevant_memory>")),
         "trivial message got recall: {texts:?}"
     );
 }
@@ -1233,15 +1170,10 @@ fn a_memory_failure_does_not_stop_the_answer() {
         text_script("Still here."),
         noop_script(),
     ]));
-    let outcome = agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_memory(memory)
-    .run_submission(&submission.id)
-    .expect("run");
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
+        .with_memory(memory)
+        .run_submission(&submission.id)
+        .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Still here."));
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 }
@@ -1268,15 +1200,10 @@ fn an_answer_is_extracted_into_memory() {
         json_script(&extraction),
     ]));
 
-    let outcome = agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_memory(Arc::clone(&memory))
-    .run_submission(&submission.id)
-    .expect("run");
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Noted."));
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 
@@ -1295,6 +1222,7 @@ fn an_answer_is_extracted_into_memory() {
 
     let requests = provider.requests();
     assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].max_tokens, None);
     let extraction_text: String = requests[1]
         .messages
         .iter()
@@ -1329,7 +1257,7 @@ fn an_extraction_without_valid_evidence_is_rejected() {
         json_script(extraction),
     ]));
 
-    agent(home.path(), &harness, provider, Pricing::default())
+    agent(home.path(), &harness, provider)
         .with_memory(Arc::clone(&memory))
         .run_submission(&submission.id)
         .expect("run");
@@ -1358,7 +1286,7 @@ fn a_noop_extraction_writes_nothing() {
         noop_script(),
     ]));
 
-    agent(home.path(), &harness, provider, Pricing::default())
+    agent(home.path(), &harness, provider)
         .with_memory(Arc::clone(&memory))
         .run_submission(&submission.id)
         .expect("run");
@@ -1376,15 +1304,10 @@ fn a_trivial_message_skips_extraction() {
     let memory = Arc::new(MemoryService::new(harness.session().clone()));
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
 
-    agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_memory(Arc::clone(&memory))
-    .run_submission(&submission.id)
-    .expect("run");
+    agent(home.path(), &harness, Arc::clone(&provider))
+        .with_memory(Arc::clone(&memory))
+        .run_submission(&submission.id)
+        .expect("run");
 
     assert_eq!(provider.requests().len(), 1);
     assert!(latest_extract_task(&harness, &conversation).is_none());
@@ -1407,7 +1330,7 @@ fn a_malformed_extraction_fails_the_task_but_not_the_answer() {
         json_script("not json"),
     ]));
 
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .with_memory(Arc::clone(&memory))
         .run_submission(&submission.id)
         .expect("run");
@@ -1443,15 +1366,10 @@ fn the_extraction_request_contains_the_run_and_similar_memories() {
         noop_script(),
     ]));
 
-    agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_memory(memory)
-    .run_submission(&submission.id)
-    .expect("run");
+    agent(home.path(), &harness, Arc::clone(&provider))
+        .with_memory(memory)
+        .run_submission(&submission.id)
+        .expect("run");
 
     let requests = provider.requests();
     assert_eq!(requests.len(), 2);
@@ -1483,7 +1401,7 @@ fn an_extraction_can_update_an_existing_memory() {
         json_script(&extraction),
     ]));
 
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .with_memory(Arc::clone(&memory))
         .run_submission(&submission.id)
         .expect("run");
@@ -1520,7 +1438,7 @@ fn an_extraction_can_supersede_an_existing_memory() {
         json_script(&extraction),
     ]));
 
-    let outcome = agent(home.path(), &harness, provider, Pricing::default())
+    let outcome = agent(home.path(), &harness, provider)
         .with_memory(Arc::clone(&memory))
         .run_submission(&submission.id)
         .expect("run");
@@ -1588,16 +1506,9 @@ fn a_memory_tool_call_uses_the_run_source() {
         ]),
     ]));
 
-    let outcome = agent_with(
-        home.path(),
-        &harness,
-        provider,
-        Pricing::default(),
-        4,
-        tools,
-    )
-    .run_submission(&submission.id)
-    .expect("run submission");
+    let outcome = agent_with(home.path(), &harness, provider, 4, tools)
+        .run_submission(&submission.id)
+        .expect("run submission");
     assert_eq!(outcome.answer_text.as_deref(), Some("saved"));
 
     let items = memory.search("metric", 10).expect("search");
@@ -1661,16 +1572,11 @@ fn recall_is_shrunk_to_fit_the_context_budget() {
         noop_script(),
     ]));
     let budget = ContextBudget::new(5_320, 4_096, 0.65, 0.85, 1_000);
-    let outcome = agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_memory(Arc::clone(&memory))
-    .with_budget(budget)
-    .run_submission(&submission.id)
-    .expect("run");
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
+        .with_memory(Arc::clone(&memory))
+        .with_budget(budget)
+        .run_submission(&submission.id)
+        .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Short."));
 
     let requests = provider.requests();
@@ -1680,7 +1586,7 @@ fn recall_is_shrunk_to_fit_the_context_budget() {
         .iter()
         .filter(|message| message.role == Role::System)
         .map(message_text)
-        .find(|text| text.contains("Relevant memory"))
+        .find(|text| text.contains("<relevant_memory>"))
         .expect("recall message");
     let lines = recall
         .lines()
@@ -1722,15 +1628,10 @@ fn oversized_tool_results_are_shrunk_to_fit_the_context_budget() {
         .submission;
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Done.")]));
     let budget = ContextBudget::new(7_120, 4_096, 0.65, 0.85, 1_000);
-    let outcome = agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_budget(budget)
-    .run_submission(&submission.id)
-    .expect("run");
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
+        .with_budget(budget)
+        .run_submission(&submission.id)
+        .expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("Done."));
 
     let requests = provider.requests();
@@ -1766,15 +1667,10 @@ fn an_oversized_prompt_settles_with_a_budget_notice() {
         .submission;
     let provider = Arc::new(ScriptedProvider::new(vec![]));
     let budget = ContextBudget::new(5_420, 4_096, 0.65, 0.85, 1_000);
-    let outcome = agent(
-        home.path(),
-        &harness,
-        Arc::clone(&provider),
-        Pricing::default(),
-    )
-    .with_budget(budget)
-    .run_submission(&submission.id)
-    .expect("run");
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
+        .with_budget(budget)
+        .run_submission(&submission.id)
+        .expect("run");
     assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
     assert!(
         outcome
@@ -1817,7 +1713,6 @@ fn elevenlabs_voice_tags_are_in_the_runtime_note() {
     let agent = Agent::new(
         harness.session().clone(),
         provider.clone(),
-        Pricing::default(),
         AgentConfig {
             soul: "You are a test soul.".to_owned(),
             model: "test-model".to_owned(),
@@ -1861,7 +1756,6 @@ fn project_guidance_reaches_the_prompt() {
     let agent = Agent::new(
         harness.session().clone(),
         provider.clone(),
-        Pricing::default(),
         AgentConfig {
             soul: "You are a test soul.".to_owned(),
             model: "test-model".to_owned(),

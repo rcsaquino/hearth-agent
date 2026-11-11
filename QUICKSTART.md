@@ -7,12 +7,7 @@ OpenAI-compatible model provider. Replace `123456789`, `~/.hearth`, and `example
 
 1. Open Telegram and talk to `@BotFather`.
 2. Send `/newbot`, choose a display name and a username ending in `bot`.
-3. Copy the bot token. Store it in an environment variable, not in a shell
-   history file:
-
-```bash
-export HEARTH_TELEGRAM_BOT_TOKEN='your-bot-token'
-```
+3. Copy the bot token. Keep it out of shell history and committed files.
 
 ## 2. Get your numeric Telegram id
 
@@ -28,38 +23,49 @@ sudo install -m 755 target/release/hearth /usr/local/bin/hearth
 
 You can skip the system install and run `./target/release/hearth` directly.
 
-## 4. Initialize the home
+## 4. Open Hearth
 
-Interactive setup asks for the token, your user id, the provider base URL, API
-key, and model, then offers optional media blocks:
-
-```bash
-hearth init
-```
-
-For a scripted setup:
+Run the binary with no arguments:
 
 ```bash
-export PROVIDER_API_KEY='your-provider-key'
-
-hearth init --non-interactive \
-  --telegram-token '${HEARTH_TELEGRAM_BOT_TOKEN}' \
-  --allowed-user-id 123456789 \
-  --base-url 'https://example.com/v1' \
-  --api-key '${PROVIDER_API_KEY}' \
-  --model 'your-model-name' \
-  --agent-name Hearth \
-  --timezone UTC
+hearth
 ```
 
-`hearth init` creates `~/.hearth`, writes `settings.json` with mode `0600`,
-creates `SOUL.md` and an empty `HEARTH.md`, and opens the database. Values written
-as `${NAME}` are expanded from the environment when Hearth runs.
+The first launch opens the setup wizard. It asks for:
+
+- the Telegram bot token from `@BotFather` and your numeric `@userinfobot` id;
+- a provider: DeepSeek, OpenCode, OpenCode Go, Command Code, or another
+  OpenAI-compatible endpoint;
+- the provider API key, with a short hint for where to create it;
+- a model, loaded from the provider's `/models` endpoint and searchable; if the
+  list cannot be loaded, type the model name;
+- the default thinking level: provider default, off, low, medium, high, xhigh, or
+  max;
+- the agent name, prefilled with `Hearth`;
+- optional image (OpenRouter), transcription (Groq), and speech (ElevenLabs)
+  services;
+- when Hearth should start: when you open the TUI, at login, or at startup;
+- whether the daemon should keep running after the window closes.
+
+Paste keys with Ctrl+Shift+V (Ctrl+V also works in terminals that forward it).
+
+The TUI is also the control plane: **Settings** shows every option inline, with `r`
+to reset the selected row and `*` marking values that differ from the default. It
+also edits `SOUL.md` and `HEARTH.md` directly.
+**Memory** browses saved memories, and **Skills** can create or edit your own skills.
+
+Finish writes `~/.hearth/settings.json` with mode `0600`, keeping only values that
+differ from the defaults. It creates `SOUL.md`, `HEARTH.md`, and the database,
+applies the start mode, and starts or attaches to the daemon. Values written as
+`${NAME}` are expanded from the environment when Hearth runs.
+
+The timezone comes from the system (`TZ`, `/etc/localtime`, `/etc/timezone`, then
+UTC). There is no prompt.
 
 If your gateway routes requests by session, set `models.session_header` to the
 header it expects, for example `x-opencode-session`; Hearth sends the
-conversation id in that header. `hearth init` adds it automatically for
-opencode-go URLs. Leave it out for providers that do not need it.
+conversation id in that header. Setup adds it automatically for opencode-go
+URLs. Leave it out for providers that do not need it.
 
 ### Guidance files
 
@@ -75,46 +81,30 @@ opencode-go URLs. Leave it out for providers that do not need it.
 
 ## 5. Check the install
 
-```bash
-hearth doctor
-```
+Open the Doctor tab with `6` (or `Tab`). Press `Enter` for offline checks, or `l`
+for live checks. The offline check validates settings, the database, the schema,
+and the lock. The live check sends a Telegram `getMe` and one small provider
+request. Neither prints the token or key.
 
-The offline check validates settings, the database, the schema, and the lock.
-With a real token and provider you can add one live check:
+## 6. The TUI
 
-```bash
-hearth doctor --live
-```
+Running `hearth` opens the control plane:
 
-It sends a Telegram `getMe` and one small provider request. It never prints the
-token or key.
+- **Overview** combines runtime, model, context, turn limit, usage and cache,
+  tasks and memory, provider connections, and recent activity.
+- **Activity** streams live runs, including Telegram messages and tool calls.
+- **Memory** browses saved memories.
+- **Skills** browses the skill library read-only.
+- **Prompt** shows the newest saved prompt and its XML sections.
+- **Doctor** runs offline and live checks.
+- **Settings** is the last tab and shows every option inline. Use `r` to reset the
+  selected row, `*` to spot changes, and the daemon controls to start, stop, or
+  restart the daemon. It also edits `SOUL.md` and `HEARTH.md`.
 
-## 6. Run the daemon
-
-Install the systemd user unit:
-
-```bash
-hearth service install
-systemctl --user start hearth
-systemctl --user status hearth
-```
-
-Or run it in the foreground:
-
-```bash
-hearth daemon
-```
-
-While it runs:
-
-```bash
-hearth status
-hearth watch
-hearth watch --json
-```
-
-`hearth status` requires the daemon socket. `hearth watch` streams live events
-from the active run; detaching does not cancel the run.
+Use `Tab`/`Shift+Tab` or `1`..`8` to move, `?` for help, and `q` to quit.
+Conversations happen in Telegram; the TUI does not host a local chat. A
+TUI-started daemon runs detached, so closing the window does not stop it when
+keep-running is on. A service-managed daemon is never stopped by the TUI.
 
 ## 7. Talk to it
 
@@ -126,32 +116,16 @@ Send images, documents, or voice notes as you would to any contact. Voice notes
 become text through the configured transcription service. The `message` tool can
 send files, albums, and, when you explicitly ask for voice, a spoken reply.
 
-For a terminal conversation without Telegram:
-
-```bash
-hearth chat
-```
-
 ## 8. Backups
 
-```bash
-hearth backup
-```
-
 Snapshots go to `~/.hearth/backups/` and are pruned to seven daily and four
-weekly copies. A nightly backup runs from the daemon. To restore, stop the
-daemon first:
-
-```bash
-systemctl --user stop hearth
-hearth restore ~/.hearth/backups/hearth-YYYYMMDD.db
-systemctl --user start hearth
-```
+weekly copies. The daemon writes them automatically.
 
 ## 9. Troubleshooting
 
 - **`another hearth daemon is already running`**: only one daemon may own a
-  home. Stop the old one, or use a different `--home`.
+  home. Open the TUI and use Settings to stop it, or use a different
+  `HEARTH_HOME`.
 - **Telegram conflict or duplicate polling**: only one process may call
   `getUpdates` for a bot. Do not run two daemons with the same token.
 - **Bot ignores you**: check `telegram.allowed_user_ids` and, for groups,
@@ -163,11 +137,11 @@ systemctl --user start hearth
 - **Telegram 429**: Hearth honors `retry_after`; a busy bot may still pause.
 - **Rich reply rejected**: Hearth falls back to plain messages with entities.
   The answer is still delivered once.
-- **Empty or odd answers**: inspect the exact prompt with
-  `hearth prompt --last` or `hearth prompt --json`. Credentials are redacted.
+- **Empty or odd answers**: open the Prompt tab to inspect the last prompt.
 - **Runaway tools**: send `stop`. The shell is not sandboxed; read
   [SECURITY.md](SECURITY.md).
+- **The window is too small**: resize to at least 80 columns by 24 rows.
 - **Logs**: `~/.hearth/logs/hearth.log` is JSON and has no message bodies by
-  default. `hearth doctor` is the first check.
+  default. The Doctor tab is the first check.
 
 The full behavior is in [SPEC.md](docs/SPEC.md).

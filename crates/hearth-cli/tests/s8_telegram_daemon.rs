@@ -7,30 +7,41 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use hearth_config::Daemon;
+use hearth_runtime::{InitOptions, init};
 use serde_json::{Value, json};
 
 fn hearth() -> Command {
     Command::new(env!("CARGO_BIN_EXE_hearth"))
 }
 
+fn daemon_command(home: &Path) -> Command {
+    let mut command = hearth();
+    command
+        .env("HEARTH_DAEMON", "1")
+        .env("HEARTH_HOME", home)
+        .stdin(Stdio::null());
+    command
+}
+
 fn init_home(home: &Path, provider_base: &str) {
-    let output = hearth()
-        .args(["init", "--non-interactive"])
-        .arg("--home")
-        .arg(home)
-        .args(["--telegram-token", "123:fake-token"])
-        .args(["--allowed-user-id", "42"])
-        .args(["--base-url", provider_base])
-        .args(["--api-key", "fake-key"])
-        .args(["--model", "fake-model"])
-        .args(["--timezone", "UTC"])
-        .output()
-        .expect("run init");
-    assert!(
-        output.status.success(),
-        "init failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    init(
+        home,
+        InitOptions {
+            telegram_token: "123:fake-token".to_owned(),
+            allowed_user_ids: vec![42],
+            base_url: provider_base.to_owned(),
+            api_key: "fake-key".to_owned(),
+            model: "fake-model".to_owned(),
+            thinking: "default".to_owned(),
+            agent_name: "Hearth".to_owned(),
+            timezone: Some("UTC".to_owned()),
+            media: None,
+            context_window: None,
+            daemon: Daemon::default(),
+        },
+    )
+    .expect("init home");
 }
 
 fn add_telegram_base(home: &Path, base: &str) {
@@ -279,10 +290,7 @@ impl Drop for DaemonGuard {
 }
 
 fn start_daemon(home: &Path) -> Child {
-    hearth()
-        .args(["daemon"])
-        .arg("--home")
-        .arg(home)
+    daemon_command(home)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -771,18 +779,7 @@ fn hearth_status_reads_a_running_daemon() {
         assert_eq!(mode, 0o600, "socket mode was {mode:o}");
     }
 
-    let output = hearth()
-        .args(["status", "--json"])
-        .arg("--home")
-        .arg(home.path())
-        .output()
-        .expect("run status");
-    assert!(
-        output.status.success(),
-        "status failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let status: Value = serde_json::from_slice(&output.stdout).expect("status json");
+    let status: Value = hearth_runtime::read_status(home.path()).expect("read status");
     assert_eq!(status["model"], "fake-model");
     assert!(status["uptime_seconds"].as_u64().is_some());
     assert_eq!(status["tasks_running"], 0);
@@ -798,19 +795,16 @@ fn hearth_status_reads_a_running_daemon() {
     let _ = telegram_thread.join();
 }
 
-fn start_watch(home: &Path) -> (Child, mpsc::Receiver<String>) {
-    let mut child = hearth()
-        .args(["watch", "--json"])
-        .arg("--home")
-        .arg(home)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn watch");
-    let stdout = child.stdout.take().expect("watch stdout");
+fn start_watch(home: &Path) -> (thread::JoinHandle<()>, mpsc::Receiver<String>) {
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let reader = BufReader::new(stdout);
+    let home = home.to_path_buf();
+    let handle = thread::spawn(move || {
+        let Ok(reader) = hearth_runtime::open_watch(&home, None) else {
+            return;
+        };
+        if sender.send("{\"v\":1,\"ok\":true}".to_owned()).is_err() {
+            return;
+        }
         for line in reader.lines() {
             let Ok(line) = line else {
                 break;
@@ -820,7 +814,7 @@ fn start_watch(home: &Path) -> (Child, mpsc::Receiver<String>) {
             }
         }
     });
-    (child, receiver)
+    (handle, receiver)
 }
 
 #[test]
@@ -847,7 +841,7 @@ fn hearth_watch_receives_live_run_events() {
     let daemon = DaemonGuard::new(start_daemon(home.path()));
     wait_for_socket(home.path());
 
-    let (mut watch, lines) = start_watch(home.path());
+    let (watch, lines) = start_watch(home.path());
     let ack = lines
         .recv_timeout(Duration::from_secs(5))
         .expect("watch ack");
@@ -884,9 +878,8 @@ fn hearth_watch_receives_live_run_events() {
         "kinds: {kinds:?}"
     );
 
-    let _ = watch.kill();
-    let _ = watch.wait();
     daemon.stop();
+    let _ = watch.join();
     telegram_state.stop.store(true, Ordering::SeqCst);
     let _ = telegram_thread.join();
     let _ = provider_thread.join();
@@ -1036,10 +1029,7 @@ fn a_helper_runs_in_the_daemon_and_notifies_the_parent() {
     };
 
     let daemon = DaemonGuard::new(
-        hearth()
-            .args(["daemon"])
-            .arg("--home")
-            .arg(home.path())
+        daemon_command(home.path())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -1173,10 +1163,7 @@ fn a_parent_spawns_a_helper_through_the_daemon() {
     add_telegram_base(home.path(), &telegram_base);
 
     let daemon = DaemonGuard::new(
-        hearth()
-            .args(["daemon"])
-            .arg("--home")
-            .arg(home.path())
+        daemon_command(home.path())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

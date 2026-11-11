@@ -13,7 +13,7 @@ use hearth_core::{
     plan_compaction,
 };
 use hearth_model::{
-    MediaError, OpenAiCompatibleProvider, Pricing, Provider, ProviderError, Speaker, SpeechClient,
+    MediaError, OpenAiCompatibleProvider, Provider, ProviderError, Speaker, SpeechClient,
     Transcriber, TranscriptionClient,
 };
 use hearth_telegram::{
@@ -42,6 +42,8 @@ use crate::tools::{
     MessageTarget, TaskTarget, ToolMediaRoots, build_tools, memory_policy, voice_tags,
 };
 use hearth_memory::{MemoryService, MemorySource};
+
+const TELEGRAM_POLL_TIMEOUT_SECS: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum DaemonError {
@@ -120,6 +122,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     tracing::info!(recovered, "effect recovery complete");
 
     let shutdown = Arc::new(AtomicBool::new(false));
+    let ipc_shutdown = Arc::new(AtomicBool::new(false));
     let events = Arc::new(EventBus::new(collect_secrets(&settings)));
     let model = settings
         .models
@@ -135,7 +138,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             memory: Arc::clone(&memory),
         },
         Arc::clone(&events),
-        Arc::clone(&shutdown),
+        Arc::clone(&ipc_shutdown),
     )?;
     tracing::info!(socket = %ipc::socket_path(home).display(), "daemon socket ready");
 
@@ -197,6 +200,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     if effect_handle.join().is_err() {
         tracing::error!("effect worker panicked");
     }
+    ipc_shutdown.store(true, Ordering::Relaxed);
     if socket_handle.join().is_err() {
         tracing::error!("daemon socket panicked");
     }
@@ -248,14 +252,11 @@ impl TelegramRuntime {
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect(),
             models.session_header.clone(),
-        )?;
+        )?
+        .with_reasoning_effort(models.thinking.clone());
         let provider: Arc<dyn Provider> = Arc::new(provider);
 
-        let soul_path = match &settings.identity.soul_file {
-            Some(path) if path.is_absolute() => path.clone(),
-            Some(path) => home.join(path),
-            None => home.join("SOUL.md"),
-        };
+        let soul_path = home.join("SOUL.md");
         let soul = std::fs::read_to_string(&soul_path)
             .unwrap_or_else(|_| hearth_core::default_soul(&settings.identity.agent_name));
 
@@ -268,7 +269,7 @@ impl TelegramRuntime {
             session.clone(),
             telegram.allowed_user_ids.clone(),
             telegram.allowed_chat_ids.clone(),
-            30,
+            TELEGRAM_POLL_TIMEOUT_SECS,
             InboundMedia::new(home.join("media/inbound")),
             transcriber,
             Some(Arc::new(RegistryStop(Arc::clone(&cancellations)))),
@@ -282,17 +283,14 @@ impl TelegramRuntime {
             settings.compaction.hard_compact,
             settings.compaction.keep_recent_tokens,
         );
-        let pricing = crate::tools::pricing_from_settings(&settings);
         let skills = Arc::new(SkillLibrary::new(home));
         let reviewer = Arc::new(SkillReviewer::new(
             session.clone(),
             Arc::clone(&provider),
-            pricing.clone(),
             Arc::clone(&memory),
             Arc::clone(&skills),
             models.model.clone(),
             models.kind.clone(),
-            1024,
         ));
         let registry = Arc::new(
             TaskRegistry::new()
@@ -343,7 +341,6 @@ impl TelegramRuntime {
             voice_tags: voice_tags(&settings),
             max_turns: settings.agent.max_turns,
             budget,
-            pricing: pricing.clone(),
             events: Arc::clone(&events) as Arc<dyn crate::events::EventSink>,
             owner: format!("helper:{}", std::process::id()),
         });
@@ -370,7 +367,6 @@ impl TelegramRuntime {
             voice_tags: voice_tags(&settings),
             max_turns: settings.agent.max_turns,
             budget,
-            pricing,
             pid: std::process::id(),
             cancellations,
             helper_controls,
@@ -404,7 +400,6 @@ struct TelegramWorker {
     voice_tags: bool,
     max_turns: u32,
     budget: ContextBudget,
-    pricing: Pricing,
     pid: u32,
     cancellations: Arc<CancellationRegistry>,
     helper_controls: Arc<HelperControls>,
@@ -538,13 +533,10 @@ impl TelegramWorker {
         let compactor = Compactor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            self.pricing.clone(),
             Some(Arc::clone(&self.memory)),
             self.model.clone(),
             self.provider_name.clone(),
             format!("daemon:idle:{}", self.pid),
-            self.budget.reserve,
-            self.budget.max_output_tokens,
         );
         match compactor.compact(conversation_id, &plan) {
             Ok(Some(_)) => {
@@ -625,7 +617,6 @@ impl TelegramWorker {
         let agent = Agent::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            self.pricing.clone(),
             AgentConfig {
                 soul: self.soul.clone(),
                 model: self.model.clone(),
@@ -900,7 +891,7 @@ fn collect_secrets(settings: &Settings) -> Vec<String> {
             }
         }
     }
-    secrets.retain(|secret| !secret.is_empty());
+    secrets.retain(|secret| hearth_core::secrets::is_redactable_value(secret));
     secrets
 }
 

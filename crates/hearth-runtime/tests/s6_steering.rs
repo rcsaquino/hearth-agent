@@ -146,7 +146,6 @@ fn agent(home: &std::path::Path, harness: &Harness, provider: Arc<dyn Provider>)
     Agent::new(
         harness.session().clone(),
         provider,
-        hearth_model::Pricing::default(),
         AgentConfig {
             soul: "test soul".to_owned(),
             model: "test-model".to_owned(),

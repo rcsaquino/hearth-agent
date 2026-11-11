@@ -21,7 +21,7 @@ fn text_of(message: &hearth_model::ChatMessage) -> String {
 }
 
 #[test]
-fn the_prompt_starts_with_identity_and_operation_and_ends_with_runtime() {
+fn the_prompt_starts_with_identity_and_ends_with_runtime() {
     let (_home, harness) = harness();
     let session = harness.session();
     let conversation = session
@@ -48,15 +48,7 @@ fn the_prompt_starts_with_identity_and_operation_and_ends_with_runtime() {
 
     let first = prompt.request.messages.first().expect("first message");
     assert_eq!(first.role, Role::System);
-    let first_text = text_of(first);
-    assert!(
-        first_text.contains("SOUL TEXT"),
-        "missing soul: {first_text}"
-    );
-    assert!(
-        first_text.contains("Operation"),
-        "missing operation: {first_text}"
-    );
+    assert_eq!(text_of(first), "SOUL TEXT");
 
     let last = prompt.request.messages.last().expect("last message");
     assert_eq!(last.role, Role::System);
@@ -221,10 +213,8 @@ fn the_audit_document_has_five_segments() {
 
     assert_eq!(prompt.document["identity"], "SOUL TEXT");
     assert!(
-        prompt.document["operation"]
-            .as_str()
-            .expect("operation segment")
-            .contains("Operation")
+        prompt.document.get("operation").is_none(),
+        "the operation layer is gone"
     );
     assert_eq!(prompt.document["tools"], serde_json::json!([]));
     assert_eq!(
@@ -371,40 +361,6 @@ fn image_and_file_blocks_survive_the_prompt_and_audit() {
 }
 
 #[test]
-fn the_operation_carries_the_message_and_voice_rules() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("create conversation");
-    let prompt = session
-        .build_prompt(PromptInput {
-            soul: "SOUL TEXT".to_owned(),
-            conversation_id: conversation.id.clone(),
-            model: "test-model".to_owned(),
-            tools: Vec::new(),
-            runtime_note: "RUNTIME NOTE".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
-            recall: String::new(),
-            skills_index: String::new(),
-            guidance: String::new(),
-        })
-        .expect("build prompt");
-    let operation = prompt.document["operation"]
-        .as_str()
-        .expect("operation segment");
-    assert!(
-        operation.contains("message tool"),
-        "missing message rule: {operation}"
-    );
-    assert!(
-        operation.contains("voice only when"),
-        "missing voice rule: {operation}"
-    );
-}
-
-#[test]
 fn standing_and_recall_are_placed_in_their_layers() {
     let (_home, harness) = harness();
     let session = harness.session();
@@ -439,7 +395,7 @@ fn standing_and_recall_are_placed_in_their_layers() {
     let standing = messages
         .iter()
         .find(|message| {
-            message.role == Role::System && text_of(message).contains("Standing memory")
+            message.role == Role::System && text_of(message).contains("<standing_memory>")
         })
         .expect("standing message");
     let standing_text = text_of(standing);
@@ -455,7 +411,7 @@ fn standing_and_recall_are_placed_in_their_layers() {
     let newest = *user_positions.last().expect("newest user");
     assert_eq!(messages[newest - 1].role, Role::System);
     let recall_text = text_of(&messages[newest - 1]);
-    assert!(recall_text.contains("Relevant memory"));
+    assert!(recall_text.contains("<relevant_memory>"));
     assert!(recall_text.contains("R1"));
 
     let last = messages.last().expect("last");
@@ -499,10 +455,6 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
     let estimate = |text: &str| hearth_model::estimate_tokens(text) as u64;
     assert_eq!(tokens.identity, estimate("SOUL TEXT"));
     assert_eq!(
-        tokens.operation,
-        estimate(prompt.document["operation"].as_str().expect("operation"))
-    );
-    assert_eq!(
         tokens.tools,
         estimate(&serde_json::to_string(&prompt.document["tools"]).expect("tools JSON"))
     );
@@ -516,12 +468,7 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
     assert_eq!(tokens.skills, 0);
     assert_eq!(
         tokens.fixed,
-        tokens.identity
-            + tokens.operation
-            + tokens.tools
-            + tokens.standing
-            + tokens.skills
-            + tokens.runtime
+        tokens.identity + tokens.tools + tokens.standing + tokens.skills + tokens.runtime
     );
     assert_eq!(
         tokens.total,
@@ -603,7 +550,7 @@ fn the_prefix_hash_tracks_only_the_stable_layers() {
 }
 
 #[test]
-fn project_instructions_are_a_system_message_between_operation_and_standing() {
+fn project_instructions_are_a_system_message_between_identity_and_standing() {
     let (_home, harness) = harness();
     let session = harness.session();
     let conversation = session
@@ -632,60 +579,28 @@ fn project_instructions_are_a_system_message_between_operation_and_standing() {
         .expect("project instructions message");
     assert_eq!(prompt.request.messages[position].role, Role::System);
     assert!(
-        text_of(&prompt.request.messages[position]).starts_with("## Project instructions"),
+        text_of(&prompt.request.messages[position]).starts_with("<project_instructions>"),
         "unexpected guidance message: {:?}",
         text_of(&prompt.request.messages[position])
     );
-    let operation = prompt
+    let identity = prompt
         .request
         .messages
         .iter()
-        .position(|message| text_of(message).contains("Operation"))
-        .expect("operation");
+        .position(|message| text_of(message) == "SOUL")
+        .expect("identity");
     let standing = prompt
         .request
         .messages
         .iter()
-        .position(|message| text_of(message).contains("Standing memory"))
+        .position(|message| text_of(message).contains("<standing_memory>"))
         .expect("standing");
-    assert!(operation < position, "guidance must follow the operation");
+    assert!(identity < position, "guidance must follow the identity");
     assert!(position < standing, "guidance must precede standing memory");
     assert!(prompt.tokens.guidance > 0);
     assert_eq!(prompt.document["guidance"], "PROJECT RULES");
     assert!(prompt.document["tokens"]["guidance"].as_u64().unwrap_or(0) > 0);
     assert!(prompt.document["prefix_parts"]["guidance"].is_string());
-}
-
-#[test]
-fn request_from_document_restores_project_instructions() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("create conversation");
-    let prompt = session
-        .build_prompt(PromptInput {
-            soul: "SOUL".to_owned(),
-            conversation_id: conversation.id.clone(),
-            model: "test-model".to_owned(),
-            tools: Vec::new(),
-            standing: String::new(),
-            standing_version: 0,
-            recall: String::new(),
-            skills_index: String::new(),
-            guidance: "PROJECT RULES".to_owned(),
-            runtime_note: "RUNTIME".to_owned(),
-        })
-        .expect("build prompt");
-    let rebuilt =
-        hearth_core::request_from_document(&prompt.document).expect("rebuild the request");
-    assert!(
-        rebuilt
-            .messages
-            .iter()
-            .any(|message| text_of(message).contains("PROJECT RULES")),
-        "the rebuilt request lost the project instructions"
-    );
 }
 
 #[test]

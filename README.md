@@ -1,5 +1,7 @@
 # Hearth
 
+*A durable personal agent, built with Rust.*
+
 Hearth is a single-user personal agent that lives in Telegram and keeps its own
 durable record in a local SQLite database. It is written in Rust. One daemon owns
 the database, runs the agent loop, and talks to one Telegram bot. There is no
@@ -26,9 +28,11 @@ acceptance matrix pass; a seven-day real-time soak is still pending.
   voice.
 - Speaks Telegram natively: text, images, documents, voice notes, albums, and
   rich replies.
-- Provides a local line-based chat, live run watch, status, prompt audit, usage
-  stats, and offline evaluations.
-- Backs up to `~/.hearth/backups/` and installs as a systemd user service.
+- Provides a live daemon event stream, status, prompt audit, and skill
+  inspection.
+- Lets you edit `SOUL.md`, `HEARTH.md`, and every setting, browse saved
+  memories, and manage your own skills from the TUI.
+- Backs up to `~/.hearth/backups/` and installs or removes a systemd user service.
 
 ## Requirements
 
@@ -44,27 +48,22 @@ acceptance matrix pass; a seven-day real-time soak is still pending.
 
 ```bash
 cargo build --release
-./target/release/hearth init
-./target/release/hearth doctor
-./target/release/hearth service install
-systemctl --user start hearth
+./target/release/hearth
 ```
 
-For a foreground run instead of the service, use
-`./target/release/hearth daemon`.
+The first launch opens a terminal setup wizard. It walks through the Telegram
+bot, your numeric id, the provider, the model, thinking, optional media, and
+when the daemon should start. It then starts the daemon and shows the control
+plane: Overview, Activity, Memory, Skills, Prompt, Doctor, and Settings.
 
-Then open your bot in Telegram and send a message. Hearth answers only the
-allowed user ids.
+Open your bot in Telegram and send a message. Conversations happen in Telegram;
+the TUI configures, observes, audits, and controls the daemon. A TUI-started
+daemon runs detached, and Settings controls whether it survives the window
+closing.
 
-For a terminal-only conversation:
-
-```bash
-./target/release/hearth chat
-```
-
-The home folder defaults to `~/.hearth`. `HEARTH_HOME` or `--home` moves it.
-[QUICKSTART.md](QUICKSTART.md) covers BotFather, your numeric id, provider
-settings, the service, backups, and troubleshooting.
+The home folder defaults to `~/.hearth`; set `HEARTH_HOME` to move it.
+[QUICKSTART.md](QUICKSTART.md) covers the setup wizard, provider settings,
+start-at-login, backups, and troubleshooting.
 
 ## Architecture
 
@@ -75,7 +74,7 @@ Hearth is a Rust workspace with narrow crate boundaries:
 | `hearth-config` | Strict settings parsing, validation, and environment references. |
 | `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, guidance, compaction, memory records. |
 | `hearth-storage` | SQLite connections, migrations, snapshots, full-text search. |
-| `hearth-model` | OpenAI-compatible streaming, tool calls, usage, pricing, media clients. |
+| `hearth-model` | OpenAI-compatible streaming, tool calls, usage, media clients. |
 | `hearth-memory` | Memory store, dedupe, standing memory, recall, extraction, consolidation, episodes. |
 | `hearth-tools` | Files, shell, web search, web fetch, documents, media, browser, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, the message tool. |

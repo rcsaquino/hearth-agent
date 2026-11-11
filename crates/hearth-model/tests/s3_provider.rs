@@ -206,6 +206,41 @@ fn request() -> ChatRequest {
     }
 }
 
+fn wire(base_url: &str, effort: Option<&str>) -> Value {
+    OpenAiCompatibleProvider::new(base_url, "test-key", Vec::new(), None)
+        .expect("provider")
+        .with_reasoning_effort(effort.map(str::to_owned))
+        .wire_body(&request())
+        .expect("wire body")
+}
+
+#[test]
+fn the_reasoning_effort_is_added_to_the_wire_body() {
+    let body = wire("https://example.com/v1", Some("medium"));
+    assert_eq!(body["reasoning_effort"], "medium");
+
+    let body = wire("https://example.com/v1", Some("default"));
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
+fn turning_thinking_off_uses_the_provider_toggle() {
+    let deepseek = wire("https://api.deepseek.com/v1", Some("off"));
+    assert_eq!(deepseek["thinking"]["type"], "disabled");
+    assert!(deepseek.get("reasoning_effort").is_none());
+
+    let other = wire("https://example.com/v1", Some("off"));
+    assert_eq!(other["reasoning_effort"], "none");
+    assert!(other.get("thinking").is_none());
+}
+
+#[test]
+fn a_basic_request_is_sent_without_thinking_fields() {
+    let body = wire("https://example.com/v1", None);
+    assert!(body.get("reasoning_effort").is_none());
+    assert!(body.get("thinking").is_none());
+}
+
 #[test]
 fn a_text_stream_sends_the_request_and_yields_deltas() {
     let server = FakeServer::start(vec![TestResponse::sse(&[

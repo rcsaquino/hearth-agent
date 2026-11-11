@@ -4,7 +4,6 @@ use std::path::Path;
 
 mod agent;
 pub mod backup;
-mod chat;
 mod compaction;
 mod daemon;
 mod doctor;
@@ -12,33 +11,29 @@ mod effect_worker;
 mod events;
 mod helpers;
 mod init;
+pub mod inspect;
 mod ipc;
 pub mod maintenance;
 mod memory_extract;
-mod prompt_audit;
 mod scheduler;
 pub mod service;
 pub mod skill_review;
 pub mod skills;
-mod stats;
 pub mod tool_groups;
 mod tools;
 
 pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};
-pub use chat::{ChatError, chat};
 pub use compaction::{CompactionError, Compactor};
 pub use daemon::{DaemonError, daemon};
-pub use doctor::{DoctorError, doctor, doctor_with};
+pub use doctor::{DoctorError, doctor_with};
 pub use effect_worker::EffectWorker;
 pub use events::{EventBus, EventSink, NoopSink, RunEvent};
 pub use helpers::{HelperConfig, HelperControls, HelperPool, TaskTool};
-pub use init::{InitError, InitOptions, init, init_with_io};
-pub use ipc::{IpcError, StatusContext, serve, status, watch};
-pub use prompt_audit::{PromptError, PromptOptions, prompt};
+pub use init::{InitError, InitOptions, InitReport, init};
+pub use ipc::{IpcError, StatusContext, open_watch, read_status, serve, socket_path};
 pub use scheduler::{
     ReminderHandler, ScheduleTool, Scheduler, TaskHandler, TaskHandlerError, TaskRegistry,
 };
-pub use stats::{StatsError, StatsReport, StatsRow, stats, stats_report};
 pub use tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
 pub use tools::ToolMediaRoots;
 

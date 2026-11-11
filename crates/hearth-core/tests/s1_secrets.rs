@@ -1,4 +1,4 @@
-use hearth_core::secrets::{contains_secret, redact_secrets, redact_value};
+use hearth_core::secrets::{contains_secret, is_redactable_value, redact_secrets, redact_value};
 use hearth_core::{
     CoreError, EffectIntent, Harness, MemoryChange, MemoryWrite, NewMemory, NewTask, Save,
 };
@@ -30,6 +30,19 @@ fn plain_text_is_unchanged_and_credentials_are_detected() {
     assert!(!redacted.contains("sk-test-not-a-real-key"));
     assert!(redacted.contains("[redacted]"));
     assert!(redacted.contains("and more"));
+}
+
+#[test]
+fn short_placeholder_values_are_not_redactable() {
+    for placeholder in ["-", "", "none", "1", "abc"] {
+        assert!(
+            !is_redactable_value(placeholder),
+            "{placeholder:?} must not be a redaction value"
+        );
+    }
+    for secret in ["fake-key", "sk-test-not-a-real-key"] {
+        assert!(is_redactable_value(secret), "{secret:?} must be redactable");
+    }
 }
 
 #[test]

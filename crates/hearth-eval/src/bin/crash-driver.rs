@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use hearth_core::{Harness, Save};
-use hearth_model::{ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent};
+use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent};
 use hearth_runtime::{Agent, AgentConfig, EffectWorker};
 use hearth_tools::ToolRegistry;
 use serde_json::json;
@@ -77,12 +77,7 @@ fn agent(args: &[String]) -> Result<()> {
         voice_tags: false,
         guidance: String::new(),
     };
-    let agent = Agent::new(
-        session,
-        Arc::new(ScriptedProvider),
-        Pricing::default(),
-        config,
-    );
+    let agent = Agent::new(session, Arc::new(ScriptedProvider), config);
     let outcome = agent.run_submission(&submitted.submission.id)?;
     println!("answer={:?}", outcome.answer_text);
     Ok(())

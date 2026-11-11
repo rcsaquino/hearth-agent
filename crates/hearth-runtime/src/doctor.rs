@@ -3,6 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use hearth_config::{ConfigError, Settings};
+use hearth_core::{IdGen, UuidV7};
 use hearth_model::{
     ChatMessage, ChatRequest, ContentBlock, OpenAiCompatibleProvider, Provider, ProviderError, Role,
 };
@@ -15,7 +16,7 @@ pub enum DoctorError {
     Config(#[from] ConfigError),
     #[error(transparent)]
     Storage(#[from] hearth_storage::StorageError),
-    #[error("database not found at {0}; run hearth init")]
+    #[error("database not found at {0}; run `hearth` to set up the home")]
     DatabaseMissing(PathBuf),
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -23,11 +24,6 @@ pub enum DoctorError {
     Telegram(#[from] TelegramError),
     #[error(transparent)]
     Provider(#[from] ProviderError),
-}
-
-/// Check the home folder without printing secrets.
-pub fn doctor(home: &Path, live: bool) -> Result<(), DoctorError> {
-    doctor_with(home, live, &mut std::io::stdout())
 }
 
 /// Check the home folder and write the findings to a writer.
@@ -95,7 +91,8 @@ fn check_provider(settings: &Settings, out: &mut impl Write) -> Result<(), Docto
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect(),
         models.session_header.clone(),
-    )?;
+    )?
+    .with_reasoning_effort(models.thinking.clone());
     let request = ChatRequest {
         model: models.model.clone(),
         messages: vec![ChatMessage {
@@ -104,8 +101,8 @@ fn check_provider(settings: &Settings, out: &mut impl Write) -> Result<(), Docto
         }],
         tools: Vec::new(),
         temperature: None,
-        max_tokens: Some(1),
-        session_id: None,
+        max_tokens: None,
+        session_id: Some(UuidV7.new_id()),
     };
     let stream = provider.stream(request)?;
     for event in stream {

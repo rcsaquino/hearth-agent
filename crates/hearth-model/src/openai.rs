@@ -19,15 +19,64 @@ pub struct OpenAiCompatibleProvider {
     api_key: String,
     headers: Vec<(HeaderName, HeaderValue)>,
     session_header: Option<HeaderName>,
+    reasoning_effort: Option<String>,
     client: reqwest::blocking::Client,
     sleeper: Arc<dyn Sleeper>,
 }
 
 const MAX_ATTEMPTS: u32 = 3;
 const BASE_DELAY: Duration = Duration::from_millis(500);
+const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn backoff(attempt: u32) -> Duration {
     BASE_DELAY.saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1)))
+}
+
+/// List model ids from an OpenAI-compatible `/models` endpoint.
+pub fn list_models(base_url: &str, api_key: &str) -> Result<Vec<String>, ProviderError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(MODEL_LIST_TIMEOUT)
+        .build()
+        .map_err(|error| {
+            ProviderError::Config(format!("could not build the HTTP client: {error}"))
+        })?;
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let response = client
+        .get(&url)
+        .bearer_auth(api_key)
+        .send()
+        .map_err(|error| ProviderError::Transport(error.to_string()))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        let message: String = body.chars().take(200).collect();
+        return Err(ProviderError::Request {
+            status: status.as_u16(),
+            message,
+            retryable: false,
+        });
+    }
+    let body: Value = response
+        .json()
+        .map_err(|error| ProviderError::Protocol(format!("model list is not JSON: {error}")))?;
+    let items = body
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| body.as_array());
+    let mut models = Vec::new();
+    for item in items.into_iter().flatten() {
+        let id = item
+            .get("id")
+            .and_then(Value::as_str)
+            .or_else(|| item.as_str())
+            .filter(|id| !id.is_empty());
+        if let Some(id) = id {
+            models.push(id.to_owned());
+        }
+    }
+    models.sort();
+    models.dedup();
+    Ok(models)
 }
 
 impl OpenAiCompatibleProvider {
@@ -84,9 +133,18 @@ impl OpenAiCompatibleProvider {
             api_key: api_key.into(),
             headers,
             session_header,
+            reasoning_effort: None,
             client,
             sleeper,
         })
+    }
+
+    /// Send this reasoning effort on every request.
+    ///
+    /// `default` leaves the provider's own behavior unchanged.
+    pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
+        self.reasoning_effort = effort.filter(|effort| !effort.is_empty() && effort != "default");
+        self
     }
 
     /// Build the exact wire body without sending it.
@@ -212,6 +270,18 @@ impl OpenAiCompatibleProvider {
         }
         if let Some(max_tokens) = request.max_tokens {
             body["max_tokens"] = json!(max_tokens);
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            if effort == "off" {
+                // DeepSeek disables thinking with its own toggle, not an effort.
+                if self.base_url.contains("deepseek.com") {
+                    body["thinking"] = json!({"type": "disabled"});
+                } else {
+                    body["reasoning_effort"] = json!("none");
+                }
+            } else {
+                body["reasoning_effort"] = json!(effort);
+            }
         }
         Ok(body)
     }

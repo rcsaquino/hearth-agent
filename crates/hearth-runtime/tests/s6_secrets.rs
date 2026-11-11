@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use hearth_core::Harness;
 use hearth_model::{
-    ChatRequest, Pricing, Provider, ProviderError, ProviderStream, StreamEvent, ToolCall, ToolSpec,
+    ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, ToolCall, ToolSpec,
 };
 use hearth_runtime::{Agent, AgentConfig};
 use hearth_tools::{Tool, ToolError, ToolOutput, ToolRegistry};
@@ -121,7 +121,6 @@ fn tool_output_and_spill_do_not_store_credentials() {
     let agent = Agent::new(
         session.clone(),
         provider.clone(),
-        Pricing::default(),
         config(home.path(), ToolRegistry::new(vec![Arc::new(LeakyTool)])),
     );
     let outcome = agent.run_submission(&submitted.submission.id).expect("run");
@@ -180,7 +179,6 @@ fn provider_errors_are_redacted_in_the_notice_and_transcript() {
     let agent = Agent::new(
         session.clone(),
         Arc::new(FailingProvider),
-        Pricing::default(),
         config(_home.path(), ToolRegistry::new(vec![])),
     );
     let outcome = agent.run_submission(&submitted.submission.id).expect("run");

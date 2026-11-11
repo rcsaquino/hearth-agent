@@ -120,7 +120,6 @@ fn the_agent_indexes_skills_and_can_load_one() {
     let agent = Agent::new(
         harness.session().clone(),
         provider.clone(),
-        hearth_model::Pricing::default(),
         AgentConfig {
             soul: "test soul".to_owned(),
             model: "test-model".to_owned(),
@@ -142,7 +141,7 @@ fn the_agent_indexes_skills_and_can_load_one() {
     assert_eq!(requests.len(), 2);
     assert!(
         requests[0].messages.iter().any(
-            |message| text(message).contains("## Skills") && text(message).contains("research")
+            |message| text(message).contains("<skills>") && text(message).contains("research")
         ),
         "first request has no skills index"
     );

@@ -5,9 +5,7 @@ use hearth_core::{
     ContextBudget, Harness, NewEntry, Save, Submission, plan_compaction, summary_text,
 };
 use hearth_memory::MemoryService;
-use hearth_model::{
-    ChatRequest, Price, Pricing, Provider, ProviderError, ProviderStream, StreamEvent, Usage,
-};
+use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, Usage};
 use hearth_runtime::{Agent, AgentConfig, Compactor};
 use hearth_tools::ToolRegistry;
 use serde_json::{Value, json};
@@ -122,17 +120,13 @@ fn compactor(
     provider: Arc<dyn Provider>,
     memory: Option<Arc<MemoryService>>,
 ) -> Compactor {
-    let budget = ContextBudget::default();
     Compactor::new(
         harness.session().clone(),
         provider,
-        Pricing::default(),
         memory,
         "test-model".to_owned(),
         "scripted".to_owned(),
         "test-owner".to_owned(),
-        budget.reserve,
-        budget.max_output_tokens,
     )
 }
 
@@ -145,7 +139,6 @@ fn agent(
     Agent::new(
         harness.session().clone(),
         provider,
-        Pricing::default(),
         AgentConfig {
             soul: "Test soul.".to_owned(),
             model: "test-model".to_owned(),
@@ -192,7 +185,7 @@ fn a_compaction_saves_a_summary_and_records_usage() {
         .expect("usage row");
     assert_eq!(usage.kind, "compaction");
     let request = &provider.requests()[0];
-    assert_eq!(request.max_tokens, Some(7372));
+    assert_eq!(request.max_tokens, None);
     let user = request.messages[1].blocks[0]
         .as_text()
         .expect("summary user text");
@@ -483,35 +476,20 @@ fn a_context_overflow_compacts_and_retries_once() {
 }
 
 #[test]
-fn an_unpriced_model_still_records_compaction_usage() {
+fn compaction_records_usage() {
     let (_home, harness) = harness();
     let conversation = conversation(&harness);
     long_entries(&harness, &conversation, 4);
     let history = harness.session().history(&conversation).expect("history");
     let plan = plan_compaction(&history, 100).expect("plan");
     let provider = Arc::new(ScriptedProvider::new(vec![summary_script("Summary.")]));
-    let mut pricing = Pricing::default();
-    pricing.insert(
-        "test-model",
-        Price {
-            input: 1_000_000,
-            cache_read: 0,
-            cache_write: 0,
-            output: 2_000_000,
-            reasoning: 0,
-        },
-    );
-    let budget = ContextBudget::default();
     let compactor = Compactor::new(
         harness.session().clone(),
         provider,
-        pricing,
         None,
         "test-model".to_owned(),
         "scripted".to_owned(),
         "test-owner".to_owned(),
-        budget.reserve,
-        budget.max_output_tokens,
     );
     compactor.compact(&conversation, &plan).expect("compact");
     let usage = harness
@@ -520,5 +498,4 @@ fn an_unpriced_model_still_records_compaction_usage() {
         .expect("usage")
         .expect("usage row");
     assert_eq!(usage.kind, "compaction");
-    assert!(usage.cost_micros > 0);
 }

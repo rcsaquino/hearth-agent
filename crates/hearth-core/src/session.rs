@@ -812,7 +812,6 @@ impl Session {
             cache_write_tokens: new.usage.cache_write_tokens,
             output_tokens: new.usage.output_tokens,
             reasoning_tokens: new.usage.reasoning_tokens,
-            cost_micros: new.cost_micros,
             latency_ms: new.latency_ms,
         };
         let insert = event.clone();
@@ -820,8 +819,8 @@ impl Session {
             writer.execute(
                 "INSERT INTO usage_events (id, ts, task_id, conversation_id, provider, model, \
                  kind, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, \
-                 reasoning_tokens, cost_micros, latency_ms) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 reasoning_tokens, latency_ms) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     insert.id.as_str(),
                     insert.ts,
@@ -835,7 +834,6 @@ impl Session {
                     insert.cache_write_tokens,
                     insert.output_tokens,
                     insert.reasoning_tokens,
-                    insert.cost_micros,
                     insert.latency_ms,
                 ),
             )?;
@@ -850,7 +848,7 @@ impl Session {
             reader.query(
                 "SELECT id, ts, task_id, conversation_id, provider, model, kind, input_tokens, \
                  cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, \
-                 cost_micros, latency_ms FROM usage_events WHERE task_id = ? ORDER BY ts, id",
+                 latency_ms FROM usage_events WHERE task_id = ? ORDER BY ts, id",
                 (task_id,),
                 |row| {
                     Ok(UsageEvent {
@@ -866,8 +864,7 @@ impl Session {
                         cache_write_tokens: row.get(9)?,
                         output_tokens: row.get(10)?,
                         reasoning_tokens: row.get(11)?,
-                        cost_micros: row.get(12)?,
-                        latency_ms: row.get(13)?,
+                        latency_ms: row.get(12)?,
                     })
                 },
             )
@@ -881,7 +878,7 @@ impl Session {
             reader.query_optional(
                 "SELECT id, ts, task_id, conversation_id, provider, model, kind, input_tokens, \
                  cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, \
-                 cost_micros, latency_ms FROM usage_events ORDER BY ts DESC, id DESC LIMIT 1",
+                 latency_ms FROM usage_events ORDER BY ts DESC, id DESC LIMIT 1",
                 [],
                 |row| {
                     Ok(UsageEvent {
@@ -897,8 +894,7 @@ impl Session {
                         cache_write_tokens: row.get(9)?,
                         output_tokens: row.get(10)?,
                         reasoning_tokens: row.get(11)?,
-                        cost_micros: row.get(12)?,
-                        latency_ms: row.get(13)?,
+                        latency_ms: row.get(12)?,
                     })
                 },
             )
@@ -944,14 +940,15 @@ impl Session {
         Ok(self.storage.read(|reader| {
             reader.query_row(
                 "SELECT COALESCE(SUM(input_tokens),0), \
-                 COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cost_micros),0) \
+                 COALESCE(SUM(output_tokens),0), \
+                 COALESCE(SUM(cache_read_tokens),0) \
                  FROM usage_events WHERE ts >= ?",
                 (ts,),
                 |row| {
                     Ok(UsageTotals {
                         input_tokens: row.get(0)?,
-                        cache_read_tokens: row.get(1)?,
-                        cost_micros: row.get(2)?,
+                        output_tokens: row.get(1)?,
+                        cache_read_tokens: row.get(2)?,
                     })
                 },
             )

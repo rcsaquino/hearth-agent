@@ -1,5 +1,6 @@
 use crate::settings::{
-    ImageService, Media, Models, SttService, Tasks, Telegram, TtsService, WebFetch, WebSearch,
+    Daemon, ImageService, Media, Models, SttService, Tasks, Telegram, TtsService, WebFetch,
+    WebSearch,
 };
 use crate::{ConfigError, Settings, unresolved};
 
@@ -48,9 +49,6 @@ impl Settings {
     pub fn validate(&self) -> Result<(), ConfigError> {
         require("identity.agent_name", &self.identity.agent_name)?;
         require("identity.timezone", &self.identity.timezone)?;
-        if let Some(path) = &self.identity.soul_file {
-            require("identity.soul_file", &path.to_string_lossy())?;
-        }
 
         if let Some(telegram) = &self.telegram {
             telegram.validate()?;
@@ -65,6 +63,7 @@ impl Settings {
             web.search.validate()?;
             web.fetch.validate()?;
         }
+        self.daemon.validate()?;
         self.tasks.validate()?;
 
         if let Some(path) = &self.agent.workspace {
@@ -113,7 +112,7 @@ impl Settings {
         self.validate()?;
         if self.models.is_none() {
             return Err(invalid(
-                "models is not configured; add the models block or run hearth init",
+                "models is not configured; run `hearth` to finish setup",
             ));
         }
         Ok(())
@@ -274,6 +273,15 @@ fn is_search_provider(name: &str) -> bool {
     )
 }
 
+impl Daemon {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !matches!(self.start.as_str(), "tui" | "login" | "startup") {
+            return Err(invalid("daemon.start must be tui, login, or startup"));
+        }
+        Ok(())
+    }
+}
+
 impl Tasks {
     fn validate(&self) -> Result<(), ConfigError> {
         if !(1..=8).contains(&self.max_concurrent) {
@@ -305,25 +313,19 @@ impl Models {
         if let Some(header) = &self.session_header {
             require("models.session_header", header)?;
         }
+        if let Some(thinking) = &self.thinking
+            && !matches!(
+                thinking.as_str(),
+                "default" | "off" | "low" | "medium" | "high" | "xhigh" | "max"
+            )
+        {
+            return Err(invalid(
+                "models.thinking must be one of default, off, low, medium, high, xhigh, or max",
+            ));
+        }
         for (name, value) in &self.headers {
             require("models.headers key", name)?;
             require("models.headers value", value)?;
-        }
-        for (model, price) in &self.pricing {
-            require("models.pricing model", model)?;
-            for (name, value) in [
-                ("input", price.input),
-                ("cache_read", price.cache_read),
-                ("cache_write", price.cache_write),
-                ("output", price.output),
-                ("reasoning", price.reasoning),
-            ] {
-                if value < 0 {
-                    return Err(invalid(format!(
-                        "models.pricing.{model}.{name} must not be negative"
-                    )));
-                }
-            }
         }
         Ok(())
     }

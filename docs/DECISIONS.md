@@ -1040,3 +1040,384 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   command. The group kill uses the system `kill` command, so no new dependency is
   added. The timeout regression test uses `sleep 5 & wait` so it exercises the
   grandchild case deterministically.
+
+## 2026-11-11: Friendly setup, local chat, and service uninstall (sir-directed)
+
+- `hearth init` prints the `@BotFather` bot-token steps and the `@userinfobot`
+  numeric-id steps before asking for the token and id.
+- Interactive init offers five provider choices: DeepSeek, OpenCode, OpenCode Go,
+  Command Code, and another OpenAI-compatible endpoint. A preset supplies the base
+  URL for the first four; the last choice asks for one. After the API key, init
+  prints a provider-specific key hint.
+- Init then calls the OpenAI-compatible `GET {base_url}/models` with a 15-second
+  timeout, prints the sorted unique ids, and accepts a number or a typed name. A
+  failed or empty list falls back to a model-name prompt. Non-interactive init is
+  unchanged and makes no model-list call.
+- The timezone prompt is gone. Interactive init stores `TZ`, the `/etc/localtime`
+  target, `/etc/timezone`, or UTC. An explicit `--timezone` still wins.
+- The image block asks for an OpenRouter key and names OpenRouter. The
+  transcription and speech prompts name Groq and ElevenLabs and link their key
+  pages.
+- `hearth chat` renders a banner, a `you>` prompt, streamed answer deltas, tool
+  names, and a per-turn duration, token, and cost line when both stdin and stdout
+  are terminals. Piped mode stays answer-only. Commands are `/help`, `/new`, and
+  `/exit` (or `/quit`).
+- `hearth service uninstall` stops, disables, and removes the user unit, then runs
+  `daemon-reload`. It keeps the home and database. `uninstall_at` takes a flag so
+  tests never touch the host.
+- No new dependencies. `list_models` reuses the existing blocking reqwest client,
+  and the chat UI uses the standard library and ANSI escapes.
+
+## 2026-11-11: Operation layer removed (sir-directed)
+
+- The fixed `## Operation` system text is removed. The first system message is
+  `SOUL.md` alone.
+- Rationale: the text duplicated the default soul ("plain and brief", "use tools
+  when they help", "never reveal secrets") and the `message` tool description
+  (send files, voice only when asked). Local chat has no message tool, so that
+  sentence was inapplicable there. Secret handling is enforced in code.
+- `SEGMENT_OPERATION`, the `operation` field in `TokenCounts`, the prefix parts,
+  the audit document, the token benchmark totals, and the `hearth prompt --system`
+  output are removed. The spec keeps L2-L7 for tools through runtime, and project
+  guidance becomes L1.
+- `request_from_document` still replays an `operation` field when it appears in a
+  prompt blob saved before this change, so `hearth prompt --wire` stays faithful to
+  the stored record.
+
+## 2026-11-11: Default thinking and XML prompt sections (sir-directed)
+
+- `models.thinking` is optional: `default`, `off`, `low`, `medium`, or `high`.
+  Absent or `default` sends no thinking field and leaves the provider unchanged.
+- Interactive init asks for the level immediately after the model list. The
+  `--thinking` flag covers the non-interactive path, and init validates the value
+  before writing anything.
+- The OpenAI-compatible adapter sends `reasoning_effort` for `low`, `medium`, and
+  `high`. `off` sends `reasoning_effort: none`, except on DeepSeek base URLs,
+  where the adapter sends `thinking: {"type": "disabled"}` because DeepSeek's
+  OpenAI format disables thinking with its own toggle. The logic lives in the
+  adapter body, so chat, the daemon, doctor, and `hearth prompt --wire` agree.
+- The prompt section wrappers are XML tags rather than Markdown headings:
+  `<project_instructions>`, `<standing_memory>`, `<skills>`, `<relevant_memory>`,
+  and `<summary_of_earlier_conversation>`. The default `SOUL.md` template uses
+  `<identity>`, `<voice>`, and `<rules>`. Existing `SOUL.md` files are user content
+  and are not rewritten.
+- `request_from_document` rebuilds the XML wrappers for saved prompts; a saved
+  `operation` segment is still replayed when present.
+
+## 2026-11-11: Short placeholders are not redacted
+
+- Exact-value redaction of configured credentials, in both `hearth prompt` and the
+  daemon event bus, now ignores values shorter than 8 characters. A value of `-`,
+  `none`, or `1` is a placeholder; replacing every occurrence corrupted ordinary
+  prompt and event text.
+- The threshold is `hearth_core::secrets::MIN_SECRET_LENGTH`, shared with the
+  existing credential-shape checks.
+
+## 2026-11-11: Trimmed CLI (sir-directed)
+
+- The top-level commands are `init`, `daemon`, `status`, `prompt`, `doctor`,
+  `service`, and `skills`. `chat`, `watch`, `stats`, `backup`, `restore`, and
+  `eval` are removed.
+- `hearth daemon` now has subcommands: `start` runs the long-lived agent (the old
+  bare `hearth daemon` behavior) and `watch` follows live events (the old bare
+  `hearth watch` behavior).
+- The systemd unit runs `daemon start --home`.
+- The chat and stats runtime modules are deleted. Backup and restore remain library
+  functions; the daemon still writes nightly backups, but there is no CLI for them.
+- Benchmarks run through `cargo test -p hearth-eval --test memory_bench` and
+  `--test tokens_bench`; the acceptance and soak scripts use those. The CLI no
+  longer depends on `hearth-eval`.
+- An already installed unit keeps its old command until
+  `hearth service install --force` rewrites it.
+
+## 2026-11-11: The TUI operator surface (sir-directed)
+
+- The only user-facing entry is `hearth`, which opens a ratatui terminal
+  application. `init`, `daemon`, `status`, `prompt`, `doctor`, `service`, and
+  `skills` subcommands are removed; there are no user-facing flags or positional
+  arguments. `HEARTH_HOME` still selects the home.
+- `HEARTH_DAEMON=1` is the internal daemon child mode used by the TUI and the
+  systemd unit. A TUI-spawned daemon is started through `setsid` (with a direct
+  spawn fallback) so it survives the window closing. The PID comes from
+  `hearth.lock`.
+- First run opens an onboarding wizard and writes the home through the existing
+  `init` path: Telegram, provider, API key, model list, thinking, agent name,
+  optional media, start mode, and keep-running. `init` is silent and returns an
+  `InitReport`; the interactive prompt path and `init_with_io` are removed.
+- Conversations stay in Telegram. The TUI is a control plane: Overview, Activity,
+  Doctor, Skills, Prompt, and Settings. Activity uses the daemon socket; Prompt
+  reads the newest saved prompt read-only; Skills reads the skill library
+  read-only; Doctor calls `doctor_with`; Settings edits the daemon section (superseded
+  by the TUI customization surface below, which edits every setting).
+- `settings.daemon.start` is `tui`, `login`, or `startup`; `keep_running` is a
+  boolean. `save_daemon` updates that section atomically with mode 0600 and
+  preserves the rest of the file. Startup uses `loginctl enable-linger`.
+- The systemd unit sets `HEARTH_DAEMON=1` and `HEARTH_HOME` and runs the binary
+  with no arguments. Service commands capture output so they never corrupt the
+  TUI. A service-managed or attached daemon is never stopped by TUI exit.
+- New dependencies: `ratatui` 0.30 and `crossterm` 0.29. Ratatui 0.30.2 requires
+  Rust 1.88; the workspace is 1.89. Both are MIT-licensed and already needed for
+  a terminal interface.
+- Removed along with the commands: `prompt_audit`, `request_from_document`, the
+  `doctor` print wrapper, and the `skills` CLI formatter. The runtime prompt
+  assembly, skill library, doctor checks, and backup/restore remain.
+- `scripts/soak.sh` and `scripts/acceptance.sh` start the daemon with
+  `HEARTH_DAEMON=1` and move status/doctor/backup checks into cargo tests.
+
+## 2026-11-11: TUI usability and thinking levels
+
+- The onboarding tagline is "A durable personal agent, built with Rust." The
+  shared theme uses a slate/cyan palette with readable muted text, brighter
+  borders, a distinct field fill, and a high-contrast selection row. No view sets
+  a foreground to `DarkGray` or relies on the terminal's default border color.
+- Onboarding fields are labelled rows with their own fill and focus state. The
+  cursor column is measured from the rendered prefix with `unicode-width`, so it
+  stays on the insertion point while typing and for long values. The wizard
+  enables bracketed paste, accepts crossterm paste events, and tells the user to
+  paste with Ctrl+Shift+V or Ctrl+V where the terminal forwards it.
+- Thinking levels add `xhigh` and `max` after `high`. They are sent as
+  `reasoning_effort` values verbatim; availability stays a provider concern. The
+  config and init validators, onboarding list, review, and docs share the same set.
+- Activity coalesces adjacent text and thinking deltas per task, shows local
+  timestamps and type badges, and renders a readable event detail instead of raw
+  JSON. Overview replaces the vague "Work" card with "Tasks & memory", removes the
+  instructional card, and adds a separate Memory card. The Daemon card and the
+  Settings daemon panel both show the configured thinking level.
+- The Prompt tab renders each saved prompt layer with a header, token count, and
+  text gutter, including tools, relevant memory, and transcript. Raw JSON remains
+  available.
+- Stopping a TUI-owned daemon waits for both the socket and the writer lock to be
+  released. The daemon keeps its status socket open until the poller, worker,
+  scheduler, helpers, and effect worker have joined, then removes the socket and
+  releases the lock. `ensure_with` waits for an existing lock before spawning so a
+  quick close and reopen cannot race the previous daemon's shutdown.
+- New direct dependencies: `time` for local event timestamps (already used by the
+  runtime) and `unicode-width` for exact cursor placement (already in the lockfile
+  through ratatui). Both are existing workspace crates, not new services.
+
+## 2026-11-11: TUI customization surface
+
+- The TUI is the complete customization surface. No file editing is required for
+  normal use. A built-in text editor with line numbers, bracketed paste, `Ctrl+S`,
+  and an unsaved-change guard edits `SOUL.md`, `HEARTH.md`, `settings.json`, and
+  user skill files. Writes are atomic, private, and mode 0600.
+- The Files tab reads and edits the resolved `SOUL.md` (including
+  `identity.soul_file`) and the home `HEARTH.md`. `f` switches files, `e` opens the
+  editor, and `o` reloads. The view styles XML sections, Markdown headings, and
+  bullets so the files are readable without an external editor.
+- The Settings tab keeps the daemon controls and adds "All settings…" and an `e`
+  shortcut. The full-screen form presents every settings section with friendly
+  labels, descriptions, masked secrets, friendly choices for start mode, thinking,
+  and log level, and inline editing. Missing default sections are shown from the
+  documented defaults. Optional media services can be added from the form; a
+  service is kept as an unsaved draft until its required values are complete.
+  Missing advanced maps and brand-new keys remain available through the raw
+  `settings.json` editor. Every edit is parsed as `Settings`, validated, and only
+  then written. The running daemon picks up changes after a restart.
+- The Memory tab is read-only and uses a new `inspect::list_memories` query over a
+  read-only SQLite connection; the TUI still never opens a writer. It shows kind,
+  status, standing, importance, source, tags, timestamps, and the full content, and
+  supports incremental text filtering.
+- The Skills tab keeps the read-only learned library but can create a new user skill
+  and edit an existing user skill. Learned skills stay agent-managed. A new skill
+  starts from a small Markdown template and is created only when saved.
+- The tab bar grows to eight entries and wraps to two rows on narrow terminals.
+  The help overlay documents the customization shortcuts.
+- The daemon status now includes a `usage` object with `today`, `week`, `month`,
+  and `total` periods. Each carries input, output, cache-read, and cost totals; the
+  legacy today fields remain for compatibility. The Overview Usage card presents
+  the four periods as a compact table.
+- Tests cover the editor cursor and save path, all-settings form labels and
+  validation, optional media setup, friendly setting values, memory inspection and
+  rendering, file editing, user-skill creation, and the new tab routing.
+
+## 2026-11-11: Doctor live checks send a session id
+
+- The Doctor live provider check now sends a generated session id. Providers that
+  configure `models.session_header`, such as OpenCode Go's
+  `x-opencode-session`, require the header on every request. The daemon and
+  compaction/review paths already supplied one; the Doctor path did not.
+- A fake-server regression test asserts that a configured session header reaches
+  the provider request.
+
+## 2026-11-11: Settings defaults and web provider form (sir-directed)
+
+- `identity.soul_file` defaults to `SOUL.md`. A settings file that omits it still
+  resolves to `$HEARTH_HOME/SOUL.md`, and `init` now writes the field explicitly so
+  the default is visible. The Files tab already resolved the same fallback.
+- `agent.max_turns` defaults to 120 instead of 30. The settings form uses the same
+  default, so a missing value and a fresh home agree.
+- The all-settings form no longer exposes `web.search.order` or `web.fetch.order` as
+  comma-separated text. Each known provider is a row: Enter turns it on or off,
+  Shift+Up and Shift+Down move it, and the last enabled provider cannot be turned
+  off. This makes coloring outside the provider list or deleting the chain by a typo
+  impossible from the form. The raw JSON editor remains available for advanced use.
+- Web search and fetch API keys have masked rows for every supported provider even
+  when the `providers` map is absent. Saving a key creates the nested provider object;
+  the existing validation still accepts providers without a key and skips them at
+  runtime. The Exa row notes that a key is optional.
+- Editing any setting opens a bordered "Tip" tooltip with field-specific guidance,
+  examples, and valid ranges. Vague numeric and path settings now name their units
+  and limits, and secret rows explain that blank means keep the current value.
+- Tests cover the two defaults, init writing `SOUL.md`, provider toggling and
+  reordering, the last-provider guard, web key creation, and the editing tooltip.
+
+## 2026-11-11: Model requests keep provider defaults (sir-directed)
+
+- Hearth no longer sends `max_tokens` on any model request. This covers the main
+  agent loop, compaction summaries, memory extraction, skill review, and the live
+  doctor check. The provider and model keep their own output limit.
+- No sampling parameters are sent: temperature, top-p, top-k, penalties, stop, and
+  seed stay absent. The only generation control Hearth sets is the reasoning level
+  from `models.thinking`, as `reasoning_effort` or DeepSeek's `thinking` toggle
+  for off.
+- `models.max_output_tokens` remains as a local reserve for the context budget. It
+  is not sent to the provider; renaming the schema would break existing settings, so
+  the form label and docs now call it an output reserve.
+- The budget formula is unchanged: reserve = max(configured_output, 4096) + 1024,
+  usable = window - reserve. It still prevents Hearth from filling the whole context
+  with the transcript before a reply has room.
+- `ChatRequest.max_tokens` remains an optional adapter field, so a future caller or a
+  recorded fixture can still send it. No production runtime path sets it.
+- Tests assert that main, extraction, compaction, skill-review, and doctor requests
+  carry `None` for `max_tokens` and that the doctor wire body has no `max_tokens`
+  field.
+
+## 2026-11-12: Inline settings, compact saves, clearer Overview, faster close
+
+- The Settings tab is now the last tab and renders the complete form inline. No
+  `e` shortcut or separate daemon panel is needed. The form keeps daemon start and
+  keep-running rows, adds start, stop, and restart actions, and adds Edit SOUL.md
+  and Edit HEARTH.md actions. The Files tab still reads and edits both files.
+- Changed rows carry a `*` marker. `r` resets the selected row to its canonical
+  default; order rows restore the default provider order, and optional values with
+  no default are removed. Fields still validate before a reset is committed.
+- `hearth_config::default_settings_value` and `hearth_config::compact_settings`
+  are the single authority for defaults and omission. Settings saves, init, and
+  `save_daemon` write only values that differ from the defaults. Required model
+  fields (`kind`, `base_url`, `api_key`, and `model`) stay even when they match a
+  default so the file still deserializes. `models.thinking = "default"` is stored
+  as absent.
+- The daemon-section migration no longer writes a default daemon section when no
+  unit is installed. A start-mode change from the form still applies the service
+  mode asynchronously; other changes say a restart is needed.
+- Overview now uses five cards: Runtime, Usage, Work & memory, Connections, and
+  Recent activity. Usage includes cache reads and hit rate; Runtime names the
+  provider, context, turn limit, and workspace; Work includes helper limits,
+  memory budgets, consolidation, and skill-review changes; Connections lists
+  Telegram, search order, fetch order, and media services.
+- The Telegram long poll is 2 seconds with a request timeout two seconds above the
+  poll timeout, so an idle daemon joins its poller promptly on SIGTERM. TUI exit
+  now sends SIGTERM to a daemon it spawned and returns without waiting for the
+  writer lock. The explicit Stop and Restart actions still wait for a clean stop.
+- Tests cover inline Settings rendering, file actions, changed markers, reset,
+  default-order reset, compact settings output, compact init output, tab order, the
+  new Overview cards, and nonblocking TUI exit.
+
+## 2026-11-12: Settings and onboarding polish
+
+- The timezone row opens a picker. The options come from the system zoneinfo tree
+  (`/usr/share/zoneinfo`, `/etc/zoneinfo`, or the macOS path) plus the current value
+  and UTC; a small common-zone list is the fallback when the tree is absent.
+- The footer shows the selected row's full tooltip before editing, not only while
+  editing. The short `help` string remains on the row for callers that do not render
+  the footer.
+- The Files tab is removed. `SOUL.md` and `HEARTH.md` are still edited from the
+  Settings actions, which are the only remaining entry points.
+- `models.context_window` is labeled local, like the output reserve. It is never
+  sent to the provider.
+- models.dev is the optional source for the context window and token prices. The
+  settings action fetches the public `https://models.dev/api.json` catalog, matches
+  the configured `models.base_url` and model id (model ids alone are ambiguous
+  across providers), and fills only the context window and `models.pricing`. It
+  leaves the local output reserve unchanged because that value is a reserve, not
+  the provider's output ceiling. Onboarding looks up the selected model in the
+  background and carries any result into `InitOptions`; a failure or missing entry
+  falls back to the existing default. No lookup blocks startup or a conversation.
+- `http` and `https` remain aliases for the one direct fetch provider so existing
+  settings files keep parsing, but the settings picker offers only Direct HTTP.
+- `tasks.eta_reminder_minutes` was unused. It is replaced by
+  `tasks.eta_reminder_seconds` (default 1) and the helper reminder now waits
+  `expected_seconds + eta_reminder_seconds` before sending. The old key still
+  deserializes as an ignored compatibility field; it is not shown and not used.
+- Resetting a draft media service prunes an empty service object and shows its
+  Add action again instead of leaving an invisible empty section.
+- Onboarding skips the key/model rows of a disabled optional service, and Up/Down
+  move between enabled rows only.
+
+## 2026-11-12: Default budgets, lookup defaults, and tab order
+
+- `models.max_output_tokens` defaults to 32,000 and
+  `compaction.keep_recent_tokens` defaults to 20,000. Both remain local budgeting
+  values; the output reserve is still never sent as an API output cap.
+- The models.dev lookup now also replaces the form's default baseline for the
+  fetched context window and prices. The fetched values are written to the document,
+  are not marked as changes, and `r` resets them to the fetched values. The last
+  lookup is cached at `$HEARTH_HOME/cache/models.dev.json` for the current base URL
+  and model, so the reset baseline survives reopening Settings and restarting; the
+  onboarding lookup writes the same cache after init. When no matching cache exists,
+  `r` on the context window or the current model's prices fetches models.dev and
+  applies the result. The output reserve is not taken from the catalog because it is
+  a local reserve rather than the provider's output ceiling.
+- The Settings footer adds one blank line above the selected row's tip.
+- The tab order is Overview, Activity, Memory, Skills, Prompt, Doctor, Settings;
+  numeric shortcuts follow that order.
+
+## 2026-11-12: Prices are USD per million
+
+- `models.pricing` values are now USD per million tokens in settings and in the
+  Settings form. The internal `Price` type and usage ledger still use integer
+  micros so cost arithmetic stays exact; the config conversion happens once in
+  `pricing_from_settings`.
+- `PriceAmount` is an untagged config value: a decimal is USD, while an integer is
+  a legacy micros-per-million value. This keeps existing settings and old cached
+  lookups correct without a version field. The form normalizes legacy integers to
+  USD on open.
+- Onboarding, the models.dev lookup, and the lookup cache write USD values. The
+  cache converts back to micros when loaded so the reset baseline keeps exact
+  internal prices.
+- Help text and docs show examples such as `0.30`, not `300000`.
+
+## 2026-11-12: Settings cleanup and a fixed soul path
+
+- The Settings form no longer repeats the key hints; the shared footer carries
+  `↑↓`, `enter`, `r`, and `q` once. The form footer keeps the blank line and tip.
+- Resetting a media row keeps the row visible. Media fields with no static default
+  become an explicit null in the form instead of being removed, so the service rows
+  do not vanish while the user is editing; required fields still validate and revert.
+- The `Web search and fetch` header is removed because it sat immediately above the
+  `Search order` header. The web rows start directly with `Search order`.
+- `identity.soul_file` is gone. SOUL.md is always `$HEARTH_HOME/SOUL.md`; the
+  daemon, file editor, and prompt loader no longer consult a configurable path.
+  `hearth_config::load` and the settings form strip the old key, and
+  `compact_settings` drops it, so existing homes keep loading without a manual edit.
+
+## 2026-11-12: Prompt audit, activity time, and cost accounting
+
+- `latest_prompt` skips prompt blobs that are not JSON. Compaction, memory
+  extraction, and skill review also store plain-text prompts in `prompt_blobs`;
+  selecting the newest row blindly made the Prompt tab (and its Overview banner)
+  fail with `saved prompt is not JSON`.
+- The Prompt view stores the rendered scroll range on the app view and clamps
+  Down/PageDown/End to it. Switching raw/system resets the scroll to the top, and a
+  newly loaded prompt does the same.
+- Overview recent activity shows local `HH:MM:SS` before the event kind.
+- Cost accounting no longer charges cached prompt tokens twice: OpenAI prompt
+  tokens include cached tokens, so the fresh part pays the input rate and the
+  cached part pays the cache rate. When a reasoning price is configured, the
+  reasoning subset is removed from output before both are priced. The internal
+  ledger remains micros; the displayed cost is still USD.
+
+## 2026-11-12: Remove pricing and cost tracking
+
+- `models.pricing` is gone from the settings schema and the Settings form. A legacy
+  `pricing` block is stripped on load and omitted on save by `compact_settings`.
+- `Price`, `Pricing`, `PriceConfig`, `PriceAmount`, and the models.dev cost parsing
+  are removed. The models.dev lookup now fills only the context window and output
+  limit.
+- Usage events keep input, cache read, cache write, output, reasoning, and latency.
+  `cost_micros` is removed from `NewUsage`, `UsageEvent`, `UsageTotals`, the SQL
+  statements, and the daemon status JSON.
+- Migration 0005 drops `usage_events.cost_micros`; `SCHEMA_VERSION` is 5.
+- The TUI no longer shows a cost column in Usage or cost metadata in Activity.
+  Onboarding and the lookup cache no longer carry prices.

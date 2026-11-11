@@ -15,7 +15,7 @@ use hearth_core::{
     StepOutput, SubmissionStatus, TaskStatus, TerminalOutcome,
 };
 use hearth_memory::{MemoryService, MemorySource};
-use hearth_model::{Pricing, Provider, Speaker, ToolSpec};
+use hearth_model::{Provider, Speaker, ToolSpec};
 use hearth_telegram::{SendOutcome, TelegramSender};
 use hearth_tools::{Tool, ToolError, ToolOutput};
 use serde_json::{Value, json};
@@ -349,7 +349,6 @@ pub struct HelperConfig {
     pub voice_tags: bool,
     pub max_turns: u32,
     pub budget: ContextBudget,
-    pub pricing: Pricing,
     pub events: Arc<dyn EventSink>,
     pub owner: String,
 }
@@ -554,7 +553,6 @@ impl HelperPool {
         let agent = Agent::new(
             self.config.session.clone(),
             Arc::clone(&self.config.provider),
-            self.config.pricing.clone(),
             AgentConfig {
                 soul: self.config.soul.clone(),
                 model: self.config.model.clone(),
@@ -589,12 +587,9 @@ impl HelperPool {
         let eta_sender = self.config.sender.clone();
         let eta_parent = parent_id.clone();
         let eta_task = task_id.clone();
+        let eta_wait = eta_delay(expected, self.config.settings.tasks.eta_reminder_seconds);
         let eta_handle = thread::spawn(move || {
-            if eta_rx
-                .recv_timeout(Duration::from_secs(expected.max(0) as u64))
-                .is_err()
-                && !eta_parent.is_empty()
-            {
+            if eta_rx.recv_timeout(eta_wait).is_err() && !eta_parent.is_empty() {
                 let text = format!("Helper {eta_task} is taking longer than expected.");
                 let _ = send_notice(
                     &eta_session,
@@ -772,5 +767,21 @@ fn send_notice(
             session.mark_effect_failed(&effect_id, json!({"error": error.to_string()}))?;
             Err(CoreError::Invalid(error.to_string()))
         }
+    }
+}
+
+fn eta_delay(expected_seconds: i64, reminder_seconds: u32) -> Duration {
+    Duration::from_secs(expected_seconds.max(0) as u64 + u64::from(reminder_seconds))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_eta_reminder_waits_after_the_estimate() {
+        assert_eq!(eta_delay(480, 1), Duration::from_secs(481));
+        assert_eq!(eta_delay(0, 1), Duration::from_secs(1));
+        assert_eq!(eta_delay(-5, 0), Duration::ZERO);
     }
 }

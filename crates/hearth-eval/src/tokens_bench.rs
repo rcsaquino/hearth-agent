@@ -18,7 +18,7 @@ use hearth_core::{
 };
 use hearth_memory::{MemoryKind, MemoryService, MemoryTool, NewMemoryInput, SourceKind};
 use hearth_model::{
-    ChatMessage, ChatRequest, ContentBlock, Pricing, Provider, ProviderError, ProviderStream, Role,
+    ChatMessage, ChatRequest, ContentBlock, Provider, ProviderError, ProviderStream, Role,
     StreamEvent, ToolCall, ToolSpec, Usage, estimate_tokens,
 };
 use hearth_runtime::{Agent, AgentConfig, ToolGroups, ToolSearchTool};
@@ -154,7 +154,6 @@ pub fn run() -> Result<TokensReport> {
     let agent = Agent::new(
         session.clone(),
         provider.clone(),
-        Pricing::default(),
         AgentConfig {
             soul: soul.clone(),
             model: model.clone(),
@@ -238,7 +237,6 @@ pub fn run() -> Result<TokensReport> {
 
         fixed.push(prompt.tokens.fixed);
         let prefix = prompt.tokens.identity
-            + prompt.tokens.operation
             + prompt.tokens.tools
             + prompt.tokens.standing
             + prompt.tokens.skills;
@@ -246,7 +244,6 @@ pub fn run() -> Result<TokensReport> {
         prefix_hashes.push(prompt.prefix_hash.clone());
         for (name, value) in [
             ("identity", prompt.tokens.identity),
-            ("operation", prompt.tokens.operation),
             ("tools", prompt.tokens.tools),
             ("standing", prompt.tokens.standing),
             ("skills", prompt.tokens.skills),
