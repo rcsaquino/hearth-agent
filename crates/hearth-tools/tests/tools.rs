@@ -155,7 +155,7 @@ fn times_out_a_long_command() {
     let tool = ShellTool::new(&workspace, Duration::from_millis(100));
     let started = Instant::now();
     let error = tool
-        .call(&json!({"command": "sleep 5"}))
+        .call(&json!({"command": "sleep 5 & wait"}))
         .expect_err("the command must time out");
     assert_eq!(error.code, "timeout");
     assert!(started.elapsed() < Duration::from_secs(2));
