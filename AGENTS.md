@@ -204,7 +204,7 @@ it rather than adding a second identity.
   path is about 5 ms.
 - `deepseek-v4.1-flash` is unpriced in this home; cost is recorded as unpriced
   rather than invented.
-- The seven-day soak and the public-release decision remain open. The bounded
+- The seven-day soak remains open; the first public release is 0.1.0 alpha. The bounded
   soak and the local acceptance matrix are green.
 - The aarch64 package is built only when the target toolchain is present.
 - The old dev-home memory row saved before the provenance fix still has the old

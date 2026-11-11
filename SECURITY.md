@@ -70,8 +70,8 @@ kept beside the restored database. Media is not included in a database snapshot.
 Report security issues privately through the repository's Security tab using
 GitHub private vulnerability reporting. Do not open a public issue.
 
-## Public release
+## Release hygiene
 
-Publication is a separate decision. Before a public release, the history is
+This repository is public. Before each release, the history is
 scanned against a private deny-list kept outside the tree, personal paths and
 identifiers are removed from examples, and the release artifacts are checksummed.
