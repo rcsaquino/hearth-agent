@@ -170,4 +170,4 @@ systemctl --user start hearth
 - **Logs**: `~/.hearth/logs/hearth.log` is JSON and has no message bodies by
   default. `hearth doctor` is the first check.
 
-The full behavior is in [SPEC.md](SPEC.md).
+The full behavior is in [SPEC.md](docs/SPEC.md).

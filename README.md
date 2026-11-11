@@ -5,8 +5,8 @@ durable record in a local SQLite database. It is written in Rust. One daemon own
 the database, runs the agent loop, and talks to one Telegram bot. There is no
 Hearth account, no telemetry, and no hosted storage.
 
-The full behavior and design are defined in [SPEC.md](SPEC.md); the storage
-columns are defined in [SCHEMA.md](SCHEMA.md), with the migrations as the
+The full behavior and design are defined in [SPEC.md](docs/SPEC.md); the storage
+columns are defined in [SCHEMA.md](docs/SCHEMA.md), with the migrations as the
 executable authority. This tree is the pre-1.0 implementation.
 
 ## Project status
@@ -102,9 +102,9 @@ Telegram.
 - [SECURITY.md](SECURITY.md) for the trust model and secret handling.
 - [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
 - [AGENTS.md](AGENTS.md) for coding agents working in this repository.
-- [SCHEMA.md](SCHEMA.md) for the storage columns and migration map.
-- [SPEC.md](SPEC.md) for the binding product definition.
-- [DECISIONS.md](DECISIONS.md) for implementation decisions and deviations.
+- [SCHEMA.md](docs/SCHEMA.md) for the storage columns and migration map.
+- [SPEC.md](docs/SPEC.md) for the binding product definition.
+- [DECISIONS.md](docs/DECISIONS.md) for implementation decisions and deviations.
 
 ## Support
 

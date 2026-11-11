@@ -4,9 +4,9 @@
 
 Hearth is a local-first, single-user personal agent written in Rust. One daemon
 owns a SQLite record, runs the agent loop, and talks to one Telegram bot. The
-binding product definition is [SPEC.md](SPEC.md); implementation choices and
-deviations are in [DECISIONS.md](DECISIONS.md); the storage columns are in
-[SCHEMA.md](SCHEMA.md), with the migrations as the executable authority.
+binding product definition is [SPEC.md](docs/SPEC.md); implementation choices and
+deviations are in [DECISIONS.md](docs/DECISIONS.md); the storage columns are in
+[SCHEMA.md](docs/SCHEMA.md), with the migrations as the executable authority.
 
 This file is for coding agents working in this repository. Hearth also reads
 `AGENTS.md` files from the workspace and its ancestors as project guidance, so
@@ -170,7 +170,7 @@ Key invariants:
 
 - Apply YAGNI, KISS, and DRY. Build what the current slice needs, choose the
   smallest direct design, and keep one authoritative definition for each rule.
-- New dependencies need a one-line justification in `DECISIONS.md`. Prefer the
+- New dependencies need a one-line justification in `docs/DECISIONS.md`. Prefer the
   standard library and an existing crate.
 - Use `cargo fmt` and address clippy rather than suppressing it.
 - Keep modules small and public interfaces narrow. The main seams are `Harness`,
@@ -178,7 +178,7 @@ Key invariants:
 - Errors are single-sentence and user-facing. They must not include secrets,
   request bodies, or file contents.
 - Prefer clear names over comments. Comment why, not what.
-- Update `DECISIONS.md` for a deviation or a nontrivial choice. Bump the spec
+- Update `docs/DECISIONS.md` for a deviation or a nontrivial choice. Bump the spec
   Draft when behavior changes. Do not leave a decision only in a commit message.
 
 ## Commits

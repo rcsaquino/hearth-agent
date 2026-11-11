@@ -1,8 +1,8 @@
 # Contributing
 
 Hearth is a local-first Rust project. The product definition is
-[SPEC.md](SPEC.md). Implementation choices and deviations are recorded in
-[DECISIONS.md](DECISIONS.md). Coding agents should also read
+[SPEC.md](docs/SPEC.md). Implementation choices and deviations are recorded in
+[DECISIONS.md](docs/DECISIONS.md). Coding agents should also read
 [AGENTS.md](AGENTS.md), which has the build, test, architecture, and safety rules
 in a compact form.
 
@@ -42,7 +42,7 @@ independent of the implementation. A bug fix starts with a reproduction.
 Apply YAGNI, KISS, and DRY. Build what the current milestone needs, choose the
 smallest direct design, and keep one authoritative definition for each rule.
 Prefer a little repetition over a premature abstraction. New dependencies need a
-one-line justification in `DECISIONS.md`.
+one-line justification in `docs/DECISIONS.md`.
 
 Use `cargo fmt` and address clippy rather than suppressing it. Keep modules small
 and public interfaces narrow. The main seams are `Harness`, `Session`, `Storage`,
