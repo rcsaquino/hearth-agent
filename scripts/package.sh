@@ -27,6 +27,8 @@ cp "target/$target/release/hearth" "$stage/hearth"
 chmod 755 "$stage/hearth"
 cp README.md QUICKSTART.md SECURITY.md CONTRIBUTING.md LICENSE "$stage/"
 cp packaging/hearth.service "$stage/hearth.service"
+cp scripts/fetch-embedding-model.sh "$stage/fetch-embedding-model.sh"
+chmod 755 "$stage/fetch-embedding-model.sh"
 
 mkdir -p dist
 name="hearth-$version-$target"

@@ -8,7 +8,23 @@ fn main() -> anyhow::Result<()> {
         hearth_runtime::daemon(&home)?;
         return Ok(());
     }
-    if std::env::args_os().len() > 1 {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if let [flag] = args.as_slice()
+        && let Some(flag) = flag.to_str()
+    {
+        match flag {
+            "--version" | "-V" => {
+                println!("hearth {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            "--help" | "-h" => {
+                println!("Run `hearth` with no arguments to open Hearth.");
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+    if !args.is_empty() {
         eprintln!("Run `hearth` with no arguments to open Hearth.");
         std::process::exit(2);
     }
