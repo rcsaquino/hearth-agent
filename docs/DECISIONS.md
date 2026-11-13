@@ -1493,3 +1493,35 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Rendered sections are cached by saved prompt hash, request time, response entry,
   raw mode, and width. Wrapping preserves leading indentation instead of flattening
   code and JSON, and schema fields include argument descriptions.
+
+## 2026-11-13: Memory phase 0, bounded recall, and the hybrid target
+
+- The approved recall target is 100% obtainability, not 100% automatic
+  injection: every stored memory must be reachable through the indexes or a
+  tool, while automatic recall remains a bounded cache. The benchmark targets
+  automatic recall@5 of 0.95 or better and one-tool recovery for misses.
+- Automatic recall now uses `memory.recall_max_items` and
+  `memory.recall_max_tokens` from settings instead of a hardcoded limit. The
+  default budget is 8 items and 900 tokens. Each item is clipped to a 240-character
+  snippet, and tags and ids are omitted from the injected text. The model reads
+  full content through `memory_search`.
+- New and edited long-term memories are limited to 2,000 characters and 8 tags
+  through the tools. The 20,000-character storage cap remains for archived or
+  imported rows. Standing bullets are also limited to 2,000 characters through
+  the tool path.
+- Credential-shaped content is rejected before it reaches the long-term or
+  standing store, using the shared `hearth_core::secrets` matcher.
+- The daemon status exposes `memory_recall` with the mode, configured and active
+  embedding flags, item cap, and token cap. Overview shows `hybrid` only when
+  embeddings are active; otherwise it shows `lexical` or `lexical fallback`.
+- Embeddings remain default-on with lexical fallback. The selected model is
+  `bekko-embedding-v1-a8m` at 384 dimensions with INT8 vectors and a local model
+  directory. The backend is not wired yet, so the status currently reports
+  `lexical`.
+- The next retrieval phase is hybrid FTS5 + local vectors with reciprocal-rank
+  fusion, no remote embedding calls, and a hard fallback to lexical recall when
+  the model is missing or slow. Selective extraction is deferred to explicit
+  cues, compaction, or idle review; per-turn extraction stays rejected.
+- The stale SPEC memory section was replaced with the current two-store design
+  and the approved target. The old nightly consolidation status remains in the
+  status JSON for compatibility but is no longer shown in Overview.

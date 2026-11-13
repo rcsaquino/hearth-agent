@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.20, plain-language edition
+**Status:** Draft 0.21, plain-language edition
 **Date:** 2026-11-13
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,8 @@
 ---
 
 ## A note on language
+
+Draft 0.21 applies the first memory improvement slice: automatic recall now respects the configured item and token budgets, injects short snippets instead of full rows, and omits tags from the injected text. New memory writes are limited to 2,000 characters and 8 tags, credential-shaped content is refused, and Overview reports whether recall is lexical or hybrid. The approved target keeps embeddings default-on with lexical fallback, using a local `bekko-embedding-v1-a8m` index.
 
 Draft 0.20 replaces the two-card Prompt audit with one live, scrollable session export that shows every prompt layer, tool declaration, message, reply, and usage line in full. A reply or settled run refreshes the open view, and a coalesced follow-up read keeps the final saved answer from being missed. `[` and `]` walk older snapshots, and `f` toggles the live tail.
 
@@ -865,211 +867,137 @@ preambles and no server-side additions.
 
 ## 7. Memory
 
-**In plain terms.** Memory is a library, not a pile. There is a desk for what is
-open right now, a shelf for standing instructions, deep stacks for everything else,
-journals for past days, and a recipe box for skills. The library is built to last
-years: active items are kept indefinitely, decay affects ranking rather than
-existence, and nothing is routinely deleted.
-
-Memory is the defining subsystem of Hearth. It must work without the model being
-asked to "remember", and it must stay within a fixed token budget.
-
-### 7.1 Five layers of memory
-
-| Layer | What it holds | Where it lives | When it is loaded |
-|---|---|---|---|
-| Working | The current context | RAM | Every request |
-| Standing | Identity, standing rules, pinned facts | `memory_items` | Every request, 1200 tokens |
-| Long-term | Facts, preferences, people, projects, decisions | SQLite, full-text search, tags | On demand, 900 tokens |
-| Episodic | Day and conversation summaries linked to entries | SQLite | Deep recall |
-| Procedural | Skills and workflows | Versioned Markdown files | Index always, body on demand |
-
-In the code, standing memory is the rows whose `standing` field is `promoted` or
-`pinned`.
+**In plain terms.** Memory is two stores and the conversation record. A small
+standing file is always on the desk. A searchable library holds everything else.
+The transcript remains the evidence of what was said. The model writes memory
+through tools; automatic recall brings back a short, budgeted set of reminders.
 
 Memory is global. There is one library for the user, not a scope per chat or per
-project. Every conversation and background task reads and writes the same rows.
+project. Every conversation and background task reads and writes the same stores.
 
-### 7.2 What a memory looks like
+### 7.1 Two stores and the transcript
 
-**In plain terms.** Each memory is one statement, not a diary entry. It carries
-where it came from, when it was true, how important it is, and what it replaced if
-it corrected an older belief.
+| Store | What it holds | Where it lives | When it is loaded |
+|---|---|---|---|
+| Standing | Durable rules and facts that need no retrieval cue | `$HEARTH_HOME/memory/standing.md` | Every request, before the transcript |
+| Long-term | Facts, preferences, people, projects, decisions | `$HEARTH_HOME/memory/long-term.sqlite` | Automatically, up to 900 tokens; deeper on demand |
+| Transcript | Every saved conversation entry | `$HEARTH_HOME/hearth.db` | On demand through `memory_sessions` |
+| Working | The assembled prompt | RAM | Every request |
 
-The exact row:
+The current code has no separate episode store, no importance/decay fields, and
+no nightly consolidation. Skills are versioned Markdown files and are not memory
+rows.
+
+### 7.2 What a long-term memory looks like
+
+Each long-term memory is one statement with retrieval cues and provenance.
 
 | Field | Notes |
 |---|---|
-| `id` | UUIDv7, stable and quoted when memory is recalled |
-| `kind` | `fact`, `preference`, `person`, `project`, `event`, `episode`, `rule` |
-| `content` | Full statement, one fact per row |
-| `tags` | JSON array, lowercase |
-| `importance` | 0 to 100 |
-| `status` | `active`, `superseded`, `archived`, `deleted` |
-| `valid_from`, `valid_to` | When the fact was true, nullable |
-| `supersedes_id` | The row this one replaced, nullable |
-| `source_kind` | `user`, `assistant`, `session`, `external`, `inference` |
-| `source_ref` | Entry id, message id, URL, or file path |
-| `standing` | `none`, `promoted`, or `pinned` |
-| `created_at`, `last_used_at` | `last_used_at` drives decay and LRU demotion |
+| `id` | Stable `m_` UUID |
+| `content` | One fact; new writes are capped at 2,000 characters |
+| `tags` | JSON array; new writes allow up to 8 tags |
+| `source` | Optional provenance |
+| `created_at`, `updated_at` | RFC 3339 timestamps |
+| `revision` | Increments on edit; used for optimistic writes |
 
-Three supporting pieces:
+SQLite FTS5 indexes content, tags, and source with Porter stemming and a literal
+substring fallback. Standing memory is a line-oriented file:
 
-- **Full-text search.** SQLite's full-text search module, FTS5, indexes `content`
-  and tags, so keyword search is fast and local.
-- **No embeddings.** Hearth does not compute or store embeddings. Retrieval is
-  lexical: full-text search plus tags, recency, and importance. Memory
-  stays one local database with no second model, no extra service, and no index to
-  rebuild. The tradeoff is weaker recall on paraphrase, which 7.8 measures separately.
-- **Events.** `memory_events` is an append-only audit trail of memory changes.
+```text
+- [s_abc123] [p=80] Never use em dashes in output.
+```
+
+Each bullet has a stable `s_` id, a priority from 0 to 100, and one line of
+content. The serialized file is capped at 5,000 characters.
 
 ### 7.3 How memories get in
 
-**In plain terms.** Memories enter from four directions: the agent explicitly saves
-one, a background extractor notices a durable fact after a conversation, a
-compaction flushes detail before summarizing, and a nightly consolidation tidies
-the library.
+The current code has one write path: the model calls a memory tool.
 
-The four sources:
+- `memory_add` writes long-term memory by default, or standing memory with
+  `store: "standing"`.
+- `memory_edit` changes content, tags, source, or standing priority.
+- `memory_delete` removes a row permanently.
+- Identical content is reused rather than duplicated.
+- Long-term edits can require `expected_revision`; standing edits can require
+  `expected_content`.
+- Credential-shaped content is refused.
+- Standing capacity is protected by priority: only strictly lower-priority
+  bullets can be displaced, and displaced bullets are archived to long-term
+  memory with the `standing-archive` tag.
 
-1. **Explicit tool.** The agent calls `memory` with `save`, `update`, `forget`, or
-   `pin`. This is immediate and visible to the user.
-2. **Post-run extraction.** After a settled run, a durable `memory.extract` task
-   sends the model a compressed view (user messages, assistant claims, tool
-   outcomes, capped at 2000 tokens) plus the five most similar existing memories
-   found by full-text search. It returns at most three candidate operations as
-   valid JSON: `add`, `update`, `supersede`, or `noop`, each with an evidence quote
-   and an importance score.
-3. **Compaction flush.** Before summarizing a range, the same extractor runs over
-   the range so durable details survive compaction.
-4. **Consolidation.** A nightly task, by default at 03:30 local time, merges
-   duplicates, closes contradictions, writes episode summaries, and recomputes
-   importance.
-
-Extraction is skipped for trivial exchanges such as greetings and
-acknowledgements, and for runs with no user content. Every extracted item must cite
-an entry id. Items without evidence are rejected.
-
-Deduplication works in three passes:
-
-- a fingerprint of the cleaned text catches exact duplicates;
-- full-text similarity catches near duplicates;
-- shared tags and content tokens catch paraphrases whose subject matches even
-  when the wording differs.
-
-A merge updates the existing row, extends its provenance, and raises its importance
-rather than creating a twin. A contradiction supersedes the old row and preserves
-the chain. Nothing is hard-deleted except on an explicit user request.
+There is no post-run extractor, compaction memory flush, or nightly consolidation
+in the current code. The approved next step is selective, deferred extraction on
+explicit cues and during idle or compaction work, not on every turn.
 
 ### 7.4 How memories come back
 
-**In plain terms.** When a message arrives, Hearth searches the library in several
-ways at once, combines the results, removes near-duplicates, and brings back a small
-number of items that fit the budget. If nothing is relevant, it brings back nothing.
-
-The pipeline:
+Automatic recall runs before a model call:
 
 ```
-query
-  -> normalize and detect trivial input
-  -> parallel candidates:
-       full-text search with BM25 ranking, top 40
-       standing items
-       tag matches
-  -> combine the ranked lists (reciprocal rank fusion, or RRF)
-  -> filter: active and currently valid
-  -> score:
-       combined rank (RRF score)
-       + 0.20 * recency
-       + 0.20 * importance
-       - 0.15 * staleness
-  -> diversity filter: at most two items per kind, near-duplicates collapsed
-  -> budget 900 tokens, at most 6 items
-  -> render only the remembered text, one bullet per item
+latest user text
+  -> skip empty or trivial input (hi, thanks, ok, ...)
+  -> FTS5 keyword search with stemming, bm25 order
+  -> literal substring fallback if FTS has no hit
+  -> up to memory.recall_max_items hits
+  -> clip each hit to a short snippet
+  -> stop at memory.recall_max_tokens
+  -> inject as <relevant_memory> before the newest user message
 ```
 
-A recalled item looks like this:
+Defaults are 8 items and 900 tokens. Tags and ids stay out of the automatic
+recall text to spend the budget on remembered content. Automatic recall is
+lexical only today; the `memory.embeddings` setting is default-on, but the local
+embedding backend is not active yet. The daemon reports both
+`embeddings_configured` and `embeddings_active`, and Overview shows `hybrid` only
+when the backend is active, otherwise `lexical` or `lexical fallback`.
 
-```
-- prefers short replies; uses metric units
-```
+There is no score threshold, reciprocal-rank fusion, recency boost, or decay in
+the current path. The model can obtain the rest with the tools:
 
-The agent can call `memory search` for deeper recall, `memory get` for full content,
-and `memory as_of` for historical state. Automatic recall injects nothing when the
-best score is below threshold, which avoids wasting tokens on unrelated turns.
-
-There are no embeddings in this pipeline. A memory has to share a word or a tag
-with the query to be found. Rank then favors recent, important, and non-stale
-items.
-
-Trivial-input detection uses a short heuristic first: `hi`, `thanks`, `ok`, emoji,
-or a very short message. It falls back to the model only if the heuristic is
-unsure.
+- `memory_search` searches long-term content, tags, and source; an `m_` id reads
+  full content in bounded chunks.
+- `memory_sessions` searches or reads the conversation transcript by
+  `conversation#seq` citation.
 
 ### 7.5 Standing memory
 
-**In plain terms.** Some things must be present without being asked for: who the
-user is, how the user wants to be addressed, hard rules, and a few active
-constraints.
-These sit on the desk at all times, but the desk has a fixed size.
+Standing memory is injected as a system message before the transcript. It is
+reserved for instructions that must be present without a retrieval cue.
 
-Standing memory contains only:
+- The whole file is capped at 5,000 serialized characters.
+- New bullets are one line and limited to 2,000 characters.
+- Priority controls eviction; equal or higher priorities are never displaced.
+- Evicted bullets are archived to long-term memory with `standing-archive`.
+- Writes use an in-process mutex and a lock file, replace the file atomically,
+  refuse symlinks, and repair an over-budget file at startup.
+- The content hash is the standing version, so a change invalidates the prompt
+  cache prefix.
 
-- identity and address terms;
-- standing instructions and prohibitions;
-- active project constraints;
-- a small number of high-value preferences.
+### 7.6 Forgetting and secrets
 
-Promotion rules: a `pinned` item is always included. Otherwise an item with
-`importance >= 85` and a kind of `rule`, `preference`, or `person` becomes
-`promoted`. The block is capped at 1200
-tokens. When over the cap, the lowest priority and least recently used items are
-demoted to long-term memory, never deleted.
+- `memory_delete` removes a long-term row or a standing bullet permanently.
+- Standing eviction archives the displaced bullet; ordinary deletion does not.
+- There is no decay, tombstone, or automatic archival of old long-term memories
+  in the current code.
+- Credential-shaped content is rejected before a long-term or standing write.
+- A manually edited standing file is not controlled by the tool path; treat it
+  as trusted local input.
 
-Standing memory is versioned. A write produces a new version and a new prefix hash.
-The change is reported by the next status query.
+### 7.7 The memory tools
 
-### 7.6 Forgetting, gently
+There are five tools, not one dispatcher:
 
-**In plain terms.** Hearth is built for years, so it does not aggressively forget.
-Importance fades when something has not been used, which lowers its ranking, but
-the memory stays. Archiving is rare and reversible. Only an explicit request removes
-a memory, and even then a tombstone remains so the same stale fact is not learned
-again.
+- `memory_add`
+- `memory_edit`
+- `memory_delete`
+- `memory_search`
+- `memory_sessions`
 
-The rules:
-
-- Importance decays 5% per 90 days without use, floored at 15 for unpinned items.
-  Decay changes retrieval ranking, not retention.
-- Items unused for 3 years and below importance 20 become `archived`. They remain
-  searchable with `include_archived` and are never deleted by maintenance.
-- Pinned and user-stated rules never decay.
-- `forget` sets `deleted`, removes its full-text rows, and keeps a tombstone
-  with the id and timestamp.
-- Secrets are never stored. The memory writer rejects content matching credential
-  patterns and redacts matches in logs.
-
-### 7.7 The memory tool
-
-One tool keeps the schema small:
-
-```
-memory(
-  action: "search" | "get" | "save" | "update" | "forget" | "pin" | "stats" | "as_of",
-  query?: string,
-  id?: string,
-  content?: string,
-  kind?: string,
-  tags?: string[],
-  importance?: number,
-  supersedes?: string,
-  at?: string
-)
-```
-
-`search` returns compact rows. `get` returns full content and provenance. `save`
-returns the new id. `as_of` answers what was true at a given time. The tool
-description states that memory is for durable facts, not scratch state.
+Standing operations use `store: "standing"` or `s_` ids; long-term operations use
+`m_` ids. The tools return structured results, compact excerpts, and explicit
+hints when a caller uses the wrong store.
 
 ### 7.8 How we know it works
 
@@ -1088,13 +1016,16 @@ The benchmark includes:
 - duplicate-write resistance;
 - leakage checks, meaning secrets are never stored.
 
-Targets for 1.0:
+Targets for the memory plan:
 
-- recall@10 of 0.90 or better: the right memory appears in the top 10 at least 90%
-  of the time;
-- precision@5 of 0.80 or better: at least 80% of the top 5 results are relevant;
-- recall injection of 900 tokens or less at the 95th percentile;
-- retrieval of 80 ms or less at the 95th percentile with 200k items;
+- 100% indexed reachability: every stored memory is findable by at least one
+  deterministic path (content, tag, id, literal, or browse);
+- automatic recall@5 of 0.95 or better, with every automatic miss recoverable by
+  one memory tool call;
+- automatic recall p95 at or below 100 ms at 10k memories, and tool search p95 at
+  or below 500 ms;
+- automatic recall stays within the configured 900-token budget at the 95th
+  percentile;
 - zero secrets stored in the adversarial test set.
 
 The 200 questions are versioned with the repository; the user spot-checks 20.
@@ -1473,7 +1404,10 @@ Optional overrides, only when needed:
 | `models.max_output_tokens` | `32000` | Local reply reserve; not sent |
 | `tasks.eta_reminder_seconds` | `1` | Delay after a task’s expected finish before its reminder |
 | `memory.standing_max_tokens` | `1200` | Standing-memory budget |
-| `memory.recall_max_tokens` | `900` | Per-turn recall budget |
+| `memory.recall_max_tokens` | `900` | Per-turn automatic-recall token budget |
+| `memory.recall_max_items` | `8` | Per-turn automatic-recall item cap |
+| `memory.embeddings` | `true` | Request the local hybrid recall path; lexical fallback remains active |
+| `memory.embedding_model_dir` | `models/bekko-embedding-v1-a8m` | Local embedding model directory |
 | `media.image.model` | `openai/gpt-image-2.6-sunburst` | Image model |
 | `media.stt.model` | `whisper-large-v3-turbo` | Transcription model |
 | `media.tts.model` | `eleven_v4` | Speech model |
