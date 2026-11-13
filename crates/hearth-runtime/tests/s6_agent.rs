@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use hearth_core::{
-    ContextBudget, Harness, NewEntry, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus,
+    ContextBudget, Harness, NewEntry, NewTask, Save, Submission, SubmissionStatus, TaskStatus,
 };
 use hearth_memory::{MemoryInput, MemorySearchOptions, MemoryService, SearchMode};
 use hearth_model::{
@@ -952,49 +952,6 @@ fn text_script(answer: &str) -> Script {
             finish_reason: Some("stop".to_owned()),
         }),
     ])
-}
-
-fn json_script(text: &str) -> Script {
-    Ok(vec![
-        Ok(StreamEvent::TextDelta(text.to_owned())),
-        Ok(StreamEvent::Usage(Usage {
-            input_tokens: 10,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            output_tokens: 3,
-            reasoning_tokens: 0,
-        })),
-        Ok(StreamEvent::Done {
-            finish_reason: Some("stop".to_owned()),
-        }),
-    ])
-}
-
-fn noop_script() -> Script {
-    json_script(r#"{"operations":[{"op":"noop"}]}"#)
-}
-
-fn submit_text(
-    harness: &Harness,
-    conversation: &str,
-    request_id: &str,
-    text: &str,
-) -> (Submission, String) {
-    let submission = harness
-        .session()
-        .submit(conversation, request_id, "input", json!({"text": text}))
-        .expect("submit")
-        .submission;
-    let user_entry = harness
-        .session()
-        .history(conversation)
-        .expect("history")
-        .into_iter()
-        .rev()
-        .find(|entry| entry.kind == "user")
-        .expect("user entry")
-        .id;
-    (submission, user_entry)
 }
 
 /// Seed one long-term memory and return its id.

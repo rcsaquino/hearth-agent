@@ -346,7 +346,7 @@ impl MemoryStore {
             None => previous.tags.clone(),
         };
         let source = match source {
-            Some(value) if value.is_empty() => String::new(),
+            Some("") => String::new(),
             Some(value) => nonempty(value, "source", 2_000)?,
             None => previous.source.clone(),
         };
@@ -958,7 +958,7 @@ mod tests {
             content: "evicted bullet".to_owned(),
         };
         database
-            .archive(&[entry.clone()], "/home/standing.md")
+            .archive(std::slice::from_ref(&entry), "/home/standing.md")
             .unwrap();
         database.archive(&[entry], "/home/standing.md").unwrap();
         assert_eq!(database.count().unwrap(), 1);
