@@ -162,6 +162,26 @@ fn times_out_a_long_command() {
 }
 
 #[test]
+fn does_not_wait_for_a_background_child_to_close_the_capture() {
+    use hearth_tools::ShellTool;
+    use std::time::{Duration, Instant};
+
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let tool = ShellTool::new(&workspace, Duration::from_secs(2));
+    let started = Instant::now();
+    let output = tool
+        .call(&json!({"command": "sleep 3 & printf done"}))
+        .expect("run shell");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "the shell waited for a background child to close the capture"
+    );
+    assert!(!output.is_error);
+    assert!(output.content.contains("done"), "{}", output.content);
+}
+
+#[test]
 fn rejects_a_shell_cwd_escape() {
     use hearth_tools::ShellTool;
     use std::time::Duration;
