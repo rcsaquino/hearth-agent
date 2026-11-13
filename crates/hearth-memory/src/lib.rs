@@ -305,6 +305,25 @@ mod tests {
     }
 
     #[test]
+    fn automatic_recall_stays_within_its_token_budget() {
+        let (_directory, service) = service();
+        service
+            .store()
+            .add(&MemoryInput {
+                content: "needle ".repeat(2_000),
+                ..Default::default()
+            })
+            .unwrap();
+        let items = service.recall("needle").unwrap();
+        let rendered = service.render_recall(&items);
+        let tokens = hearth_model::estimate_tokens(&rendered);
+        assert!(
+            tokens <= 900,
+            "recall rendered {tokens} tokens, over the default budget"
+        );
+    }
+
+    #[test]
     fn a_trivial_input_recalls_nothing() {
         let (_directory, service) = service();
         service

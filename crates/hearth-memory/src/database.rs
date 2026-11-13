@@ -699,6 +699,19 @@ mod tests {
     }
 
     #[test]
+    fn credential_like_content_is_refused() {
+        let (_directory, database) = database();
+        let error = database
+            .add(&MemoryInput {
+                content: "token=abcdefghijk".to_owned(),
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert!(error.message.contains("credential"), "{}", error.message);
+    }
+
+    #[test]
     fn identical_content_is_reused_and_left_untouched() {
         let (_directory, database) = database();
         let first = save(&database, "same fact", &["a"]);

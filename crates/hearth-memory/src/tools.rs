@@ -565,6 +565,26 @@ mod tests {
     }
 
     #[test]
+    fn add_rejects_an_oversized_memory() {
+        let (_directory, tools) = fixture();
+        let content = "x".repeat(2_001);
+        let error = AddTool::new(tools)
+            .call(&json!({ "content": content }))
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_input");
+    }
+
+    #[test]
+    fn add_rejects_too_many_tags() {
+        let (_directory, tools) = fixture();
+        let tags: Vec<String> = (0..9).map(|index| format!("tag-{index}")).collect();
+        let error = AddTool::new(tools)
+            .call(&json!({ "content": "a fact", "tags": tags }))
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_input");
+    }
+
+    #[test]
     fn add_rejects_priority_for_long_term() {
         let (_directory, tools) = fixture();
         let error = AddTool::new(tools)

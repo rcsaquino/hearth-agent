@@ -488,6 +488,48 @@ mod tests {
     }
 
     #[test]
+    fn overview_shows_lexical_fallback_when_embeddings_are_configured() {
+        let (_home, mut app) = initialized_app();
+        app.daemon = DaemonState::Running;
+        app.status = Some(json!({
+            "model": "fake-model",
+            "memory_items": 3,
+            "standing_memory_version": 1,
+            "memory_recall": {
+                "mode": "lexical",
+                "embeddings_configured": true,
+                "embeddings_active": false,
+                "max_items": 8,
+                "max_tokens": 900
+            }
+        }));
+        let text = buffer_text(&app, 130, 34);
+        assert!(text.contains("lexical fallback"), "{text}");
+    }
+
+    #[test]
+    fn overview_shows_hybrid_when_embeddings_are_active() {
+        let (_home, mut app) = initialized_app();
+        app.daemon = DaemonState::Running;
+        app.status = Some(json!({
+            "model": "fake-model",
+            "memory_items": 3,
+            "standing_memory_version": 1,
+            "memory_recall": {
+                "mode": "hybrid",
+                "embeddings_configured": true,
+                "embeddings_active": true,
+                "max_items": 8,
+                "max_tokens": 900
+            }
+        }));
+        let text = buffer_text(&app, 130, 34);
+        assert!(text.contains("hybrid"), "{text}");
+        assert!(text.contains("8"), "{text}");
+        assert!(text.contains("900"), "{text}");
+    }
+
+    #[test]
     fn hovering_a_setting_shows_its_tooltip() {
         let (_home, mut app) = initialized_app();
         app.handle_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));

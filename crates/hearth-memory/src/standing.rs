@@ -729,6 +729,14 @@ mod tests {
     }
 
     #[test]
+    fn a_credential_like_bullet_is_refused() {
+        let (_directory, store) = store();
+        let error = store.add("token=abcdefghijk", 50).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert!(error.message.contains("credential"), "{}", error.message);
+    }
+
+    #[test]
     fn a_multiline_bullet_is_rejected() {
         let (_directory, store) = store();
         assert_eq!(

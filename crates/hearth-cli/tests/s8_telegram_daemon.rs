@@ -789,6 +789,10 @@ fn hearth_status_reads_a_running_daemon() {
     assert_eq!(status["memory_items"], 1);
     assert_eq!(status["standing_bullets"], 1);
     assert!(status["standing_memory_version"].as_u64().unwrap_or(0) > 0);
+    assert_eq!(status["memory_recall"]["mode"], "lexical");
+    assert_eq!(status["memory_recall"]["embeddings_active"], false);
+    assert_eq!(status["memory_recall"]["max_items"], 8);
+    assert_eq!(status["memory_recall"]["max_tokens"], 900);
     assert_eq!(status["last_consolidation"], "2026-11-09T03:30:00Z");
     assert_eq!(status["last_skill_review"], "2026-11-09T04:30:00Z");
     assert_eq!(status["last_skill_review_changes"], 2);
