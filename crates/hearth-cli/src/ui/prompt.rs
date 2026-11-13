@@ -1218,11 +1218,15 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_usage_link_says_so_instead_of_zeroes() {
+    fn a_missing_usage_link_adds_no_usage_row() {
         let mut exchange = sample("SOUL TEXT");
         exchange["usage"] = json!(null);
         let text = render_audit(&exchange, None);
-        assert!(text.contains("usage · not linked"), "{text}");
+        assert!(
+            !text.contains("response · usage"),
+            "an unlinked usage row is noise: {text}"
+        );
+        assert!(!text.contains("usage · not linked"), "{text}");
         assert!(!text.contains("cache read 0"), "{text}");
     }
 
