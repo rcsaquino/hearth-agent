@@ -1401,3 +1401,44 @@ fn run_loop(terminal: &mut DefaultTerminal, app: &mut App) -> anyhow::Result<()>
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    #[test]
+    fn an_agent_message_refreshes_the_open_prompt_view() {
+        let home = TempDir::new().expect("temp home");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Prompt;
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "assistant_reply",
+            "data": {"text": "the answer"}
+        })));
+        assert!(
+            app.prompt.loading,
+            "a reply must refresh the Prompt view while it is open"
+        );
+    }
+
+    #[test]
+    fn a_refresh_arriving_while_one_is_running_is_not_lost() {
+        let home = TempDir::new().expect("temp home");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Prompt;
+        app.prompt.loading = true;
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "run_settled",
+            "data": {"status": "done"}
+        })));
+        app.apply_event(AppEvent::Prompt(Ok(Vec::new())));
+        assert!(
+            app.prompt.loading,
+            "the settled run must queue the refresh that could not start"
+        );
+    }
+}

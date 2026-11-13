@@ -1069,6 +1069,23 @@ mod tests {
     }
 
     #[test]
+    fn wrapping_keeps_leading_indentation() {
+        let lines = wrap_text("    indented line that wraps at the margin", 18);
+        assert!(
+            lines[0].starts_with("    "),
+            "the first line must keep its indentation: {lines:?}"
+        );
+        assert!(
+            lines.len() > 1,
+            "the long line should wrap into several lines: {lines:?}"
+        );
+        assert!(
+            lines.iter().skip(1).all(|line| line.starts_with("    ")),
+            "continuation lines must keep the same indentation: {lines:?}"
+        );
+    }
+
+    #[test]
     fn narrow_widths_clamp_instead_of_underflowing() {
         for width in [0usize, 1, 12, 40, 75, 76, 200] {
             let exchange = sample("SOUL TEXT");

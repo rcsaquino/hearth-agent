@@ -776,6 +776,141 @@ mod tests {
     }
 
     #[test]
+    fn prompt_tab_renders_the_whole_session_like_an_export() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Prompt;
+        let identity = (0..12)
+            .map(|index| format!("identity line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.prompt.exchanges = vec![json!({
+            "request": {
+                "model": "test-model",
+                "identity": identity,
+                "guidance": "PROJECT RULES",
+                "standing_memory": "STANDING LINES",
+                "skills_index": "skill-one: does things",
+                "recall": "MEMORY HIT",
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "please inspect the whole session"}]}
+                ],
+                "runtime": "RUNTIME NOTE",
+                "tools": [
+                    {
+                        "name": "read_file",
+                        "description": "Read a file from the workspace.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "description": "The path to read."
+                                }
+                            },
+                            "required": ["path"]
+                        }
+                    }
+                ],
+                "tokens": {"total": 400, "fixed": 150}
+            },
+            "prompt_hash": "abc123def456",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": {
+                "entry_id": "entry-1",
+                "created_at": 1_700_000_005_000_000_i64,
+                "blocks": [{"type": "text", "text": "the whole answer"}],
+                "tokens_est": 12
+            },
+            "usage": json!(null)
+        })];
+        let text = buffer_text(&app, 100, 120);
+        assert!(text.contains("SESSION"), "{text}");
+        assert!(
+            text.contains("identity line 11"),
+            "the whole identity must be visible, not a collapsed preview: {text}"
+        );
+        assert!(
+            text.contains("The path to read."),
+            "tool argument descriptions must be shown: {text}"
+        );
+        assert!(text.contains("please inspect the whole session"), "{text}");
+        assert!(text.contains("the whole answer"), "{text}");
+        assert!(
+            !text.contains("more · enter"),
+            "the export view must not collapse the session: {text}"
+        );
+    }
+
+    #[test]
+    fn prompt_brackets_navigate_older_snapshots_and_back() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![
+            json!({
+                "request": {"model": "newest", "identity": "NEW SESSION"},
+                "prompt_hash": "newest",
+                "requested_at": 2,
+                "response": json!(null),
+                "usage": json!(null)
+            }),
+            json!({
+                "request": {"model": "older", "identity": "OLD SESSION"},
+                "prompt_hash": "older",
+                "requested_at": 1,
+                "response": json!(null),
+                "usage": json!(null)
+            }),
+        ];
+        let text = buffer_text(&app, 100, 60);
+        assert!(text.contains("NEW SESSION"), "{text}");
+        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
+        let text = buffer_text(&app, 100, 60);
+        assert!(text.contains("OLD SESSION"), "{text}");
+        assert!(!text.contains("NEW SESSION"), "{text}");
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        let text = buffer_text(&app, 100, 60);
+        assert!(text.contains("NEW SESSION"), "{text}");
+    }
+
+    #[test]
+    fn prompt_arrows_scroll_the_document_and_end_follows_the_tail() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Prompt;
+        let body = (0..60)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.prompt.exchanges = vec![json!({
+            "request": {
+                "identity": body,
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "hello"}]}
+                ]
+            },
+            "prompt_hash": "hash",
+            "requested_at": 1,
+            "response": json!(null),
+            "usage": json!(null)
+        })];
+        let _ = buffer_text(&app, 100, 24);
+        for _ in 0..3 {
+            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        assert!(
+            app.prompt.scroll > 0,
+            "Down must scroll the document, not just pick a section"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        assert_eq!(app.prompt.scroll, app.prompt.max_scroll.get());
+        app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        let text = buffer_text(&app, 100, 24);
+        assert!(
+            text.contains("paused"),
+            "scrolling away from the tail must pause follow mode: {text}"
+        );
+    }
+
+    #[test]
     fn prompt_scroll_stops_at_the_end_and_resets_on_raw_toggle() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
