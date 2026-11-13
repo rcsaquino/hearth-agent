@@ -20,10 +20,10 @@ echo "== reminders and scheduler =="
 cargo test -p hearth-runtime --test s7_scheduler
 
 echo "== telegram fake end to end =="
-cargo test -p hearth-cli --test s8_telegram_daemon
+cargo test -p hearth-cli --test s8_telegram_daemon -- --test-threads=1
 
 echo "== daemon lifecycle and tui state =="
-cargo test -p hearth-cli --test daemon_lifecycle
+cargo test -p hearth-cli --test daemon_lifecycle -- --test-threads=1
 cargo test -p hearth-cli --lib
 
 echo "== memory benchmark =="
