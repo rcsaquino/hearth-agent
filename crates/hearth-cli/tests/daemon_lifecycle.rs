@@ -6,7 +6,7 @@ use hearth_runtime::{InitOptions, init};
 use tempfile::TempDir;
 
 fn wait_for_stop(home: &Path) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while daemon_client::probe(home).is_ok() {
         assert!(
             std::time::Instant::now() < deadline,

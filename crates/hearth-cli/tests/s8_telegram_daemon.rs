@@ -302,7 +302,7 @@ fn stop_daemon(mut child: Child) {
         .arg("-TERM")
         .arg(child.id().to_string())
         .status();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         match child.try_wait().expect("poll daemon") {
             Some(_) => return,

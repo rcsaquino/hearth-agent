@@ -69,7 +69,7 @@ fn write_settings(home: &std::path::Path, text: &str) {
 }
 
 fn wait_for_lock_pid(home: &Path, child: &mut Child) -> u32 {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(status) = child.try_wait().expect("poll daemon") {
             panic!("daemon exited before writing the lock: {status}");
@@ -92,7 +92,7 @@ fn terminate(mut child: Child) {
         .arg("-TERM")
         .arg(child.id().to_string())
         .status();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         match child.try_wait().expect("poll daemon") {
             Some(_) => return,

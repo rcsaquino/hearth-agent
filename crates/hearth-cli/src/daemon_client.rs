@@ -174,7 +174,7 @@ fn signal_stop(pid: u32) -> Result<(), String> {
 }
 
 fn wait_for_status(home: &Path) -> Result<Value, String> {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
         if let Ok(status) = probe(home) {
             return Ok(status);
@@ -188,7 +188,7 @@ fn wait_for_status(home: &Path) -> Result<Value, String> {
 }
 
 fn wait_for_stop(home: &Path) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
         if probe(home).is_err() && lock_available(home) {
             return true;
@@ -207,7 +207,7 @@ fn lock_available(home: &Path) -> bool {
 }
 
 fn wait_for_existing_daemon(home: &Path) -> Option<Value> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !lock_available(home) {
         if let Ok(status) = probe(home) {
             return Some(status);
