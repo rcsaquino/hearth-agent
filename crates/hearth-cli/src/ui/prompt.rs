@@ -699,15 +699,18 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
             }
         }
     }
-    rows.push(PromptRow {
-        label: "response · usage".to_owned(),
-        label_style: theme::faint(),
-        content: vec![(usage_line(&view.exchange["usage"]), theme::faint())],
-        meta: view.exchange["response"]["tokens_est"]
-            .as_u64()
-            .filter(|tokens| *tokens > 0)
-            .map(|tokens| format!("{} tok", count(tokens))),
-    });
+    let usage = &view.exchange["usage"];
+    if !usage.is_null() {
+        rows.push(PromptRow {
+            label: "response · usage".to_owned(),
+            label_style: theme::faint(),
+            content: vec![(usage_line(usage), theme::faint())],
+            meta: view.exchange["response"]["tokens_est"]
+                .as_u64()
+                .filter(|tokens| *tokens > 0)
+                .map(|tokens| format!("{} tok", count(tokens))),
+        });
+    }
 
     rows
 }
