@@ -1474,8 +1474,10 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - The Prompt tab is now one scrollable session document instead of the two-card
   audit. The newest saved exchange renders in full with the stable layers first:
   system identity, guidance, standing memory, skills, request tools, then relevant
-  memory, every transcript item, the runtime note, the saved response, and usage.
-  Tools are a top-level request field, but placing them with the fixed layers makes
+  memory, every transcript item, the runtime note, and the saved response. Usage
+  is shown only when the exchange has a linked usage record; today the inspect
+  view has no reliable link, so the row is omitted. Tools are a top-level request
+  field, but placing them with the fixed layers makes
   the stable prefix and its cache behavior easy to see. Sections are not collapsed
   and tool results are not clipped; `r` still shows the raw exchange JSON.
 - Up/Down scroll one line, PageUp/PageDown move a page, Home/End (or `g`/`G`) jump

@@ -838,7 +838,9 @@ preambles and no server-side additions.
   is shown in full with the stable layers first: system identity (`SOUL.md`),
   guidance, standing memory, skills, and the request `tools` field, followed by
   relevant memory immediately before the newest user, every transcript item, the
-  runtime note, the saved response, and usage. Tools are a top-level request field,
+  runtime note, and the saved response. A usage row appears only when the exchange
+  has a linked usage record; an unlinked one is omitted rather than shown empty.
+  Tools are a top-level request field,
   not a system message, but they render with the fixed layers so the stable prefix
   is visible at the top. Nothing is collapsed and tool results are not clipped.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or `g`/`G`)
