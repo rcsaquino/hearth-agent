@@ -95,7 +95,10 @@ Running `hearth` opens the control plane:
 - **Activity** streams live runs, including Telegram messages and tool calls.
 - **Memory** browses saved memories.
 - **Skills** browses the skill library read-only.
-- **Prompt** shows the newest saved prompt and its XML sections.
+- **Prompt** is a live, scrollable export of the newest saved session: system
+  prompts, tool declarations, the full conversation, the reply, and token counts.
+  It refreshes after every reply. Use `[`/`]` for older snapshots and `f` to
+  resume following the tail.
 - **Doctor** runs offline and live checks.
 - **Settings** is the last tab and shows every option inline. Use `r` to reset the
   selected row, `*` to spot changes, and the daemon controls to start, stop, or
@@ -137,7 +140,8 @@ weekly copies. The daemon writes them automatically.
 - **Telegram 429**: Hearth honors `retry_after`; a busy bot may still pause.
 - **Rich reply rejected**: Hearth falls back to plain messages with entities.
   The answer is still delivered once.
-- **Empty or odd answers**: open the Prompt tab to inspect the last prompt.
+- **Empty or odd answers**: open the Prompt tab to inspect the whole session and
+  the exact prompt the model received.
 - **Runaway tools**: send `stop`. The shell is not sandboxed; read
   [SECURITY.md](SECURITY.md).
 - **The window is too small**: resize to at least 80 columns by 24 rows.

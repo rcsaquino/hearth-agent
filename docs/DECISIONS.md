@@ -1468,3 +1468,25 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   Rendering slices only visible left rows and visible detail lines and never asks
   Paragraph to rewrap the whole prompt, so selection and scrolling stay
   responsive on large prompts.
+
+## 2026-11-13: Live session export in the Prompt tab
+
+- The Prompt tab is now one scrollable session document instead of the two-card
+  audit. The newest saved exchange renders in full: system identity, guidance,
+  standing memory, skills, relevant memory, every transcript item, the runtime
+  note, tool declarations with argument descriptions, the saved response, and
+  usage. Sections are not collapsed and tool results are not clipped; `r` still
+  shows the raw exchange JSON.
+- Up/Down scroll one line, PageUp/PageDown move a page, Home/End (or `g`/`G`) jump
+  to the top or tail, `[`/`]` walk older loaded snapshots, and `f` toggles live
+  follow. Scrolling away pauses follow; End or reaching the bottom resumes it. The
+  header names the snapshot, live state, prompt and prefix hashes, token counts,
+  and cache peers.
+- The view refreshes when the open Prompt tab sees an `assistant_reply` or
+  `run_settled` event. A refresh that arrives while one is already running is
+  coalesced into one follow-up read, so the final saved answer is not missed. A
+  paused reading position survives the reload, and the scroll range is clamped
+  after every cache rebuild.
+- Rendered sections are cached by saved prompt hash, request time, response entry,
+  raw mode, and width. Wrapping preserves leading indentation instead of flattening
+  code and JSON, and schema fields include argument descriptions.

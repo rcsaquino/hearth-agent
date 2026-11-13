@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.19, plain-language edition
-**Date:** 2026-11-11
+**Status:** Draft 0.20, plain-language edition
+**Date:** 2026-11-13
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -9,6 +9,8 @@
 ---
 
 ## A note on language
+
+Draft 0.20 replaces the two-card Prompt audit with one live, scrollable session export that shows every prompt layer, tool declaration, message, reply, and usage line in full. A reply or settled run refreshes the open view, and a coalesced follow-up read keeps the final saved answer from being missed. `[` and `]` walk older snapshots, and `f` toggles the live tail.
 
 Draft 0.19 removes token pricing and cost tracking entirely. Usage keeps token counts and latency only. Draft 0.18 still covers the plain-text prompt skip, recent-activity seconds, bounded Prompt scrolling, Settings cleanup, media reset behavior, and the fixed SOUL.md path.
 
@@ -301,7 +303,7 @@ terminal application. There are no subcommands or flags.
 | Activity | The live event stream from the daemon, with coalesced stream deltas and a readable event detail. |
 | Memory | Browse and search saved memory records. |
 | Skills | Browse skills with automatic, scrollable body preview; create and edit user skills; learned skills stay read-only. |
-| Prompt | Two bordered read-only cards: a left list of wire items and a right detail card showing the selected item in full, with token counts and a raw JSON view. |
+| Prompt | A live, scrollable session export: every prompt layer, tool declaration, transcript item, reply, and usage line in full, with token counts, older-snapshot navigation, a raw JSON view, and automatic refresh after each reply. |
 | Doctor | Offline and live checks. |
 | Settings | The last tab. Every option is shown inline, with SOUL.md and HEARTH.md actions, daemon controls, a raw JSON editor, changed-row markers, and reset to default. |
 
@@ -337,7 +339,7 @@ follows it.
 - The stream is read-only. Closing the TUI does not cancel work. Attaching late
   shows events from that point; entries and tool results hold the earlier record.
 - Telegram shows only the final answer. Activity is for the local terminal.
-- Activity is for observing. The Prompt tab is for auditing what the model saw.
+- Activity is for observing. The Prompt tab is a live export of the whole session as the model saw it.
 
 ---
 
@@ -832,18 +834,26 @@ preambles and no server-side additions.
 
 - The exact prompt text is saved in `prompt_blobs` before the request and linked from
   the generation checkpoint.
-- The Prompt tab shows only the latest saved request in two bordered cards, like
-  Activity. The left card lists every wire item as a one-line label in exact
-  request order: system identity (`SOUL.md`), guidance, standing memory, skills,
-  every transcript item with relevant memory immediately before the newest user,
-  the runtime note, the request `tools` field, and the saved response. The right
-  card always shows the selected item in full.
-- Up/Down select a row, Home/End jump to the first or last row, and
-  PageUp/PageDown scroll the detail card. Tool definitions show argument names,
-  types, enums, and required markers instead of pretty-printed schema JSON. `r`
-  shows the raw JSON. Rows are cached by request, width, and response revision;
-  detail is cached by selection, so selecting and scrolling do not rebuild or
-  rewrap the whole prompt.
+- The Prompt tab is one live, scrollable session export. The newest saved exchange
+  is shown in full in request order: system identity (`SOUL.md`), guidance,
+  standing memory, skills, relevant memory immediately before the newest user,
+  every transcript item, the runtime note, the request `tools` field, the saved
+  response, and usage. Nothing is collapsed and tool results are not clipped.
+- Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or `g`/`G`)
+  jump to the top or tail. `[` and `]` walk older loaded snapshots, and `f` toggles
+  live follow. Scrolling away from the tail pauses follow; End or reaching the
+  bottom resumes it. The header names the snapshot, live state, prompt and prefix
+  hashes, token counts, and cache peers.
+- Tool definitions show argument names, types, enums, required or optional
+  markers, and argument descriptions instead of pretty-printed schema JSON.
+  Wrapping preserves leading indentation for code and JSON. `r` shows the raw
+  exchange JSON. Rendered sections are cached by saved prompt hash, request time,
+  response entry, raw mode, and width, so redraws while paused do not rebuild the
+  document.
+- The open view refreshes when an `assistant_reply` or `run_settled` event arrives.
+  A refresh that arrives while one is already running is coalesced into one
+  follow-up read, so the final saved response is shown even when replies and the
+  settled event arrive close together.
 - The view is read-only. Saved prompt content is redacted by the save path.
 - Prompt blobs are pruned after 30 days by default.
 
