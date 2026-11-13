@@ -1174,6 +1174,19 @@ mod tests {
     }
 
     #[test]
+    fn tool_declarations_sit_with_the_stable_system_prefix() {
+        let exchange = sample("SOUL TEXT");
+        let text = render_audit(&exchange, None);
+        let skills = text.find("system · skills index").expect("skills index");
+        let tools = text.find("request · tools").expect("tools");
+        let user = text.find("please inspect").expect("newest user");
+        assert!(
+            skills < tools && tools < user,
+            "tools must follow the system layers and precede the transcript: {text}"
+        );
+    }
+
+    #[test]
     fn the_runtime_note_follows_the_conversation() {
         let exchange = sample("SOUL TEXT");
         let text = render_audit(&exchange, None);
