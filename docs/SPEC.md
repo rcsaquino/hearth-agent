@@ -934,10 +934,12 @@ durable cue such as "remember", "I prefer", "always", "never", "from now on",
 "my name is", or "decision". It sees a bounded tail of the conversation, asks the
 configured model for at most three memories as JSON, and writes through the same
 store rules (2,000 characters, 8 tags, credential rejection, exact dedupe). It
-runs after delivery in the background, not on the hot reply path.
+runs after delivery in the background, not on the hot reply path. Compaction also
+runs the same extractor over the range it is about to summarize, so durable details
+survive the summary.
 
-There is no per-turn extractor, compaction memory flush, or nightly consolidation
-in the current code. Those remain deliberate later options.
+There is no per-turn extractor or nightly consolidation in the current code.
+Those remain deliberate later options.
 
 ### 7.4 How memories come back
 

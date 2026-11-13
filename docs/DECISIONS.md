@@ -1546,7 +1546,9 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   target i3-7100T, a8m query encoding measured about 2.5 ms for a short query,
   6 ms for 37 tokens, and 16 ms for 123 tokens; a 200k-row, 384-dimension vector
   scan measured about 205 ms, and a 10k-row scan about 10 ms. This keeps normal
-  recall below 100 ms and the 200k floor under the 500 ms acceptable bound.
+  recall below 100 ms and the 200k floor under the 500 ms acceptable bound. A
+  paraphrase smoke ("Who is Bob's boss?" against "Alice manages Bob") found the
+  manager memory in about 3.5 ms.
 - Automatic recall now renders 240-character snippets, omitted tags and ids, and
   stops at the configured item and token caps. Overview shows `hybrid` only when
   the embedding backend is active, otherwise `lexical` or `lexical fallback`.
@@ -1554,7 +1556,8 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   contains a durable cue. It sends a bounded conversation tail to the configured
   model, accepts at most three one-line memories as JSON, records usage, and
   writes through the normal store checks. It is not on the reply path and is not
-  a per-turn extractor.
+  a per-turn extractor. Compaction runs the same extractor over its source range
+  before summarizing, so durable details survive the summary.
 - Nightly backups now include same-date `memory-YYYYMMDD.db` and
   `standing-YYYYMMDD.md` sidecars. Restore copies them back when present, so a
   main-database restore no longer leaves the memory library behind.
