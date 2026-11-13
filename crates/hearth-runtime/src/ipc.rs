@@ -202,6 +202,13 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         "standing_memory_version": standing_version,
         "standing_bullets": standing_bullets,
         "standing_characters": standing_characters,
+        "memory_recall": {
+            "mode": context.memory.recall_mode(),
+            "embeddings_configured": context.memory.embeddings_configured(),
+            "embeddings_active": context.memory.embeddings_active(),
+            "max_items": context.memory.recall_max_items(),
+            "max_tokens": context.memory.recall_max_tokens(),
+        },
         "last_consolidation": last_consolidation,
         "last_skill_review": last_skill_review,
         "last_skill_review_changes": last_skill_review_changes,

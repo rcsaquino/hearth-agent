@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 
 use crate::errors::{ErrorCode, ExpectedError, Result};
 use crate::files::{atomic_write, is_missing};
-use crate::text::{MEMORY_LIMIT, STANDING_LIMIT, integer, single_line};
+use crate::text::{MEMORY_LIMIT, STANDING_LIMIT, integer, no_credentials, single_line};
 
 /// One bullet in `standing.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -428,6 +428,7 @@ impl StandingStore {
     /// Add a bullet, reusing an identical existing one.
     pub fn add(&self, content: &str, priority: i64) -> Result<StandingAddResult> {
         let normalized = single_line(content, "content", MEMORY_LIMIT)?;
+        no_credentials(&normalized)?;
         let requested = integer(priority, "priority", 0, 100)?;
         self.locked(|| {
             let entries = parse(&self.read()?.unwrap_or_default())?;
@@ -481,7 +482,11 @@ impl StandingStore {
         expected_content: Option<&str>,
     ) -> Result<StandingEditResult> {
         let normalized = match content {
-            Some(value) => Some(single_line(value, "content", MEMORY_LIMIT)?),
+            Some(value) => {
+                let content = single_line(value, "content", MEMORY_LIMIT)?;
+                no_credentials(&content)?;
+                Some(content)
+            }
             None => None,
         };
         let requested = match priority {

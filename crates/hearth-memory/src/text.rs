@@ -4,12 +4,18 @@
 //! a caller that relied on a 20,000-character memory limit or a 5,000-character
 //! standing file keeps working after the port.
 
+use hearth_core::secrets::contains_secret;
+
 use crate::errors::{ErrorCode, ExpectedError, Result};
 
 /// The whole `standing.md` budget, in characters of serialized text.
 pub const STANDING_LIMIT: usize = 5_000;
-/// One long-term memory's maximum length, in characters.
+/// One long-term memory's hard storage length, in characters.
 pub const MEMORY_LIMIT: usize = 20_000;
+/// The normal length for a new or edited memory.
+pub const NEW_MEMORY_LIMIT: usize = 2_000;
+/// The normal tag count for a new or edited memory.
+pub const NEW_TAG_LIMIT: usize = 8;
 /// The soft ceiling for one tool result, in bytes.
 pub const RESULT_BYTES: usize = 32_000;
 
@@ -24,6 +30,17 @@ pub fn nonempty(value: &str, name: &str, max: usize) -> Result<String> {
         ));
     }
     Ok(text.to_owned())
+}
+
+/// Refuse credential-shaped content before it reaches either store.
+pub fn no_credentials(content: &str) -> Result<()> {
+    if contains_secret(content) {
+        return Err(ExpectedError::new(
+            ErrorCode::InvalidInput,
+            "credential-like memory content was refused.",
+        ));
+    }
+    Ok(())
 }
 
 /// Validate an integer within an inclusive range.

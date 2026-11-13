@@ -109,10 +109,15 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     let spill = home.join("spill");
     // Memory is not optional: a daemon that cannot reach its store would answer
     // with silently missing context, so failing to open it stops startup.
-    let memory =
-        Arc::new(MemoryService::new(session.clone()).map_err(|error| {
-            std::io::Error::other(format!("memory could not be opened: {error}"))
-        })?);
+    let memory = Arc::new(
+        MemoryService::new(session.clone())
+            .map_err(|error| std::io::Error::other(format!("memory could not be opened: {error}")))?
+            .with_recall_budget(
+                settings.memory.recall_max_items,
+                settings.memory.recall_max_tokens,
+            )
+            .with_embeddings(settings.memory.embeddings),
+    );
     // Repair an over-budget standing file at startup, as the store intends:
     // bullets trimmed there are archived to long-term memory first.
     match memory.standing_store().load() {

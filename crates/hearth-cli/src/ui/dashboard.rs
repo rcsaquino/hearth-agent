@@ -181,9 +181,25 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
     let standing = status
         .and_then(|status| status["standing_memory_version"].as_u64())
         .unwrap_or(0);
-    let consolidation = status
-        .and_then(|status| status["last_consolidation"].as_str())
-        .unwrap_or("not yet");
+    let recall = status.and_then(|status| status.get("memory_recall"));
+    let embeddings_active = recall
+        .and_then(|recall| recall["embeddings_active"].as_bool())
+        .unwrap_or(false);
+    let embeddings_configured = recall
+        .and_then(|recall| recall["embeddings_configured"].as_bool())
+        .unwrap_or(false);
+    let recall_label = if embeddings_active {
+        "hybrid · embeddings on"
+    } else if embeddings_configured {
+        "lexical fallback"
+    } else {
+        "lexical"
+    };
+    let recall_style = if embeddings_active {
+        theme::good()
+    } else {
+        theme::muted()
+    };
     let review = status
         .and_then(|status| status["last_skill_review"].as_str())
         .unwrap_or("not yet");
@@ -201,10 +217,16 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
         .unwrap_or_else(|| "not configured".to_owned());
     let budgets = settings
         .map(|settings| {
+            let items = recall
+                .and_then(|recall| recall["max_items"].as_u64())
+                .unwrap_or(settings.memory.recall_max_items);
+            let tokens = recall
+                .and_then(|recall| recall["max_tokens"].as_u64())
+                .unwrap_or(settings.memory.recall_max_tokens);
             format!(
-                "{} standing · {} recall",
+                "{} standing · {items}×{} recall",
                 compact_count(settings.memory.standing_max_tokens),
-                compact_count(settings.memory.recall_max_tokens)
+                compact_count(tokens)
             )
         })
         .unwrap_or_else(|| "not configured".to_owned());
@@ -225,7 +247,7 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
                 theme::text(),
             ),
             metric("budgets", budgets, theme::muted()),
-            metric("maintain", short(consolidation, 24), theme::muted()),
+            metric("recall", recall_label, recall_style),
             metric(
                 "skills",
                 format!("{} · {changes} changes", short(review, 18)),

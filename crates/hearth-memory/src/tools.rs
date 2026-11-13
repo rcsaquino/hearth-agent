@@ -26,7 +26,7 @@ use crate::results::{
     render_standing_edit,
 };
 use crate::standing::StandingStore;
-use crate::text::{MEMORY_LIMIT, integer};
+use crate::text::{MEMORY_LIMIT, NEW_MEMORY_LIMIT, NEW_TAG_LIMIT, integer, nonempty, tags};
 
 /// Convert an expected failure into a tool error.
 fn tool_error(error: ExpectedError) -> ToolError {
@@ -124,6 +124,22 @@ fn optional_tags(arguments: &Value, field: &str) -> Option<Vec<String>> {
     })
 }
 
+/// Normalize and bound tags on a write. Search filters keep the wider cap.
+fn bounded_tags(arguments: &Value) -> crate::errors::Result<Option<Vec<String>>> {
+    let Some(raw) = optional_tags(arguments, "tags") else {
+        return Ok(None);
+    };
+    let normalized = tags(Some(&raw))?;
+    if normalized.len() > NEW_TAG_LIMIT {
+        return Err(ExpectedError::with_details(
+            ErrorCode::InvalidInput,
+            format!("Use at most {NEW_TAG_LIMIT} tags for a memory."),
+            json!({ "field": "tags", "max_items": NEW_TAG_LIMIT }),
+        ));
+    }
+    Ok(Some(normalized))
+}
+
 /// `memory_add`.
 pub struct AddTool {
     tools: MemoryTools,
@@ -144,7 +160,7 @@ impl Tool for AddTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "content": { "type": "string", "minLength": 1, "maxLength": MEMORY_LIMIT },
+                    "content": { "type": "string", "minLength": 1, "maxLength": NEW_MEMORY_LIMIT },
                     "store": {
                         "type": "string",
                         "enum": ["long_term", "standing"],
@@ -153,8 +169,8 @@ impl Tool for AddTool {
                     "tags": {
                         "type": "array",
                         "items": { "type": "string", "minLength": 1, "maxLength": 80 },
-                        "maxItems": 30,
-                        "description": "SQLite only: retrieval cues such as fruit and preferences. Omit for standing memory; supplied tags are ignored and reported."
+                        "maxItems": NEW_TAG_LIMIT,
+                        "description": "SQLite only: up to eight retrieval cues such as fruit and preferences. Omit for standing memory; supplied tags are ignored and reported."
                     },
                     "source": { "type": "string", "maxLength": 2_000, "description": "SQLite only: provenance. Omit on add to use the current session. Ignored and reported for standing memory." },
                     "priority": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Hot-memory importance; default 50. Only strictly lower-priority entries can be displaced." }
@@ -167,7 +183,11 @@ impl Tool for AddTool {
 
     fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
         guard(|| {
-            let content = required_str(arguments, "content")?;
+            let content = nonempty(
+                &required_str(arguments, "content")?,
+                "content",
+                NEW_MEMORY_LIMIT,
+            )?;
             let store = optional_str(arguments, "store").unwrap_or_else(|| "long_term".to_owned());
             if store == "standing" {
                 let priority = optional_int(arguments, "priority").unwrap_or(50);
@@ -186,7 +206,7 @@ impl Tool for AddTool {
                 .unwrap_or_default();
             let (memory, created) = self.tools.database.add(&MemoryInput {
                 content,
-                tags: optional_tags(arguments, "tags"),
+                tags: bounded_tags(arguments)?,
                 source: if source.is_empty() {
                     None
                 } else {
@@ -219,8 +239,8 @@ impl Tool for EditTool {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "Stable s_... standing-memory or m_... SQLite memory ID." },
-                    "content": { "type": "string", "minLength": 1, "maxLength": MEMORY_LIMIT },
-                    "tags": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 80 }, "maxItems": 30 },
+                    "content": { "type": "string", "minLength": 1, "maxLength": NEW_MEMORY_LIMIT },
+                    "tags": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 80 }, "maxItems": NEW_TAG_LIMIT },
                     "source": { "type": "string", "maxLength": 2_000 },
                     "priority": { "type": "integer", "minimum": 0, "maximum": 100 },
                     "expected_revision": { "type": "integer", "minimum": 1 },
@@ -235,7 +255,9 @@ impl Tool for EditTool {
     fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
         guard(|| {
             let id = required_str(arguments, "id")?;
-            let content = optional_str(arguments, "content");
+            let content = optional_str(arguments, "content")
+                .map(|content| nonempty(&content, "content", NEW_MEMORY_LIMIT))
+                .transpose()?;
             let priority = optional_int(arguments, "priority");
             let expected_revision = optional_int(arguments, "expected_revision");
             let expected_content = optional_str(arguments, "expected_content");
@@ -273,7 +295,7 @@ impl Tool for EditTool {
                     }),
                 ));
             }
-            let tags = optional_tags(arguments, "tags");
+            let tags = bounded_tags(arguments)?;
             let source = optional_str(arguments, "source");
             if content.is_none() && tags.is_none() && source.is_none() {
                 return Err(ExpectedError::with_details(

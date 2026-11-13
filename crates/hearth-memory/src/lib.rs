@@ -49,13 +49,16 @@ pub use standing::{
     ArchiveFn, StandingAddResult, StandingDeleteResult, StandingEditResult, StandingItem,
     StandingSnapshot, StandingStore,
 };
-pub use text::{MEMORY_LIMIT, RESULT_BYTES, STANDING_LIMIT};
+pub use text::{MEMORY_LIMIT, NEW_MEMORY_LIMIT, NEW_TAG_LIMIT, RESULT_BYTES, STANDING_LIMIT};
 pub use tools::{AddTool, DeleteTool, EditTool, HistoryTool, MemoryTools, SearchTool};
 
 /// The guidance block that tells the model how to use memory.
 ///
 /// Injected with the tools so the instructions and the interface cannot drift
 /// apart.
+/// The longest remembered text injected by automatic recall.
+const RECALL_ITEM_CHARS: usize = 240;
+
 pub const MEMORY_GUIDANCE: &str = "\
 You have persistent memory shared across all conversations.
 - Standing memory is injected before every prompt. Treat its bullets as standing instructions, not reference text, subject to higher-priority instructions. Reserve it for requirements that need no retrieval cue; topic-triggered facts belong in long-term memory with retrieval tags.
@@ -75,6 +78,10 @@ pub struct MemoryService {
     history: Arc<HistorySearch>,
     source: Option<String>,
     base: PathBuf,
+    recall_max_items: u64,
+    recall_max_tokens: u64,
+    embeddings_configured: bool,
+    embeddings_active: bool,
 }
 
 impl MemoryService {
@@ -111,6 +118,10 @@ impl MemoryService {
             history: Arc::new(HistorySearch::new(transcript_path)),
             source: None,
             base,
+            recall_max_items: 8,
+            recall_max_tokens: 900,
+            embeddings_configured: false,
+            embeddings_active: false,
         })
     }
 
@@ -174,6 +185,45 @@ impl MemoryService {
         self.standing().map(|(text, _)| text).unwrap_or_default()
     }
 
+    /// Apply the configured recall bounds.
+    pub fn with_recall_budget(mut self, max_items: u64, max_tokens: u64) -> Self {
+        self.recall_max_items = max_items.clamp(1, 50);
+        self.recall_max_tokens = max_tokens.max(1);
+        self
+    }
+
+    /// Record whether semantic recall is configured. The backend reports when
+    /// its index is actually ready.
+    pub fn with_embeddings(mut self, configured: bool) -> Self {
+        self.embeddings_configured = configured;
+        self
+    }
+
+    /// The recall path currently in use.
+    pub fn recall_mode(&self) -> &'static str {
+        if self.embeddings_active {
+            "hybrid"
+        } else {
+            "lexical"
+        }
+    }
+
+    pub fn recall_max_items(&self) -> u64 {
+        self.recall_max_items
+    }
+
+    pub fn recall_max_tokens(&self) -> u64 {
+        self.recall_max_tokens
+    }
+
+    pub fn embeddings_configured(&self) -> bool {
+        self.embeddings_configured
+    }
+
+    pub fn embeddings_active(&self) -> bool {
+        self.embeddings_active
+    }
+
     /// Retrieve memories relevant to a query.
     ///
     /// This is a keyword search with stemming, plus the literal fallback. It is
@@ -187,32 +237,43 @@ impl MemoryService {
         let response = self.store.search(
             trimmed,
             SearchMode::Any,
-            i64::from(self.recall_limit()),
+            self.recall_max_items as i64,
             0,
             &MemorySearchOptions::default(),
         )?;
         Ok(response.results.into_iter().map(|hit| hit.memory).collect())
     }
 
-    /// How many memories a recall may return.
-    fn recall_limit(&self) -> u32 {
-        8
-    }
-
-    /// Render recalled memories as prompt lines.
+    /// Render recalled memories as prompt lines within the token budget.
+    ///
+    /// Tags stay in the search tool output; automatic recall spends its budget
+    /// on remembered text only. A single oversized hit is clipped rather than
+    /// discarded.
     pub fn render_recall(&self, items: &[Memory]) -> String {
-        items
-            .iter()
-            .map(|item| {
-                let tags = if item.tags.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", item.tags.join(", "))
-                };
-                format!("- {}{tags}", item.content.replace('\n', " "))
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        let mut rendered = String::new();
+        let mut used = 0u64;
+        for item in items {
+            let content = clip_chars(&item.content.replace('\n', " "), RECALL_ITEM_CHARS);
+            let bullet = format!("- {content}");
+            let cost = hearth_model::estimate_tokens(&bullet).max(0) as u64;
+            if used > 0 && used + cost > self.recall_max_tokens {
+                break;
+            }
+            if used == 0 && cost > self.recall_max_tokens {
+                let max_chars = (self.recall_max_tokens.saturating_mul(3)) as usize;
+                rendered.push_str(&clip_chars(&bullet, max_chars));
+                break;
+            }
+            if !rendered.is_empty() {
+                rendered.push('\n');
+            }
+            rendered.push_str(&bullet);
+            used += cost;
+            if used >= self.recall_max_tokens {
+                break;
+            }
+        }
+        rendered
     }
 
     /// The tools for this store, with the run's provenance attached.
@@ -234,6 +295,14 @@ impl MemoryService {
             Arc::new(HistoryTool::new(tools)),
         ]
     }
+}
+
+fn clip_chars(text: &str, max: usize) -> String {
+    let mut clipped: String = text.chars().take(max).collect();
+    if text.chars().count() > max {
+        clipped.push('…');
+    }
+    clipped
 }
 
 /// Inputs that never deserve a memory recall.
@@ -301,25 +370,34 @@ mod tests {
         assert_eq!(items.len(), 1);
         let rendered = service.render_recall(&items);
         assert!(rendered.contains("nuts"));
-        assert!(rendered.contains("[health]"));
+        assert!(
+            !rendered.contains("[health]"),
+            "automatic recall spends its budget on text, not tags: {rendered}"
+        );
     }
 
     #[test]
     fn automatic_recall_stays_within_its_token_budget() {
         let (_directory, service) = service();
-        service
-            .store()
-            .add(&MemoryInput {
-                content: "needle ".repeat(2_000),
-                ..Default::default()
-            })
-            .unwrap();
+        for index in 0..4 {
+            service
+                .store()
+                .add(&MemoryInput {
+                    content: format!("needle fact {index} {}", "x".repeat(1_800)),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
         let items = service.recall("needle").unwrap();
         let rendered = service.render_recall(&items);
         let tokens = hearth_model::estimate_tokens(&rendered);
         assert!(
             tokens <= 900,
             "recall rendered {tokens} tokens, over the default budget"
+        );
+        assert!(
+            rendered.lines().count() <= 8,
+            "recall returned too many items: {rendered}"
         );
     }
 

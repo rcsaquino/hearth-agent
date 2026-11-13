@@ -23,7 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{ErrorCode, ExpectedError, Result};
 use crate::schema;
-use crate::text::{MEMORY_LIMIT, chunk, excerpt, integer, nonempty, tags};
+use crate::text::{
+    MEMORY_LIMIT, NEW_MEMORY_LIMIT, chunk, excerpt, integer, no_credentials, nonempty, tags,
+};
 
 /// One long-term memory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,7 +223,8 @@ impl MemoryStore {
     /// The lookup and the insert share one immediate transaction so two writers
     /// cannot both decide the content is new.
     pub fn add(&self, input: &MemoryInput) -> Result<(Memory, bool)> {
-        let content = nonempty(&input.content, "content", MEMORY_LIMIT)?;
+        let content = nonempty(&input.content, "content", NEW_MEMORY_LIMIT)?;
+        no_credentials(&content)?;
         let tag_list = tags(input.tags.as_deref())?;
         let source = match input.source.as_deref() {
             Some(value) => nonempty(value, "source", 2_000)?,
@@ -338,7 +341,11 @@ impl MemoryStore {
         let previous = Self::get_inner(&connection, id)?;
         check_revision(&previous, expected_revision)?;
         let content = match content {
-            Some(value) => nonempty(value, "content", MEMORY_LIMIT)?,
+            Some(value) => {
+                let content = nonempty(value, "content", NEW_MEMORY_LIMIT)?;
+                no_credentials(&content)?;
+                content
+            }
             None => previous.content.clone(),
         };
         let tag_list = match new_tags {
