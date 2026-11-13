@@ -538,7 +538,7 @@ impl PromptRow {
     }
 }
 
-/// Every request segment and response block, in wire order.
+/// Every request segment and response block, with the stable layers first.
 fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
     let mut rows = Vec::new();
     for (label, part, key, style) in [
@@ -573,6 +573,8 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
                 .with_meta(token_meta(view.request(), key)),
         );
     }
+
+    rows.push(tool_row(view));
 
     let messages = view.request()["transcript"]
         .as_array()
@@ -657,41 +659,6 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
         .with_meta(token_meta(view.request(), "runtime")),
     );
 
-    let tools = view.request()["tools"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let mut tool_content = Vec::new();
-    for (index, tool) in tools.iter().enumerate() {
-        let name = tool["name"].as_str().unwrap_or("tool");
-        tool_content.push((name.to_owned(), theme::accent_style()));
-        let description = tool["description"].as_str().unwrap_or_default();
-        for line in description.lines() {
-            tool_content.push((line.to_owned(), theme::muted()));
-        }
-        if let Some(parameters) = tool.get("parameters").filter(|value| !value.is_null()) {
-            let fields = schema_fields(parameters);
-            if !fields.is_empty() {
-                tool_content.push(("args".to_owned(), theme::muted()));
-                for field in fields {
-                    tool_content.push((format!("  {field}"), theme::faint()));
-                }
-            }
-        }
-        if index + 1 < tools.len() {
-            tool_content.push((String::new(), theme::faint()));
-        }
-    }
-    if tool_content.is_empty() {
-        tool_content.push(("(no tools)".to_owned(), theme::faint()));
-    }
-    rows.push(PromptRow {
-        label: row_label(view, "request · tools", Some("tools")),
-        label_style: theme::accent_style(),
-        content: tool_content,
-        meta: Some(token_meta(view.request(), "tools")),
-    });
-
     let response = &view.exchange["response"];
     if response.is_null() {
         rows.push(PromptRow::text(
@@ -743,6 +710,43 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
     });
 
     rows
+}
+
+fn tool_row(view: &View<'_>) -> PromptRow {
+    let tools = view.request()["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut tool_content = Vec::new();
+    for (index, tool) in tools.iter().enumerate() {
+        let name = tool["name"].as_str().unwrap_or("tool");
+        tool_content.push((name.to_owned(), theme::accent_style()));
+        let description = tool["description"].as_str().unwrap_or_default();
+        for line in description.lines() {
+            tool_content.push((line.to_owned(), theme::muted()));
+        }
+        if let Some(parameters) = tool.get("parameters").filter(|value| !value.is_null()) {
+            let fields = schema_fields(parameters);
+            if !fields.is_empty() {
+                tool_content.push(("args".to_owned(), theme::muted()));
+                for field in fields {
+                    tool_content.push((format!("  {field}"), theme::faint()));
+                }
+            }
+        }
+        if index + 1 < tools.len() {
+            tool_content.push((String::new(), theme::faint()));
+        }
+    }
+    if tool_content.is_empty() {
+        tool_content.push(("(no tools)".to_owned(), theme::faint()));
+    }
+    PromptRow {
+        label: row_label(view, "request · tools", Some("tools")),
+        label_style: theme::accent_style(),
+        content: tool_content,
+        meta: Some(token_meta(view.request(), "tools")),
+    }
 }
 
 fn row_label(view: &View<'_>, label: &str, part: Option<&str>) -> String {
@@ -1107,12 +1111,12 @@ mod tests {
             "system · guidance",
             "system · standing memory",
             "system · skills index",
+            "request · tools",
             "system · relevant memory",
             "user",
             "assistant · thinking",
             "tool call · read_file",
             "system · runtime note",
-            "request · tools",
             "response · thinking",
             "response",
             "response · tool · lookup",
@@ -1190,12 +1194,13 @@ mod tests {
     fn the_runtime_note_follows_the_conversation() {
         let exchange = sample("SOUL TEXT");
         let text = render_audit(&exchange, None);
+        let tools = text.find("request · tools").expect("tools");
         let conversation = text.find("please inspect").expect("conversation");
         let runtime = text.find("RUNTIME NOTE").expect("runtime note");
-        let response = text.find("request · tools").expect("tools");
+        let response = text.find("response · thinking").expect("response");
         assert!(
-            conversation < runtime && runtime < response,
-            "runtime note must sit after the transcript and before request tools: {text}"
+            tools < conversation && conversation < runtime && runtime < response,
+            "tools must precede the transcript and the runtime note must follow it: {text}"
         );
     }
 
