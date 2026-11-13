@@ -101,29 +101,60 @@ pub struct SkillsView {
     pub error: Option<String>,
 }
 
-#[derive(Default)]
 pub struct PromptView {
-    /// Newest-first prompt/response exchanges loaded by the worker. The view
-    /// always shows index 0.
+    /// Newest-first prompt/response exchanges loaded by the worker.
     pub exchanges: Vec<Value>,
-    /// Selected prompt section.
+    /// Snapshot being shown; zero is the newest exchange.
+    pub cursor: usize,
+    /// Section nearest the top of the document.
     pub selected: usize,
-    /// Sections the user expanded to full length.
+    /// Kept for compatibility with the old expandable audit; the session export
+    /// always shows every section in full.
     pub expanded: BTreeSet<usize>,
     pub raw: bool,
     pub scroll: usize,
     pub max_scroll: Cell<usize>,
     pub loading: bool,
+    /// Follow the newest exchange and keep the tail of the document visible.
+    pub follow: bool,
+    /// A refresh arrived while one was already running.
+    pub pending: bool,
     pub(crate) cache: RefCell<Option<crate::ui::prompt::PromptCache>>,
+}
+
+impl Default for PromptView {
+    fn default() -> Self {
+        Self {
+            exchanges: Vec::new(),
+            cursor: 0,
+            selected: 0,
+            expanded: BTreeSet::new(),
+            raw: false,
+            scroll: 0,
+            max_scroll: Cell::new(0),
+            loading: false,
+            follow: true,
+            pending: false,
+            cache: RefCell::new(None),
+        }
+    }
 }
 
 impl PromptView {
     pub fn current(&self) -> Option<&Value> {
-        self.exchanges.first()
+        self.exchanges
+            .get(self.cursor)
+            .or_else(|| self.exchanges.first())
     }
 
     pub fn older(&self) -> Option<&Value> {
-        self.exchanges.get(1)
+        self.exchanges.get(self.cursor + 1)
+    }
+
+    pub fn newer(&self) -> Option<&Value> {
+        self.cursor
+            .checked_sub(1)
+            .and_then(|index| self.exchanges.get(index))
     }
 }
 
@@ -884,38 +915,22 @@ impl App {
         match key.code {
             KeyCode::Char('r') => {
                 self.prompt.raw = !self.prompt.raw;
+                self.prompt.follow = false;
                 self.prompt.scroll = 0;
             }
-            // Toggle full length for the selected section.
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                if !self.prompt.expanded.remove(&self.prompt.selected) {
-                    self.prompt.expanded.insert(self.prompt.selected);
-                }
-                self.prompt.scroll = 0;
+            KeyCode::Char('f') => ui::prompt::toggle_follow(&mut self.prompt),
+            KeyCode::Char('[') | KeyCode::Char('<') => {
+                let _ = ui::prompt::older(&mut self.prompt);
             }
-            KeyCode::Char('a') => {
-                if self.prompt.expanded.is_empty() {
-                    let count = self
-                        .prompt
-                        .cache
-                        .borrow()
-                        .as_ref()
-                        .map(|cache| cache.sections.len())
-                        .unwrap_or(0);
-                    self.prompt.expanded.extend(0..count);
-                } else {
-                    self.prompt.expanded.clear();
-                }
-                self.prompt.scroll = 0;
+            KeyCode::Char(']') | KeyCode::Char('>') => {
+                let _ = ui::prompt::newer(&mut self.prompt);
             }
-            KeyCode::Up => ui::prompt::select_previous(&mut self.prompt),
-            KeyCode::Down => ui::prompt::select_next(&mut self.prompt),
-            KeyCode::PageUp => self.prompt.scroll = self.prompt.scroll.saturating_sub(15),
-            KeyCode::PageDown => {
-                self.prompt.scroll = (self.prompt.scroll + 15).min(self.prompt.max_scroll.get());
-            }
-            KeyCode::Home => ui::prompt::select_first(&mut self.prompt),
-            KeyCode::End => ui::prompt::select_last(&mut self.prompt),
+            KeyCode::Up | KeyCode::Char('k') => ui::prompt::scroll_up(&mut self.prompt, 1),
+            KeyCode::Down | KeyCode::Char('j') => ui::prompt::scroll_down(&mut self.prompt, 1),
+            KeyCode::PageUp => ui::prompt::page_up(&mut self.prompt),
+            KeyCode::PageDown => ui::prompt::page_down(&mut self.prompt),
+            KeyCode::Home | KeyCode::Char('g') => ui::prompt::scroll_top(&mut self.prompt),
+            KeyCode::End | KeyCode::Char('G') => ui::prompt::scroll_bottom(&mut self.prompt),
             KeyCode::Char('o') => self.refresh_prompt(),
             _ => {}
         }
@@ -1042,6 +1057,7 @@ impl App {
 
     fn refresh_prompt(&mut self) {
         if self.prompt.loading {
+            self.prompt.pending = true;
             return;
         }
         self.prompt.loading = true;
@@ -1074,7 +1090,10 @@ impl App {
                 }
             },
             AppEvent::Live(value) => {
-                let settled = value["kind"].as_str() == Some("run_settled");
+                let agent_message = matches!(
+                    value["kind"].as_str().unwrap_or_default(),
+                    "assistant_reply" | "run_settled"
+                );
                 self.events.push_back(value);
                 while self.events.len() > MAX_EVENTS {
                     self.events.pop_front();
@@ -1083,7 +1102,7 @@ impl App {
                     self.activity_selected =
                         crate::ui::activity::row_count(&self.events).saturating_sub(1);
                 }
-                if settled && self.tab == Tab::Prompt {
+                if agent_message && self.tab == Tab::Prompt {
                     self.refresh_prompt();
                 }
             }
@@ -1159,13 +1178,39 @@ impl App {
                                     .to_owned(),
                             );
                         } else {
+                            // A live tail moves to the new snapshot. A paused
+                            // reader keeps the saved hash under the cursor.
+                            let preserve = self.prompt.cursor > 0 || !self.prompt.follow;
+                            let viewing = preserve
+                                .then(|| {
+                                    self.prompt
+                                        .current()
+                                        .and_then(|exchange| exchange["prompt_hash"].as_str())
+                                        .map(str::to_owned)
+                                })
+                                .flatten();
                             self.prompt.exchanges = exchanges;
-                            self.prompt.selected = 0;
-                            self.prompt.scroll = 0;
+                            self.prompt.cursor = viewing
+                                .and_then(|hash| {
+                                    self.prompt.exchanges.iter().position(|exchange| {
+                                        exchange["prompt_hash"].as_str() == Some(hash.as_str())
+                                    })
+                                })
+                                .unwrap_or(0);
+                            self.prompt.cursor = self
+                                .prompt
+                                .cursor
+                                .min(self.prompt.exchanges.len().saturating_sub(1));
                         }
                     }
                     Err(error) => {
                         self.banner = Some(error);
+                    }
+                }
+                if self.prompt.pending {
+                    self.prompt.pending = false;
+                    if self.tab == Tab::Prompt {
+                        self.refresh_prompt();
                     }
                 }
             }
@@ -1421,6 +1466,50 @@ mod tests {
         assert!(
             app.prompt.loading,
             "a reply must refresh the Prompt view while it is open"
+        );
+    }
+
+    #[test]
+    fn a_live_refresh_follows_the_newest_exchange() {
+        let home = TempDir::new().expect("temp home");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![json!({
+            "prompt_hash": "old",
+            "request": {"model": "old"}
+        })];
+        app.prompt.follow = true;
+        app.apply_event(AppEvent::Prompt(Ok(vec![
+            json!({"prompt_hash": "new", "request": {"model": "new"}}),
+            json!({"prompt_hash": "old", "request": {"model": "old"}}),
+        ])));
+        assert_eq!(
+            app.prompt.cursor, 0,
+            "live follow must move to the newly saved exchange"
+        );
+    }
+
+    #[test]
+    fn a_paused_older_snapshot_survives_a_refresh() {
+        let home = TempDir::new().expect("temp home");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![
+            json!({"prompt_hash": "newest", "request": {"model": "newest"}}),
+            json!({"prompt_hash": "older", "request": {"model": "older"}}),
+        ];
+        app.prompt.cursor = 1;
+        app.prompt.follow = false;
+        app.apply_event(AppEvent::Prompt(Ok(vec![
+            json!({"prompt_hash": "newer", "request": {"model": "newer"}}),
+            json!({"prompt_hash": "newest", "request": {"model": "newest"}}),
+            json!({"prompt_hash": "older", "request": {"model": "older"}}),
+        ])));
+        assert_eq!(
+            app.prompt.cursor, 2,
+            "a paused reader must stay on the same saved snapshot"
         );
     }
 

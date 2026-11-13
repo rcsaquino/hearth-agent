@@ -1,8 +1,8 @@
-//! Prompt and response audit: everything sent to the model and everything back.
+//! Live session export: everything sent to the model and everything back.
 //!
-//! One card, one column. Every request segment and every response block is a
-//! stacked section. Sections collapse to a couple of lines with a trailing
-//! ellipsis; `enter` expands the selected one and `a` toggles all of them.
+//! One scrollable document. Every request segment, tool declaration, transcript
+//! item, and response block is shown in full. The newest saved exchange is shown
+//! by default; `[` and `]` walk older snapshots and `f` resumes the live tail.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -11,37 +11,107 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use serde_json::Value;
 use time::{OffsetDateTime, UtcOffset};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, PromptView};
 use crate::theme;
 use crate::ui::{count, short};
 
-/// Longest tool result shown in audit mode; raw mode shows everything.
-const RESULT_CLIP: usize = 600;
-/// Body lines shown for a collapsed section before the ellipsis.
-const COLLAPSED_LINES: usize = 2;
+/// Body lines move by this many rows for PageUp and PageDown.
+const PAGE_LINES: usize = 15;
+/// Body lines shown under a section heading.
+const BODY_INDENT: &str = "   ";
 
-pub(crate) fn select_previous(prompt: &mut PromptView) {
-    prompt.selected = prompt.selected.saturating_sub(1);
-    prompt.scroll = 0;
+/// Scroll up by `lines`, pausing the live tail.
+pub(crate) fn scroll_up(prompt: &mut PromptView, lines: usize) {
+    let current = if prompt.follow {
+        prompt.max_scroll.get()
+    } else {
+        prompt.scroll
+    };
+    prompt.follow = false;
+    prompt.scroll = current.saturating_sub(lines);
+    sync_selected(prompt);
 }
 
-pub(crate) fn select_first(prompt: &mut PromptView) {
+/// Scroll down by `lines`, resuming the live tail at the bottom.
+pub(crate) fn scroll_down(prompt: &mut PromptView, lines: usize) {
+    let max = prompt.max_scroll.get();
+    let current = if prompt.follow { max } else { prompt.scroll };
+    prompt.scroll = (current + lines).min(max);
+    prompt.follow = prompt.scroll >= max;
+    sync_selected(prompt);
+}
+
+pub(crate) fn page_up(prompt: &mut PromptView) {
+    scroll_up(prompt, PAGE_LINES);
+}
+
+pub(crate) fn page_down(prompt: &mut PromptView) {
+    scroll_down(prompt, PAGE_LINES);
+}
+
+pub(crate) fn scroll_top(prompt: &mut PromptView) {
+    prompt.follow = false;
+    prompt.scroll = 0;
     prompt.selected = 0;
-    prompt.scroll = 0;
 }
 
-pub(crate) fn select_last(prompt: &mut PromptView) {
-    let rows = section_count(prompt);
-    prompt.selected = rows.saturating_sub(1);
-    prompt.scroll = 0;
+pub(crate) fn scroll_bottom(prompt: &mut PromptView) {
+    prompt.follow = true;
+    prompt.scroll = prompt.max_scroll.get();
+    prompt.selected = section_count(prompt).saturating_sub(1);
 }
 
-pub(crate) fn select_next(prompt: &mut PromptView) {
-    let rows = section_count(prompt);
-    prompt.selected = (prompt.selected + 1).min(rows.saturating_sub(1));
+pub(crate) fn toggle_follow(prompt: &mut PromptView) {
+    prompt.follow = !prompt.follow;
+    if prompt.follow {
+        prompt.scroll = prompt.max_scroll.get();
+    }
+}
+
+/// Show the next-older saved snapshot.
+pub(crate) fn older(prompt: &mut PromptView) -> bool {
+    if prompt.cursor + 1 >= prompt.exchanges.len() {
+        return false;
+    }
+    prompt.cursor += 1;
+    prompt.follow = false;
     prompt.scroll = 0;
+    prompt.selected = 0;
+    true
+}
+
+/// Show the next-newer saved snapshot. The newest snapshot resumes live tail.
+pub(crate) fn newer(prompt: &mut PromptView) -> bool {
+    if prompt.cursor == 0 {
+        return false;
+    }
+    prompt.cursor -= 1;
+    prompt.follow = prompt.cursor == 0;
+    prompt.scroll = if prompt.follow {
+        prompt.max_scroll.get()
+    } else {
+        0
+    };
+    prompt.selected = 0;
+    true
+}
+
+fn sync_selected(prompt: &mut PromptView) {
+    let index = prompt
+        .cache
+        .borrow()
+        .as_ref()
+        .map(|cache| {
+            cache
+                .sections
+                .iter()
+                .rposition(|section| section.start <= prompt.scroll)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    prompt.selected = index;
 }
 
 fn section_count(prompt: &PromptView) -> usize {
@@ -50,7 +120,7 @@ fn section_count(prompt: &PromptView) -> usize {
         .borrow()
         .as_ref()
         .map(|cache| cache.sections.len())
-        .unwrap_or(1)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,14 +128,12 @@ struct CacheKey {
     prompt_hash: String,
     requested_at: i64,
     response_id: String,
-    selected: usize,
-    expanded: Vec<usize>,
     raw: bool,
     width: u16,
 }
 
 impl CacheKey {
-    fn new(app: &App, exchange: &Value, width: u16) -> Self {
+    fn new(exchange: &Value, width: u16, raw: bool) -> Self {
         Self {
             prompt_hash: exchange["prompt_hash"]
                 .as_str()
@@ -76,15 +144,13 @@ impl CacheKey {
                 .as_str()
                 .unwrap_or_default()
                 .to_owned(),
-            selected: app.prompt.selected,
-            expanded: app.prompt.expanded.iter().copied().collect(),
-            raw: app.prompt.raw,
+            raw,
             width,
         }
     }
 }
 
-/// One stacked section inside the prompt card.
+/// One section inside the session document.
 pub(crate) struct Section {
     /// First rendered line of this section.
     pub(crate) start: usize,
@@ -97,16 +163,19 @@ pub(crate) struct PromptCache {
 }
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
+    let title = if app.prompt.loading {
+        " Prompt · refreshing "
+    } else if app.prompt.raw {
+        " Prompt · raw "
+    } else if app.prompt.follow {
+        " Prompt · live "
+    } else {
+        " Prompt · paused "
+    };
     let card = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
-        .title(theme::heading(if app.prompt.loading {
-            " Prompt · refreshing "
-        } else if app.prompt.raw {
-            " Prompt · raw "
-        } else {
-            " Prompt "
-        }));
+        .title(theme::heading(title));
     let inner = card.inner(area);
     frame.render_widget(card, area);
 
@@ -120,10 +189,10 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let Some(exchange) = app.prompt.current() else {
         frame.render_widget(
             Paragraph::new(vec![
-                Line::styled("No prompts yet.", theme::muted()),
+                Line::styled("No session yet.", theme::muted()),
                 Line::from(""),
                 Line::styled(
-                    "Send Hearth a Telegram message, then press o to refresh.",
+                    "Send Hearth a Telegram message. This view refreshes after every reply.",
                     theme::faint(),
                 ),
             ]),
@@ -132,25 +201,22 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         return;
     };
 
-    let key = CacheKey::new(app, exchange, inner.width);
+    let key = CacheKey::new(exchange, inner.width, app.prompt.raw);
     let mut slot = app.prompt.cache.borrow_mut();
     if slot.as_ref().is_none_or(|cache| cache.key != key) {
         *slot = Some(build_cache(app, exchange, &key, usize::from(inner.width)));
     }
     let cache = slot.as_mut().expect("prompt cache");
 
-    let count = cache.sections.len();
-    let selected = app.prompt.selected.min(count.saturating_sub(1));
     let height = inner.height.max(1) as usize;
     let total = cache.lines.len();
     let max_scroll = total.saturating_sub(height);
     app.prompt.max_scroll.set(max_scroll);
-    let anchor = cache
-        .sections
-        .get(selected)
-        .map(|section| section.start)
-        .unwrap_or(0);
-    let scroll = (anchor + app.prompt.scroll).min(max_scroll);
+    let scroll = if app.prompt.follow {
+        max_scroll
+    } else {
+        app.prompt.scroll.min(max_scroll)
+    };
     let end = (scroll + height).min(total);
     frame.render_widget(Paragraph::new(cache.lines[scroll..end].to_vec()), inner);
 }
@@ -167,7 +233,9 @@ fn build_cache(app: &App, exchange: &Value, key: &CacheKey, width: usize) -> Pro
         exchange,
         older: app.prompt.older(),
         total: app.prompt.exchanges.len(),
+        snapshot: app.prompt.cursor,
         peers: if own.is_some() { peers } else { 0 },
+        follow: app.prompt.follow,
         offset: app.local_offset,
         width,
     };
@@ -181,49 +249,27 @@ fn build_cache(app: &App, exchange: &Value, key: &CacheKey, width: usize) -> Pro
         build_rows(&view)
     };
 
-    let body_width = width.saturating_sub(3).max(8);
+    let body_width = width.saturating_sub(BODY_INDENT.width()).max(8);
     let mut sections = Vec::with_capacity(rows.len());
     for (index, row) in rows.iter().enumerate() {
         if index > 0 {
             lines.push(Line::from(""));
         }
         let start = lines.len();
-        let expanded = app.prompt.expanded.contains(&index);
+        lines.push(heading_line(row, width));
         let body = if row.content.is_empty() {
             vec![("(empty)".to_owned(), theme::faint())]
         } else {
             row.content.clone()
         };
-        let mut wrapped = Vec::new();
         for (text, style) in &body {
             for line in wrap_text(text, body_width) {
-                wrapped.push((line, *style));
+                if line.is_empty() {
+                    lines.push(Line::from(""));
+                } else {
+                    lines.push(Line::styled(format!("{BODY_INDENT}{line}"), *style));
+                }
             }
-        }
-        let limit = if expanded {
-            wrapped.len()
-        } else {
-            COLLAPSED_LINES.min(wrapped.len())
-        };
-        let hidden = wrapped.len().saturating_sub(limit);
-
-        let mut heading = Row::new();
-        heading.push(" ▌ ", row.label_style);
-        heading.push(
-            row.label.clone(),
-            row.label_style.add_modifier(Modifier::BOLD),
-        );
-        if hidden > 0 {
-            heading.push(format!("  {hidden} more · enter"), theme::faint());
-        }
-        lines.push(heading.line());
-
-        for (line_index, (text, style)) in wrapped.iter().take(limit).enumerate() {
-            let mut text = text.clone();
-            if hidden > 0 && line_index + 1 == limit {
-                text.push('…');
-            }
-            lines.push(Line::styled(format!("   {text}"), *style));
         }
         sections.push(Section { start });
     }
@@ -235,15 +281,31 @@ fn build_cache(app: &App, exchange: &Value, key: &CacheKey, width: usize) -> Pro
     }
 }
 
+fn heading_line(row: &PromptRow, width: usize) -> Line<'static> {
+    let mut heading = Row::new();
+    heading.push(" ▌ ", row.label_style);
+    heading.push(
+        row.label.clone(),
+        row.label_style.add_modifier(Modifier::BOLD),
+    );
+    if let Some(meta) = &row.meta {
+        let column = width.saturating_sub(meta.width() + 1);
+        heading.pad_to(column);
+        heading.push(format!("{meta} "), theme::faint());
+    }
+    heading.line()
+}
+
 fn raw_rows(exchange: &Value) -> Vec<PromptRow> {
     let text = serde_json::to_string_pretty(exchange).unwrap_or_else(|_| exchange.to_string());
     vec![PromptRow {
-        label: "raw request".to_owned(),
+        label: "exchange · raw JSON".to_owned(),
         label_style: theme::text(),
         content: text
             .lines()
             .map(|line| (line.to_owned(), theme::text()))
             .collect(),
+        meta: None,
     }]
 }
 
@@ -253,8 +315,11 @@ struct View<'a> {
     /// The next-older exchange, used for change markers.
     older: Option<&'a Value>,
     total: usize,
+    /// Zero-based snapshot position; zero is the newest exchange.
+    snapshot: usize,
     /// Loaded exchanges sharing this request's prefix hash.
     peers: usize,
+    follow: bool,
     offset: UtcOffset,
     width: usize,
 }
@@ -286,29 +351,59 @@ fn push_header(lines: &mut Vec<Line<'static>>, view: &View<'_>) {
     let request = view.request();
     let model = request["model"].as_str().unwrap_or("unknown model");
     let mut row = Row::new();
-    row.push(" PROMPT", theme::accent_style());
+    row.push(" SESSION", theme::accent_style());
     row.push(format!("  {model}"), theme::text());
-    let position = format!(" {} loaded ", view.total);
+    let position = format!(" snapshot {} of {} ", view.snapshot + 1, view.total);
     row.pad_to(view.width.saturating_sub(position.width()));
     row.push(position, theme::muted());
     lines.push(row.line());
 
     let requested = view.exchange["requested_at"].as_i64().unwrap_or(0);
-    let hash = view.exchange["prompt_hash"].as_str().unwrap_or("-");
-    let prefix = request["prefix_hash"].as_str().unwrap_or("-");
+    let session = request["session_id"].as_str().unwrap_or("-");
     let mut row = Row::new();
     row.push(" ", theme::faint());
+    row.push(
+        if view.follow {
+            "● live"
+        } else {
+            "● paused"
+        },
+        if view.follow {
+            theme::good()
+        } else {
+            theme::warn()
+        },
+    );
+    row.push("  ·  asked ", theme::faint());
     row.push(stamp(requested, view.offset), theme::muted());
-    row.push("  ·  prompt ", theme::faint());
+    row.push("  ·  session ", theme::faint());
+    row.push(short(session, 8), theme::text());
+    let previous_count = view.total.saturating_sub(view.snapshot + 1);
+    if previous_count > 0 {
+        row.push(
+            format!("  ·  {previous_count} previous with ["),
+            theme::faint(),
+        );
+    }
+    if view.snapshot > 0 {
+        row.push(
+            format!("  ·  {} newer with ]", view.snapshot),
+            theme::faint(),
+        );
+    }
+    lines.push(row.line());
+
+    let hash = view.exchange["prompt_hash"].as_str().unwrap_or("-");
+    let prefix = request["prefix_hash"].as_str().unwrap_or("-");
+    let total = token(request, "total");
+    let fixed = token(request, "fixed");
+    let transcript = token(request, "transcript");
+    let mut row = Row::new();
+    row.push(" prompt   ", theme::muted());
     row.push(short(hash, 12), theme::text());
     row.push("  ·  prefix ", theme::faint());
     row.push(short(prefix, 12), theme::text());
-    lines.push(row.line());
-
-    let total = token(request, "total");
-    let fixed = token(request, "fixed");
-    let mut row = Row::new();
-    row.push(" tokens  ", theme::muted());
+    row.push("  ·  tokens ", theme::faint());
     row.push(
         total.map(count).unwrap_or_else(|| "-".to_owned()),
         theme::text(),
@@ -319,18 +414,15 @@ fn push_header(lines: &mut Vec<Line<'static>>, view: &View<'_>) {
         theme::text(),
     );
     row.push(" fixed · ", theme::faint());
-    let fixed_share = if let (Some(fixed), Some(total)) = (fixed, total)
-        && total > 0
-    {
-        format!("{:.1}% of the prompt", fixed as f64 / total as f64 * 100.0)
-    } else {
-        "-".to_owned()
-    };
-    row.push(fixed_share, theme::faint());
+    row.push(
+        transcript.map(count).unwrap_or_else(|| "-".to_owned()),
+        theme::text(),
+    );
+    row.push(" transcript", theme::faint());
     lines.push(row.line());
 
     let mut row = Row::new();
-    row.push(" cache   ", theme::muted());
+    row.push(" cache    ", theme::muted());
     if view.peers > 1 {
         row.push(
             format!(
@@ -345,11 +437,20 @@ fn push_header(lines: &mut Vec<Line<'static>>, view: &View<'_>) {
             theme::faint(),
         );
     }
+    if let (Some(fixed), Some(total)) = (fixed, total)
+        && total > 0
+    {
+        row.push("  ·  ", theme::faint());
+        row.push(
+            format!("{:.1}% fixed", fixed as f64 / total as f64 * 100.0),
+            theme::faint(),
+        );
+    }
     lines.push(row.line());
 
     if has_markers(view) {
         let mut row = Row::new();
-        row.push(" legend  ", theme::muted());
+        row.push(" legend   ", theme::muted());
         row.push("▲ ", theme::warn());
         row.push(
             "prefix part changed versus the previous loaded prompt".to_owned(),
@@ -370,6 +471,7 @@ struct PromptRow {
     label: String,
     label_style: Style,
     content: Vec<(String, Style)>,
+    meta: Option<String>,
 }
 
 impl PromptRow {
@@ -386,7 +488,14 @@ impl PromptRow {
             label: label.to_owned(),
             label_style: style,
             content,
+            meta: None,
         }
+    }
+
+    fn with_meta(mut self, meta: impl Into<String>) -> Self {
+        let meta = meta.into();
+        self.meta = (!meta.is_empty()).then_some(meta);
+        self
     }
 
     fn tool_call(prefix: &str, call: &Value) -> Self {
@@ -404,12 +513,13 @@ impl PromptRow {
             label,
             label_style: theme::warn(),
             content: vec![(content, theme::muted())],
+            meta: None,
         }
     }
 
     fn tool_result(prefix: &str, result: &Value) -> Self {
         let failed = result["is_error"].as_bool().unwrap_or(false);
-        let content = clipped(result["content"].as_str().unwrap_or_default(), RESULT_CLIP);
+        let content = result["content"].as_str().unwrap_or_default().to_owned();
         let style = if failed { theme::bad() } else { theme::good() };
         let label = if prefix == "tool" {
             "tool · result".to_owned()
@@ -423,6 +533,7 @@ impl PromptRow {
                 .lines()
                 .map(|line| (line.to_owned(), style))
                 .collect(),
+            meta: None,
         }
     }
 }
@@ -457,11 +568,10 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
         ),
     ] {
         let text = view.request()[key].as_str().unwrap_or_default();
-        rows.push(PromptRow::text(
-            &row_label(view, label, Some(part)),
-            style,
-            text,
-        ));
+        rows.push(
+            PromptRow::text(&row_label(view, label, Some(part)), style, text)
+                .with_meta(token_meta(view.request(), key)),
+        );
     }
 
     let messages = view.request()["transcript"]
@@ -475,11 +585,10 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
         if Some(index) == newest_user {
             let recall = view.request()["recall"].as_str().unwrap_or_default();
             if !recall.trim().is_empty() {
-                rows.push(PromptRow::text(
-                    "system · relevant memory",
-                    theme::good(),
-                    recall,
-                ));
+                rows.push(
+                    PromptRow::text("system · relevant memory", theme::good(), recall)
+                        .with_meta(token_meta(view.request(), "recall")),
+                );
             }
         }
         match message["role"].as_str().unwrap_or_default() {
@@ -539,11 +648,14 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
         }
     }
 
-    rows.push(PromptRow::text(
-        "system · runtime note",
-        theme::muted(),
-        view.request()["runtime"].as_str().unwrap_or_default(),
-    ));
+    rows.push(
+        PromptRow::text(
+            "system · runtime note",
+            theme::muted(),
+            view.request()["runtime"].as_str().unwrap_or_default(),
+        )
+        .with_meta(token_meta(view.request(), "runtime")),
+    );
 
     let tools = view.request()["tools"]
         .as_array()
@@ -570,10 +682,14 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
             tool_content.push((String::new(), theme::faint()));
         }
     }
+    if tool_content.is_empty() {
+        tool_content.push(("(no tools)".to_owned(), theme::faint()));
+    }
     rows.push(PromptRow {
         label: row_label(view, "request · tools", Some("tools")),
         label_style: theme::accent_style(),
         content: tool_content,
+        meta: Some(token_meta(view.request(), "tools")),
     });
 
     let response = &view.exchange["response"];
@@ -620,6 +736,10 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
         label: "response · usage".to_owned(),
         label_style: theme::faint(),
         content: vec![(usage_line(&view.exchange["usage"]), theme::faint())],
+        meta: view.exchange["response"]["tokens_est"]
+            .as_u64()
+            .filter(|tokens| *tokens > 0)
+            .map(|tokens| format!("{} tok", count(tokens))),
     });
 
     rows
@@ -631,6 +751,12 @@ fn row_label(view: &View<'_>, label: &str, part: Option<&str>) -> String {
     } else {
         label.to_owned()
     }
+}
+
+fn token_meta(request: &Value, key: &str) -> String {
+    token(request, key)
+        .map(|tokens| format!("{} tok", count(tokens)))
+        .unwrap_or_default()
 }
 
 fn schema_fields(parameters: &Value) -> Vec<String> {
@@ -645,14 +771,22 @@ fn schema_fields(parameters: &Value) -> Vec<String> {
     let mut fields = Vec::new();
     for (name, schema) in properties {
         let mut field = format!("{name}: {}", schema_type(schema));
+        if required.contains(&name.as_str()) {
+            field.push_str(" (required)");
+        } else {
+            field.push_str(" (optional)");
+        }
         if let Some(values) = schema.get("enum").and_then(Value::as_array) {
             let values: Vec<&str> = values.iter().filter_map(Value::as_str).collect();
             if !values.is_empty() {
-                field.push_str(&format!(" ({})", values.join(" | ")));
+                field.push_str(&format!(" [{}]", values.join(" | ")));
             }
         }
-        if required.contains(&name.as_str()) {
-            field.push_str(" (required)");
+        if let Some(description) = schema["description"].as_str() {
+            let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !description.is_empty() {
+                field.push_str(&format!(" — {description}"));
+            }
         }
         fields.push(field);
     }
@@ -769,37 +903,68 @@ fn stamp(micros: i64, offset: UtcOffset) -> String {
     )
 }
 
-/// Shorten display-only text. Raw mode never goes through here.
-fn clipped(text: &str, max: usize) -> String {
-    let total = text.chars().count();
-    if total <= max {
-        return text.to_owned();
-    }
-    let head = text.chars().take(max).collect::<String>();
-    format!("{head}… ({} more chars, r for raw)", total - max)
-}
-
+/// Wrap text without losing leading indentation. Long words are hard-split.
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     let width = width.max(8);
     let mut lines = Vec::new();
     for raw in text.lines() {
-        if raw.trim().is_empty() {
+        let expanded = raw.replace('\t', "    ");
+        let trimmed = expanded.trim_end();
+        if trimmed.trim().is_empty() {
             lines.push(String::new());
             continue;
         }
-        let mut line = String::new();
-        for word in raw.split_whitespace() {
-            if line.is_empty() {
+        let indent_len = trimmed.len() - trimmed.trim_start_matches(' ').len();
+        let indent = " ".repeat(indent_len.min(width.saturating_sub(1)));
+        let body = trimmed.trim_start_matches(' ');
+        let mut line = indent.clone();
+        let mut has_word = false;
+        for word in body.split_whitespace() {
+            let word_width = word.width();
+            let needed = if has_word { 1 + word_width } else { word_width };
+            if line.width() + needed <= width {
+                if has_word {
+                    line.push(' ');
+                }
                 line.push_str(word);
-            } else if line.width() + 1 + word.width() <= width {
-                line.push(' ');
-                line.push_str(word);
-            } else {
-                lines.push(std::mem::take(&mut line));
-                line.push_str(word);
+                has_word = true;
+                continue;
             }
+            if has_word {
+                lines.push(std::mem::take(&mut line));
+                line = indent.clone();
+            }
+            if line.width() + word_width <= width {
+                line.push_str(word);
+                has_word = true;
+                continue;
+            }
+            let available = width.saturating_sub(line.width()).max(1);
+            let mut chunk = String::new();
+            let mut chunk_width = 0;
+            let mut chunks = Vec::new();
+            for character in word.chars() {
+                let character_width = character.width().unwrap_or(0);
+                if chunk_width > 0 && chunk_width + character_width > available {
+                    chunks.push(std::mem::take(&mut chunk));
+                    chunk_width = 0;
+                }
+                chunk.push(character);
+                chunk_width += character_width;
+            }
+            if !chunk.is_empty() {
+                chunks.push(chunk);
+            }
+            let last = chunks.pop().unwrap_or_default();
+            for chunk in chunks {
+                line.push_str(&chunk);
+                lines.push(std::mem::take(&mut line));
+                line = indent.clone();
+            }
+            line.push_str(&last);
+            has_word = true;
         }
-        if !line.is_empty() {
+        if has_word || indent.is_empty() {
             lines.push(line);
         }
     }
@@ -902,7 +1067,9 @@ mod tests {
             exchange,
             older,
             total: 2,
+            snapshot: 0,
             peers: 2,
+            follow: true,
             offset: UtcOffset::UTC,
             width: 110,
         };
@@ -1051,24 +1218,6 @@ mod tests {
     }
 
     #[test]
-    fn a_collapsed_section_ends_with_an_ellipsis_and_expands() {
-        let body = (0..20)
-            .map(|index| format!("body line {index}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let row = PromptRow::text("demo", theme::text(), &body);
-        let wrapped = wrap_text(&body, 40);
-        assert!(wrapped.len() > COLLAPSED_LINES);
-        let collapsed = wrapped.len().saturating_sub(COLLAPSED_LINES);
-        assert_eq!(
-            collapsed,
-            row.content.len().checked_sub(COLLAPSED_LINES).unwrap()
-        );
-        let limit = COLLAPSED_LINES.min(row.content.len());
-        assert_eq!(limit, 2);
-    }
-
-    #[test]
     fn wrapping_keeps_leading_indentation() {
         let lines = wrap_text("    indented line that wraps at the margin", 18);
         assert!(
@@ -1093,7 +1242,9 @@ mod tests {
                 exchange: &exchange,
                 older: None,
                 total: 9,
+                snapshot: 0,
                 peers: 1,
+                follow: true,
                 offset: UtcOffset::UTC,
                 width,
             };
