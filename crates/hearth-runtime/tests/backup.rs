@@ -59,6 +59,83 @@ fn backup_and_restore_round_trip() {
 }
 
 #[test]
+fn backup_and_restore_include_the_memory_stores() {
+    let home = home_with_database();
+    let memory_dir = home.path().join("memory");
+    fs::create_dir_all(&memory_dir).expect("memory directory");
+    {
+        let memory = hearth_memory::MemoryStore::open(memory_dir.join("long-term.sqlite"))
+            .expect("memory store");
+        memory
+            .add(&hearth_memory::MemoryInput {
+                content: "the kept memory".to_owned(),
+                ..Default::default()
+            })
+            .expect("save memory");
+    }
+    fs::write(
+        memory_dir.join("standing.md"),
+        "- keep this standing rule\n",
+    )
+    .expect("standing file");
+
+    let report = backup(home.path()).expect("backup");
+    assert!(report.memory.as_deref().is_some_and(Path::is_file));
+    assert!(report.standing.as_deref().is_some_and(Path::is_file));
+
+    {
+        let memory = hearth_memory::MemoryStore::open(memory_dir.join("long-term.sqlite"))
+            .expect("memory store");
+        memory
+            .add(&hearth_memory::MemoryInput {
+                content: "the discarded memory".to_owned(),
+                ..Default::default()
+            })
+            .expect("save memory");
+    }
+    fs::write(memory_dir.join("standing.md"), "- changed rule\n").expect("standing change");
+
+    let restored = restore(home.path(), &report.path).expect("restore");
+    assert!(
+        restored
+            .memory_restored
+            .as_deref()
+            .is_some_and(Path::is_file)
+    );
+    assert!(
+        restored
+            .standing_restored
+            .as_deref()
+            .is_some_and(Path::is_file)
+    );
+
+    let memory = hearth_memory::MemoryStore::open(memory_dir.join("long-term.sqlite"))
+        .expect("reopen memory");
+    let kept = memory
+        .search(
+            "kept",
+            hearth_memory::SearchMode::Any,
+            10,
+            0,
+            &hearth_memory::MemorySearchOptions::default(),
+        )
+        .expect("search kept");
+    assert_eq!(kept.results.len(), 1);
+    let discarded = memory
+        .search(
+            "discarded",
+            hearth_memory::SearchMode::Any,
+            10,
+            0,
+            &hearth_memory::MemorySearchOptions::default(),
+        )
+        .expect("search discarded");
+    assert!(discarded.results.is_empty());
+    let standing = fs::read_to_string(memory_dir.join("standing.md")).expect("standing");
+    assert!(standing.contains("keep this standing rule"), "{standing}");
+}
+
+#[test]
 fn backup_works_while_a_writer_is_open() {
     let home = TempDir::new().expect("temp home");
     let harness = hearth_core::Harness::open(home.path()).expect("open harness");
