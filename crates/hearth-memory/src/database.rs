@@ -15,12 +15,14 @@
 //!   is plainly in the text would be a lie. The fallback is decided before
 //!   pagination is applied so page two means the same thing as page one.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use serde::{Deserialize, Serialize};
 
+use crate::embedding::EmbeddingProvider;
 use crate::errors::{ErrorCode, ExpectedError, Result};
 use crate::schema;
 use crate::text::{
@@ -122,6 +124,14 @@ pub struct MemoryRead {
 pub struct MemoryStore {
     connection: Mutex<Connection>,
     path: PathBuf,
+    embedder: Mutex<Option<Arc<dyn EmbeddingProvider>>>,
+    vector_cache: Mutex<Option<VectorCache>>,
+}
+
+struct VectorCache {
+    model: String,
+    dims: usize,
+    rows: Vec<(String, Vec<i8>)>,
 }
 
 impl std::fmt::Debug for MemoryStore {
@@ -165,6 +175,8 @@ impl MemoryStore {
         Ok(Self {
             connection: Mutex::new(connection),
             path,
+            embedder: Mutex::new(None),
+            vector_cache: Mutex::new(None),
         })
     }
 
@@ -178,6 +190,179 @@ impl MemoryStore {
         self.connection.lock().map_err(|_| {
             ExpectedError::new(ErrorCode::StoreUnavailable, "memory database lock poisoned")
         })
+    }
+
+    /// Attach the local embedding provider to this store.
+    pub fn set_embedder(&self, embedder: Arc<dyn EmbeddingProvider>) {
+        if let Ok(mut slot) = self.embedder.lock() {
+            *slot = Some(embedder);
+        }
+        self.clear_vector_cache();
+    }
+
+    fn embedder(&self) -> Option<Arc<dyn EmbeddingProvider>> {
+        self.embedder
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(Arc::clone))
+    }
+
+    fn clear_vector_cache(&self) {
+        if let Ok(mut cache) = self.vector_cache.lock() {
+            *cache = None;
+        }
+    }
+
+    /// Index one memory's text. A broken embedder leaves the row searchable by
+    /// its lexical index and lets a later backfill repair the vector.
+    fn index_text(&self, id: &str, content: &str) -> Result<()> {
+        let Some(embedder) = self.embedder() else {
+            return Ok(());
+        };
+        let vector = embedder.embed(content)?;
+        self.set_vector(
+            id,
+            embedder.model(),
+            embedder.dims(),
+            &vector,
+            &content_digest(content),
+        )
+    }
+
+    /// Index every memory that has no vector for the active model.
+    pub fn index_pending_vectors(&self) -> Result<usize> {
+        let Some(embedder) = self.embedder() else {
+            return Ok(0);
+        };
+        let model = embedder.model().to_owned();
+        let dims = embedder.dims() as i64;
+        let memories = {
+            let connection = self.lock()?;
+            let mut statement = connection.prepare(
+                "SELECT m.* FROM memories m
+                 LEFT JOIN memory_vectors v ON v.memory_id = m.id
+                 WHERE v.memory_id IS NULL OR v.model <> ? OR v.dims <> ?",
+            )?;
+            let rows = statement.query_map((model.as_str(), dims), row_to_memory)?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut indexed = 0;
+        for memory in memories {
+            match embedder.embed(&memory.content) {
+                Ok(vector) => {
+                    if self
+                        .set_vector_row(
+                            &memory.id,
+                            embedder.model(),
+                            embedder.dims(),
+                            &vector,
+                            &content_digest(&memory.content),
+                        )
+                        .is_ok()
+                    {
+                        indexed += 1;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        self.clear_vector_cache();
+        Ok(indexed)
+    }
+
+    fn set_vector(
+        &self,
+        memory_id: &str,
+        model: &str,
+        dims: usize,
+        vector: &[f32],
+        content_hash: &str,
+    ) -> Result<()> {
+        self.set_vector_row(memory_id, model, dims, vector, content_hash)?;
+        self.clear_vector_cache();
+        Ok(())
+    }
+
+    fn set_vector_row(
+        &self,
+        memory_id: &str,
+        model: &str,
+        dims: usize,
+        vector: &[f32],
+        content_hash: &str,
+    ) -> Result<()> {
+        if vector.len() != dims {
+            return Err(ExpectedError::new(
+                ErrorCode::InvalidInput,
+                "embedding dimension does not match the model",
+            ));
+        }
+        let quantized = quantize(vector);
+        let blob: Vec<u8> = quantized.iter().map(|value| *value as u8).collect();
+        let now = time::OffsetDateTime::now_utc()
+            .unix_timestamp_nanos()
+            .div_euclid(1_000) as i64;
+        let connection = self.lock()?;
+        connection.execute(
+            "INSERT OR REPLACE INTO memory_vectors(memory_id, model, dims, content_hash, vector, updated_at)
+             VALUES(?,?,?,?,?,?)",
+            rusqlite::params![memory_id, model, dims as i64, content_hash, blob, now],
+        )?;
+        Ok(())
+    }
+
+    fn search_vectors(&self, query: &[f32], limit: usize) -> Result<Vec<(String, f32)>> {
+        let Some(embedder) = self.embedder() else {
+            return Ok(Vec::new());
+        };
+        let model = embedder.model().to_owned();
+        let dims = embedder.dims();
+        if query.len() != dims {
+            return Ok(Vec::new());
+        }
+        let query = quantize(query);
+        let mut cache = self.vector_cache.lock().map_err(|_| {
+            ExpectedError::new(ErrorCode::StoreUnavailable, "vector cache lock poisoned")
+        })?;
+        if cache
+            .as_ref()
+            .is_none_or(|cache| cache.model != model || cache.dims != dims)
+        {
+            let rows = {
+                let connection = self.lock()?;
+                let mut statement = connection.prepare(
+                    "SELECT memory_id, vector FROM memory_vectors WHERE model=? AND dims=?",
+                )?;
+                let rows = statement.query_map((model.as_str(), dims as i64), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })?;
+                let mut output = Vec::new();
+                for row in rows {
+                    let (id, blob) = row?;
+                    output.push((id, blob.iter().map(|byte| *byte as i8).collect()));
+                }
+                output
+            };
+            *cache = Some(VectorCache { model, dims, rows });
+        }
+        let cache = cache.as_ref().expect("vector cache");
+        let mut scored: Vec<(String, f32)> = cache
+            .rows
+            .iter()
+            .map(|(id, vector)| {
+                let score = dot_i8(&query, vector) as f32 / (127.0 * 127.0);
+                (id.clone(), score)
+            })
+            .collect();
+        scored.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        scored.truncate(limit);
+        Ok(scored)
     }
 
     /// Read one memory by id, using a connection the caller already holds.
@@ -257,6 +442,8 @@ impl MemoryStore {
         )?;
         let saved = Self::get_inner(&connection, &id)?;
         transaction.commit()?;
+        drop(connection);
+        let _ = self.index_text(&saved.id, &saved.content);
         Ok((saved, true))
     }
 
@@ -274,6 +461,7 @@ impl MemoryStore {
         let connection = self.lock()?;
         let transaction = connection.unchecked_transaction()?;
         let mut ids = Vec::new();
+        let mut to_index: Vec<(String, String)> = Vec::new();
         for entry in entries {
             let mut hasher = Sha256::new();
             hasher.update(entry.id.as_bytes());
@@ -305,6 +493,7 @@ impl MemoryStore {
                 };
                 let content = nonempty(&part, "content", MEMORY_LIMIT)?;
                 let tag_list = ["standing-archive".to_owned()];
+                to_index.push((id.clone(), content.clone()));
                 let timestamp = time::OffsetDateTime::now_utc()
                     .format(&time::format_description::well_known::Rfc3339)
                     .unwrap_or_default();
@@ -324,6 +513,11 @@ impl MemoryStore {
             ids.push(base);
         }
         transaction.commit()?;
+        drop(connection);
+        self.clear_vector_cache();
+        for (id, content) in to_index {
+            let _ = self.index_text(&id, &content);
+        }
         Ok(ids)
     }
 
@@ -371,8 +565,12 @@ impl MemoryStore {
                 id,
             ],
         )?;
+        connection.execute("DELETE FROM memory_vectors WHERE memory_id=?", [id])?;
         let updated = Self::get_inner(&connection, id)?;
         transaction.commit()?;
+        drop(connection);
+        self.clear_vector_cache();
+        let _ = self.index_text(&updated.id, &updated.content);
         Ok(updated)
     }
 
@@ -382,13 +580,110 @@ impl MemoryStore {
         let transaction = connection.unchecked_transaction()?;
         let previous = Self::get_inner(&connection, id)?;
         check_revision(&previous, expected_revision)?;
+        connection.execute("DELETE FROM memory_vectors WHERE memory_id=?", [id])?;
         connection.execute("DELETE FROM memories WHERE id=?", [id])?;
         transaction.commit()?;
+        drop(connection);
+        self.clear_vector_cache();
         Ok(previous)
     }
 
-    /// Search long-term memory.
+    /// Search long-term memory, using the vector index when it is available.
     pub fn search(
+        &self,
+        query: &str,
+        mode: SearchMode,
+        limit: i64,
+        offset: i64,
+        options: &MemorySearchOptions,
+    ) -> Result<SearchResponse> {
+        let started = std::time::Instant::now();
+        let lexical = self.search_lexical(query, mode, limit, offset, options)?;
+        if mode != SearchMode::Any || offset != 0 || query.trim().is_empty() {
+            return Ok(lexical);
+        }
+        let Some(embedder) = self.embedder() else {
+            return Ok(lexical);
+        };
+        let Ok(query_vector) = embedder.embed(query.trim()) else {
+            return Ok(lexical);
+        };
+        let vector_limit = (limit.max(1) as usize).saturating_mul(3).min(60);
+        let vector_hits = self.search_vectors(&query_vector, vector_limit)?;
+        if vector_hits.is_empty() {
+            return Ok(lexical);
+        }
+        let mut fused = self.fuse_search(lexical, vector_hits, limit, options)?;
+        fused.elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
+        Ok(fused)
+    }
+
+    fn fuse_search(
+        &self,
+        lexical: SearchResponse,
+        vector_hits: Vec<(String, f32)>,
+        limit: i64,
+        options: &MemorySearchOptions,
+    ) -> Result<SearchResponse> {
+        let mut ranked: HashMap<String, (f32, Memory)> = HashMap::new();
+        for (rank, hit) in lexical.results.iter().enumerate() {
+            let score = 1.0 / (60.0 + rank as f32 + 1.0);
+            ranked.insert(hit.memory.id.clone(), (score, hit.memory.clone()));
+        }
+        for (rank, (id, _)) in vector_hits.iter().enumerate() {
+            let score = 1.0 / (60.0 + rank as f32 + 1.0);
+            if let Some(entry) = ranked.get_mut(id) {
+                entry.0 += score;
+                continue;
+            }
+            let Ok(memory) = self.get(id) else {
+                continue;
+            };
+            if !has_all_tags(&memory, &options.tags) {
+                continue;
+            }
+            ranked.insert(id.clone(), (score, memory));
+        }
+        let mut entries: Vec<(String, f32, Memory)> = ranked
+            .into_iter()
+            .map(|(id, (score, memory))| (id, score, memory))
+            .collect();
+        entries.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        entries.truncate(limit as usize);
+        let first_term = split_terms(lexical.query.trim())
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        let results = entries
+            .into_iter()
+            .map(|(_, _, memory)| {
+                let characters = memory.content.chars().count();
+                SearchHit {
+                    content: excerpt(&memory.content, &first_term, 600),
+                    content_characters: characters,
+                    content_clipped: characters > 600,
+                    memory,
+                }
+            })
+            .collect();
+        Ok(SearchResponse {
+            mode: "hybrid".to_owned(),
+            query: lexical.query,
+            tags: lexical.tags,
+            results,
+            next_offset: lexical.next_offset,
+            elapsed_ms: lexical.elapsed_ms,
+            hint: "Hybrid recall combined keyword and local-vector matches. Use an m_ id to read full content, or change the mode to narrow the lexical side.".to_owned(),
+        })
+    }
+
+    fn search_lexical(
         &self,
         query: &str,
         mode: SearchMode,
@@ -642,6 +937,32 @@ fn is_combining_mark(character: char) -> bool {
     matches!(character as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x20D0..=0x20FF)
 }
 
+fn quantize(vector: &[f32]) -> Vec<i8> {
+    vector
+        .iter()
+        .map(|value| (value * 127.0).round().clamp(-127.0, 127.0) as i8)
+        .collect()
+}
+
+fn dot_i8(left: &[i8], right: &[i8]) -> i32 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| i32::from(*left) * i32::from(*right))
+        .sum()
+}
+
+fn content_digest(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn has_all_tags(memory: &Memory, tags: &[String]) -> bool {
+    tags.iter()
+        .all(|tag| memory.tags.iter().any(|value| value == tag))
+}
+
 /// Map a row to a memory.
 fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
     let tags: String = row.get("tags")?;
@@ -678,6 +999,59 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = MemoryStore::open(directory.path().join("long-term.sqlite")).unwrap();
         (directory, database)
+    }
+
+    struct FakeEmbedder;
+
+    impl crate::embedding::EmbeddingProvider for FakeEmbedder {
+        fn model(&self) -> &str {
+            "fake"
+        }
+
+        fn dims(&self) -> usize {
+            4
+        }
+
+        fn embed(&self, text: &str) -> Result<Vec<f32>> {
+            let lower = text.to_lowercase();
+            let mut vector = vec![0.0f32; 4];
+            if lower.contains("paint") || lower.contains("art") {
+                vector[0] = 1.0;
+            }
+            if lower.contains("music") || lower.contains("song") {
+                vector[1] = 1.0;
+            }
+            if lower.contains("soup") || lower.contains("food") {
+                vector[2] = 1.0;
+            }
+            if lower.contains("travel") || lower.contains("trip") {
+                vector[3] = 1.0;
+            }
+            if vector.iter().all(|value| *value == 0.0) {
+                vector[0] = 0.01;
+            }
+            let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+            for value in &mut vector {
+                *value /= norm;
+            }
+            Ok(vector)
+        }
+    }
+
+    struct WideEmbedder;
+
+    impl crate::embedding::EmbeddingProvider for WideEmbedder {
+        fn model(&self) -> &str {
+            "wide"
+        }
+
+        fn dims(&self) -> usize {
+            384
+        }
+
+        fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+            Ok(vec![0.0; 384])
+        }
     }
 
     fn save(database: &MemoryStore, content: &str, tags: &[&str]) -> Memory {
@@ -735,6 +1109,119 @@ mod tests {
         assert_eq!(second.tags, vec!["a"]);
         assert_eq!(second.revision, 1);
         assert_eq!(database.count().unwrap(), 1);
+    }
+
+    #[test]
+    #[ignore = "manual vector-scan benchmark"]
+    fn vector_scan_benchmark() {
+        let (_directory, database) = database();
+        database.set_embedder(Arc::new(WideEmbedder));
+        let blob: Vec<u8> = (0..384).map(|index| (index % 127) as u8).collect();
+        {
+            let connection = database.connection.lock().unwrap();
+            let transaction = connection.unchecked_transaction().unwrap();
+            for index in 0..200_000 {
+                connection
+                    .execute(
+                        "INSERT INTO memory_vectors(memory_id,model,dims,content_hash,vector,updated_at)
+                         VALUES(?,?,?,?,?,?)",
+                        rusqlite::params![format!("m_{index}"), "wide", 384i64, "", blob, 0i64],
+                    )
+                    .unwrap();
+            }
+            transaction.commit().unwrap();
+        }
+        database.clear_vector_cache();
+        let query = vec![0.01f32; 384];
+        let started = std::time::Instant::now();
+        let hits = database.search_vectors(&query, 20).unwrap();
+        println!(
+            "200k x 384 scan: {:?}, hits={}",
+            started.elapsed(),
+            hits.len()
+        );
+        assert_eq!(hits.len(), 20);
+    }
+
+    #[test]
+    fn hybrid_search_finds_a_vector_match_without_keywords() {
+        let (_directory, database) = database();
+        database.set_embedder(Arc::new(FakeEmbedder));
+        save(&database, "she was painting a sunrise", &["art"]);
+        save(&database, "USER_NAME likes sour soup", &["food"]);
+        let response = database
+            .search(
+                "artwork",
+                SearchMode::Any,
+                10,
+                0,
+                &MemorySearchOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(response.mode, "hybrid");
+        assert!(
+            response
+                .results
+                .iter()
+                .any(|hit| hit.memory.content.contains("painting")),
+            "vector recall missed the painting memory: {response:?}"
+        );
+    }
+
+    #[test]
+    fn a_backfill_indexes_memories_saved_before_the_embedder() {
+        let (_directory, database) = database();
+        save(&database, "she was painting a sunrise", &["art"]);
+        database.set_embedder(Arc::new(FakeEmbedder));
+        assert_eq!(database.index_pending_vectors().unwrap(), 1);
+        let response = database
+            .search(
+                "artwork",
+                SearchMode::Any,
+                10,
+                0,
+                &MemorySearchOptions::default(),
+            )
+            .unwrap();
+        assert!(
+            response
+                .results
+                .iter()
+                .any(|hit| hit.memory.content.contains("painting")),
+            "backfilled vector was not searchable: {response:?}"
+        );
+    }
+
+    #[test]
+    fn editing_a_memory_reindexes_or_drops_the_old_vector() {
+        let (_directory, database) = database();
+        database.set_embedder(Arc::new(FakeEmbedder));
+        let memory = save(&database, "she was painting a sunrise", &["art"]);
+        database
+            .edit(
+                &memory.id,
+                Some("she was listening to music"),
+                None,
+                None,
+                Some(1),
+            )
+            .unwrap();
+        let response = database
+            .search(
+                "artwork",
+                SearchMode::Any,
+                10,
+                0,
+                &MemorySearchOptions::default(),
+            )
+            .unwrap();
+        assert!(
+            !response
+                .results
+                .iter()
+                .any(|hit| hit.memory.content.contains("painting")),
+            "the old vector survived an edit: {response:?}"
+        );
     }
 
     #[test]

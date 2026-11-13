@@ -29,6 +29,7 @@ use crate::agent::{Agent, AgentConfig, AgentError, RunOutcome};
 use crate::compaction::Compactor;
 use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
+use crate::extraction::MemoryExtractor;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
 use crate::maintenance::{BACKUP_KIND, BackupHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks};
@@ -36,7 +37,7 @@ use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
 use crate::skill_review::{SkillReviewHandler, SkillReviewer};
 use crate::skills::SkillLibrary;
 use crate::tools::{MessageTarget, TaskTarget, ToolMediaRoots, build_tools};
-use hearth_memory::MemoryService;
+use hearth_memory::{BekkoEmbedding, MemoryService, download_model, model_files_present};
 
 const TELEGRAM_POLL_TIMEOUT_SECS: u32 = 2;
 
@@ -109,15 +110,80 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     let spill = home.join("spill");
     // Memory is not optional: a daemon that cannot reach its store would answer
     // with silently missing context, so failing to open it stops startup.
-    let memory = Arc::new(
-        MemoryService::new(session.clone())
-            .map_err(|error| std::io::Error::other(format!("memory could not be opened: {error}")))?
-            .with_recall_budget(
-                settings.memory.recall_max_items,
-                settings.memory.recall_max_tokens,
-            )
-            .with_embeddings(settings.memory.embeddings),
-    );
+    let mut memory = MemoryService::new(session.clone())
+        .map_err(|error| std::io::Error::other(format!("memory could not be opened: {error}")))?
+        .with_recall_budget(
+            settings.memory.recall_max_items,
+            settings.memory.recall_max_tokens,
+        )
+        .with_embeddings(settings.memory.embeddings);
+    let directory = embedding_directory(home, &settings.memory.embedding_model_dir);
+    let fetch_allowed = should_fetch_embedding_model();
+    let mut fetch_in_background = false;
+    if settings.memory.embeddings {
+        if model_files_present(&directory) {
+            match BekkoEmbedding::open(&directory) {
+                Ok(Some(embedder)) => {
+                    tracing::info!(path = %directory.display(), "local embeddings ready");
+                    memory = memory.with_embedder(Arc::new(embedder));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "embedding model failed; using lexical recall");
+                    fetch_in_background = fetch_allowed;
+                }
+            }
+        } else if fetch_allowed {
+            fetch_in_background = true;
+            tracing::info!(
+                path = %directory.display(),
+                "embedding model will be fetched in the background"
+            );
+        } else {
+            tracing::warn!(
+                path = %directory.display(),
+                "embedding model is missing; using lexical recall"
+            );
+        }
+    }
+    let memory = Arc::new(memory);
+    if memory.embeddings_active() {
+        let backfill = Arc::clone(&memory);
+        thread::spawn(move || match backfill.index_pending_vectors() {
+            Ok(indexed) if indexed > 0 => tracing::info!(indexed, "memory vectors backfilled"),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "memory vector backfill failed"),
+        });
+    } else if fetch_in_background {
+        let background = Arc::clone(&memory);
+        let directory = directory.clone();
+        thread::spawn(move || {
+            if let Err(error) = download_model(&directory) {
+                tracing::warn!(%error, "embedding model download failed; using lexical recall");
+                return;
+            }
+            match BekkoEmbedding::open(&directory) {
+                Ok(Some(embedder)) => {
+                    background.activate_embedder(Arc::new(embedder));
+                    tracing::info!(path = %directory.display(), "local embeddings ready");
+                    match background.index_pending_vectors() {
+                        Ok(indexed) if indexed > 0 => {
+                            tracing::info!(indexed, "memory vectors backfilled");
+                        }
+                        Ok(_) => {}
+                        Err(error) => tracing::warn!(%error, "memory vector backfill failed"),
+                    }
+                }
+                Ok(None) => tracing::warn!(
+                    path = %directory.display(),
+                    "embedding model stayed missing; using lexical recall"
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "embedding model failed; using lexical recall")
+                }
+            }
+        });
+    }
     // Repair an over-budget standing file at startup, as the store intends:
     // bullets trimmed there are archived to long-term memory first.
     match memory.standing_store().load() {
@@ -645,6 +711,32 @@ impl TelegramWorker {
         match outcome {
             Ok(outcome) => {
                 self.deliver(chat_id, thread_id, &outcome);
+                if outcome.answer_text.is_some()
+                    && let Ok(history) = self.session.history_for_prompt(&conversation.id)
+                    && let Some(text) = latest_user_text(&history)
+                    && MemoryExtractor::should_extract(&text)
+                {
+                    let extractor = MemoryExtractor::new(
+                        self.session.clone(),
+                        Arc::clone(&self.provider),
+                        Arc::clone(&self.memory),
+                        self.model.clone(),
+                        self.provider_name.clone(),
+                        format!("daemon:{}:extract", self.pid),
+                    );
+                    let conversation_id = conversation.id.clone();
+                    thread::spawn(move || match extractor.extract(&conversation_id) {
+                        Ok(report) if !report.created.is_empty() => {
+                            tracing::info!(
+                                created = report.created.len(),
+                                skipped = report.skipped,
+                                "memory extraction complete"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => tracing::warn!(%error, "memory extraction failed"),
+                    });
+                }
                 if let Err(error) = agent.compact_soft(&conversation.id) {
                     tracing::warn!(%error, "soft compaction failed");
                 }
@@ -938,6 +1030,35 @@ fn build_speaker(media: &Media) -> Result<Option<Arc<dyn Speaker>>, DaemonError>
 
 /// Where the embedding model lives: an absolute setting wins, a relative one
 /// resolves against the Hearth home.
+fn should_fetch_embedding_model() -> bool {
+    if std::env::var_os("HEARTH_OFFLINE").is_some() {
+        return false;
+    }
+    !cfg!(debug_assertions) || std::env::var_os("HEARTH_FETCH_EMBEDDINGS").is_some()
+}
+
+fn embedding_directory(home: &std::path::Path, configured: &str) -> std::path::PathBuf {
+    let path = std::path::PathBuf::from(configured);
+    if path.is_absolute() {
+        path
+    } else {
+        home.join(path)
+    }
+}
+
+fn latest_user_text(history: &[hearth_core::Entry]) -> Option<String> {
+    let entry = history.iter().rev().find(|entry| entry.kind == "user")?;
+    let text = hearth_core::parse_blocks(&entry.content)
+        .into_iter()
+        .filter_map(|block| match block {
+            hearth_model::ContentBlock::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.trim().is_empty()).then_some(text)
+}
+
 fn parse_target(key: &str) -> Option<(i64, Option<i64>)> {
     let (chat_id, thread_id) = key.split_once(':')?;
     let chat_id = chat_id.parse::<i64>().ok()?;

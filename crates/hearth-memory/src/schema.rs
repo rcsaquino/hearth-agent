@@ -16,7 +16,7 @@ use rusqlite::Connection;
 pub const APPLICATION_ID: i64 = 0x4841_5254;
 
 /// The current schema version.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The full schema.
 ///
@@ -61,6 +61,20 @@ pub const INITIAL_SCHEMA: &str = r#"
   END;
 "#;
 
+/// Vector cache added after the first release.
+pub const VECTORS_SCHEMA: &str = r#"
+  CREATE TABLE IF NOT EXISTS memory_vectors (
+    memory_id TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    dims INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    updated_at INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE INDEX IF NOT EXISTS memory_vectors_model ON memory_vectors(model, dims);
+"#;
+
 /// Initialize or verify the schema, returning the version found.
 ///
 /// A fresh file is migrated. An existing file must already be ours: a different
@@ -84,6 +98,9 @@ pub fn prepare(connection: &Connection) -> Result<i64, String> {
             .execute_batch(INITIAL_SCHEMA)
             .map_err(|error| format!("cannot create memory schema: {error}"))?;
         connection
+            .execute_batch(VECTORS_SCHEMA)
+            .map_err(|error| format!("cannot create vector schema: {error}"))?;
+        connection
             .execute_batch(&format!(
                 "PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version={SCHEMA_VERSION};"
             ))
@@ -95,6 +112,15 @@ pub fn prepare(connection: &Connection) -> Result<i64, String> {
             "Refusing to use {}: it is not a Hearth memory database.",
             "this file"
         ));
+    }
+    if version < 2 {
+        connection
+            .execute_batch(VECTORS_SCHEMA)
+            .map_err(|error| format!("cannot migrate vector schema: {error}"))?;
+        connection
+            .execute_batch(&format!("PRAGMA user_version={SCHEMA_VERSION};"))
+            .map_err(|error| format!("cannot record vector schema version: {error}"))?;
+        return Ok(SCHEMA_VERSION);
     }
     Ok(version)
 }
@@ -137,6 +163,26 @@ mod tests {
             )
             .unwrap();
         assert!(prepare(&connection).is_err());
+    }
+
+    #[test]
+    fn a_version_one_database_gains_the_vector_table() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(INITIAL_SCHEMA).unwrap();
+        connection
+            .execute_batch(&format!(
+                "PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=1;"
+            ))
+            .unwrap();
+        assert_eq!(prepare(&connection).unwrap(), SCHEMA_VERSION);
+        let table: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_vectors'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table, 1);
     }
 
     #[test]

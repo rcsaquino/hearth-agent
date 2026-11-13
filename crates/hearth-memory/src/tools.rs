@@ -394,7 +394,7 @@ impl Tool for SearchTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "memory_search".to_owned(),
-            description: "Search long_term memory over content, tags, and source. Modes: any (default, keyword prefix with stemming), all, phrase, literal (substring). Empty query browses all. tags requires every listed tag exactly. Pass an m_ id with text_offset to read full content. Standing bullets are injected already, not searchable here. If a result is empty or uncertain, verify with memory_sessions before claiming absence.".to_owned(),
+            description: "Search long_term memory over content, tags, and source. Modes: any (default, keyword prefix with stemming plus local-vector fusion when available), all, phrase, literal (substring). Empty query browses all. tags requires every listed tag exactly. Pass an m_ id with text_offset to read full content. Standing bullets are injected already, not searchable here. If a result is empty or uncertain, verify with memory_sessions before claiming absence.".to_owned(),
             parameters: json!({
                 "type": "object",
                 "properties": {

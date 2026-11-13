@@ -206,6 +206,7 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
             "mode": context.memory.recall_mode(),
             "embeddings_configured": context.memory.embeddings_configured(),
             "embeddings_active": context.memory.embeddings_active(),
+            "embedding_model": context.memory.embedding_model(),
             "max_items": context.memory.recall_max_items(),
             "max_tokens": context.memory.recall_max_tokens(),
         },

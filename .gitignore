@@ -9,3 +9,6 @@ logs/
 media/
 spill/
 backups/
+
+# Local embedding model cache
+models/

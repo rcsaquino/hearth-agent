@@ -9,6 +9,7 @@ mod daemon;
 mod doctor;
 mod effect_worker;
 mod events;
+pub mod extraction;
 mod helpers;
 mod init;
 pub mod inspect;
