@@ -835,10 +835,12 @@ preambles and no server-side additions.
 - The exact prompt text is saved in `prompt_blobs` before the request and linked from
   the generation checkpoint.
 - The Prompt tab is one live, scrollable session export. The newest saved exchange
-  is shown in full in request order: system identity (`SOUL.md`), guidance,
-  standing memory, skills, relevant memory immediately before the newest user,
-  every transcript item, the runtime note, the request `tools` field, the saved
-  response, and usage. Nothing is collapsed and tool results are not clipped.
+  is shown in full with the stable layers first: system identity (`SOUL.md`),
+  guidance, standing memory, skills, and the request `tools` field, followed by
+  relevant memory immediately before the newest user, every transcript item, the
+  runtime note, the saved response, and usage. Tools are a top-level request field,
+  not a system message, but they render with the fixed layers so the stable prefix
+  is visible at the top. Nothing is collapsed and tool results are not clipped.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or `g`/`G`)
   jump to the top or tail. `[` and `]` walk older loaded snapshots, and `f` toggles
   live follow. Scrolling away from the tail pauses follow; End or reaching the
