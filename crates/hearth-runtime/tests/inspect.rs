@@ -1,5 +1,5 @@
 use hearth_core::{Harness, PromptInput, Save};
-use hearth_memory::{MemoryKind, MemoryService, NewMemoryInput, SourceKind};
+use hearth_memory::{MemoryInput, MemoryService};
 use hearth_runtime::inspect::{latest_prompt, list_memories};
 use hearth_runtime::{InitOptions, init};
 use serde_json::json;
@@ -102,25 +102,20 @@ fn list_memories_reads_saved_items_without_a_writer() {
     let home = TempDir::new().expect("temp home");
     init(home.path(), options()).expect("init");
     let harness = Harness::open(home.path()).expect("open harness");
-    let memory = MemoryService::new(harness.session().clone());
+    let memory = MemoryService::new(harness.session().clone()).expect("memory");
     memory
-        .save(NewMemoryInput {
+        .store()
+        .add(&MemoryInput {
             content: "The user keeps the release checklist in docs/.".to_owned(),
-            kind: MemoryKind::Fact,
-            tags: vec!["release".to_owned()],
-            importance: 80,
-            source_kind: SourceKind::User,
-            source_ref: None,
-            supersedes: None,
-            valid_from: None,
-            valid_to: None,
+            tags: Some(vec!["release".to_owned()]),
+            source: Some("test".to_owned()),
         })
         .expect("save memory");
 
     let records = list_memories(home.path(), 100).expect("list memories");
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].kind, "fact");
-    assert_eq!(records[0].status, "active");
+    assert!(!records[0].standing);
+    assert_eq!(records[0].source, "test");
     assert!(records[0].content.contains("release checklist"));
     assert_eq!(records[0].tags, vec!["release"]);
 }

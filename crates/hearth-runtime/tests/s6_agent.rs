@@ -7,9 +7,7 @@ use std::time::Duration;
 use hearth_core::{
     ContextBudget, Harness, NewEntry, NewTask, Save, Submission, SubmissionStatus, Task, TaskStatus,
 };
-use hearth_memory::{
-    MemoryKind, MemoryService, MemorySource, MemoryStatus, MemoryTool, SourceKind,
-};
+use hearth_memory::{MemoryInput, MemorySearchOptions, MemoryService, SearchMode};
 use hearth_model::{
     ChatRequest, ContentBlock, Provider, ProviderError, ProviderStream, Role, StreamEvent,
     ToolCall, Usage,
@@ -87,7 +85,6 @@ fn agent_with(
     home: &Path,
     harness: &Harness,
     provider: Arc<dyn Provider>,
-    max_turns: u32,
     tools: ToolRegistry,
 ) -> Agent {
     Agent::new(
@@ -98,17 +95,15 @@ fn agent_with(
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
-            max_turns,
             tools,
             spill_dir: home.join("spill"),
-            voice_tags: false,
             guidance: String::new(),
         },
     )
 }
 
 fn agent<P: Provider + 'static>(home: &Path, harness: &Harness, provider: Arc<P>) -> Agent {
-    agent_with(home, harness, provider, 4, ToolRegistry::default())
+    agent_with(home, harness, provider, ToolRegistry::default())
 }
 
 #[test]
@@ -466,7 +461,7 @@ fn a_files_tool_call_is_executed_and_paired() {
         ]),
     ]));
 
-    let outcome = agent_with(home.path(), &harness, provider.clone(), 4, tools)
+    let outcome = agent_with(home.path(), &harness, provider.clone(), tools)
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -532,7 +527,7 @@ fn a_large_file_read_spills_and_can_be_read_back() {
         ]),
     ]));
 
-    let outcome = agent_with(home.path(), &harness, provider, 4, tools)
+    let outcome = agent_with(home.path(), &harness, provider, tools)
         .run_submission(&submission.id)
         .expect("run submission");
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
@@ -566,7 +561,7 @@ fn a_large_file_read_spills_and_can_be_read_back() {
 }
 
 #[test]
-fn the_turn_limit_stops_a_tool_loop() {
+fn a_long_tool_loop_is_not_cut_short_by_a_turn_limit() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
@@ -577,46 +572,36 @@ fn the_turn_limit_stops_a_tool_loop() {
         workspace,
         home.path().join("spill"),
     ))]);
-    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
-        Ok(StreamEvent::ToolCall(ToolCall {
-            id: "call-1".to_owned(),
-            name: "files".to_owned(),
-            arguments: json!({"action": "read", "path": "notes/a.txt"}),
-        })),
+    // Well past the 120 requests the retired `agent.max_turns` setting allowed.
+    let rounds = 125;
+    let mut scripts = Vec::with_capacity(rounds + 1);
+    for round in 0..rounds {
+        scripts.push(Ok(vec![
+            Ok(StreamEvent::ToolCall(ToolCall {
+                id: format!("call-{round}"),
+                name: "files".to_owned(),
+                arguments: json!({"action": "read", "path": "notes/a.txt"}),
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned()),
+            }),
+        ]));
+    }
+    scripts.push(Ok(vec![
+        Ok(StreamEvent::TextDelta("done".to_owned())),
         Ok(StreamEvent::Done {
-            finish_reason: Some("tool_calls".to_owned()),
+            finish_reason: Some("stop".to_owned()),
         }),
-    ])]));
+    ]));
+    let provider = Arc::new(ScriptedProvider::new(scripts));
 
-    let outcome = agent_with(home.path(), &harness, provider.clone(), 1, tools)
+    let outcome = agent_with(home.path(), &harness, provider.clone(), tools)
         .run_submission(&submission.id)
         .expect("run submission");
 
-    assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
-    assert_eq!(
-        outcome.submission.error,
-        Some(json!({"reason": "turn_limit"}))
-    );
-    assert!(
-        outcome
-            .notice
-            .as_deref()
-            .expect("notice")
-            .to_lowercase()
-            .contains("turn limit")
-    );
-    assert_eq!(provider.requests().len(), 1);
-    let task = harness
-        .session()
-        .task(&outcome.task_id)
-        .expect("read task")
-        .expect("task exists");
-    assert_eq!(task.status, TaskStatus::Failed);
-    let history = harness.session().history(&conversation).expect("history");
-    assert_eq!(history.len(), 4);
-    assert_eq!(history[1].kind, "assistant");
-    assert_eq!(history[2].kind, "tool_result");
-    assert_eq!(history[3].kind, "notice");
+    assert_eq!(outcome.answer_text.as_deref(), Some("done"));
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+    assert_eq!(provider.requests().len(), rounds + 1);
 }
 
 #[test]
@@ -650,7 +635,7 @@ fn a_pending_tool_call_is_replayed_before_the_next_request() {
         }),
     ])]));
 
-    let outcome = agent_with(home.path(), &harness, provider.clone(), 4, tools)
+    let outcome = agent_with(home.path(), &harness, provider.clone(), tools)
         .run_submission(&submission.id)
         .expect("run submission");
 
@@ -849,12 +834,17 @@ fn a_text_run_emits_live_events_in_order() {
     let index = |kind: &str| kinds.iter().position(|value| value == kind);
     assert!(index("run_started").is_some(), "kinds: {kinds:?}");
     assert!(index("turn_started").is_some(), "kinds: {kinds:?}");
-    assert!(index("text_delta").is_some(), "kinds: {kinds:?}");
+    assert!(index("assistant_reply").is_some(), "kinds: {kinds:?}");
+    assert!(index("user_message").is_some(), "kinds: {kinds:?}");
+    assert!(
+        index("text_delta").is_none(),
+        "deltas must not stream: {kinds:?}"
+    );
     assert!(index("usage").is_some(), "kinds: {kinds:?}");
     assert!(index("run_settled").is_some(), "kinds: {kinds:?}");
     assert!(index("run_started") < index("turn_started"));
-    assert!(index("turn_started") < index("text_delta"));
-    assert!(index("text_delta") < index("usage"));
+    assert!(index("turn_started") < index("assistant_reply"));
+    assert!(index("assistant_reply") < index("usage"));
     assert!(index("usage") < index("run_settled"));
     let events = sink.events.lock().expect("event lock");
     let settled = events
@@ -918,7 +908,7 @@ fn a_tool_run_emits_start_and_result_events() {
         ]),
     ]));
     let sink = Arc::new(RecordingSink::default());
-    let outcome = agent_with(home.path(), &harness, provider, 4, tools)
+    let outcome = agent_with(home.path(), &harness, provider, tools)
         .run_submission_with_events(
             &submission.id,
             Arc::new(AtomicBool::new(false)),
@@ -1007,59 +997,32 @@ fn submit_text(
     (submission, user_entry)
 }
 
-fn latest_extract_task(harness: &Harness, conversation: &str) -> Option<Task> {
-    let id: Option<String> = harness
-        .session()
-        .storage()
-        .read(|reader| {
-            reader.query_optional(
-                "SELECT id FROM tasks WHERE kind = 'memory.extract' AND conversation_id = ? \
-                 ORDER BY created_at DESC, id DESC LIMIT 1",
-                (conversation,),
-                |row| row.get(0),
-            )
+/// Seed one long-term memory and return its id.
+fn seed_memory(memory: &MemoryService, content: &str, tags: &[&str]) -> String {
+    memory
+        .store()
+        .add(&MemoryInput {
+            content: content.to_owned(),
+            tags: Some(tags.iter().map(|tag| (*tag).to_owned()).collect()),
+            source: None,
         })
-        .expect("task query");
-    id.and_then(|id| harness.session().task(&id).expect("task"))
-}
-
-fn memory_input(
-    content: &str,
-    kind: hearth_memory::MemoryKind,
-    importance: i64,
-) -> hearth_memory::NewMemoryInput {
-    hearth_memory::NewMemoryInput {
-        content: content.to_owned(),
-        kind,
-        tags: Vec::new(),
-        importance,
-        source_kind: hearth_memory::SourceKind::User,
-        source_ref: None,
-        supersedes: None,
-        valid_from: None,
-        valid_to: None,
-    }
+        .expect("memory")
+        .0
+        .id
 }
 
 #[test]
 fn the_agent_injects_standing_and_recall_memory() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(hearth_memory::MemoryService::new(harness.session().clone()));
+    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
+    // A bullet in the standing file is injected without a retrieval cue.
     memory
-        .save(memory_input(
-            "Use metric units",
-            hearth_memory::MemoryKind::Rule,
-            90,
-        ))
+        .standing_store()
+        .add("Use metric units", 90)
         .expect("standing rule");
-    memory
-        .save(memory_input(
-            "Sam prefers dark roast coffee",
-            hearth_memory::MemoryKind::Preference,
-            70,
-        ))
-        .expect("recall memory");
+    // A long-term fact is retrieved by search.
+    seed_memory(&memory, "Sam prefers dark roast coffee", &["coffee"]);
     let submission = harness
         .session()
         .submit(
@@ -1070,10 +1033,7 @@ fn the_agent_injects_standing_and_recall_memory() {
         )
         .expect("submit")
         .submission;
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Dark roast."),
-        noop_script(),
-    ]));
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Dark roast.")]));
     let outcome = agent(home.path(), &harness, Arc::clone(&provider))
         .with_memory(Arc::clone(&memory))
         .run_submission(&submission.id)
@@ -1101,21 +1061,13 @@ fn the_agent_injects_standing_and_recall_memory() {
 fn a_trivial_message_gets_standing_but_no_recall() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(hearth_memory::MemoryService::new(harness.session().clone()));
+    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
     memory
-        .save(memory_input(
-            "Use metric units",
-            hearth_memory::MemoryKind::Rule,
-            90,
-        ))
+        .standing_store()
+        .add("Use metric units", 90)
         .expect("standing rule");
-    memory
-        .save(memory_input(
-            "Sam prefers dark roast coffee",
-            hearth_memory::MemoryKind::Preference,
-            70,
-        ))
-        .expect("recall memory");
+    seed_memory(&memory, "Sam prefers dark roast coffee", &["coffee"]);
+    // `submit` sends "hi", which carries no topic worth searching for.
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
     agent(home.path(), &harness, Arc::clone(&provider))
@@ -1127,12 +1079,14 @@ fn a_trivial_message_gets_standing_but_no_recall() {
     let request = requests.last().expect("request");
     let texts: Vec<String> = request.messages.iter().map(message_text).collect();
     assert!(
-        texts.iter().any(|text| text.contains("<standing_memory>")),
+        texts
+            .iter()
+            .any(|text| text.contains("<standing_memory>") && text.contains("Use metric units")),
         "missing standing: {texts:?}"
     );
     assert!(
         !texts.iter().any(|text| text.contains("<relevant_memory>")),
-        "trivial message got recall: {texts:?}"
+        "a trivial message got recall: {texts:?}"
     );
 }
 
@@ -1140,22 +1094,15 @@ fn a_trivial_message_gets_standing_but_no_recall() {
 fn a_memory_failure_does_not_stop_the_answer() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(hearth_memory::MemoryService::new(harness.session().clone()));
-    memory
-        .save(memory_input(
-            "Sam prefers dark roast coffee",
-            hearth_memory::MemoryKind::Preference,
-            70,
-        ))
-        .expect("memory");
-    harness
-        .session()
-        .storage()
-        .write(|writer| -> Result<(), hearth_storage::StorageError> {
-            writer.execute("DROP TABLE memory_fts", [])?;
-            Ok(())
-        })
-        .expect("drop fts");
+    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
+    seed_memory(&memory, "Sam prefers dark roast coffee", &["coffee"]);
+    // Break the standing store in a way that survives the plain-file check: a
+    // directory where the file belongs makes every read fail.
+    let standing = memory.base().join("standing.md");
+    if standing.exists() {
+        fs::remove_file(&standing).expect("remove standing");
+    }
+    fs::create_dir(&standing).expect("block standing");
     let submission = harness
         .session()
         .submit(
@@ -1166,10 +1113,7 @@ fn a_memory_failure_does_not_stop_the_answer() {
         )
         .expect("submit")
         .submission;
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Still here."),
-        noop_script(),
-    ]));
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Still here.")]));
     let outcome = agent(home.path(), &harness, Arc::clone(&provider))
         .with_memory(memory)
         .run_submission(&submission.id)
@@ -1178,283 +1122,8 @@ fn a_memory_failure_does_not_stop_the_answer() {
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 }
 
-// ---- M4c: post-run memory extraction ----
-
 #[test]
-fn an_answer_is_extracted_into_memory() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let (submission, user_entry) = submit_text(
-        &harness,
-        &conversation,
-        "req-extract",
-        "I prefer dark roast coffee",
-    );
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let extraction = format!(
-        r#"{{"operations":[{{"op":"add","kind":"preference","content":"Sam prefers dark roast coffee","tags":["coffee"],"importance":70,"evidence_entry_id":"{}","evidence_quote":"I prefer dark roast coffee"}}]}}"#,
-        user_entry
-    );
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Noted."),
-        json_script(&extraction),
-    ]));
-
-    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
-    assert_eq!(outcome.answer_text.as_deref(), Some("Noted."));
-    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
-
-    let found = memory.search("dark roast", 5).expect("search");
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].source_kind, SourceKind::Session);
-    assert_eq!(found[0].source_ref.as_deref(), Some(user_entry.as_str()));
-
-    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
-    assert_eq!(task.status, TaskStatus::Done);
-    let result = task.result.as_ref().expect("result");
-    assert_eq!(result["applied"], 1);
-    let usage = harness.session().usage_for_task(&task.id).expect("usage");
-    assert_eq!(usage.len(), 1);
-    assert_eq!(usage[0].kind, "memory.extract");
-
-    let requests = provider.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[1].max_tokens, None);
-    let extraction_text: String = requests[1]
-        .messages
-        .iter()
-        .map(message_text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(extraction_text.contains("I prefer dark roast coffee"));
-    assert!(extraction_text.contains("operations"));
-
-    let prompt = harness
-        .session()
-        .latest_prompt()
-        .expect("blob")
-        .expect("prompt");
-    assert!(prompt.text.contains("I prefer dark roast coffee"));
-}
-
-#[test]
-fn an_extraction_without_valid_evidence_is_rejected() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let (submission, _user_entry) = submit_text(
-        &harness,
-        &conversation,
-        "req-extract-bad",
-        "I prefer dark roast coffee",
-    );
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let extraction = r#"{"operations":[{"op":"add","kind":"preference","content":"Sam prefers dark roast coffee","evidence_entry_id":"missing","evidence_quote":"I prefer dark roast coffee"}]}"#;
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Noted."),
-        json_script(extraction),
-    ]));
-
-    agent(home.path(), &harness, provider)
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
-
-    assert_eq!(memory.stats().expect("stats").total, 0);
-    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
-    assert_eq!(task.status, TaskStatus::Done);
-    let result = task.result.as_ref().expect("result");
-    assert_eq!(result["applied"], 0);
-    assert_eq!(result["rejected"], 1);
-}
-
-#[test]
-fn a_noop_extraction_writes_nothing() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let (submission, _user_entry) = submit_text(
-        &harness,
-        &conversation,
-        "req-extract-noop",
-        "I prefer dark roast coffee",
-    );
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Noted."),
-        noop_script(),
-    ]));
-
-    agent(home.path(), &harness, provider)
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
-
-    assert_eq!(memory.stats().expect("stats").total, 0);
-    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
-    assert_eq!(task.status, TaskStatus::Done);
-}
-
-#[test]
-fn a_trivial_message_skips_extraction() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let submission = submit(&harness, &conversation);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
-
-    agent(home.path(), &harness, Arc::clone(&provider))
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
-
-    assert_eq!(provider.requests().len(), 1);
-    assert!(latest_extract_task(&harness, &conversation).is_none());
-    assert_eq!(memory.stats().expect("stats").total, 0);
-}
-
-#[test]
-fn a_malformed_extraction_fails_the_task_but_not_the_answer() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let (submission, _user_entry) = submit_text(
-        &harness,
-        &conversation,
-        "req-extract-malformed",
-        "I prefer dark roast coffee",
-    );
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Still answered."),
-        json_script("not json"),
-    ]));
-
-    let outcome = agent(home.path(), &harness, provider)
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
-
-    assert_eq!(outcome.answer_text.as_deref(), Some("Still answered."));
-    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
-    assert_eq!(memory.stats().expect("stats").total, 0);
-    let task = latest_extract_task(&harness, &conversation).expect("extraction task");
-    assert_eq!(task.status, TaskStatus::Failed);
-    assert!(task.result.as_ref().expect("result")["error"].is_string());
-}
-
-#[test]
-fn the_extraction_request_contains_the_run_and_similar_memories() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    memory
-        .save(memory_input(
-            "Sam prefers dark roast coffee",
-            MemoryKind::Preference,
-            60,
-        ))
-        .expect("seed memory");
-    let (submission, _user_entry) = submit_text(
-        &harness,
-        &conversation,
-        "req-extract-similar",
-        "I prefer dark roast coffee",
-    );
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Noted."),
-        noop_script(),
-    ]));
-
-    agent(home.path(), &harness, Arc::clone(&provider))
-        .with_memory(memory)
-        .run_submission(&submission.id)
-        .expect("run");
-
-    let requests = provider.requests();
-    assert_eq!(requests.len(), 2);
-    let extraction_text: String = requests[1]
-        .messages
-        .iter()
-        .map(message_text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(extraction_text.contains("Sam prefers dark roast coffee"));
-}
-
-#[test]
-fn an_extraction_can_update_an_existing_memory() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let seed = memory
-        .save(memory_input("Sam prefers tea", MemoryKind::Preference, 50))
-        .expect("seed");
-    let (submission, user_entry) =
-        submit_text(&harness, &conversation, "req-update", "I prefer coffee now");
-    let extraction = format!(
-        r#"{{"operations":[{{"op":"update","kind":"preference","content":"Sam prefers coffee","tags":["coffee"],"importance":70,"evidence_entry_id":"{}","evidence_quote":"I prefer coffee now","supersedes_id":"{}"}}]}}"#,
-        user_entry, seed.id
-    );
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Updated."),
-        json_script(&extraction),
-    ]));
-
-    let outcome = agent(home.path(), &harness, provider)
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
-    assert_eq!(outcome.answer_text.as_deref(), Some("Updated."));
-    let updated = memory.get(&seed.id).expect("get").expect("row");
-    assert_eq!(updated.content, "Sam prefers coffee");
-    assert_eq!(updated.importance, 70);
-    assert_eq!(memory.stats().expect("stats").total, 1);
-    let task = latest_extract_task(&harness, &conversation).expect("task");
-    assert_eq!(task.status, TaskStatus::Done);
-    assert_eq!(task.result.as_ref().expect("result")["applied"], 1);
-}
-
-#[test]
-fn an_extraction_can_supersede_an_existing_memory() {
-    let (home, harness) = harness();
-    let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let seed = memory
-        .save(memory_input("Sam lives in Manila", MemoryKind::Fact, 50))
-        .expect("seed");
-    let (submission, user_entry) = submit_text(
-        &harness,
-        &conversation,
-        "req-supersede",
-        "I moved to Quezon City",
-    );
-    let extraction = format!(
-        r#"{{"operations":[{{"op":"supersede","kind":"fact","content":"Sam lives in Quezon City","tags":[],"importance":60,"evidence_entry_id":"{}","evidence_quote":"I moved to Quezon City","supersedes_id":"{}"}}]}}"#,
-        user_entry, seed.id
-    );
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Moved."),
-        json_script(&extraction),
-    ]));
-
-    let outcome = agent(home.path(), &harness, provider)
-        .with_memory(Arc::clone(&memory))
-        .run_submission(&submission.id)
-        .expect("run");
-    assert_eq!(outcome.answer_text.as_deref(), Some("Moved."));
-    let old = memory.get(&seed.id).expect("get").expect("old");
-    assert_eq!(old.status, MemoryStatus::Superseded);
-    let found = memory.search("Quezon City", 5).expect("search");
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].content, "Sam lives in Quezon City");
-    assert_eq!(memory.stats().expect("stats").total, 2);
-    let task = latest_extract_task(&harness, &conversation).expect("task");
-    assert_eq!(task.status, TaskStatus::Done);
-}
-
-#[test]
-fn a_memory_tool_call_uses_the_run_source() {
+fn a_memory_tool_call_records_the_run_source() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
@@ -1463,21 +1132,21 @@ fn a_memory_tool_call_uses_the_run_source() {
         .latest_user_entry_id(&conversation)
         .expect("latest")
         .expect("entry");
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let tools = ToolRegistry::new(vec![Arc::new(MemoryTool::with_source(
-        Arc::clone(&memory),
-        MemorySource::user(entry.clone()),
-    ))]);
+    // The service stamps its provenance onto saves that do not name a source.
+    let memory = Arc::new(
+        MemoryService::new(harness.session().clone())
+            .expect("memory")
+            .with_source(entry.clone()),
+    );
+    let tools = ToolRegistry::new(memory.tools());
     let provider = Arc::new(ScriptedProvider::new(vec![
         Ok(vec![
             Ok(StreamEvent::ToolCall(ToolCall {
                 id: "call-mem".to_owned(),
-                name: "memory".to_owned(),
+                name: "memory_add".to_owned(),
                 arguments: json!({
-                    "action": "save",
                     "content": "Sam prefers metric units",
-                    "kind": "preference",
-                    "importance": 85
+                    "tags": ["units"]
                 }),
             })),
             Ok(StreamEvent::Usage(Usage {
@@ -1506,30 +1175,27 @@ fn a_memory_tool_call_uses_the_run_source() {
         ]),
     ]));
 
-    let outcome = agent_with(home.path(), &harness, provider, 4, tools)
+    let outcome = agent_with(home.path(), &harness, provider, tools)
         .run_submission(&submission.id)
         .expect("run submission");
     assert_eq!(outcome.answer_text.as_deref(), Some("saved"));
 
-    let items = memory.search("metric", 10).expect("search");
-    let item = items
+    let found = memory
+        .store()
+        .search(
+            "metric",
+            SearchMode::Any,
+            10,
+            0,
+            &MemorySearchOptions::default(),
+        )
+        .expect("search");
+    let item = found
+        .results
         .iter()
-        .find(|item| item.content.contains("metric units"))
+        .find(|hit| hit.memory.content.contains("metric units"))
         .expect("saved memory");
-    assert_eq!(item.source_kind, SourceKind::User);
-    assert_eq!(item.source_ref.as_deref(), Some(entry.as_str()));
-    let action: String = harness
-        .session()
-        .storage()
-        .read(|reader| {
-            reader.query_row(
-                "SELECT action FROM memory_events ORDER BY created_at DESC, id DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-        })
-        .expect("event");
-    assert_eq!(action, "add");
+    assert_eq!(item.memory.source, entry);
 }
 
 fn tool_result_text(message: &hearth_model::ChatMessage) -> String {
@@ -1544,18 +1210,16 @@ fn tool_result_text(message: &hearth_model::ChatMessage) -> String {
 }
 
 #[test]
-fn recall_is_shrunk_to_fit_the_context_budget() {
+fn recall_is_bounded_to_fit_the_context_budget() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
     for index in 0..10 {
-        memory
-            .save(memory_input(
-                &format!("project fact {index} about Atlas"),
-                MemoryKind::Fact,
-                50,
-            ))
-            .expect("memory");
+        seed_memory(
+            &memory,
+            &format!("project fact {index} about Atlas"),
+            &["atlas"],
+        );
     }
     let submission = harness
         .session()
@@ -1567,10 +1231,7 @@ fn recall_is_shrunk_to_fit_the_context_budget() {
         )
         .expect("submit")
         .submission;
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script("Short."),
-        noop_script(),
-    ]));
+    let provider = Arc::new(ScriptedProvider::new(vec![text_script("Short.")]));
     let budget = ContextBudget::new(5_320, 4_096, 0.65, 0.85, 1_000);
     let outcome = agent(home.path(), &harness, Arc::clone(&provider))
         .with_memory(Arc::clone(&memory))
@@ -1590,12 +1251,15 @@ fn recall_is_shrunk_to_fit_the_context_budget() {
         .expect("recall message");
     let lines = recall
         .lines()
-        .filter(|line| line.trim_start().starts_with('['))
+        .filter(|line| line.trim_start().starts_with("- "))
         .count();
+    // Ten memories match, so a bounded recall must return fewer than all of them.
     assert!(
-        lines > 0 && lines < 6,
-        "expected a shrunken recall, got {lines} lines: {recall}"
+        lines > 0 && lines < 10,
+        "expected a bounded recall, got {lines} lines: {recall}"
     );
+    // The ceiling is the recall cap, which is eight.
+    assert!(lines <= 8, "recall exceeded the item cap, got {lines}");
 }
 
 #[test]
@@ -1605,16 +1269,28 @@ fn oversized_tool_results_are_shrunk_to_fit_the_context_budget() {
     let huge = "x".repeat(20_000);
     harness
         .session()
-        .save(Save::new(&conversation).entry_with(NewEntry {
-            kind: "tool_result".to_owned(),
-            content: json!([{
-                "type": "tool_result",
-                "call_id": "call-budget",
-                "content": huge,
-            }]),
-            source: None,
-            prompt_hash: None,
-        }))
+        .save(
+            Save::new(&conversation)
+                .entry_with(NewEntry {
+                    kind: "assistant".to_owned(),
+                    content: json!([
+                        {"type": "text", "text": "checking"},
+                        {"type": "tool_call", "id": "call-budget", "name": "files", "arguments": {}}
+                    ]),
+                    source: None,
+                    prompt_hash: None,
+                })
+                .entry_with(NewEntry {
+                    kind: "tool_result".to_owned(),
+                    content: json!([{
+                        "type": "tool_result",
+                        "call_id": "call-budget",
+                        "content": huge,
+                    }]),
+                    source: None,
+                    prompt_hash: None,
+                }),
+        )
         .expect("tool result");
     let submission = harness
         .session()
@@ -1700,7 +1376,7 @@ fn an_oversized_prompt_settles_with_a_budget_notice() {
 }
 
 #[test]
-fn elevenlabs_voice_tags_are_in_the_runtime_note() {
+fn the_voice_tag_guidance_is_not_repeated_in_the_runtime_note() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
     let submission = submit(&harness, &conversation);
@@ -1718,10 +1394,8 @@ fn elevenlabs_voice_tags_are_in_the_runtime_note() {
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
-            max_turns: 2,
             tools: ToolRegistry::default(),
             spill_dir: home.path().join("spill"),
-            voice_tags: true,
             guidance: String::new(),
         },
     );
@@ -1738,8 +1412,10 @@ fn elevenlabs_voice_tags_are_in_the_runtime_note() {
         })
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(text.contains("Eleven"), "runtime note was {text:?}");
-    assert!(text.contains("[warm"), "runtime note was {text:?}");
+    // The audio-tag guidance belongs to the message tool description. Repeating
+    // it in the uncached runtime note cost fresh tokens on every single turn.
+    assert!(!text.contains("Eleven"), "runtime note was {text:?}");
+    assert!(!text.contains("[warm"), "runtime note was {text:?}");
 }
 
 #[test]
@@ -1761,10 +1437,8 @@ fn project_guidance_reaches_the_prompt() {
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
-            max_turns: 2,
             tools: ToolRegistry::default(),
             spill_dir: home.path().join("spill"),
-            voice_tags: false,
             guidance: "PROJECT RULES".to_owned(),
         },
     );

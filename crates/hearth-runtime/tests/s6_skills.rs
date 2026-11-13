@@ -125,10 +125,8 @@ fn the_agent_indexes_skills_and_can_load_one() {
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "owner".to_owned(),
-            max_turns: 6,
             tools,
             spill_dir: home.path().join("spill"),
-            voice_tags: false,
             guidance: String::new(),
         },
     )

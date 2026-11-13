@@ -156,10 +156,8 @@ fn tool_search_loads_a_group_for_the_next_request() {
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "owner".to_owned(),
-            max_turns: 6,
             tools: core,
             spill_dir: home.path().join("spill"),
-            voice_tags: false,
             guidance: String::new(),
         },
     )

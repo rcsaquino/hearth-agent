@@ -35,6 +35,8 @@ pub struct Message {
     pub voice: Option<Voice>,
     #[serde(default)]
     pub video: Option<Video>,
+    #[serde(default)]
+    pub reply_to_message: Option<Box<Message>>,
 }
 
 /// The chat a message belongs to.

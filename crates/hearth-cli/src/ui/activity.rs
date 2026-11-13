@@ -24,57 +24,22 @@ pub struct ActivityRow {
     pub chunks: usize,
 }
 
+/// One row per event, oldest first. Streaming deltas are no longer emitted, so
+/// every event is a single immutable row: the feed only ever grows at the end
+/// and rows already shown are never rewritten.
 pub fn rows(events: &VecDeque<Value>) -> Vec<ActivityRow> {
-    let mut rows = Vec::new();
-    let mut index = 0;
-    while index < events.len() {
-        let event = &events[index];
-        let kind = event["kind"].as_str().unwrap_or("event");
-        let timestamp = event["ts"].as_i64().unwrap_or(0);
-        if matches!(kind, "text_delta" | "thinking_delta") {
-            let task = event["task_id"].as_str().unwrap_or_default();
-            let mut text = event["data"]["text"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned();
-            let mut last = index;
-            while last + 1 < events.len() {
-                let next = &events[last + 1];
-                if next["kind"].as_str() != Some(kind)
-                    || next["task_id"].as_str().unwrap_or_default() != task
-                {
-                    break;
-                }
-                text.push_str(next["data"]["text"].as_str().unwrap_or_default());
-                last += 1;
-            }
-            let label = if kind == "thinking_delta" {
-                "Thinking"
-            } else {
-                "Reply"
-            };
-            rows.push(ActivityRow {
-                first: index,
-                last,
-                kind: kind.to_owned(),
-                timestamp,
-                summary: format!("{label} · {}", one_line(&text, 120)),
-                chunks: last - index + 1,
-            });
-            index = last + 1;
-        } else {
-            rows.push(ActivityRow {
-                first: index,
-                last: index,
-                kind: kind.to_owned(),
-                timestamp,
-                summary: event_summary(event),
-                chunks: 1,
-            });
-            index += 1;
-        }
-    }
-    rows
+    events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| ActivityRow {
+            first: index,
+            last: index,
+            kind: event["kind"].as_str().unwrap_or("event").to_owned(),
+            timestamp: event["ts"].as_i64().unwrap_or(0),
+            summary: event_summary(event),
+            chunks: 1,
+        })
+        .collect()
 }
 
 pub fn row_count(events: &VecDeque<Value>) -> usize {
@@ -119,7 +84,7 @@ fn list(app: &App, frame: &mut Frame, area: Rect, rows: &[ActivityRow], selected
         return;
     }
     let height = inner.height.max(1) as usize;
-    let start = selected.saturating_sub(height.saturating_sub(1) / 2);
+    let start = list_start(selected, rows.len(), height);
     let mut lines = Vec::new();
     for (index, row) in rows.iter().enumerate().skip(start).take(height) {
         let is_selected = index == selected;
@@ -198,32 +163,65 @@ fn detail(app: &App, frame: &mut Frame, area: Rect, rows: &[ActivityRow], select
         );
     }
     lines.push(Line::from(""));
-    if matches!(row.kind.as_str(), "text_delta" | "thinking_delta") {
-        let text = app
-            .events
-            .iter()
-            .skip(row.first)
-            .take(row.last - row.first + 1)
-            .filter_map(|event| event["data"]["text"].as_str())
-            .collect::<String>();
-        let style = if row.kind == "thinking_delta" {
-            theme::think()
-        } else {
-            theme::text()
-        };
-        for line in text.lines() {
-            lines.push(Line::styled(format!("  {line}"), style));
-        }
+    render_event(first, &mut lines);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let rendered = paragraph.line_count(inner.width);
+    let scroll = detail_scroll(
+        selected,
+        rows.len(),
+        app.activity_paused,
+        rendered,
+        inner.height,
+    );
+    frame.render_widget(paragraph.scroll((scroll, 0)), inner);
+}
+
+/// First visible row. The live (last) row is pinned to the bottom edge so the
+/// newest text never drifts out of view; any other selection stays centered.
+pub(crate) fn list_start(selected: usize, total: usize, height: usize) -> usize {
+    if total > 0 && selected + 1 == total {
+        (selected + 1).saturating_sub(height.max(1))
     } else {
-        render_event(first, &mut lines);
+        selected.saturating_sub(height.saturating_sub(1) / 2)
     }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+/// Vertical offset for the detail pane. Only the live streaming row is
+/// bottom-pinned; a paused feed or an older selection stays at the top so the
+/// reader keeps their place.
+fn detail_scroll(
+    selected: usize,
+    total: usize,
+    paused: bool,
+    rendered_lines: usize,
+    height: u16,
+) -> u16 {
+    let pinned = !paused && total > 0 && selected + 1 == total;
+    if !pinned {
+        return 0;
+    }
+    let visible = usize::from(height).max(1);
+    rendered_lines
+        .saturating_sub(visible)
+        .min(u16::MAX as usize) as u16
 }
 
 fn render_event(event: &Value, lines: &mut Vec<Line<'static>>) {
     let data = &event["data"];
     let kind = event["kind"].as_str().unwrap_or("event");
     match kind {
+        "user_message" => push_block(
+            lines,
+            "message",
+            data["text"].as_str(),
+            theme::accent_style(),
+        ),
+        "assistant_reply" => {
+            let calls = data["tool_calls"].as_u64().unwrap_or(0);
+            push_meta(lines, "tool calls", Some(&calls.to_string()));
+            push_block(lines, "thinking", data["thinking"].as_str(), theme::think());
+            push_block(lines, "reply", data["text"].as_str(), theme::text());
+        }
         "run_started" => push_meta(lines, "submission", data["submission_id"].as_str()),
         "turn_started" => push_meta(lines, "turn", Some(&data["turn"].to_string())),
         "task_step" => {
@@ -328,8 +326,8 @@ fn kind_badge(kind: &str, first: usize, app: &App) -> (&'static str, Style) {
         "run_started" => ("RUN", theme::accent_style()),
         "turn_started" => ("TURN", theme::accent_style()),
         "task_step" => ("STEP", theme::muted()),
-        "thinking_delta" => ("THINK", theme::think()),
-        "text_delta" => ("REPLY", theme::text()),
+        "user_message" => ("YOU", theme::accent_style()),
+        "assistant_reply" => ("REPLY", theme::text()),
         "tool_call_started" => ("TOOL", theme::warn()),
         "tool_result" => {
             let failed = app
@@ -387,11 +385,6 @@ fn event_time_full(micros: i64, offset: UtcOffset) -> String {
     )
 }
 
-fn one_line(text: &str, width: usize) -> String {
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    short(&collapsed, width)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,9 +393,9 @@ mod tests {
     fn events() -> VecDeque<Value> {
         [
             json!({"ts": 1, "kind": "run_started", "task_id": "t", "data": {}}),
-            json!({"ts": 2, "kind": "thinking_delta", "task_id": "t", "data": {"text": "first "}}),
-            json!({"ts": 3, "kind": "thinking_delta", "task_id": "t", "data": {"text": "second"}}),
-            json!({"ts": 4, "kind": "text_delta", "task_id": "t", "data": {"text": "answer"}}),
+            json!({"ts": 2, "kind": "user_message", "task_id": "t", "data": {"text": "please inspect"}}),
+            json!({"ts": 3, "kind": "tool_call_started", "task_id": "t", "data": {"name": "read_file"}}),
+            json!({"ts": 4, "kind": "assistant_reply", "task_id": "t", "data": {"text": "answer", "thinking": "", "tool_calls": 0}}),
             json!({"ts": 5, "kind": "run_settled", "task_id": "t", "data": {"status": "done"}}),
         ]
         .into_iter()
@@ -410,13 +403,90 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_deltas_are_one_readable_row() {
+    fn every_event_is_its_own_row_and_rows_never_merge() {
         let rows = rows(&events());
-        assert_eq!(rows.len(), 4);
-        assert_eq!(rows[1].kind, "thinking_delta");
-        assert_eq!(rows[1].chunks, 2);
-        assert!(rows[1].summary.contains("first second"));
-        assert_eq!(rows[2].kind, "text_delta");
-        assert_eq!(rows[2].chunks, 1);
+        // One row per event: nothing is coalesced, so the feed only grows.
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[0].kind, "run_started");
+        assert_eq!(rows[1].kind, "user_message");
+        assert!(
+            rows[1].summary.contains("please inspect"),
+            "{:?}",
+            rows[1].summary
+        );
+        assert_eq!(rows[2].kind, "tool_call_started");
+        assert_eq!(rows[3].kind, "assistant_reply");
+        assert_eq!(rows[3].summary, "Reply · answer");
+        assert_eq!(rows[4].kind, "run_settled");
+        for row in &rows {
+            assert_eq!(row.first, row.last, "a row must own exactly one event");
+        }
+    }
+
+    #[test]
+    fn appending_an_event_never_rewrites_earlier_rows() {
+        let mut events = events();
+        let before = rows(&events);
+        events.push_back(
+            json!({"ts": 6, "kind": "user_message", "task_id": "t", "data": {"text": "next"}}),
+        );
+        let after = rows(&events);
+        assert_eq!(after.len(), before.len() + 1);
+        for (old, new) in before.iter().zip(after.iter()) {
+            assert_eq!(old.kind, new.kind);
+            assert_eq!(old.summary, new.summary, "an existing row was rewritten");
+        }
+    }
+
+    #[test]
+    fn a_user_message_and_a_reply_both_appear() {
+        let rows = rows(&events());
+        let labels: Vec<&str> = rows.iter().map(|row| row.kind.as_str()).collect();
+        assert!(labels.contains(&"user_message"));
+        assert!(labels.contains(&"assistant_reply"));
+        assert!(
+            !labels.iter().any(|kind| kind.ends_with("_delta")),
+            "deltas must not stream into the feed: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn the_live_row_sits_on_the_last_visible_line() {
+        // 20 rows in a 6-line pane: the newest row must land on the bottom.
+        let start = list_start(19, 20, 6);
+        assert_eq!(start, 14);
+        assert_eq!(start + 6, 20);
+        // Older selections keep the centered behaviour and never underflow.
+        assert_eq!(list_start(0, 20, 6), 0);
+        assert_eq!(list_start(10, 20, 6), 8);
+        assert_eq!(list_start(0, 1, 6), 0);
+        assert_eq!(list_start(0, 0, 0), 0);
+    }
+
+    #[test]
+    fn streaming_detail_scrolls_to_the_newest_line() {
+        let text = (0..40)
+            .map(|index| format!("streamed line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let lines = text
+            .lines()
+            .map(|line| Line::styled(line.to_owned(), theme::text()))
+            .collect::<Vec<_>>();
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let rendered = paragraph.line_count(40);
+        assert!(rendered > 10, "expected wrapped lines, got {rendered}");
+        let scroll = detail_scroll(2, 3, false, rendered, 10);
+        assert!(scroll > 0, "the live row must scroll into view");
+        assert_eq!(
+            usize::from(scroll) + 10,
+            rendered.min(usize::from(scroll) + 10),
+            "scroll must keep the last line inside the pane"
+        );
+        // Paused or older selections never force a scroll.
+        assert_eq!(detail_scroll(2, 3, true, rendered, 10), 0);
+        assert_eq!(detail_scroll(1, 3, false, rendered, 10), 0);
+        // Content shorter than the pane cannot scroll.
+        assert_eq!(detail_scroll(0, 1, false, 3, 10), 0);
     }
 }

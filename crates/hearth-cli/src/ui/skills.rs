@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::theme;
+use crate::ui::activity;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let rows = Layout::default()
@@ -46,8 +47,17 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             inner,
         );
     } else {
+        let height = inner.height.max(1) as usize;
+        let start = activity::list_start(app.skills.selected, app.skills.skills.len(), height);
         let mut lines = Vec::new();
-        for (index, skill) in app.skills.skills.iter().enumerate() {
+        for (index, skill) in app
+            .skills
+            .skills
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(height)
+        {
             let selected = index == app.skills.selected;
             let marker = if selected { "▶ " } else { "  " };
             let label = format!(
@@ -71,14 +81,22 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let inner = body.inner(columns[1]);
     frame.render_widget(body, columns[1]);
     match &app.skills.body {
-        Some(text) => frame.render_widget(
-            Paragraph::new(text.as_str()).wrap(Wrap { trim: false }),
-            inner,
-        ),
-        None => frame.render_widget(
-            Paragraph::new("Select a skill and press Enter to read it.").wrap(Wrap { trim: false }),
-            inner,
-        ),
+        Some(text) => {
+            let paragraph = Paragraph::new(text.as_str()).wrap(Wrap { trim: false });
+            let max_scroll = paragraph
+                .line_count(inner.width)
+                .saturating_sub(inner.height as usize);
+            app.skills.max_scroll.set(max_scroll);
+            let scroll = app.skills.scroll.min(max_scroll).min(u16::MAX as usize) as u16;
+            frame.render_widget(paragraph.scroll((scroll, 0)), inner);
+        }
+        None => {
+            app.skills.max_scroll.set(0);
+            frame.render_widget(
+                Paragraph::new("Select a skill to read it.").wrap(Wrap { trim: false }),
+                inner,
+            );
+        }
     }
     new_skill_prompt(app, frame, area);
 }

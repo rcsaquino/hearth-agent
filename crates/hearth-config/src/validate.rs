@@ -69,7 +69,6 @@ impl Settings {
         if let Some(path) = &self.agent.workspace {
             require("agent.workspace", &path.to_string_lossy())?;
         }
-        positive("agent.max_turns", u64::from(self.agent.max_turns))?;
         positive("compaction.idle_minutes", self.compaction.idle_minutes)?;
         positive(
             "compaction.idle_min_tokens",

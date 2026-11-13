@@ -65,6 +65,12 @@ impl ToolGroups {
         self.groups.get(name)
     }
 
+    /// True when at least one optional group can actually be loaded. Without
+    /// this, `tool_search` would advertise a doorway to nothing.
+    pub fn any_available(&self) -> bool {
+        self.groups.values().any(|group| group.available())
+    }
+
     /// Groups matching any word in the query. An empty query returns all.
     pub fn search(&self, query: &str) -> Vec<&ToolGroup> {
         let terms: Vec<String> = query

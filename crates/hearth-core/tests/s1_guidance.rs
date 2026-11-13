@@ -26,8 +26,22 @@ fn home_and_project_guidance_are_loaded_in_order() {
     let nested_at = guidance.text.find("NESTED RULE").expect("nested text");
     assert!(home_at < project_at, "home rules must come first");
     assert!(project_at < nested_at, "the nearest project must come last");
-    assert!(guidance.text.contains("HEARTH.md"));
-    assert!(guidance.text.contains("AGENTS.md"));
+    assert!(
+        !guidance.text.contains("Hearth home"),
+        "the home file header leaked into the prompt: {}",
+        guidance.text
+    );
+    assert!(
+        !guidance.text.contains(&home.display().to_string()),
+        "an absolute home path leaked into the prompt: {}",
+        guidance.text
+    );
+    assert_eq!(
+        guidance.text.matches("### Project rules").count(),
+        2,
+        "each project file should get one compact label: {}",
+        guidance.text
+    );
     assert!(
         guidance
             .files

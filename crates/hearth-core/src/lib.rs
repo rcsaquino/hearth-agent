@@ -29,7 +29,7 @@ pub use model::{
     Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,
     EffectStatus, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewEntry, NewMemory,
     NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission, SubmissionStatus, SubmitResult,
-    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
+    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals, cache_hit_rate,
 };
 pub use prompt::{Prompt, PromptInput, build as build_prompt, parse_blocks, prefix_cause};
 pub use session::{Harness, Session};

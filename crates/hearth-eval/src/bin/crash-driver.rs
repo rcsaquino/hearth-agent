@@ -71,10 +71,8 @@ fn agent(args: &[String]) -> Result<()> {
         model: "test-model".to_owned(),
         provider_name: "scripted".to_owned(),
         owner: "crash-driver".to_owned(),
-        max_turns: 3,
         tools: ToolRegistry::new(vec![]),
         spill_dir: home.join("spill"),
-        voice_tags: false,
         guidance: String::new(),
     };
     let agent = Agent::new(session, Arc::new(ScriptedProvider), config);

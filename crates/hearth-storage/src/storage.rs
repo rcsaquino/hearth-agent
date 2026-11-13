@@ -1,6 +1,6 @@
 //! Session-facing storage boundary: one writer thread and a read pool.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -14,6 +14,7 @@ type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 /// The durable storage boundary. One writer connection runs on a dedicated
 /// thread; four read-only connections serve readers.
 pub struct Storage {
+    path: PathBuf,
     sender: Mutex<Option<Sender<Job>>>,
     readers: Mutex<Vec<Connection>>,
     reader_ready: Condvar,
@@ -34,11 +35,17 @@ impl Storage {
         let (sender, receiver) = mpsc::channel::<Job>();
         let thread = thread::spawn(move || writer_loop(receiver, connection));
         Ok(Self {
+            path: path.to_path_buf(),
             sender: Mutex::new(Some(sender)),
             readers: Mutex::new(readers),
             reader_ready: Condvar::new(),
             thread: Mutex::new(Some(thread)),
         })
+    }
+
+    /// The database file this handle was opened on.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Run one closure inside one transaction on the writer thread.

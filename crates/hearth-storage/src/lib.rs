@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
 /// The schema version this build understands.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 pub use backup::{snapshot, verify};
 pub use storage::{Reader, Storage, Writer};
@@ -100,6 +100,7 @@ pub fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
         (2, schema::MIGRATION_0003, 3),
         (3, schema::MIGRATION_0004, 4),
         (4, schema::MIGRATION_0005, 5),
+        (5, schema::MIGRATION_0006, 6),
     ] {
         if current != from {
             continue;

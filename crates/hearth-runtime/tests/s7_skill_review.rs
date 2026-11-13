@@ -58,7 +58,7 @@ fn body() -> &'static str {
 
 fn reviewer(session: &Session, home: &Path, response: &str) -> (Arc<Scripted>, SkillReviewer) {
     let scripted = Scripted::new(response);
-    let memory = Arc::new(MemoryService::new(session.clone()));
+    let memory = Arc::new(MemoryService::new(session.clone()).expect("memory"));
     let library = Arc::new(SkillLibrary::new(home));
     let reviewer = SkillReviewer::new(
         session.clone(),

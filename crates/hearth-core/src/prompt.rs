@@ -1,6 +1,6 @@
 //! Prompt assembly from the permanent record.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Role, ToolSpec};
 use serde_json::{Value, json};
@@ -43,37 +43,34 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         role: Role::System,
         blocks: vec![ContentBlock::Text(input.soul.clone())],
     });
-    if !input.guidance.trim().is_empty() {
-        messages.push(ChatMessage {
-            role: Role::System,
-            blocks: vec![ContentBlock::Text(format!(
-                "<project_instructions>\n{}\n</project_instructions>",
-                input.guidance
-            ))],
-        });
-    }
-    if !input.standing.trim().is_empty() {
-        messages.push(ChatMessage {
-            role: Role::System,
-            blocks: vec![ContentBlock::Text(format!(
-                "<standing_memory>\n{}\n</standing_memory>",
-                input.standing
-            ))],
-        });
-    }
-    if !input.skills_index.trim().is_empty() {
-        messages.push(ChatMessage {
-            role: Role::System,
-            blocks: vec![ContentBlock::Text(format!(
-                "<skills>\n{}\n</skills>",
-                input.skills_index
-            ))],
-        });
-    }
-    let newest_user = history.iter().rposition(|entry| {
-        message_for_entry(entry).is_some_and(|message| message.role == Role::User)
+    // Always emit the four fixed segments, even when empty, so a transient
+    // read failure cannot shift every later message by one slot.
+    messages.push(ChatMessage {
+        role: Role::System,
+        blocks: vec![ContentBlock::Text(format!(
+            "<project_instructions>\n{}\n</project_instructions>",
+            input.guidance
+        ))],
     });
-    for (index, entry) in history.iter().enumerate() {
+    messages.push(ChatMessage {
+        role: Role::System,
+        blocks: vec![ContentBlock::Text(format!(
+            "<standing_memory>\n{}\n</standing_memory>",
+            input.standing
+        ))],
+    });
+    messages.push(ChatMessage {
+        role: Role::System,
+        blocks: vec![ContentBlock::Text(format!(
+            "<skills>\n{}\n</skills>",
+            input.skills_index
+        ))],
+    });
+    let history_messages = paired_messages(history);
+    let newest_user = history_messages
+        .iter()
+        .rposition(|message| message.role == Role::User);
+    for (index, message) in history_messages.iter().enumerate() {
         if Some(index) == newest_user && !input.recall.trim().is_empty() {
             messages.push(ChatMessage {
                 role: Role::System,
@@ -83,18 +80,15 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
                 ))],
             });
         }
-        if let Some(message) = message_for_entry(entry) {
-            messages.push(message);
-        }
+        messages.push(message.clone());
     }
     messages.push(ChatMessage {
         role: Role::System,
         blocks: vec![ContentBlock::Text(input.runtime_note.clone())],
     });
 
-    let transcript: Vec<Value> = history
+    let transcript: Vec<Value> = history_messages
         .iter()
-        .filter_map(message_for_entry)
         .map(|message| {
             json!({
                 "role": role_str(message.role),
@@ -134,10 +128,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     let mut prefix_parts = BTreeMap::new();
     prefix_parts.insert("identity".to_owned(), hash_part(&input.soul));
     prefix_parts.insert("tools".to_owned(), hash_part(&tools_text));
-    prefix_parts.insert(
-        "standing".to_owned(),
-        hash_part(&format!("{}\n{}", input.standing, input.standing_version)),
-    );
+    prefix_parts.insert("standing".to_owned(), hash_part(&input.standing));
     prefix_parts.insert("skills".to_owned(), hash_part(&skills_text));
     prefix_parts.insert("guidance".to_owned(), hash_part(&input.guidance));
     let prefix_hash = hash_part(
@@ -151,6 +142,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "identity": input.soul,
         "tools": tools,
         "standing_memory": input.standing,
+        "standing_version": input.standing_version,
         "skills_index": input.skills_index,
         "guidance": input.guidance,
         "recall": input.recall,
@@ -258,6 +250,102 @@ fn block_json(block: &ContentBlock) -> Value {
             "mime": mime,
         }),
     }
+}
+
+/// Build the history messages, then repair the tool-call pairing on the wire.
+///
+/// A steering message can be saved between an assistant call and its result.
+/// OpenAI-compatible providers require every tool call to be answered directly
+/// after the assistant message, so matching results are pulled forward and
+/// unmatched calls or results are dropped.
+fn paired_messages(history: &[Entry]) -> Vec<ChatMessage> {
+    let messages: Vec<ChatMessage> = history.iter().filter_map(message_for_entry).collect();
+    let mut output = Vec::with_capacity(messages.len());
+    let mut queue: VecDeque<ChatMessage> = messages.into();
+    while let Some(message) = queue.pop_front() {
+        if message.role == Role::Tool {
+            continue;
+        }
+        if message.role != Role::Assistant {
+            output.push(message);
+            continue;
+        }
+        let call_ids: HashSet<String> = message
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::ToolCall(call) => Some(call.id.clone()),
+                _ => None,
+            })
+            .collect();
+        if call_ids.is_empty() {
+            output.push(message);
+            continue;
+        }
+
+        let mut rest = VecDeque::with_capacity(queue.len());
+        let mut matched = Vec::new();
+        let mut satisfied = HashSet::new();
+        while let Some(next) = queue.pop_front() {
+            if next.role != Role::Tool {
+                rest.push_back(next);
+                continue;
+            }
+            let (mine, other) = split_tool_results(next.blocks, &call_ids, &satisfied);
+            if !mine.is_empty() {
+                for block in &mine {
+                    if let ContentBlock::ToolResult { call_id, .. } = block {
+                        satisfied.insert(call_id.clone());
+                    }
+                }
+                matched.push(ChatMessage {
+                    role: Role::Tool,
+                    blocks: mine,
+                });
+            }
+            if !other.is_empty() {
+                rest.push_back(ChatMessage {
+                    role: Role::Tool,
+                    blocks: other,
+                });
+            }
+        }
+
+        let mut blocks = message.blocks;
+        blocks.retain(|block| match block {
+            ContentBlock::ToolCall(call) => satisfied.contains(&call.id),
+            _ => true,
+        });
+        if !blocks.is_empty() {
+            output.push(ChatMessage {
+                role: Role::Assistant,
+                blocks,
+            });
+        }
+        output.extend(matched);
+        queue = rest;
+    }
+    output
+}
+
+fn split_tool_results(
+    blocks: Vec<ContentBlock>,
+    call_ids: &HashSet<String>,
+    satisfied: &HashSet<String>,
+) -> (Vec<ContentBlock>, Vec<ContentBlock>) {
+    let mut mine = Vec::new();
+    let mut other = Vec::new();
+    for block in blocks {
+        match &block {
+            ContentBlock::ToolResult { call_id, .. }
+                if call_ids.contains(call_id) && !satisfied.contains(call_id) =>
+            {
+                mine.push(block);
+            }
+            _ => other.push(block),
+        }
+    }
+    (mine, other)
 }
 
 /// Map one permanent entry to a chat message.

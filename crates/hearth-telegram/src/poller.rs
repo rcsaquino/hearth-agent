@@ -242,6 +242,10 @@ impl TelegramPoller {
 
     fn blocks(&self, message: &Message) -> Vec<Value> {
         let mut blocks = Vec::new();
+        if let Some(context) = message.reply_to_message.as_deref().and_then(reply_context) {
+            blocks.push(json!({"type": "text", "text": context}));
+        }
+
         if let Some(text) = message
             .text
             .as_deref()
@@ -404,6 +408,42 @@ impl TelegramPoller {
         }
         true
     }
+}
+
+/// The largest quoted body Hearth forwards as reply context.
+const REPLY_CONTEXT_CHARS: usize = 500;
+
+/// The context line describing the message being replied to.
+fn reply_context(quoted: &Message) -> Option<String> {
+    let author = quoted
+        .from
+        .as_ref()
+        .and_then(|user| user.first_name.as_deref())
+        .unwrap_or("someone");
+    let body = match quoted
+        .text
+        .as_deref()
+        .or(quoted.caption.as_deref())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        Some(text) => {
+            let mut characters = text.chars();
+            let head: String = characters.by_ref().take(REPLY_CONTEXT_CHARS).collect();
+            if characters.next().is_some() {
+                format!("\"{head}…\"")
+            } else {
+                format!("\"{head}\"")
+            }
+        }
+        None if !quoted.photo.is_empty() => "(a photo)".to_owned(),
+        None if quoted.document.is_some() => "(a document)".to_owned(),
+        None if quoted.audio.is_some() => "(an audio file)".to_owned(),
+        None if quoted.voice.is_some() => "(a voice message)".to_owned(),
+        None if quoted.video.is_some() => "(a video)".to_owned(),
+        None => return None,
+    };
+    Some(format!("Replying to {author}: {body}"))
 }
 
 fn has_content(message: &Message) -> bool {

@@ -260,11 +260,13 @@ fn a_configured_speaker_teaches_elevenlabs_tags() {
     let spec = tool.spec();
     assert!(spec.description.contains("Eleven"), "{}", spec.description);
     assert!(spec.description.contains("[warm"), "{}", spec.description);
+    // One copy only. The speech parameter used to repeat the same sentence,
+    // and the runtime note repeated it a third time on every turn.
     let text = spec.parameters["properties"]["text"]["description"]
         .as_str()
         .expect("text description");
-    assert!(text.contains("Eleven"), "{text}");
-    assert!(text.contains("[warm"), "{text}");
+    assert!(!text.contains("Eleven"), "{text}");
+    assert!(!text.contains("[warm"), "{text}");
 }
 
 #[test]

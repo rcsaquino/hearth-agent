@@ -231,6 +231,15 @@ pub struct UsageTotals {
     pub cache_read_tokens: i64,
 }
 
+/// The share of prompt tokens served from the provider cache.
+/// `input_tokens` is the prompt total and already includes cached tokens.
+pub fn cache_hit_rate(input_tokens: i64, cache_read_tokens: i64) -> f64 {
+    if input_tokens <= 0 {
+        return 0.0;
+    }
+    (cache_read_tokens as f64 / input_tokens as f64).clamp(0.0, 1.0)
+}
+
 /// One saved prompt text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptBlob {

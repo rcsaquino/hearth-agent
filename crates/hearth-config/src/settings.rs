@@ -252,22 +252,11 @@ pub struct SearchProvider {
     pub api_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Agent {
     #[serde(default)]
     pub workspace: Option<PathBuf>,
-    #[serde(default = "default_max_turns")]
-    pub max_turns: u32,
-}
-
-impl Default for Agent {
-    fn default() -> Self {
-        Self {
-            workspace: None,
-            max_turns: default_max_turns(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -304,6 +293,14 @@ pub struct Memory {
     pub standing_max_tokens: u64,
     #[serde(default = "default_recall_max_tokens")]
     pub recall_max_tokens: u64,
+    #[serde(default = "default_recall_max_items")]
+    pub recall_max_items: u64,
+    /// Semantic recall. Off means keyword search only.
+    #[serde(default = "default_embeddings")]
+    pub embeddings: bool,
+    /// Directory holding `model.onnx` and `tokenizer.json`.
+    #[serde(default = "default_embedding_model_dir")]
+    pub embedding_model_dir: String,
 }
 
 impl Default for Memory {
@@ -311,6 +308,9 @@ impl Default for Memory {
         Self {
             standing_max_tokens: default_standing_max_tokens(),
             recall_max_tokens: default_recall_max_tokens(),
+            recall_max_items: default_recall_max_items(),
+            embeddings: default_embeddings(),
+            embedding_model_dir: default_embedding_model_dir(),
         }
     }
 }
@@ -389,10 +389,6 @@ fn default_search_max_results() -> u8 {
     10
 }
 
-fn default_max_turns() -> u32 {
-    120
-}
-
 fn default_context_window() -> u64 {
     128_000
 }
@@ -427,6 +423,18 @@ fn default_standing_max_tokens() -> u64 {
 
 fn default_recall_max_tokens() -> u64 {
     900
+}
+
+fn default_recall_max_items() -> u64 {
+    8
+}
+
+fn default_embeddings() -> bool {
+    true
+}
+
+fn default_embedding_model_dir() -> String {
+    "models/bekko-embedding-v1-a8m".to_owned()
 }
 
 fn default_log_level() -> String {
@@ -484,7 +492,6 @@ pub fn default_settings_value() -> Value {
         },
         "agent": {
             "workspace": null,
-            "max_turns": default_max_turns(),
         },
         "compaction": {
             "idle_minutes": default_idle_minutes(),

@@ -149,6 +149,166 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
 }
 
 #[test]
+fn a_steering_message_between_a_tool_call_and_its_result_is_reordered() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "read it"}))
+                .entry(
+                    "assistant",
+                    json!([
+                        {"type": "text", "text": "calling"},
+                        {"type": "tool_call", "id": "call-1", "name": "read", "arguments": {"path": "a"}}
+                    ]),
+                ),
+        )
+        .expect("save first turn");
+    session
+        .save(Save::new(&conversation.id).entry("user", json!({"text": "also check b"})))
+        .expect("save steering message");
+    session
+        .save(Save::new(&conversation.id).entry(
+            "tool_result",
+            json!([{"type": "tool_result", "call_id": "call-1", "content": "file body"}]),
+        ))
+        .expect("save result");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME".to_owned(),
+            standing: String::new(),
+            standing_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: String::new(),
+        })
+        .expect("build prompt");
+
+    let assistant = prompt
+        .request
+        .messages
+        .iter()
+        .position(|message| message.role == Role::Assistant)
+        .expect("assistant");
+    let tool = prompt
+        .request
+        .messages
+        .iter()
+        .position(|message| message.role == Role::Tool)
+        .expect("tool result");
+    let steering = prompt
+        .request
+        .messages
+        .iter()
+        .position(|message| text_of(message) == "also check b")
+        .expect("steering message");
+    assert_eq!(
+        tool,
+        assistant + 1,
+        "the tool result must immediately follow its assistant call: {:?}",
+        prompt.request.messages
+    );
+    assert!(
+        steering > tool,
+        "the steering message must come after the paired result: {:?}",
+        prompt.request.messages
+    );
+
+    let transcript = prompt.document["transcript"]
+        .as_array()
+        .expect("transcript");
+    let roles = transcript
+        .iter()
+        .filter_map(|message| message["role"].as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        roles.windows(2).any(|pair| pair == ["assistant", "tool"]),
+        "the audit transcript must match the wire order: {roles:?}"
+    );
+}
+
+#[test]
+fn orphan_tool_results_and_unresolved_calls_are_dropped_from_the_request() {
+    use hearth_model::ContentBlock;
+
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "read it"}))
+                .entry(
+                    "assistant",
+                    json!([
+                        {"type": "text", "text": "calling"},
+                        {"type": "tool_call", "id": "missing", "name": "read", "arguments": {}}
+                    ]),
+                )
+                .entry(
+                    "tool_result",
+                    json!([{"type": "tool_result", "call_id": "other", "content": "orphan"}]),
+                ),
+        )
+        .expect("save entries");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME".to_owned(),
+            standing: String::new(),
+            standing_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: String::new(),
+        })
+        .expect("build prompt");
+
+    assert!(
+        prompt
+            .request
+            .messages
+            .iter()
+            .all(|message| message.role != Role::Tool),
+        "an orphan tool result must not be sent: {:?}",
+        prompt.request.messages
+    );
+    let assistant = prompt
+        .request
+        .messages
+        .iter()
+        .find(|message| message.role == Role::Assistant)
+        .expect("assistant");
+    assert!(
+        assistant
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, ContentBlock::ToolCall(_))),
+        "an unresolved tool call must not be sent: {:?}",
+        assistant.blocks
+    );
+    assert!(
+        assistant
+            .blocks
+            .contains(&ContentBlock::Text("calling".to_owned()))
+    );
+}
+
+#[test]
 fn the_request_carries_the_model_tools_and_session() {
     use hearth_model::ToolSpec;
 
@@ -539,10 +699,10 @@ fn the_prefix_hash_tracks_only_the_stable_layers() {
     let causes = prefix_cause(Some(&json!(first.prefix_parts)), &tools.prefix_parts);
     assert_eq!(causes, vec!["tools"]);
 
-    let standing = build("SOUL", Vec::new(), 1, "R1", "RUN");
-    assert_ne!(first.prefix_hash, standing.prefix_hash);
-    let causes = prefix_cause(Some(&json!(first.prefix_parts)), &standing.prefix_parts);
-    assert_eq!(causes, vec!["standing memory"]);
+    // The version is an audit value; only the rendered bytes belong in the hash.
+    let same_standing = build("SOUL", Vec::new(), 1, "R1", "RUN");
+    assert_eq!(first.prefix_hash, same_standing.prefix_hash);
+    assert_eq!(same_standing.document["standing_version"], 1);
 
     let runtime = build("SOUL", Vec::new(), 0, "R2", "RUN 2");
     assert_eq!(first.prefix_hash, runtime.prefix_hash);

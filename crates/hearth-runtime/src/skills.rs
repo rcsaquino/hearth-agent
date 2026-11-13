@@ -238,8 +238,7 @@ impl SkillLibrary {
                 .success_rate()
                 .partial_cmp(&left.success_rate())
                 .unwrap_or(std::cmp::Ordering::Equal);
-            rate.then_with(|| right.last_used.cmp(&left.last_used))
-                .then_with(|| left.name.cmp(&right.name))
+            rate.then_with(|| left.name.cmp(&right.name))
         });
 
         let mut lines: Vec<String> = Vec::new();

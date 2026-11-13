@@ -526,6 +526,7 @@ fn parse_usage(value: &Value) -> Usage {
         cache_read_tokens: value["prompt_tokens_details"]["cached_tokens"]
             .as_i64()
             .or_else(|| value["cache_read_input_tokens"].as_i64())
+            .or_else(|| value["prompt_cache_hit_tokens"].as_i64())
             .unwrap_or(0),
         cache_write_tokens: value["cache_creation_input_tokens"].as_i64().unwrap_or(0),
         output_tokens: value["completion_tokens"].as_i64().unwrap_or(0),

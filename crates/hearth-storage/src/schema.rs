@@ -13,3 +13,6 @@ pub const MIGRATION_0004: &str = include_str!("../migrations/0004.sql");
 
 /// Migration 0005 removes token cost accounting.
 pub const MIGRATION_0005: &str = include_str!("../migrations/0005.sql");
+
+/// Migration 0006 caches memory embeddings for hybrid recall.
+pub const MIGRATION_0006: &str = include_str!("../migrations/0006.sql");

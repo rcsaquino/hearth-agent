@@ -130,6 +130,7 @@ pub struct SettingsForm {
     home: PathBuf,
     defaults: Value,
     catalog_key: Option<(String, String)>,
+    daemon_running: bool,
 }
 
 impl SettingsForm {
@@ -173,7 +174,7 @@ impl SettingsForm {
             apply_catalog_defaults(&mut defaults, limits);
             catalog_key = Some((base_url.to_owned(), model.to_owned()));
         }
-        let rows = build_rows(&document, &home, &defaults);
+        let rows = build_rows(&document, &home, &defaults, false);
         let selected = rows
             .iter()
             .position(|row| row.kind != RowKind::Header)
@@ -190,7 +191,41 @@ impl SettingsForm {
             home,
             defaults,
             catalog_key,
+            daemon_running: false,
         })
+    }
+
+    /// Swap the daemon action rows to match the live daemon state.
+    pub fn set_daemon_running(&mut self, running: bool) {
+        if self.daemon_running == running {
+            return;
+        }
+        // Rebuilding the row list would move the edit or picker under the user.
+        if self.edit.is_some() || self.picker.is_some() {
+            return;
+        }
+        let selected_path = self.rows.get(self.selected).map(|row| row.path.clone());
+        let selected_kind = self.rows.get(self.selected).map(|row| row.kind);
+        self.daemon_running = running;
+        self.rows = build_rows(
+            &self.document,
+            &self.home,
+            &self.defaults,
+            self.daemon_running,
+        );
+        let path_index = selected_path
+            .as_ref()
+            .filter(|path| !path.is_empty())
+            .and_then(|path| self.rows.iter().position(|row| &row.path == path));
+        let kind_index =
+            selected_kind.and_then(|kind| self.rows.iter().position(|row| row.kind == kind));
+        let daemon_index = selected_kind
+            .filter(|kind| is_daemon_action(*kind))
+            .and_then(|_| self.rows.iter().position(|row| is_daemon_action(row.kind)));
+        if let Some(index) = path_index.or(kind_index).or(daemon_index) {
+            self.selected = index;
+        }
+        self.selected = self.selected.min(self.rows.len().saturating_sub(1));
     }
 
     /// The document as pretty JSON, with defaults omitted.
@@ -749,7 +784,12 @@ impl SettingsForm {
 
     fn rebuild_rows(&mut self) {
         let selected_path = self.rows.get(self.selected).map(|row| row.path.clone());
-        self.rows = build_rows(&self.document, &self.home, &self.defaults);
+        self.rows = build_rows(
+            &self.document,
+            &self.home,
+            &self.defaults,
+            self.daemon_running,
+        );
         if let Some(path) = selected_path
             && let Some(index) = self.rows.iter().position(|row| row.path == path)
         {
@@ -846,7 +886,19 @@ fn merge_defaults(document: &mut Value, defaults: &Value) {
     }
 }
 
-fn build_rows(document: &Value, home: &Path, defaults: &Value) -> Vec<SettingsRow> {
+fn is_daemon_action(kind: RowKind) -> bool {
+    matches!(
+        kind,
+        RowKind::StartDaemon | RowKind::StopDaemon | RowKind::RestartDaemon
+    )
+}
+
+fn build_rows(
+    document: &Value,
+    home: &Path,
+    defaults: &Value,
+    daemon_running: bool,
+) -> Vec<SettingsRow> {
     let mut rows = Vec::new();
     let object = match document.as_object() {
         Some(object) => object,
@@ -897,27 +949,30 @@ fn build_rows(document: &Value, home: &Path, defaults: &Value) -> Vec<SettingsRo
         }
         if key == "daemon" {
             rows.push(header("Daemon controls"));
-            rows.push(action_row(
-                "Start daemon now",
-                "Start",
-                RowKind::StartDaemon,
-                "Start Hearth without closing this window.",
-                "Start the daemon now. It uses the start mode saved above.",
-            ));
-            rows.push(action_row(
-                "Stop daemon now",
-                "Stop",
-                RowKind::StopDaemon,
-                "Stop the daemon this window started.",
-                "Stop a daemon this window owns. A service-managed daemon is left alone.",
-            ));
-            rows.push(action_row(
-                "Restart daemon now",
-                "Restart",
-                RowKind::RestartDaemon,
-                "Restart the daemon this window owns.",
-                "Stop and start a daemon this window owns. A service-managed daemon is left alone.",
-            ));
+            if daemon_running {
+                rows.push(action_row(
+                    "Stop daemon",
+                    "Stop",
+                    RowKind::StopDaemon,
+                    "Stop Hearth without closing this window.",
+                    "Stop the local Hearth daemon. An installed service unit is left in place.",
+                ));
+                rows.push(action_row(
+                    "Restart daemon",
+                    "Restart",
+                    RowKind::RestartDaemon,
+                    "Restart Hearth and apply saved settings.",
+                    "Stop and start the local Hearth daemon. An installed service unit is reused.",
+                ));
+            } else {
+                rows.push(action_row(
+                    "Start daemon",
+                    "Start",
+                    RowKind::StartDaemon,
+                    "Start Hearth without closing this window.",
+                    "Start the daemon now. It uses the start mode saved above.",
+                ));
+            }
         }
         seen.push(key.to_owned());
     }
@@ -1002,7 +1057,9 @@ fn build_web_rows(rows: &mut Vec<SettingsRow>, web: Option<&Value>, defaults: &V
             "search",
             &name,
             &label,
-            search_providers.and_then(|providers| providers.get(&name)),
+            search_providers
+                .and_then(|providers| providers.get(&name))
+                .and_then(|provider| provider.get("api_key")),
             name == "exa",
         ));
     }
@@ -1047,7 +1104,9 @@ fn build_web_rows(rows: &mut Vec<SettingsRow>, web: Option<&Value>, defaults: &V
             "fetch",
             name,
             label,
-            fetch_providers.and_then(|providers| providers.get(name)),
+            fetch_providers
+                .and_then(|providers| providers.get(name))
+                .and_then(|provider| provider.get("api_key")),
             name == "jina",
         ));
     }
@@ -1676,7 +1735,6 @@ fn humanize(key: &str) -> String {
         "max_results" => "Maximum results",
         "providers" => "Providers",
         "workspace" => "Workspace",
-        "max_turns" => "Max turns",
         "max_concurrent" => "Max concurrent tasks",
         "max_depth" => "Max helper depth",
         "retention_days" => "Helper retention days",
@@ -1723,7 +1781,6 @@ fn help_for(key: &str, kind: RowKind) -> &'static str {
         "max_output_tokens" => {
             "Local space reserved for answers when planning context. Not sent to the provider."
         }
-        "max_turns" => "Maximum model requests in one run. Default 120.",
         "workspace" => "The folder tools may read and write. Empty uses the default workspace.",
         "soft_compact" => "A fraction of the usable window, for example 0.65.",
         "hard_compact" => "A fraction of the usable window, for example 0.85.",
@@ -1792,9 +1849,6 @@ fn tooltip_for(key: &str, kind: RowKind) -> &'static str {
         }
         "workspace" => {
             "The folder file tools may read and write. A relative path lives inside the Hearth home; empty uses the default workspace folder."
-        }
-        "max_turns" => {
-            "Maximum model requests in one run. Each tool call and follow-up counts as another request. The default is 120."
         }
         "max_concurrent" => {
             "How many helper tasks may run at the same time. Enter a whole number from 1 to 8."
@@ -1897,7 +1951,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_has_no_soul_file_row_and_120_turns_by_default() {
+    fn identity_has_no_soul_file_row_and_no_turn_limit_row() {
         let form = form();
         assert!(
             !form
@@ -1905,8 +1959,12 @@ mod tests {
                 .iter()
                 .any(|row| row.path == ["identity", "soul_file"])
         );
-        let turns = &form.rows[row_index(&form, &["agent", "max_turns"])];
-        assert_eq!(turns.value, "120");
+        assert!(
+            !form
+                .rows
+                .iter()
+                .any(|row| row.path == ["agent", "max_turns"])
+        );
     }
 
     #[test]
@@ -1982,16 +2040,52 @@ mod tests {
             form.document["web"]["fetch"]["providers"]["firecrawl"]["api_key"],
             "new-key"
         );
+        for path in [
+            ["web", "search", "providers", "brave", "api_key"],
+            ["web", "fetch", "providers", "firecrawl", "api_key"],
+        ] {
+            assert_eq!(
+                form.rows[row_index(&form, &path)].value,
+                "••••••••",
+                "{path:?} should look set after editing"
+            );
+        }
+    }
+
+    #[test]
+    fn configured_web_keys_show_as_set() {
+        let form = SettingsForm::from_document(json!({
+            "web": {
+                "search": {"providers": {
+                    "brave": {"api_key": "fake-brave-key"},
+                    "exa": {"api_key": ""}
+                }},
+                "fetch": {"providers": {
+                    "firecrawl": {"api_key": "${FIRECRAWL_API_KEY}"}
+                }}
+            }
+        }))
+        .expect("form");
+
+        for path in [
+            ["web", "search", "providers", "brave", "api_key"],
+            ["web", "fetch", "providers", "firecrawl", "api_key"],
+        ] {
+            let row = &form.rows[row_index(&form, &path)];
+            assert_eq!(row.value, "••••••••", "{path:?} should look set");
+        }
+        let exa = &form.rows[row_index(&form, &["web", "search", "providers", "exa", "api_key"])];
+        assert_eq!(exa.value, "not set");
     }
 
     #[test]
     fn editing_a_vague_setting_shows_a_tooltip() {
         let mut form = form();
-        let index = row_index(&form, &["agent", "max_turns"]);
+        let index = row_index(&form, &["compaction", "soft_compact"]);
         form.selected = index;
         form.handle_key(key(KeyCode::Enter));
         let hint = form.edit.as_ref().expect("edit").hint;
-        assert!(hint.contains("model requests"), "{hint}");
+        assert!(hint.contains("fraction of"), "{hint}");
     }
 
     #[test]
@@ -2105,19 +2199,19 @@ mod tests {
                 "api_key": "fake-key",
                 "model": "fake-model"
             },
-            "agent": {"max_turns": 60}
+            "compaction": {"idle_minutes": 15}
         }))
         .expect("form");
-        let index = row_index(&form, &["agent", "max_turns"]);
+        let index = row_index(&form, &["compaction", "idle_minutes"]);
         assert!(form.rows[index].modified);
         form.selected = index;
         assert_eq!(
             form.handle_key(key(KeyCode::Char('r'))),
             FormAction::Changed
         );
-        assert_eq!(form.document["agent"]["max_turns"], 120);
-        assert!(!form.rows[row_index(&form, &["agent", "max_turns"])].modified);
-        assert!(!form.text().contains("max_turns"));
+        assert_eq!(form.document["compaction"]["idle_minutes"], 60);
+        assert!(!form.rows[row_index(&form, &["compaction", "idle_minutes"])].modified);
+        assert!(!form.text().contains("idle_minutes"));
     }
 
     #[test]
@@ -2168,32 +2262,62 @@ mod tests {
     }
 
     #[test]
-    fn settings_rows_include_the_file_and_daemon_actions() {
-        let form = form();
-        for kind in [
-            RowKind::EditSoul,
-            RowKind::EditGuidance,
-            RowKind::StartDaemon,
-            RowKind::StopDaemon,
-            RowKind::RestartDaemon,
-        ] {
+    fn daemon_actions_follow_the_running_state() {
+        let mut form = form();
+        for kind in [RowKind::EditSoul, RowKind::EditGuidance] {
             assert!(
                 form.rows.iter().any(|row| row.kind == kind),
                 "missing action {kind:?}"
             );
         }
-        for (kind, value) in [
-            (RowKind::StartDaemon, "Start"),
-            (RowKind::StopDaemon, "Stop"),
-            (RowKind::RestartDaemon, "Restart"),
+
+        form.set_daemon_running(false);
+        assert!(
+            form.rows.iter().any(|row| row.kind == RowKind::StartDaemon),
+            "a stopped daemon needs a start action"
+        );
+        assert!(
+            form.rows
+                .iter()
+                .all(|row| !matches!(row.kind, RowKind::StopDaemon | RowKind::RestartDaemon)),
+            "stop and restart must be hidden while stopped"
+        );
+        let start = form
+            .rows
+            .iter()
+            .find(|row| row.kind == RowKind::StartDaemon)
+            .expect("start action");
+        assert_eq!(start.value, "Start");
+
+        form.set_daemon_running(true);
+        assert!(
+            form.rows.iter().all(|row| row.kind != RowKind::StartDaemon),
+            "start must be hidden while the daemon is running"
+        );
+        for (kind, value, label) in [
+            (RowKind::StopDaemon, "Stop", "Stop daemon"),
+            (RowKind::RestartDaemon, "Restart", "Restart daemon"),
         ] {
             let row = form
                 .rows
                 .iter()
                 .find(|row| row.kind == kind)
                 .expect("daemon action");
+            assert_eq!(row.label, label);
             assert_eq!(row.value, value);
         }
+
+        form.selected = form
+            .rows
+            .iter()
+            .position(|row| row.kind == RowKind::RestartDaemon)
+            .expect("restart");
+        form.set_daemon_running(false);
+        assert_eq!(
+            form.selected_row().expect("selection").kind,
+            RowKind::StartDaemon,
+            "the selection should stay in the daemon controls"
+        );
     }
     #[test]
     fn the_timezone_row_opens_a_picker() {

@@ -497,11 +497,13 @@ fn a_configured_speaker_teaches_elevenlabs_tags() {
     let spec = tool.spec();
     assert!(spec.description.contains("Eleven"), "{}", spec.description);
     assert!(spec.description.contains("[warm"), "{}", spec.description);
+    // One copy only. Repeating the guidance in the speech parameter and in the
+    // runtime note cost the same tokens three times over on every request.
     let speech = spec.parameters["properties"]["speech"]["description"]
         .as_str()
         .expect("speech description");
-    assert!(speech.contains("Eleven"), "{speech}");
-    assert!(speech.contains("[warm"), "{speech}");
+    assert!(!speech.contains("Eleven"), "{speech}");
+    assert!(!speech.contains("[warm"), "{speech}");
 }
 
 #[test]

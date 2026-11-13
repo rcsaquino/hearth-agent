@@ -735,7 +735,7 @@ fn hearth_status_reads_a_running_daemon() {
     add_telegram_base(home.path(), &telegram_base);
     {
         use hearth_core::Harness;
-        use hearth_memory::{MemoryKind, MemoryService, NewMemoryInput, SourceKind};
+        use hearth_memory::{MemoryInput, MemoryService};
         let harness = Harness::open(home.path()).expect("open memory home");
         harness
             .session()
@@ -749,21 +749,20 @@ fn hearth_status_reads_a_running_daemon() {
             .session()
             .set_meta("last_skill_review_changes", "2")
             .expect("review count");
-        let memory = MemoryService::new(harness.session().clone());
+        let memory = MemoryService::new(harness.session().clone()).expect("memory");
         memory
-            .save(NewMemoryInput {
+            .store()
+            .add(&MemoryInput {
                 content: "Prefers short replies.".to_owned(),
-                kind: MemoryKind::Preference,
-                tags: vec!["preferences".to_owned()],
-                importance: 90,
-                source_kind: SourceKind::User,
-                source_ref: None,
-                supersedes: None,
-                valid_from: None,
-                valid_to: None,
+                tags: Some(vec!["preferences".to_owned()]),
+                source: None,
             })
             .expect("seed memory");
-        let _ = memory.standing().expect("refresh standing");
+        // A standing bullet, injected every turn.
+        memory
+            .standing_store()
+            .add("Prefers short replies.", 90)
+            .expect("seed standing");
     }
     let daemon = DaemonGuard::new(start_daemon(home.path()));
     wait_for_socket(home.path());
@@ -783,9 +782,13 @@ fn hearth_status_reads_a_running_daemon() {
     assert_eq!(status["model"], "fake-model");
     assert!(status["uptime_seconds"].as_u64().is_some());
     assert_eq!(status["tasks_running"], 0);
-    assert_eq!(status["tasks_asleep"], 3);
+    // Backup and skill review. Memory has no scheduled pass: the standing file
+    // is repaired at startup instead.
+    assert_eq!(status["tasks_asleep"], 2);
+    // `memory_items` counts long-term memories; the standing bullet is separate.
     assert_eq!(status["memory_items"], 1);
-    assert_eq!(status["standing_memory_version"], 1);
+    assert_eq!(status["standing_bullets"], 1);
+    assert!(status["standing_memory_version"].as_u64().unwrap_or(0) > 0);
     assert_eq!(status["last_consolidation"], "2026-11-09T03:30:00Z");
     assert_eq!(status["last_skill_review"], "2026-11-09T04:30:00Z");
     assert_eq!(status["last_skill_review_changes"], 2);
@@ -869,7 +872,7 @@ fn hearth_watch_receives_live_run_events() {
         "kinds: {kinds:?}"
     );
     assert!(
-        kinds.iter().any(|kind| kind == "text_delta"),
+        kinds.iter().any(|kind| kind == "assistant_reply"),
         "kinds: {kinds:?}"
     );
     assert!(kinds.iter().any(|kind| kind == "usage"), "kinds: {kinds:?}");
@@ -1099,19 +1102,32 @@ fn send_tool_stream(stream: &mut TcpStream, name: &str, arguments: &str) {
     .expect("provider response");
 }
 
-fn fake_helper_provider() -> (String, thread::JoinHandle<()>) {
+fn fake_helper_provider() -> (String, Arc<AtomicBool>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider");
+    // Non-blocking accept with a stop flag: a fixed accept count would hang the
+    // test forever whenever the number of provider calls changes, which is
+    // exactly what happened when post-run memory extraction was removed.
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking provider");
     let base = format!("http://{}", listener.local_addr().expect("provider addr"));
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
     let handle = thread::spawn(move || {
-        for _ in 0..4 {
-            let (mut stream, _) = listener.accept().expect("provider accept");
+        while !flag.load(Ordering::SeqCst) {
+            let (mut stream, _) = match listener.accept() {
+                Ok(pair) => pair,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => panic!("provider accept: {error}"),
+            };
             let request = read_request(&mut stream);
             let messages = request.body["messages"]
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            let all = serde_json::to_string(&messages).unwrap_or_default();
-            let extraction = all.contains("operations");
             let tool_result = messages
                 .iter()
                 .any(|message| message["role"].as_str() == Some("tool"));
@@ -1120,9 +1136,7 @@ fn fake_helper_provider() -> (String, thread::JoinHandle<()>) {
                     message["role"].as_str() == Some("user")
                         && message["content"].as_str() == Some("Produce a helper report.")
                 });
-            if extraction {
-                send_text_stream(&mut stream, "{\"operations\":[{\"op\":\"noop\"}]}");
-            } else if helper {
+            if helper {
                 send_text_stream(&mut stream, "Helper report from helper");
             } else if tool_result {
                 send_text_stream(&mut stream, "Parent final answer");
@@ -1137,14 +1151,14 @@ fn fake_helper_provider() -> (String, thread::JoinHandle<()>) {
             }
         }
     });
-    (format!("{base}/v1"), handle)
+    (format!("{base}/v1"), stop, handle)
 }
 
 #[test]
 fn a_parent_spawns_a_helper_through_the_daemon() {
     use hearth_core::{Harness, TaskStatus};
 
-    let (provider_base, provider_thread) = fake_helper_provider();
+    let (provider_base, provider_stop, provider_thread) = fake_helper_provider();
     let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(
         vec![json!({
             "update_id": 1,
@@ -1182,6 +1196,9 @@ fn a_parent_spawns_a_helper_through_the_daemon() {
 
     daemon.stop();
     telegram_state.stop.store(true, Ordering::SeqCst);
+    // Release the provider loop before joining it, or the join waits on an
+    // accept that can never arrive.
+    provider_stop.store(true, Ordering::SeqCst);
     let _ = telegram_thread.join();
     let _ = provider_thread.join();
 

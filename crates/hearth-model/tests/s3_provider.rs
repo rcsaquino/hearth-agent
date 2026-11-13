@@ -355,6 +355,37 @@ fn usage_chunk_maps_every_token_field() {
 }
 
 #[test]
+fn deepseek_usage_reads_the_cache_hit_field() {
+    let server = FakeServer::start(vec![TestResponse::sse(&[
+        r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20}}"#,
+    ])]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let events: Vec<StreamEvent> = provider
+        .stream(request())
+        .expect("stream")
+        .collect::<Result<_, _>>()
+        .expect("events");
+    assert_eq!(
+        events,
+        vec![
+            StreamEvent::Usage(hearth_model::Usage {
+                input_tokens: 100,
+                cache_read_tokens: 80,
+                cache_write_tokens: 0,
+                output_tokens: 20,
+                reasoning_tokens: 0,
+            }),
+            StreamEvent::Done {
+                finish_reason: Some("stop".to_owned())
+            },
+        ]
+    );
+    server.request();
+    server.finish();
+}
+
+#[test]
 fn reasoning_deltas_are_separate_from_text() {
     let server = FakeServer::start(vec![TestResponse::sse(&[
         r#"{"choices":[{"delta":{"reasoning_content":"think","content":"answer"},"finish_reason":"stop"}]}"#,

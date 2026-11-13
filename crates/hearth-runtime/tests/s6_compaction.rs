@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use hearth_core::{
     ContextBudget, Harness, NewEntry, Save, Submission, plan_compaction, summary_text,
 };
-use hearth_memory::MemoryService;
 use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, Usage};
 use hearth_runtime::{Agent, AgentConfig, Compactor};
 use hearth_tools::ToolRegistry;
@@ -115,15 +114,10 @@ fn text_script(text: &str) -> Script {
     summary_script(text)
 }
 
-fn compactor(
-    harness: &Harness,
-    provider: Arc<dyn Provider>,
-    memory: Option<Arc<MemoryService>>,
-) -> Compactor {
+fn compactor(harness: &Harness, provider: Arc<dyn Provider>) -> Compactor {
     Compactor::new(
         harness.session().clone(),
         provider,
-        memory,
         "test-model".to_owned(),
         "scripted".to_owned(),
         "test-owner".to_owned(),
@@ -144,10 +138,8 @@ fn agent(
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
-            max_turns: 4,
             tools: ToolRegistry::default(),
             spill_dir: home.path().join("spill"),
-            voice_tags: false,
             guidance: String::new(),
         },
     )
@@ -164,7 +156,7 @@ fn a_compaction_saves_a_summary_and_records_usage() {
     let provider = Arc::new(ScriptedProvider::new(vec![summary_script(
         "Old range summary.",
     )]));
-    let summary = compactor(&harness, provider.clone(), None)
+    let summary = compactor(&harness, provider.clone())
         .compact(&conversation, &plan)
         .expect("compact")
         .expect("summary");
@@ -234,7 +226,7 @@ fn the_summary_prompt_truncates_long_tool_results() {
     let history = harness.session().history(&conversation).expect("history");
     let plan = plan_compaction(&history, 100).expect("plan");
     let provider = Arc::new(ScriptedProvider::new(vec![summary_script("Summary.")]));
-    compactor(&harness, provider.clone(), None)
+    compactor(&harness, provider.clone())
         .compact(&conversation, &plan)
         .expect("compact");
     let request = &provider.requests()[0];
@@ -259,7 +251,7 @@ fn a_second_compaction_includes_the_earlier_summary() {
         summary_script("First summary."),
         summary_script("Second summary."),
     ]));
-    let first = compactor(&harness, provider.clone(), None)
+    let first = compactor(&harness, provider.clone())
         .compact(&conversation, &plan)
         .expect("first compact")
         .expect("first summary");
@@ -270,7 +262,7 @@ fn a_second_compaction_includes_the_earlier_summary() {
         .expect("visible");
     let second_plan = plan_compaction(&visible, 100).expect("second plan");
     assert_eq!(second_plan.entries[0].id, first.id);
-    let second = compactor(&harness, provider.clone(), None)
+    let second = compactor(&harness, provider.clone())
         .compact(&conversation, &second_plan)
         .expect("second compact")
         .expect("second summary");
@@ -286,109 +278,6 @@ fn a_second_compaction_includes_the_earlier_summary() {
         .expect("visible");
     assert_eq!(visible[0].id, second.id);
     assert!(!visible.iter().any(|entry| entry.id == first.id));
-}
-
-#[test]
-fn the_memory_flush_runs_before_the_summary() {
-    let (_home, harness) = harness();
-    let conversation = conversation(&harness);
-    let user = save_entry(
-        &harness,
-        &conversation,
-        "user",
-        json!({"text": "I prefer metric units."}),
-    );
-    save_entry(
-        &harness,
-        &conversation,
-        "assistant",
-        json!({"text": "Noted."}),
-    );
-    for index in 0..4 {
-        let kind = if index % 2 == 0 { "user" } else { "assistant" };
-        save_entry(
-            &harness,
-            &conversation,
-            kind,
-            json!({"text": "z".repeat(500)}),
-        );
-    }
-    let history = harness.session().history(&conversation).expect("history");
-    let plan = plan_compaction(&history, 100).expect("plan");
-    let extraction = json!({
-        "operations": [{
-            "op": "add",
-            "kind": "preference",
-            "content": "Sam prefers metric units.",
-            "tags": ["units", "preference"],
-            "importance": 85,
-            "evidence_entry_id": user,
-            "evidence_quote": "I prefer metric units.",
-        }]
-    })
-    .to_string();
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        text_script(&extraction),
-        summary_script("Summary after flush."),
-    ]));
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let summary = compactor(&harness, provider.clone(), Some(Arc::clone(&memory)))
-        .compact(&conversation, &plan)
-        .expect("compact")
-        .expect("summary");
-    assert_eq!(summary_text(&summary), Some("Summary after flush."));
-    let found = memory.search("metric", 5).expect("memory search");
-    assert_eq!(found.len(), 1, "the flush did not store the preference");
-    assert_eq!(found[0].source_ref.as_deref(), Some(user.as_str()));
-    let requests = provider.requests();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        requests[0]
-            .messages
-            .iter()
-            .any(|message| message.blocks.iter().any(|block| match block {
-                hearth_model::ContentBlock::Text(text) => text.contains("durable memory"),
-                _ => false,
-            })),
-        "the first request was not the extraction"
-    );
-}
-
-#[test]
-fn a_flush_failure_does_not_block_the_summary() {
-    let (_home, harness) = harness();
-    let conversation = conversation(&harness);
-    save_entry(
-        &harness,
-        &conversation,
-        "user",
-        json!({"text": "I prefer metric units."}),
-    );
-    for index in 0..5 {
-        let kind = if index % 2 == 0 { "user" } else { "assistant" };
-        save_entry(
-            &harness,
-            &conversation,
-            kind,
-            json!({"text": "z".repeat(500)}),
-        );
-    }
-    let history = harness.session().history(&conversation).expect("history");
-    let plan = plan_compaction(&history, 100).expect("plan");
-    let provider = Arc::new(ScriptedProvider::new(vec![
-        Err(ProviderError::Transport("offline".to_owned())),
-        summary_script("Summary after failed flush."),
-    ]));
-    let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let summary = compactor(&harness, provider.clone(), Some(Arc::clone(&memory)))
-        .compact(&conversation, &plan)
-        .expect("compact")
-        .expect("summary");
-    assert_eq!(summary_text(&summary), Some("Summary after failed flush."));
-    assert!(
-        memory.search("metric", 5).expect("search").is_empty(),
-        "a failed flush stored memory"
-    );
 }
 
 #[test]
@@ -486,7 +375,6 @@ fn compaction_records_usage() {
     let compactor = Compactor::new(
         harness.session().clone(),
         provider,
-        None,
         "test-model".to_owned(),
         "scripted".to_owned(),
         "test-owner".to_owned(),

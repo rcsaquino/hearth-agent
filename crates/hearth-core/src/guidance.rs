@@ -24,10 +24,11 @@ pub struct Guidance {
 /// Read `HEARTH.md` from the home and every `AGENTS.md` from the filesystem
 /// root down to the workspace. Missing files are skipped.
 pub fn load(home: &Path, workspace: &Path) -> Guidance {
-    let mut sources: Vec<(&str, PathBuf)> = Vec::new();
+    let mut sources: Vec<(Option<&str>, PathBuf)> = Vec::new();
     let hearth = home.join(HEARTH_GUIDANCE_FILE);
     if hearth.is_file() {
-        sources.push(("Hearth home", hearth));
+        // The home rules are the base layer; a path header would only add noise.
+        sources.push((None, hearth));
     }
 
     let workspace = if workspace.is_absolute() {
@@ -40,7 +41,7 @@ pub fn load(home: &Path, workspace: &Path) -> Guidance {
     for directory in directories {
         let agents = directory.join(AGENTS_GUIDANCE_FILE);
         if agents.is_file() {
-            sources.push(("Project", agents));
+            sources.push((Some("### Project rules"), agents));
         }
     }
 
@@ -54,7 +55,7 @@ pub fn load(home: &Path, workspace: &Path) -> Guidance {
         if file_truncated {
             guidance.truncated = true;
         }
-        let header = format!("### {label}: {}\n\n", path.display());
+        let header = label.map_or_else(String::new, |label| format!("{label}\n\n"));
         let remaining = MAX_GUIDANCE_TOTAL_BYTES.saturating_sub(guidance.text.len() + header.len());
         if content.len() > remaining {
             let partial = truncate_to(content, remaining);

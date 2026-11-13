@@ -117,3 +117,20 @@ fn keep_running_false_allows_the_next_open_to_start_again() {
     assert_eq!(status["model"], "fake-model");
     daemon_client::stop(home.path(), &second).expect("stop daemon");
 }
+
+#[test]
+fn an_attached_daemon_can_be_stopped_from_the_tui() {
+    let home = TempDir::new().expect("temp home");
+    init_daemon_home(home.path());
+    let executable = Path::new(env!("CARGO_BIN_EXE_hearth"));
+    let (spawned, _) =
+        daemon_client::ensure_with(home.path(), "tui", executable).expect("start daemon");
+    let (attached, _) =
+        daemon_client::ensure_with(home.path(), "tui", executable).expect("attach to daemon");
+    assert_eq!(attached, Ownership::Attached);
+
+    daemon_client::stop(home.path(), &attached).expect("stop an attached daemon");
+    wait_for_stop(home.path());
+
+    daemon_client::stop_on_exit(home.path(), &spawned, true);
+}

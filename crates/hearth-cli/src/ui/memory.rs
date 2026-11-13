@@ -5,7 +5,6 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use time::{OffsetDateTime, UtcOffset};
 
 use crate::app::App;
 use crate::theme;
@@ -51,7 +50,7 @@ fn list(app: &App, frame: &mut Frame, area: Rect) {
                 Line::styled("No memories match.", theme::muted()),
                 Line::from(""),
                 Line::styled(
-                    "Hearth saves facts, preferences, people, projects, and rules here.",
+                    "Facts the agent chose to remember, plus the standing bullets injected every turn.",
                     theme::faint(),
                 ),
             ])
@@ -70,7 +69,7 @@ fn list(app: &App, frame: &mut Frame, area: Rect) {
         let selected = index == app.memory.selected;
         let marker = if selected { "▸" } else { " " };
         let (status, status_style) = status(record);
-        let kind = short(&record.kind.to_uppercase(), 10);
+        let kind = short(&crate::app::store_label(record).to_uppercase(), 10);
         let content_width = rows[1].width.saturating_sub(20) as usize;
         let spans = vec![
             Span::styled(
@@ -137,28 +136,21 @@ fn detail(app: &App, frame: &mut Frame, area: Rect) {
         lines.push(Line::styled(format!("  {line}"), theme::text()));
     }
     lines.push(Line::from(""));
-    meta(&mut lines, "kind", &record.kind);
-    meta(&mut lines, "status", &record.status);
-    meta(&mut lines, "standing", &record.standing);
-    meta(&mut lines, "importance", &record.importance.to_string());
-    meta(&mut lines, "source", &record.source_kind);
-    if let Some(reference) = &record.source_ref {
-        meta(&mut lines, "reference", reference);
+    meta(&mut lines, "store", crate::app::store_label(record));
+    if !record.source.is_empty() {
+        meta(&mut lines, "source", &record.source);
+    }
+    if record.revision > 0 {
+        meta(&mut lines, "revision", &record.revision.to_string());
     }
     if !record.tags.is_empty() {
         meta(&mut lines, "tags", &record.tags.join(", "));
     }
-    meta(
-        &mut lines,
-        "created",
-        &format_time(record.created_at, app.local_offset),
-    );
-    if let Some(last_used) = record.last_used_at {
-        meta(
-            &mut lines,
-            "last used",
-            &format_time(last_used, app.local_offset),
-        );
+    if !record.created_at.is_empty() {
+        meta(&mut lines, "created", &record.created_at);
+    }
+    if !record.updated_at.is_empty() {
+        meta(&mut lines, "updated", &record.updated_at);
     }
     lines.push(Line::from(""));
     lines.push(Line::styled(
@@ -169,11 +161,10 @@ fn detail(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 fn status(record: &hearth_runtime::inspect::MemoryRecord) -> (&'static str, Style) {
-    match record.status.as_str() {
-        "active" => ("●", theme::good()),
-        "archived" => ("◌", theme::warn()),
-        "deleted" => ("×", theme::bad()),
-        _ => ("○", theme::faint()),
+    if record.standing {
+        ("★", theme::warn())
+    } else {
+        ("●", theme::good())
     }
 }
 
@@ -182,18 +173,4 @@ fn meta(lines: &mut Vec<Line<'static>>, label: &str, value: &str) {
         Span::styled(format!("  {label:<11}"), theme::muted()),
         Span::styled(value.to_owned(), theme::text()),
     ]));
-}
-
-fn format_time(micros: i64, offset: UtcOffset) -> String {
-    let time = OffsetDateTime::from_unix_timestamp_nanos(i128::from(micros) * 1_000)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .to_offset(offset);
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        time.year(),
-        u8::from(time.month()),
-        time.day(),
-        time.hour(),
-        time.minute()
-    )
 }

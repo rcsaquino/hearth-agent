@@ -3,8 +3,7 @@ use std::fs;
 use hearth_core::{ClaimedTask, Harness, StepOutput};
 use hearth_runtime::TaskHandler;
 use hearth_runtime::maintenance::{
-    BACKUP_KIND, BackupHandler, MEMORY_CONSOLIDATE_KIND, SKILL_REVIEW_KIND,
-    ensure_maintenance_tasks,
+    BACKUP_KIND, BackupHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks,
 };
 use hearth_storage::open;
 use serde_json::json;
@@ -17,11 +16,6 @@ fn ensure_creates_the_backup_and_consolidation_tasks() {
     let session = harness.session();
     ensure_maintenance_tasks(session).expect("ensure maintenance");
     assert!(session.has_open_task(BACKUP_KIND).expect("backup task"));
-    assert!(
-        session
-            .has_open_task(MEMORY_CONSOLIDATE_KIND)
-            .expect("memory task")
-    );
     assert!(
         session
             .has_open_task(SKILL_REVIEW_KIND)

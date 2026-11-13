@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use hearth_core::{CoreError, Entry, NewUsage, Session, SubmissionStatus, parse_blocks};
-use hearth_memory::{MemoryError, MemoryService};
+use hearth_memory::MemoryService;
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -15,7 +15,6 @@ use time::format_description::well_known::Rfc3339;
 use crate::maintenance::{
     SKILL_REVIEW_HOUR, SKILL_REVIEW_MINUTE, local_offset, next_daily_micros, rfc3339,
 };
-use crate::memory_extract::entry_text;
 use crate::scheduler::{TaskHandler, TaskHandlerError};
 use crate::skills::{Skill, SkillError, SkillLibrary, SkillSave, SkillScope, SkillStatus};
 
@@ -47,8 +46,8 @@ pub struct ReviewReport {
 pub enum SkillReviewError {
     #[error(transparent)]
     Core(#[from] CoreError),
-    #[error(transparent)]
-    Memory(#[from] MemoryError),
+    #[error("memory error: {0}")]
+    Memory(String),
     #[error(transparent)]
     Skill(#[from] SkillError),
     #[error("provider error: {0}")]
@@ -228,8 +227,10 @@ impl SkillReviewer {
             }
             skills.push_str(&line);
         }
-        let standing = self.memory.standing()?;
-        let memory = self.memory.render_standing(&standing.items);
+        let (memory, _version) = self
+            .memory
+            .standing()
+            .map_err(|error| SkillReviewError::Memory(error.to_string()))?;
         let user_text = format!(
             "## Recent successful runs\n{recent}\n\n## Skills\n{skills}\n\n## Memory\n{memory}"
         );
@@ -500,4 +501,24 @@ fn parse_changes(text: &str) -> Result<Vec<Value>, SkillReviewError> {
         .and_then(Value::as_array)
         .ok_or_else(|| SkillReviewError::Invalid("changes is not an array".to_owned()))?;
     Ok(changes.clone())
+}
+
+/// The readable text of one entry, used when reviewing recent runs.
+fn entry_text(entry: &hearth_core::Entry) -> String {
+    hearth_core::parse_blocks(&entry.content)
+        .into_iter()
+        .filter_map(|block| match block {
+            hearth_model::ContentBlock::Text(text) => Some(text),
+            hearth_model::ContentBlock::Thinking(_) => None,
+            hearth_model::ContentBlock::ToolCall(call) => {
+                Some(format!("tool call {} {}", call.name, call.arguments))
+            }
+            hearth_model::ContentBlock::ToolResult { content, .. } => {
+                Some(format!("tool result: {content}"))
+            }
+            hearth_model::ContentBlock::Image { path, .. } => Some(format!("[image {path}]")),
+            hearth_model::ContentBlock::File { name, .. } => Some(format!("[file {name}]")),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

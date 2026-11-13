@@ -22,7 +22,6 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::compaction::Compactor;
 use crate::events::{EventSink, NoopSink, RunEvent};
-use crate::memory_extract::MemoryExtractor;
 use crate::tool_groups::ToolGroups;
 
 /// Everything an agent needs beyond the record and the provider.
@@ -32,10 +31,8 @@ pub struct AgentConfig {
     pub model: String,
     pub provider_name: String,
     pub owner: String,
-    pub max_turns: u32,
     pub tools: ToolRegistry,
     pub spill_dir: PathBuf,
-    pub voice_tags: bool,
     pub guidance: String,
 }
 
@@ -69,7 +66,6 @@ pub struct Agent {
     config: AgentConfig,
     memory: Option<Arc<MemoryService>>,
     skills: Option<Arc<crate::skills::SkillLibrary>>,
-    extract: bool,
     reservations: Mutex<HashSet<String>>,
     budget: ContextBudget,
     groups: Option<Arc<ToolGroups>>,
@@ -85,7 +81,6 @@ impl Agent {
             config,
             memory: None,
             skills: None,
-            extract: true,
             reservations: Mutex::new(HashSet::new()),
             budget: ContextBudget::default(),
             groups: None,
@@ -114,7 +109,7 @@ impl Agent {
     /// The active skill index, or an empty string on a library error.
     fn skills_index(&self) -> String {
         match &self.skills {
-            Some(skills) => match skills.index() {
+            Some(skills) => match skills.read_index() {
                 Ok(index) => index,
                 Err(error) => {
                     tracing::warn!(%error, "skill index could not be built");
@@ -123,12 +118,6 @@ impl Agent {
             },
             None => String::new(),
         }
-    }
-
-    /// Do not extract memory after this agent's runs.
-    pub fn without_extraction(mut self) -> Self {
-        self.extract = false;
-        self
     }
 
     /// Attach the optional tool groups and the selection shared with tool_search.
@@ -225,7 +214,7 @@ impl Agent {
             return (String::new(), String::new(), 0);
         };
         let (standing, standing_version) = match memory.standing() {
-            Ok(standing) => (memory.render_standing(&standing.items), standing.version),
+            Ok((text, version)) => (text, version),
             Err(error) => {
                 tracing::warn!(%error, "standing memory could not be read");
                 (String::new(), 0)
@@ -247,7 +236,6 @@ impl Agent {
         Compactor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            self.memory.clone(),
             self.config.model.clone(),
             self.config.provider_name.clone(),
             self.config.owner.clone(),
@@ -275,14 +263,12 @@ impl Agent {
         let now = OffsetDateTime::now_utc()
             .format(&Rfc3339)
             .unwrap_or_else(|_| "unknown time".to_owned());
-        let mut note = format!(
+        let note = format!(
             "Current time: {now}. Conversation: {conversation_id}. Model: {}.",
             self.config.model
         );
-        if self.config.voice_tags {
-            note.push(' ');
-            note.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
-        }
+        // The audio-tag guidance lives in the message tool description only. It
+        // used to be repeated here, where it was paid fresh on every turn.
         note
     }
 
@@ -415,6 +401,19 @@ impl Agent {
             "run_started",
             json!({"submission_id": submission.id}),
         );
+        if let Some(text) = latest_user_text(
+            &self
+                .session
+                .history_for_prompt(&submission.conversation_id)?,
+        ) {
+            emit(
+                events,
+                &claimed.id,
+                &submission.conversation_id,
+                "user_message",
+                json!({"text": text}),
+            );
+        }
         self.load_selection(claimed.checkpoint.as_ref());
         let mut absorbed: Vec<String> = Vec::new();
         if cancel.load(Ordering::Relaxed) {
@@ -451,21 +450,16 @@ impl Agent {
 
         let mut hard_compacted = false;
         let mut overflow_attempted = false;
-        let mut previous_prefix: Option<Value> = None;
+        // Seed from the checkpoint so the first turn can attribute a prefix change.
+        let mut previous_prefix: Option<Value> = claimed
+            .checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.get("prefix_parts"))
+            .map(|parts| json!(parts));
         'turn: loop {
             self.absorb_queued(&submission.conversation_id, &submission.id, &mut absorbed)?;
             if cancel.load(Ordering::Relaxed) {
                 return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
-            }
-            if turn >= self.config.max_turns {
-                return self.settle_failure(
-                    &absorbed,
-                    &submission,
-                    &claimed.id,
-                    "The turn limit was reached before a final answer.",
-                    "turn_limit",
-                    events,
-                );
             }
             emit(
                 events,
@@ -592,24 +586,10 @@ impl Agent {
                     Ok(StreamEvent::TextDelta(delta)) => {
                         text.push_str(&delta);
                         hearth_storage::crash_if("mid_stream");
-                        emit(
-                            events,
-                            &claimed.id,
-                            &submission.conversation_id,
-                            "text_delta",
-                            json!({"text": delta}),
-                        );
                     }
                     Ok(StreamEvent::ThinkingDelta(delta)) => {
                         thinking.push_str(&delta);
                         hearth_storage::crash_if("mid_stream");
-                        emit(
-                            events,
-                            &claimed.id,
-                            &submission.conversation_id,
-                            "thinking_delta",
-                            json!({"text": delta}),
-                        );
                     }
                     Ok(StreamEvent::ToolCall(call)) => calls.push(call),
                     Ok(StreamEvent::Usage(value)) => usage = value,
@@ -642,6 +622,13 @@ impl Agent {
                     }
                 }
             }
+            emit(
+                events,
+                &claimed.id,
+                &submission.conversation_id,
+                "assistant_reply",
+                json!({"thinking": thinking, "text": text, "tool_calls": calls.len()}),
+            );
             let latency_ms = started.elapsed().as_millis() as i64;
             self.record_usage(&claimed.id, &submission.conversation_id, usage, latency_ms)?;
             emit_usage(events, &claimed.id, &submission.conversation_id, usage);
@@ -711,7 +698,6 @@ impl Agent {
                 "run_settled",
                 json!({"status": "done", "answer_entry_id": answer_entry_id}),
             );
-            self.extract_memory(&submission, &answer_entry_id);
             return Ok(RunOutcome {
                 submission: settled,
                 task_id: claimed.id,
@@ -719,41 +705,6 @@ impl Agent {
                 answer_text: Some(hearth_core::secrets::redact_secrets(&text)),
                 notice: None,
             });
-        }
-    }
-
-    fn extract_memory(&self, submission: &Submission, answer_entry_id: &str) {
-        if !self.extract {
-            return;
-        }
-        let Some(memory) = &self.memory else {
-            return;
-        };
-        let history = match self.session.history(&submission.conversation_id) {
-            Ok(history) => history,
-            Err(error) => {
-                tracing::warn!(%error, "memory extraction history could not be read");
-                return;
-            }
-        };
-        let entries = run_entries(&history, submission, answer_entry_id);
-        let Some(query) = latest_user_text(&entries) else {
-            return;
-        };
-        if hearth_memory::is_trivial(&query) {
-            return;
-        }
-        let extractor = MemoryExtractor::new(
-            self.session.clone(),
-            Arc::clone(&self.provider),
-            Arc::clone(memory),
-            self.config.model.clone(),
-            self.config.provider_name.clone(),
-            self.config.owner.clone(),
-        );
-        if let Err(error) = extractor.extract(&submission.conversation_id, &submission.id, &entries)
-        {
-            tracing::warn!(%error, "memory extraction failed");
         }
     }
 
@@ -883,15 +834,10 @@ impl Agent {
                 true,
             );
         }
-        let head: String = content.chars().take(2000).collect();
-        let tail: String = {
-            let mut chars: Vec<char> = content.chars().rev().take(1000).collect();
-            chars.reverse();
-            chars.into_iter().collect()
-        };
+        let head: String = content.chars().take(SPILL_INLINE_CHARS).collect();
         (
             format!(
-                "[tool output truncated: {} bytes, ~{} tokens; full output: spill/{name}.txt]\n{head}\n...\n{tail}",
+                "[tool output truncated: {} bytes, ~{} tokens; full output: spill/{name}.txt]\n{head}\n[read the file for the rest]",
                 content.len(),
                 hearth_model::estimate_tokens(&content)
             ),
@@ -1081,28 +1027,6 @@ fn write_private(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn run_entries(history: &[Entry], submission: &Submission, answer_entry_id: &str) -> Vec<Entry> {
-    let Some(start) = history.iter().position(|entry| {
-        entry.kind == "user"
-            && entry.created_at == submission.created_at
-            && entry.content == submission.content
-    }) else {
-        return Vec::new();
-    };
-    let Some(end) = history.iter().position(|entry| entry.id == answer_entry_id) else {
-        return Vec::new();
-    };
-    if end < start {
-        return Vec::new();
-    }
-    let start_id = history[start].id.clone();
-    history[start..=end]
-        .iter()
-        .filter(|entry| entry.kind != "user" || entry.id == start_id)
-        .cloned()
-        .collect()
-}
-
 fn latest_user_text(history: &[Entry]) -> Option<String> {
     let entry = history.iter().rev().find(|entry| entry.kind == "user")?;
     let text = parse_blocks(&entry.content)
@@ -1116,9 +1040,15 @@ fn latest_user_text(history: &[Entry]) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
-const TOOL_RESULT_SHRINK_TOKENS: i64 = 1_000;
-const TOOL_RESULT_HEAD_CHARS: usize = 4_000;
-const TOOL_RESULT_TAIL_CHARS: usize = 1_000;
+/// Inline token target for one tool result. The full body stays readable on disk.
+const TOOL_RESULT_SHRINK_TOKENS: i64 = 600;
+/// Character budgets derived from the target, at roughly four characters per token.
+const TOOL_RESULT_HEAD_CHARS: usize = TOOL_RESULT_SHRINK_TOKENS as usize * 3;
+const TOOL_RESULT_TAIL_CHARS: usize = TOOL_RESULT_SHRINK_TOKENS as usize * 2 / 3;
+/// Characters of body kept inline when a result spills to disk. The rest is a
+/// pointer; the previous head-and-tail pair shipped roughly 830 tokens that the
+/// model could already read from the file.
+const SPILL_INLINE_CHARS: usize = 800;
 
 fn shrink_tool_results(history: &[Entry]) -> Vec<Entry> {
     history

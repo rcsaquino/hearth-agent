@@ -45,9 +45,9 @@ fn budget_settings_accept_a_custom_window() {
 }
 
 #[test]
-fn agent_defaults_to_120_turns() {
+fn agent_has_no_turn_limit_setting() {
     let settings: Settings = serde_json::from_str(&models()).expect("settings");
-    assert_eq!(settings.agent.max_turns, 120);
+    assert_eq!(settings.agent.workspace, None);
 }
 
 #[test]

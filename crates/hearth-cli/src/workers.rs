@@ -13,6 +13,9 @@ use serde_json::Value;
 
 use crate::daemon_client::{self, Ownership};
 
+/// How many prompt/response exchanges the Prompt tab loads on refresh.
+pub const PROMPT_EXCHANGES: usize = 25;
+
 #[derive(Debug)]
 pub enum OnboardResult {
     Ready(Ownership, Value),
@@ -37,7 +40,7 @@ pub enum AppEvent {
     Service(Result<(Ownership, Value), String>),
     Daemon(Result<(Ownership, Value), String>),
     Stopped(Result<(), String>),
-    Prompt(Result<Option<Value>, String>),
+    Prompt(Result<Vec<Value>, String>),
     ModelInfo {
         model: String,
         result: Result<Option<hearth_model::ModelLimits>, String>,
@@ -207,8 +210,11 @@ impl Workers {
     pub fn spawn_service(&self, home: PathBuf, start: String, ownership: Ownership) {
         let tx = self.sender();
         thread::spawn(move || {
-            if !matches!(ownership, Ownership::Attached) {
-                let _ = daemon_client::stop(&home, &ownership);
+            // A start-mode change must restart the daemon so the chosen mode
+            // owns it, including a daemon this window merely attached to.
+            if let Err(error) = daemon_client::stop(&home, &ownership) {
+                let _ = tx.send(AppEvent::Service(Err(error)));
+                return;
             }
             if let Err(error) = daemon_client::apply_start_mode(&home, &start) {
                 let _ = tx.send(AppEvent::Service(Err(error)));
@@ -246,8 +252,8 @@ impl Workers {
     pub fn spawn_prompt(&self, home: PathBuf) {
         let tx = self.sender();
         thread::spawn(move || {
-            let result =
-                hearth_runtime::inspect::latest_prompt(&home).map_err(|error| error.to_string());
+            let result = hearth_runtime::inspect::prompt_exchanges(&home, PROMPT_EXCHANGES)
+                .map_err(|error| error.to_string());
             let _ = tx.send(AppEvent::Prompt(result));
         });
     }

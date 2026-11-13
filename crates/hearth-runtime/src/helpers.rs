@@ -14,7 +14,7 @@ use hearth_core::{
     ContextBudget, CoreError, EffectIntent, EffectStatus, NewEntry, NewTask, Save, Session,
     StepOutput, SubmissionStatus, TaskStatus, TerminalOutcome,
 };
-use hearth_memory::{MemoryService, MemorySource};
+use hearth_memory::MemoryService;
 use hearth_model::{Provider, Speaker, ToolSpec};
 use hearth_telegram::{SendOutcome, TelegramSender};
 use hearth_tools::{Tool, ToolError, ToolOutput};
@@ -346,8 +346,6 @@ pub struct HelperConfig {
     pub media: ToolMediaRoots,
     pub model: String,
     pub provider_name: String,
-    pub voice_tags: bool,
-    pub max_turns: u32,
     pub budget: ContextBudget,
     pub events: Arc<dyn EventSink>,
     pub owner: String,
@@ -503,13 +501,6 @@ impl HelperPool {
             outbound: self.config.outbound.clone(),
             speaker: self.config.speaker.clone(),
         };
-        let memory_source = self
-            .config
-            .session
-            .latest_user_entry_id(&helper_id)
-            .ok()
-            .flatten()
-            .map(MemorySource::user);
         let task_target = TaskTarget {
             depth,
             controls: Arc::clone(&self.controls),
@@ -522,7 +513,6 @@ impl HelperPool {
             &self.config.spill,
             Some(target),
             Some(Arc::clone(&self.config.memory)),
-            memory_source,
             None,
             Some(task_target),
             &self.config.media,
@@ -558,18 +548,15 @@ impl HelperPool {
                 model: self.config.model.clone(),
                 provider_name: self.config.provider_name.clone(),
                 owner: format!("{}:{}", self.config.owner, task_id),
-                max_turns: self.config.max_turns,
                 tools: built.core,
                 spill_dir: self.config.spill.clone(),
-                voice_tags: self.config.voice_tags,
                 guidance: hearth_core::load_guidance(&self.config.home, &self.config.workspace)
                     .text,
             },
         )
         .with_memory(Arc::clone(&self.config.memory))
         .with_groups(built.groups, built.selection)
-        .with_budget(helper_budget)
-        .without_extraction();
+        .with_budget(helper_budget);
 
         let (wall_tx, wall_rx) = mpsc::channel::<()>();
         let wall_cancel = Arc::clone(&cancel);

@@ -94,10 +94,8 @@ fn config(home: &std::path::Path, tools: ToolRegistry) -> AgentConfig {
         model: "test-model".to_owned(),
         provider_name: "scripted".to_owned(),
         owner: "test-owner".to_owned(),
-        max_turns: 4,
         tools,
         spill_dir: home.join("spill"),
-        voice_tags: false,
         guidance: String::new(),
     }
 }

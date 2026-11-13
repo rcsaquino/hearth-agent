@@ -68,6 +68,7 @@ fn header(app: &App, frame: &mut Frame, area: Rect) {
     let (label, style) = match &app.daemon {
         DaemonState::Running => ("running".to_owned(), theme::good()),
         DaemonState::Starting => ("starting".to_owned(), theme::warn()),
+        DaemonState::Stopping => ("stopping".to_owned(), theme::warn()),
         DaemonState::Stopped => ("stopped".to_owned(), theme::muted()),
         DaemonState::Error(message) => (format!("error: {}", short(message, 40)), theme::bad()),
     };
@@ -167,15 +168,18 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
         ]),
         Tab::Skills => theme::hints(&[
             ("↑↓", "select"),
-            ("enter", "open"),
+            ("pgup/pgdn", "scroll"),
             ("e", "edit user skill"),
             ("n", "new skill"),
             ("q", "quit"),
         ]),
         Tab::Prompt => theme::hints(&[
-            ("r", "raw/system"),
+            ("↑↓", "select"),
+            ("enter", "expand"),
+            ("a", "expand all"),
+            ("pgup/pgdn", "scroll"),
+            ("r", "raw"),
             ("o", "refresh"),
-            ("↑↓", "scroll"),
             ("q", "quit"),
         ]),
         Tab::Settings => theme::hints(&[
@@ -278,14 +282,19 @@ pub fn event_summary(value: &serde_json::Value) -> String {
     let kind = value["kind"].as_str().unwrap_or("event");
     let data = &value["data"];
     match kind {
-        "text_delta" => format!(
-            "Reply · {}",
+        "user_message" => format!(
+            "You · {}",
             short(data["text"].as_str().unwrap_or_default(), 100)
         ),
-        "thinking_delta" => format!(
-            "Thinking · {}",
-            short(data["text"].as_str().unwrap_or_default(), 100)
-        ),
+        "assistant_reply" => {
+            let calls = data["tool_calls"].as_u64().unwrap_or(0);
+            let text = short(data["text"].as_str().unwrap_or_default(), 100);
+            if text.is_empty() {
+                format!("Reply · {calls} tool call(s)")
+            } else {
+                format!("Reply · {text}")
+            }
+        }
         "tool_call_started" => format!("Tool call · {}", data["name"].as_str().unwrap_or("tool")),
         "tool_result" => {
             let prefix = if data["is_error"].as_bool().unwrap_or(false) {
@@ -474,7 +483,6 @@ mod tests {
         assert!(text.contains("Work & memory"), "{text}");
         assert!(text.contains("Connections"), "{text}");
         assert!(text.contains("Telegram"), "{text}");
-        assert!(text.contains("turn limit 120"), "{text}");
         assert!(text.contains("00:00:00"), "{text}");
     }
 
@@ -488,11 +496,11 @@ mod tests {
             .expect("form")
             .rows
             .iter()
-            .position(|row| row.label == "Max turns")
-            .expect("max turns row");
+            .position(|row| row.label == "Soft compaction")
+            .expect("soft compaction row");
         app.settings_form.as_mut().expect("form").selected = index;
         let text = buffer_text(&app, 110, 34);
-        assert!(text.contains("Each tool call"), "{text}");
+        assert!(text.contains("fraction of the usable"), "{text}");
     }
 
     #[test]
@@ -518,7 +526,7 @@ mod tests {
     #[test]
     fn memory_tab_shows_saved_memories() {
         use hearth_core::Harness;
-        use hearth_memory::{MemoryKind, MemoryService, NewMemoryInput, SourceKind};
+        use hearth_memory::{MemoryInput, MemoryService};
 
         let home = TempDir::new().expect("temp home");
         init(
@@ -540,18 +548,13 @@ mod tests {
         .expect("init");
         {
             let harness = Harness::open(home.path()).expect("harness");
-            let memory = MemoryService::new(harness.session().clone());
+            let memory = MemoryService::new(harness.session().clone()).expect("memory");
             memory
-                .save(NewMemoryInput {
+                .store()
+                .add(&MemoryInput {
                     content: "The release checklist lives in docs/.".to_owned(),
-                    kind: MemoryKind::Fact,
-                    tags: vec!["release".to_owned()],
-                    importance: 80,
-                    source_kind: SourceKind::User,
-                    source_ref: None,
-                    supersedes: None,
-                    valid_from: None,
-                    valid_to: None,
+                    tags: Some(vec!["release".to_owned()]),
+                    source: None,
                 })
                 .expect("memory");
         }
@@ -561,7 +564,7 @@ mod tests {
         let text = buffer_text(&app, 110, 34);
         assert!(text.contains("Memory"), "{text}");
         assert!(text.contains("release checklist"), "{text}");
-        assert!(text.contains("FACT"), "{text}");
+        assert!(text.contains("LONG-TERM"), "{text}");
     }
 
     #[test]
@@ -610,13 +613,13 @@ mod tests {
             .expect("form")
             .rows
             .iter()
-            .position(|row| row.label == "Max turns")
-            .expect("max turns row");
+            .position(|row| row.label == "Soft compaction")
+            .expect("soft compaction row");
         app.settings_form.as_mut().expect("form").selected = index;
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = buffer_text(&app, 110, 34);
         assert!(text.contains("Tip"), "{text}");
-        assert!(text.contains("model requests"), "{text}");
+        assert!(text.contains("fraction of the usable"), "{text}");
     }
 
     #[test]
@@ -681,7 +684,7 @@ mod tests {
             "timezone": "UTC",
             "soul_file": "SOUL.md"
         });
-        value["agent"] = json!({"max_turns": 120});
+        value["agent"] = json!({"workspace": null});
         app.editor
             .as_mut()
             .expect("editor")
@@ -735,19 +738,41 @@ mod tests {
     }
 
     #[test]
-    fn prompt_tab_renders_the_saved_sections() {
+    fn prompt_tab_renders_rows_and_full_detail() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
-        app.prompt.document = Some(json!({
-            "identity": "SOUL TEXT",
-            "guidance": "PROJECT RULES",
-            "runtime": "RUNTIME NOTE"
-        }));
-        let text = buffer_text(&app, 100, 32);
-        assert!(text.contains("<identity>"), "{text}");
+        app.prompt.exchanges = vec![json!({
+            "request": {
+                "identity": "SOUL TEXT\nSECOND LINE",
+                "guidance": "PROJECT RULES",
+                "runtime": "RUNTIME NOTE",
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "please inspect"}]}
+                ]
+            },
+            "prompt_hash": "abc123def456",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": {
+                "entry_id": "entry-1",
+                "created_at": 1_700_000_005_000_000_i64,
+                "blocks": [{"type": "text", "text": "the answer"}],
+                "tokens_est": 12
+            },
+            "usage": json!(null)
+        })];
+        let text = buffer_text(&app, 100, 100);
+        for label in [
+            "system · identity",
+            "system · guidance",
+            "system · runtime note",
+            "user",
+            "request · tools",
+            "response",
+        ] {
+            assert!(text.contains(label), "missing row {label}: {text}");
+        }
         assert!(text.contains("SOUL TEXT"), "{text}");
-        assert!(text.contains("<project_instructions>"), "{text}");
-        assert!(text.contains("<runtime>"), "{text}");
+        assert!(text.contains("SECOND LINE"), "{text}");
     }
 
     #[test]
@@ -758,12 +783,27 @@ mod tests {
             .map(|index| format!("line {index}"))
             .collect::<Vec<_>>()
             .join("\n");
-        app.prompt.document = Some(json!({"identity": body}));
+        app.prompt.exchanges = vec![json!({
+            "request": {
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": body}]}
+                ]
+            },
+            "prompt_hash": "abc123def456",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": json!(null),
+            "usage": json!(null)
+        })];
+        let _ = buffer_text(&app, 100, 24);
+        for _ in 0..4 {
+            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = buffer_text(&app, 100, 24);
         let max = app.prompt.max_scroll.get();
         assert!(max > 0, "expected a scroll range");
-        for _ in 0..100 {
-            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        for _ in 0..200 {
+            app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
         }
         assert_eq!(app.prompt.scroll, max);
         app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
@@ -772,12 +812,47 @@ mod tests {
     }
 
     #[test]
+    fn prompt_shows_only_the_latest_exchange() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![
+            json!({
+                "request": {"model": "newest", "identity": "new"},
+                "prompt_hash": "newest",
+                "requested_at": 2,
+                "response": json!(null),
+                "usage": json!(null)
+            }),
+            json!({
+                "request": {"model": "older", "identity": "old"},
+                "prompt_hash": "older",
+                "requested_at": 1,
+                "response": json!(null),
+                "usage": json!(null)
+            }),
+        ];
+        let text = buffer_text(&app, 100, 60);
+        assert!(text.contains("newest"), "{text}");
+        assert!(!text.contains("older"), "{text}");
+        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        let text = buffer_text(&app, 100, 60);
+        assert!(text.contains("newest"), "{text}");
+        assert!(!text.contains("older"), "{text}");
+    }
+
+    #[test]
     fn settings_tab_renders_the_start_modes() {
         let (_home, mut app) = initialized_app();
         app.handle_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));
         let text = buffer_text(&app, 100, 34);
         assert!(text.contains("Start"), "{text}");
-        assert!(text.contains("When Hearth opens"), "{text}");
+        let start = match app.settings.daemon.start.as_str() {
+            "login" => "At login",
+            "startup" => "At startup",
+            _ => "When Hearth opens",
+        };
+        assert!(text.contains(start), "{text}");
         assert!(text.contains("Keep running after close"), "{text}");
         assert!(text.contains("fake-model"), "{text}");
     }
@@ -810,6 +885,90 @@ mod tests {
         app.skills.reload();
         let text = buffer_text(&app, 100, 32);
         assert!(text.contains("research"), "{text}");
+    }
+
+    #[test]
+    fn skills_tab_shows_the_selected_body_without_enter() {
+        let home = TempDir::new().expect("temp home");
+        std::fs::create_dir_all(home.path().join("skills")).expect("skills dir");
+        std::fs::write(
+            home.path().join("skills/a-first.md"),
+            "# First\n\nFirst body.\n",
+        )
+        .expect("write first skill");
+        std::fs::write(
+            home.path().join("skills/b-second.md"),
+            "# Second\n\nSecond body.\n",
+        )
+        .expect("write second skill");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Skills;
+        app.skills.reload();
+        let text = buffer_text(&app, 100, 32);
+        assert!(text.contains("First body."), "{text}");
+        assert!(!text.contains("Second body."), "{text}");
+
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let text = buffer_text(&app, 100, 32);
+        assert!(text.contains("Second body."), "{text}");
+    }
+
+    #[test]
+    fn skills_detail_scrolls_and_resets_on_selection() {
+        let home = TempDir::new().expect("temp home");
+        std::fs::create_dir_all(home.path().join("skills")).expect("skills dir");
+        let body = (0..80)
+            .map(|index| format!("detail line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(
+            home.path().join("skills/a-long.md"),
+            format!("# Long\n\n{body}\n"),
+        )
+        .expect("write skill");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Skills;
+        app.skills.reload();
+        let _ = buffer_text(&app, 100, 30);
+        let max = app.skills.max_scroll.get();
+        assert!(max > 0, "expected a scroll range");
+        for _ in 0..200 {
+            app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        }
+        assert_eq!(app.skills.scroll, max);
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.skills.scroll, 0);
+        app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        assert_eq!(app.skills.scroll, max);
+    }
+
+    #[test]
+    fn prompt_home_and_end_jump_between_items() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![json!({
+            "request": {
+                "identity": "SOUL",
+                "guidance": "GUIDE",
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "hello"}]}
+                ]
+            },
+            "prompt_hash": "hash",
+            "requested_at": 1,
+            "response": json!(null),
+            "usage": json!(null)
+        })];
+        let _ = buffer_text(&app, 100, 60);
+        assert_eq!(app.prompt.selected, 0);
+        app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        assert!(app.prompt.selected > 0, "End must select the last item");
+        assert_eq!(app.prompt.scroll, 0);
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.prompt.selected, 0);
+        assert_eq!(app.prompt.scroll, 0);
     }
 
     #[test]

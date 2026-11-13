@@ -50,6 +50,7 @@ fn runtime_card(app: &App, frame: &mut Frame, area: Rect) {
     let (label, style) = match &app.daemon {
         DaemonState::Running => ("Running", theme::good()),
         DaemonState::Starting => ("Starting", theme::warn()),
+        DaemonState::Stopping => ("Stopping", theme::warn()),
         DaemonState::Stopped => ("Stopped", theme::muted()),
         DaemonState::Error(_) => ("Error", theme::bad()),
     };
@@ -75,11 +76,6 @@ fn runtime_card(app: &App, frame: &mut Frame, area: Rect) {
             )
         })
         .unwrap_or_else(|| "not configured".to_owned());
-    let turns = app
-        .settings_data
-        .as_ref()
-        .map(|settings| settings.agent.max_turns.to_string())
-        .unwrap_or_else(|| "-".to_owned());
     let workspace = app
         .settings_data
         .as_ref()
@@ -100,7 +96,6 @@ fn runtime_card(app: &App, frame: &mut Frame, area: Rect) {
             metric("thinking", thinking(app), theme::think()),
             metric("provider", provider, theme::muted()),
             metric("context", context, theme::text()),
-            metric("turn limit", turns, theme::text()),
             metric("workspace", short(&workspace, 30), theme::faint()),
         ],
     );
@@ -153,12 +148,7 @@ fn usage_card(app: &App, frame: &mut Frame, area: Rect) {
         lines.push(usage_row(label, label_style, input, output));
     }
     let today = read("today");
-    let denominator = today.0 + today.2;
-    let hit_rate = if denominator > 0 {
-        today.2 as f64 / denominator as f64 * 100.0
-    } else {
-        0.0
-    };
+    let hit_rate = hearth_runtime::cache_hit_rate(today.0 as i64, today.2 as i64) * 100.0;
     lines.push(metric(
         "cache hit",
         format!("{hit_rate:.1}% · {} read", compact_count(today.2)),
@@ -308,35 +298,48 @@ fn connections_card(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 fn recent_card(app: &App, frame: &mut Frame, area: Rect) {
-    let mut lines = Vec::new();
     let rows = activity::rows(&app.events);
-    let limit = area.height.saturating_sub(2).max(1) as usize;
+    let limit = recent_limit(area);
+    let lines = recent_lines(&rows, limit, app.local_offset);
+    card(frame, area, "Recent activity", lines);
+}
+
+/// Visible rows inside a bordered card. `area` includes both border lines, so
+/// the two-line allowance is exact and the newest row is never clipped.
+fn recent_limit(area: Rect) -> usize {
+    area.height.saturating_sub(2).max(1) as usize
+}
+
+/// Newest-last list of activity rows, trimmed to the newest `limit` entries.
+fn recent_lines(
+    rows: &[activity::ActivityRow],
+    limit: usize,
+    offset: time::UtcOffset,
+) -> Vec<Line<'static>> {
     if rows.is_empty() {
-        lines.push(Line::styled(
+        return vec![Line::styled(
             "No live events yet. Send Hearth a Telegram message.",
             theme::muted(),
-        ));
-    } else {
-        for row in rows
-            .iter()
-            .rev()
-            .take(limit)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-        {
-            let time = activity::event_time(row.timestamp, app.local_offset);
-            lines.push(Line::from(vec![
+        )];
+    }
+    rows.iter()
+        .rev()
+        .take(limit.max(1))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|row| {
+            let time = activity::event_time(row.timestamp, offset);
+            Line::from(vec![
                 Span::styled(format!("  {time} "), theme::muted()),
                 Span::styled(
                     format!("{:<7}", kind_label(&row.kind)),
                     kind_style(&row.kind),
                 ),
                 Span::styled(short(&row.summary, 58), theme::text()),
-            ]));
-        }
-    }
-    card(frame, area, "Recent activity", lines);
+            ])
+        })
+        .collect()
 }
 
 fn kind_label(kind: &str) -> &'static str {
@@ -344,8 +347,8 @@ fn kind_label(kind: &str) -> &'static str {
         "run_started" => "RUN",
         "turn_started" => "TURN",
         "task_step" => "STEP",
-        "thinking_delta" => "THINK",
-        "text_delta" => "REPLY",
+        "user_message" => "YOU",
+        "assistant_reply" => "REPLY",
         "tool_call_started" => "TOOL",
         "tool_result" => "RESULT",
         "usage" => "USAGE",
@@ -356,10 +359,9 @@ fn kind_label(kind: &str) -> &'static str {
 
 fn kind_style(kind: &str) -> Style {
     match kind {
-        "thinking_delta" => theme::think(),
         "tool_call_started" => theme::warn(),
         "tool_result" | "usage" | "run_settled" => theme::good(),
-        "run_started" | "turn_started" => theme::accent_style(),
+        "user_message" | "run_started" | "turn_started" => theme::accent_style(),
         _ => theme::muted(),
     }
 }
@@ -440,5 +442,57 @@ mod tests {
             header.find("out").unwrap() + 3,
             month.find("500.0k").unwrap() + 6
         );
+    }
+
+    fn activity_rows(count: usize) -> Vec<activity::ActivityRow> {
+        (0..count)
+            .map(|index| activity::ActivityRow {
+                first: index,
+                last: index,
+                kind: "text_delta".to_owned(),
+                timestamp: index as i64 * 1_000_000,
+                summary: format!("reply {index}"),
+                chunks: 1,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn recent_card_shows_the_newest_row_last() {
+        let rows = activity_rows(40);
+        let limit = recent_limit(Rect::new(0, 0, 40, 6));
+        assert_eq!(limit, 4);
+        let lines = recent_lines(&rows, limit, time::UtcOffset::UTC);
+        assert_eq!(lines.len(), limit, "the newest rows must fill the card");
+        let rendered = lines.iter().map(text).collect::<Vec<_>>();
+        assert!(
+            rendered.last().unwrap().contains("reply 39"),
+            "newest row must be the final line: {rendered:?}"
+        );
+        assert!(
+            !rendered
+                .iter()
+                .any(|line| line.contains("reply 39")
+                    && !std::ptr::eq(line, rendered.last().unwrap())),
+            "the newest row must appear once"
+        );
+        assert!(rendered[0].contains("reply 36"), "{rendered:?}");
+    }
+
+    #[test]
+    fn recent_card_survives_a_tiny_pane_and_no_events() {
+        let rows = activity_rows(3);
+        assert_eq!(recent_limit(Rect::new(0, 0, 20, 1)), 1);
+        assert_eq!(recent_limit(Rect::new(0, 0, 20, 0)), 1);
+        let lines = recent_lines(
+            &rows,
+            recent_limit(Rect::new(0, 0, 40, 2)),
+            time::UtcOffset::UTC,
+        );
+        assert_eq!(lines.len(), 1);
+        assert!(text(&lines[0]).contains("reply 2"));
+        let empty = recent_lines(&[], 4, time::UtcOffset::UTC);
+        assert_eq!(empty.len(), 1);
+        assert!(text(&empty[0]).contains("No live events yet"));
     }
 }

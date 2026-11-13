@@ -21,6 +21,7 @@ pub enum DaemonState {
     Running,
     Stopped,
     Starting,
+    Stopping,
     Error(String),
 }
 
@@ -108,27 +109,22 @@ fn lock_pid(home: &Path) -> Option<u32> {
 
 /// Stop the daemon when the TUI owns it.
 pub fn stop(home: &Path, ownership: &Ownership) -> Result<(), String> {
-    match ownership {
-        Ownership::Spawned(pid) => {
-            signal_stop(*pid)?;
-            if wait_for_stop(home) {
-                Ok(())
-            } else {
-                Err("The daemon did not stop in time.".to_owned())
-            }
-        }
-        Ownership::ServiceManaged => {
-            hearth_runtime::service::stop().map_err(|error| error.to_string())?;
-            if wait_for_stop(home) {
-                Ok(())
-            } else {
-                Err("The daemon did not stop in time.".to_owned())
-            }
-        }
-        Ownership::Attached => {
-            Err("Hearth was already running; this window did not start it.".to_owned())
-        }
+    if matches!(ownership, Ownership::ServiceManaged) {
+        hearth_runtime::service::stop().map_err(|error| error.to_string())?;
+        return wait_after_stop(home);
     }
+    if probe(home).is_err() && lock_available(home) {
+        return Ok(());
+    }
+    let pid = match ownership {
+        Ownership::Spawned(pid) => lock_pid(home).unwrap_or(*pid),
+        Ownership::Attached => lock_pid(home)
+            .ok_or_else(|| "Hearth is running but its pid could not be read.".to_owned())?,
+        Ownership::ServiceManaged => unreachable!(),
+    };
+    // The lock records the live daemon even after a restart.
+    signal_stop(pid)?;
+    wait_after_stop(home)
 }
 
 /// Restart a daemon the TUI owns.
@@ -154,6 +150,14 @@ pub fn stop_on_exit(_home: &Path, ownership: &Ownership, keep_running: bool) {
     }
     if let Ownership::Spawned(pid) = ownership {
         let _ = signal_stop(*pid);
+    }
+}
+
+fn wait_after_stop(home: &Path) -> Result<(), String> {
+    if wait_for_stop(home) {
+        Ok(())
+    } else {
+        Err("The daemon did not stop in time.".to_owned())
     }
 }
 
@@ -221,9 +225,20 @@ mod tests {
     use super::*;
     use std::fs::OpenOptions;
     use std::process::Command;
+    use std::sync::Mutex;
+
+    /// `flock` is held by the open file description, so a child forked while a
+    /// lock is held keeps it alive until it execs. Tests that fork and tests
+    /// that assert on lock state must therefore never overlap.
+    static FORK_GUARD: Mutex<()> = Mutex::new(());
+
+    fn fork_guard() -> std::sync::MutexGuard<'static, ()> {
+        FORK_GUARD.lock().unwrap_or_else(|error| error.into_inner())
+    }
 
     #[test]
     fn lock_available_tracks_the_writer_lock() {
+        let _guard = fork_guard();
         let home = tempfile::TempDir::new().expect("temp home");
         let path = home.path().join("hearth.lock");
         let file = OpenOptions::new()
@@ -241,6 +256,7 @@ mod tests {
 
     #[test]
     fn stop_on_exit_signals_without_waiting_for_the_lock() {
+        let _guard = fork_guard();
         let home = tempfile::TempDir::new().expect("temp home");
         let lock = OpenOptions::new()
             .create(true)

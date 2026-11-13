@@ -81,3 +81,11 @@ fn the_latest_usage_row_is_available() {
         .expect("a usage row");
     assert_eq!(latest.id, recorded.id);
 }
+
+#[test]
+fn the_cache_hit_rate_is_cache_reads_over_prompt_tokens() {
+    assert_eq!(hearth_core::cache_hit_rate(100, 80), 0.8);
+    assert_eq!(hearth_core::cache_hit_rate(0, 0), 0.0);
+    assert_eq!(hearth_core::cache_hit_rate(100, 0), 0.0);
+    assert_eq!(hearth_core::cache_hit_rate(100, 140), 1.0);
+}

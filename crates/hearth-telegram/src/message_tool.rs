@@ -54,12 +54,10 @@ impl Tool for MessageTool {
     fn spec(&self) -> ToolSpec {
         let mut description = "Send files, an album, or a voice reply to the user. Use voice only when the user explicitly asks for it."
             .to_owned();
-        let mut speech = "Text to synthesize as a voice reply".to_owned();
+        let speech = "Text to synthesize as a voice reply";
         if self.speaker.is_some() {
             description.push(' ');
             description.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
-            speech.push_str(". ");
-            speech.push_str(hearth_model::ELEVENLABS_TAG_GUIDANCE);
         }
         ToolSpec {
             name: "message".to_owned(),

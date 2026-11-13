@@ -6,6 +6,11 @@ use serde_json::{Value, json};
 use crate::tool::{Tool, ToolError, ToolOutput};
 use crate::workspace::Workspace;
 
+/// Lines returned by `files read` when the caller gives no limit.
+const DEFAULT_READ_LINES: usize = 400;
+/// Hard ceiling on one `files read`, whatever the caller asks for.
+const MAX_READ_LINES: usize = 2_000;
+
 /// File access confined to a workspace, with spill reads.
 #[derive(Debug, Clone)]
 pub struct FileTool {
@@ -137,18 +142,29 @@ fn slice_lines(text: &str, arguments: &Value) -> String {
         .unwrap_or(1)
         .max(1) as usize;
     let limit = arguments.get("limit").and_then(Value::as_u64);
-    if offset == 1 && limit.is_none() {
-        return text.to_owned();
-    }
     let lines: Vec<&str> = text.lines().collect();
     let start = offset.saturating_sub(1).min(lines.len());
-    let end = match limit {
-        Some(limit) => start.saturating_add(limit as usize).min(lines.len()),
-        None => lines.len(),
-    };
+    // An unbounded read used to return the whole file, letting one large file
+    // flood the transcript. Cap the default and say how to continue.
+    let requested = limit.map_or(DEFAULT_READ_LINES, |limit| limit as usize);
+    let capped = requested.min(MAX_READ_LINES);
+    let end = start.saturating_add(capped).min(lines.len());
+    if start == 0 && end == lines.len() {
+        // The whole file fits: return it byte for byte, with no added newline.
+        return text.to_owned();
+    }
     let mut selected = lines[start..end].join("\n");
     if !selected.is_empty() {
         selected.push('\n');
+    }
+    if end < lines.len() {
+        selected.push_str(&format!(
+            "[showing lines {}-{} of {}; continue with offset {}]\n",
+            start + 1,
+            end,
+            lines.len(),
+            end + 1
+        ));
     }
     selected
 }

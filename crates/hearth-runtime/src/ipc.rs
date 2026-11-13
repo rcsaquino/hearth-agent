@@ -162,8 +162,19 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         .usage_totals_since(timestamp_micros(now - TimeDuration::days(30)))?;
     let total = context.session.usage_totals_since(0)?;
     let counts = context.session.task_counts()?;
-    let memory = context.session.memory_item_count()?;
-    let standing_version = context.memory.standing_version().unwrap_or(0);
+    // Count the live store, not the retired table.
+    let memory = context.memory.store().count().unwrap_or(0);
+    let (standing_characters, standing_version) = context
+        .memory
+        .standing()
+        .map(|(text, version)| (text.chars().count(), version))
+        .unwrap_or((0, 0));
+    let standing_bullets = context
+        .memory
+        .standing_store()
+        .entries()
+        .map(|items| items.len())
+        .unwrap_or(0);
     let last_consolidation = context.session.meta_value("last_consolidation")?;
     let last_skill_review = context.session.meta_value("last_skill_review")?;
     let last_skill_review_changes = context
@@ -171,12 +182,7 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         .meta_value("last_skill_review_changes")?
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0);
-    let denominator = today.input_tokens + today.cache_read_tokens;
-    let cache_hit_rate = if denominator > 0 {
-        today.cache_read_tokens as f64 / denominator as f64
-    } else {
-        0.0
-    };
+    let cache_hit_rate = hearth_core::cache_hit_rate(today.input_tokens, today.cache_read_tokens);
     Ok(json!({
         "model": context.model,
         "uptime_seconds": context.started.elapsed().as_secs(),
@@ -194,6 +200,8 @@ fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
         "cache_hit_rate": cache_hit_rate,
         "memory_items": memory,
         "standing_memory_version": standing_version,
+        "standing_bullets": standing_bullets,
+        "standing_characters": standing_characters,
         "last_consolidation": last_consolidation,
         "last_skill_review": last_skill_review,
         "last_skill_review_changes": last_skill_review_changes,

@@ -1421,3 +1421,50 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Migration 0005 drops `usage_events.cost_micros`; `SCHEMA_VERSION` is 5.
 - The TUI no longer shows a cost column in Usage or cost metadata in Activity.
   Onboarding and the lookup cache no longer carry prices.
+
+## 2026-11-12: Tool pairing, clean memory text, and daemon controls
+
+- A steering user entry can be saved between an assistant tool-call entry and its
+  tool-result entry. Prompt assembly now pulls matching results directly after the
+  assistant call, keeps the steering entry after the result, and drops unresolved
+  calls or orphan results. The audit transcript uses the same repaired order, so
+  an OpenAI-compatible provider never receives an unanswered `tool_calls` message.
+- Guidance keeps the home `HEARTH.md` text as the unlabeled base layer and labels
+  each project `AGENTS.md` with `### Project rules`. Absolute file paths are no
+  longer written into the prompt.
+- Standing and relevant memory render only the remembered text, one `- ` bullet per
+  item. IDs, kinds, dates, tags, and importance stay in the memory store, tool
+  output, extraction prompt, and Memory tab, where they are useful, and no longer
+  spend prompt tokens. Recall budgets count the rendered bullet.
+- The Settings daemon controls follow the live state: Start while stopped, Stop and
+  Restart while starting, running, or stopping. An attached daemon can be stopped
+  and a start-mode change restarts the daemon so the chosen mode owns it. The
+  settings form rebuilds those rows after every state change, and the in-memory
+  daemon section follows a migrated `settings.json` section so saving another
+  setting does not re-apply the start mode.
+- The Prompt audit drops tree guides, XML tag labels, and closing-tag rows. Sections
+  use a compact accent heading, indented bodies, role labels, and spacing between
+  messages; the raw JSON view still shows every tag and field.
+- Daemon settings migration no longer rewrites the installed systemd unit. It
+  writes the missing `daemon` section and leaves the existing unit alone, so
+  opening the TUI from a test or ad-hoc build cannot capture the unit and point
+  it at the wrong executable or home.
+
+## 2026-11-12: Prompt two-card audit
+
+- The Prompt tab always shows the latest saved request and uses two bordered
+  cards like Activity. The left card is a one-line list of wire items in exact
+  request order: system identity, guidance, standing memory, skills, every
+  transcript item with relevant memory immediately before the newest user, the
+  runtime note, the request `tools` field, and the saved response. The right card
+  always shows the selected item in full.
+- Up/Down select, and PageUp/PageDown, Home/End, and the scroll keys move the
+  detail. Tool definitions show compact `args` fields such as
+  `path: string (required)` and enum choices instead of pretty-printed schema
+  JSON. Tool-call arguments render as `key=value · key=value`. Raw JSON remains
+  available with `r`.
+- The row model is cached by request, width, response revision, and older request
+  for change markers. The selected detail is cached separately by selection.
+  Rendering slices only visible left rows and visible detail lines and never asks
+  Paragraph to rewrap the whole prompt, so selection and scrolling stay
+  responsive on large prompts.

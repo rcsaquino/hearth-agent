@@ -563,3 +563,78 @@ fn text_and_an_attachment_both_appear_in_the_content() {
     assert_eq!(blocks[1]["type"], "image");
     bot.stop();
 }
+
+#[test]
+fn a_reply_puts_the_quoted_text_first_in_the_content() {
+    let bot = FakeBot::start(
+        vec![message(
+            49,
+            13,
+            json!({
+                "text": "what does this mean",
+                "reply_to_message": {
+                    "message_id": 7,
+                    "date": 1_700_000_000,
+                    "chat": {"id": 10, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "text": "the case report is due Friday",
+                },
+            }),
+        )],
+        vec![],
+    );
+    let (_home, _harness, poller) = setup(&bot, None);
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.admitted, 1);
+
+    let blocks = blocks(&submission(&poller, "tg:10:13"));
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0]["type"], "text");
+    let context = blocks[0]["text"].as_str().expect("context text");
+    assert!(context.contains("Replying to"), "{context}");
+    assert!(
+        context.contains("the case report is due Friday"),
+        "{context}"
+    );
+    assert_eq!(blocks[1]["type"], "text");
+    assert_eq!(blocks[1]["text"], "what does this mean");
+    bot.stop();
+}
+
+#[test]
+fn a_reply_to_a_media_only_message_is_described_and_still_admitted() {
+    let bot = FakeBot::start(
+        vec![message(
+            50,
+            14,
+            json!({
+                "photo": [
+                    {"file_id": "large", "file_unique_id": "l", "width": 100, "height": 100, "file_size": 3}
+                ],
+                "reply_to_message": {
+                    "message_id": 6,
+                    "date": 1_700_000_000,
+                    "chat": {"id": 10, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "voice": {"file_id": "voice", "file_unique_id": "v", "file_size": 3},
+                },
+            }),
+        )],
+        vec![(
+            "large".to_owned(),
+            "photos/large.jpg".to_owned(),
+            vec![1, 2, 3],
+            3,
+        )],
+    );
+    let (_home, _harness, poller) = setup(&bot, None);
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.admitted, 1);
+
+    let blocks = blocks(&submission(&poller, "tg:10:14"));
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0]["type"], "text");
+    assert_eq!(blocks[0]["text"], "Replying to Sam: (a voice message)");
+    assert_eq!(blocks[1]["type"], "image");
+    bot.stop();
+}

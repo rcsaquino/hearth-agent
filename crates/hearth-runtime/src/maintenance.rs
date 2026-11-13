@@ -1,10 +1,8 @@
-//! Nightly maintenance scheduling and the memory consolidation handler.
+//! Nightly maintenance scheduling.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use hearth_core::{ClaimedTask, CoreError, NewTask, Session, StepOutput};
-use hearth_memory::{MemoryError, MemoryService};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
@@ -17,13 +15,8 @@ pub const BACKUP_KIND: &str = "backup";
 pub const BACKUP_HOUR: u8 = 3;
 pub const BACKUP_MINUTE: u8 = 0;
 
-/// The scheduled duplicate, archive, and episode pass.
-pub const MEMORY_CONSOLIDATE_KIND: &str = "memory.consolidate";
 /// The scheduled skill review pass.
 pub const SKILL_REVIEW_KIND: &str = "skill.review";
-/// Memory consolidation wakes at 03:30 local time.
-pub const MEMORY_CONSOLIDATE_HOUR: u8 = 3;
-pub const MEMORY_CONSOLIDATE_MINUTE: u8 = 30;
 /// Skill review wakes at 04:30 local time.
 pub const SKILL_REVIEW_HOUR: u8 = 4;
 pub const SKILL_REVIEW_MINUTE: u8 = 30;
@@ -58,12 +51,6 @@ pub fn ensure_maintenance_tasks(session: &Session) -> Result<(), CoreError> {
     for (kind, slot, hour, minute) in [
         (BACKUP_KIND, "03:00", BACKUP_HOUR, BACKUP_MINUTE),
         (
-            MEMORY_CONSOLIDATE_KIND,
-            "03:30",
-            MEMORY_CONSOLIDATE_HOUR,
-            MEMORY_CONSOLIDATE_MINUTE,
-        ),
-        (
             SKILL_REVIEW_KIND,
             "04:30",
             SKILL_REVIEW_HOUR,
@@ -77,70 +64,6 @@ pub fn ensure_maintenance_tasks(session: &Session) -> Result<(), CoreError> {
         session.create_sleeping_task(NewTask::new(kind, 1, "run", json!({"slot": slot})), wake)?;
     }
     Ok(())
-}
-
-/// Runs the memory consolidation, archive, and episode pass, then sleeps until
-/// the next night.
-pub struct MemoryMaintenanceHandler {
-    session: Session,
-    memory: Arc<MemoryService>,
-}
-
-impl MemoryMaintenanceHandler {
-    /// Build the handler.
-    pub fn new(session: Session, memory: Arc<MemoryService>) -> Self {
-        Self { session, memory }
-    }
-}
-
-impl TaskHandler for MemoryMaintenanceHandler {
-    fn step(&self, _task: &ClaimedTask) -> Result<StepOutput, TaskHandlerError> {
-        let now = self.session.now_micros();
-        let offset = local_offset();
-        let next = next_daily_micros(
-            now,
-            offset,
-            MEMORY_CONSOLIDATE_HOUR,
-            MEMORY_CONSOLIDATE_MINUTE,
-        );
-        let merged = self.memory.consolidate().map_err(memory_handler_error)?;
-        let archived = self.memory.archive_stale().map_err(memory_handler_error)?;
-        let episodes = self
-            .memory
-            .consolidate_episodes()
-            .map_err(memory_handler_error)?;
-        let stamp = rfc3339(now);
-        self.session
-            .set_meta("last_consolidation", &stamp)
-            .map_err(|error| TaskHandlerError::Retryable(error.to_string()))?;
-        Ok(StepOutput::Sleep {
-            until_micros: next,
-            phase: "run".to_owned(),
-            checkpoint: json!({
-                "last_consolidation": stamp,
-                "merged": merged.merged,
-                "unchanged": merged.unchanged,
-                "archived": archived.archived,
-                "episodes": episodes.written,
-            }),
-        })
-    }
-}
-
-fn memory_handler_error(error: MemoryError) -> TaskHandlerError {
-    let permanent = matches!(
-        &error,
-        MemoryError::Invalid(_)
-            | MemoryError::Secret(_)
-            | MemoryError::Corrupt(_)
-            | MemoryError::NotFound(_)
-    );
-    let message = error.to_string();
-    if permanent {
-        TaskHandlerError::Permanent(message)
-    } else {
-        TaskHandlerError::Retryable(message)
-    }
 }
 
 pub(crate) fn rfc3339(now_micros: i64) -> String {

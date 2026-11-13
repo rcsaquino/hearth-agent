@@ -1,4 +1,4 @@
-//! Compaction: summarize an old range and flush its memory first.
+//! Compaction: summarize an old range into one summary entry.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -7,12 +7,9 @@ use hearth_core::{
     CompactionPlan, CoreError, Entry, NewEntry, NewTask, NewUsage, Save, Session, StepOutput,
     TerminalOutcome, parse_blocks, summary_content,
 };
-use hearth_memory::MemoryService;
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::json;
 use thiserror::Error;
-
-use crate::memory_extract::MemoryExtractor;
 
 const ENTRY_PREVIEW_CHARS: usize = 400;
 const RANGE_CHARS_PER_ENTRY: usize = 1200;
@@ -33,11 +30,10 @@ pub enum CompactionError {
     Invalid(String),
 }
 
-/// Summarizes one planned range and flushes its durable memory first.
+/// Summarizes one planned range into a single summary entry.
 pub struct Compactor {
     session: Session,
     provider: Arc<dyn Provider>,
-    memory: Option<Arc<MemoryService>>,
     model: String,
     provider_name: String,
     owner: String,
@@ -48,7 +44,6 @@ impl Compactor {
     pub fn new(
         session: Session,
         provider: Arc<dyn Provider>,
-        memory: Option<Arc<MemoryService>>,
         model: String,
         provider_name: String,
         owner: String,
@@ -56,14 +51,13 @@ impl Compactor {
         Self {
             session,
             provider,
-            memory,
             model,
             provider_name,
             owner,
         }
     }
 
-    /// Flush memory from the plan range and save one summary entry.
+    /// Summarize the planned range and save one summary entry.
     pub fn compact(
         &self,
         conversation_id: &str,
@@ -90,8 +84,6 @@ impl Compactor {
             .ok_or_else(|| {
                 CompactionError::Invalid("the compaction task could not be claimed".to_owned())
             })?;
-
-        self.flush_memory(conversation_id, &claimed.id, &plan.entries);
 
         let instruction = SUMMARY_INSTRUCTION.to_owned();
         let range = render_range(&plan.entries);
@@ -175,25 +167,6 @@ impl Compactor {
             .history(conversation_id)?
             .into_iter()
             .find(|entry| entry.id == summary_id))
-    }
-
-    fn flush_memory(&self, conversation_id: &str, task_id: &str, entries: &[Entry]) {
-        let Some(memory) = &self.memory else {
-            return;
-        };
-        let extractor = MemoryExtractor::new(
-            self.session.clone(),
-            Arc::clone(&self.provider),
-            Arc::clone(memory),
-            self.model.clone(),
-            self.provider_name.clone(),
-            self.owner.clone(),
-        );
-        if let Err(error) =
-            extractor.extract(conversation_id, &format!("compaction:{task_id}"), entries)
-        {
-            tracing::warn!(%error, "memory flush before compaction failed");
-        }
     }
 
     fn record_usage(

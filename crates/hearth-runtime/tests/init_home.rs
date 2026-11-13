@@ -49,7 +49,6 @@ fn init_writes_a_complete_home_silently() {
     let settings = load(home.path()).expect("load settings");
     assert_eq!(settings.identity.agent_name, "Hearth");
     assert_eq!(settings.identity.timezone, "UTC");
-    assert_eq!(settings.agent.max_turns, 120);
     let settings_text = std::fs::read_to_string(&report.settings).expect("settings text");
     assert!(
         !settings_text.contains("\"soul_file\""),

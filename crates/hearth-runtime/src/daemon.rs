@@ -31,17 +31,12 @@ use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
-use crate::maintenance::{
-    BACKUP_KIND, BackupHandler, MEMORY_CONSOLIDATE_KIND, MemoryMaintenanceHandler,
-    SKILL_REVIEW_KIND, ensure_maintenance_tasks,
-};
+use crate::maintenance::{BACKUP_KIND, BackupHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks};
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
 use crate::skill_review::{SkillReviewHandler, SkillReviewer};
 use crate::skills::SkillLibrary;
-use crate::tools::{
-    MessageTarget, TaskTarget, ToolMediaRoots, build_tools, memory_policy, voice_tags,
-};
-use hearth_memory::{MemoryService, MemorySource};
+use crate::tools::{MessageTarget, TaskTarget, ToolMediaRoots, build_tools};
+use hearth_memory::MemoryService;
 
 const TELEGRAM_POLL_TIMEOUT_SECS: u32 = 2;
 
@@ -112,10 +107,23 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         None => home.join("workspace"),
     };
     let spill = home.join("spill");
-    let memory = Arc::new(MemoryService::with_policy(
-        session.clone(),
-        memory_policy(&settings),
-    ));
+    // Memory is not optional: a daemon that cannot reach its store would answer
+    // with silently missing context, so failing to open it stops startup.
+    let memory =
+        Arc::new(MemoryService::new(session.clone()).map_err(|error| {
+            std::io::Error::other(format!("memory could not be opened: {error}"))
+        })?);
+    // Repair an over-budget standing file at startup, as the store intends:
+    // bullets trimmed there are archived to long-term memory first.
+    match memory.standing_store().load() {
+        Ok(snapshot) if !snapshot.archived.is_empty() => tracing::warn!(
+            archived = snapshot.archived.len(),
+            characters = snapshot.characters,
+            "standing memory repaired"
+        ),
+        Ok(_) => {}
+        Err(error) => tracing::warn!(%error, "standing memory could not be loaded"),
+    }
 
     let effect_worker = EffectWorker::new(session.clone(), workspace.clone());
     let recovered = effect_worker.recover_started()?;
@@ -299,13 +307,6 @@ impl TelegramRuntime {
                     Arc::new(ReminderHandler::new(session.clone(), sender.clone())),
                 )
                 .register(
-                    MEMORY_CONSOLIDATE_KIND,
-                    Arc::new(MemoryMaintenanceHandler::new(
-                        session.clone(),
-                        Arc::clone(&memory),
-                    )),
-                )
-                .register(
                     SKILL_REVIEW_KIND,
                     Arc::new(SkillReviewHandler::new(session.clone(), reviewer)),
                 )
@@ -338,8 +339,6 @@ impl TelegramRuntime {
             },
             model: models.model.clone(),
             provider_name: models.kind.clone(),
-            voice_tags: voice_tags(&settings),
-            max_turns: settings.agent.max_turns,
             budget,
             events: Arc::clone(&events) as Arc<dyn crate::events::EventSink>,
             owner: format!("helper:{}", std::process::id()),
@@ -364,8 +363,6 @@ impl TelegramRuntime {
             },
             model: models.model.clone(),
             provider_name: models.kind.clone(),
-            voice_tags: voice_tags(&settings),
-            max_turns: settings.agent.max_turns,
             budget,
             pid: std::process::id(),
             cancellations,
@@ -397,8 +394,6 @@ struct TelegramWorker {
     media: ToolMediaRoots,
     model: String,
     provider_name: String,
-    voice_tags: bool,
-    max_turns: u32,
     budget: ContextBudget,
     pid: u32,
     cancellations: Arc<CancellationRegistry>,
@@ -533,7 +528,6 @@ impl TelegramWorker {
         let compactor = Compactor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
-            Some(Arc::clone(&self.memory)),
             self.model.clone(),
             self.provider_name.clone(),
             format!("daemon:idle:{}", self.pid),
@@ -586,19 +580,12 @@ impl TelegramWorker {
             outbound: self.outbound.clone(),
             speaker: self.speaker.clone(),
         };
-        let memory_source = self
-            .session
-            .latest_user_entry_id(&submission.conversation_id)
-            .ok()
-            .flatten()
-            .map(MemorySource::user);
         let built = match build_tools(
             &self.settings,
             &self.workspace,
             &self.spill,
             Some(target),
             Some(Arc::clone(&self.memory)),
-            memory_source,
             Some(Arc::clone(&self.skills)),
             Some(TaskTarget {
                 depth: 0,
@@ -622,10 +609,8 @@ impl TelegramWorker {
                 model: self.model.clone(),
                 provider_name: self.provider_name.clone(),
                 owner: format!("daemon:{}:{}", self.pid, submission.id),
-                max_turns: self.max_turns,
                 tools: built.core,
                 spill_dir: self.spill.clone(),
-                voice_tags: self.voice_tags,
                 guidance: hearth_core::load_guidance(&self.home, &self.workspace).text,
             },
         )
@@ -946,6 +931,8 @@ fn build_speaker(media: &Media) -> Result<Option<Arc<dyn Speaker>>, DaemonError>
     )?)))
 }
 
+/// Where the embedding model lives: an absolute setting wins, a relative one
+/// resolves against the Hearth home.
 fn parse_target(key: &str) -> Option<(i64, Option<i64>)> {
     let (chat_id, thread_id) = key.split_once(':')?;
     let chat_id = chat_id.parse::<i64>().ok()?;

@@ -1,7 +1,7 @@
 //! The Hearth TUI application.
 
-use std::cell::Cell;
-use std::collections::VecDeque;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -95,17 +95,36 @@ pub struct SkillsView {
     pub skills: Vec<Skill>,
     pub selected: usize,
     pub body: Option<String>,
+    pub scroll: usize,
+    pub max_scroll: Cell<usize>,
     pub stats: Option<SkillStats>,
     pub error: Option<String>,
 }
 
 #[derive(Default)]
 pub struct PromptView {
-    pub document: Option<Value>,
+    /// Newest-first prompt/response exchanges loaded by the worker. The view
+    /// always shows index 0.
+    pub exchanges: Vec<Value>,
+    /// Selected prompt section.
+    pub selected: usize,
+    /// Sections the user expanded to full length.
+    pub expanded: BTreeSet<usize>,
     pub raw: bool,
     pub scroll: usize,
     pub max_scroll: Cell<usize>,
     pub loading: bool,
+    pub(crate) cache: RefCell<Option<crate::ui::prompt::PromptCache>>,
+}
+
+impl PromptView {
+    pub fn current(&self) -> Option<&Value> {
+        self.exchanges.first()
+    }
+
+    pub fn older(&self) -> Option<&Value> {
+        self.exchanges.get(1)
+    }
 }
 
 pub struct SettingsView {
@@ -152,6 +171,15 @@ pub struct MemoryView {
     pub error: Option<String>,
 }
 
+/// The store a memory row came from.
+pub fn store_label(record: &MemoryRecord) -> &'static str {
+    if record.standing {
+        "standing"
+    } else {
+        "long-term"
+    }
+}
+
 impl MemoryView {
     pub fn reload(&mut self, home: &Path) {
         match hearth_runtime::inspect::list_memories(home, 1000) {
@@ -174,9 +202,8 @@ impl MemoryView {
             .filter(|record| {
                 filter.is_empty()
                     || record.content.to_lowercase().contains(&filter)
-                    || record.kind.to_lowercase().contains(&filter)
-                    || record.status.to_lowercase().contains(&filter)
-                    || record.standing.to_lowercase().contains(&filter)
+                    || record.source.to_lowercase().contains(&filter)
+                    || store_label(record).to_lowercase().contains(&filter)
                     || record
                         .tags
                         .iter()
@@ -238,6 +265,8 @@ impl App {
             skills: Vec::new(),
             selected: 0,
             body: None,
+            scroll: 0,
+            max_scroll: Cell::new(0),
             stats: None,
             error: None,
             new_name: None,
@@ -295,13 +324,16 @@ impl App {
                     "Settings need attention. Open Doctor for details.".to_owned(),
                 );
             }
+            self.sync_daemon_controls();
             return;
         }
         if self.ownership.is_some() {
             self.daemon = DaemonState::Running;
+            self.sync_daemon_controls();
             return;
         }
         self.daemon = DaemonState::Starting;
+        self.sync_daemon_controls();
         let start = self.settings.daemon.start.clone();
         self.workers.spawn_daemon_action(
             self.home.clone(),
@@ -400,8 +432,13 @@ impl App {
         self.tab = tab;
         match tab {
             Tab::Prompt => self.refresh_prompt(),
-            Tab::Skills if self.skills.skills.is_empty() => self.skills.reload(),
-            Tab::Skills => {}
+            Tab::Skills => {
+                if self.skills.skills.is_empty() {
+                    self.skills.reload();
+                } else if self.skills.body.is_none() {
+                    self.skills.load_selected();
+                }
+            }
             Tab::Memory => self.memory.reload(&self.home),
             Tab::Settings => self.ensure_settings_form(),
             _ => {}
@@ -541,6 +578,15 @@ impl App {
                 self.banner = Some(error);
             }
         }
+        self.sync_daemon_controls();
+    }
+
+    /// Keep the daemon action rows in step with the live daemon state.
+    fn sync_daemon_controls(&mut self) {
+        let running = !matches!(self.daemon, DaemonState::Stopped | DaemonState::Error(_));
+        if let Some(form) = &mut self.settings_form {
+            form.set_daemon_running(running);
+        }
     }
 
     fn open_settings_editor(&mut self) {
@@ -624,6 +670,8 @@ impl App {
             let start = self.settings.daemon.start.clone();
             let ownership = self.ownership.clone().unwrap_or(Ownership::Attached);
             self.settings.message = Some(format!("Applying {}...", start_label(&start)));
+            self.daemon = DaemonState::Starting;
+            self.sync_daemon_controls();
             self.workers
                 .spawn_service(self.home.clone(), start, ownership);
         } else {
@@ -758,19 +806,21 @@ impl App {
         match key.code {
             KeyCode::Up => {
                 self.skills.selected = self.skills.selected.saturating_sub(1);
-                self.skills.body = None;
+                self.skills.load_selected();
             }
             KeyCode::Down => {
                 if self.skills.selected + 1 < self.skills.skills.len() {
                     self.skills.selected += 1;
                 }
-                self.skills.body = None;
+                self.skills.load_selected();
             }
-            KeyCode::Enter => {
-                if let Some(skill) = self.skills.skills.get(self.skills.selected) {
-                    self.skills.body = self.skills.library.load_body(&skill.name).ok().flatten();
-                }
+            KeyCode::Enter => self.skills.load_selected(),
+            KeyCode::PageUp => self.skills.scroll = self.skills.scroll.saturating_sub(15),
+            KeyCode::PageDown => {
+                self.skills.scroll = (self.skills.scroll + 15).min(self.skills.max_scroll.get());
             }
+            KeyCode::Home => self.skills.scroll = 0,
+            KeyCode::End => self.skills.scroll = self.skills.max_scroll.get(),
             KeyCode::Char('n') => {
                 self.skills.new_name = Some(TextInput::new(false));
                 self.skills.error = None;
@@ -794,7 +844,6 @@ impl App {
                     None => {}
                 }
             }
-            KeyCode::Esc => self.skills.body = None,
             _ => {}
         }
     }
@@ -837,16 +886,36 @@ impl App {
                 self.prompt.raw = !self.prompt.raw;
                 self.prompt.scroll = 0;
             }
-            KeyCode::Up => self.prompt.scroll = self.prompt.scroll.saturating_sub(1),
-            KeyCode::Down => {
-                self.prompt.scroll = (self.prompt.scroll + 1).min(self.prompt.max_scroll.get());
+            // Toggle full length for the selected section.
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                if !self.prompt.expanded.remove(&self.prompt.selected) {
+                    self.prompt.expanded.insert(self.prompt.selected);
+                }
+                self.prompt.scroll = 0;
             }
+            KeyCode::Char('a') => {
+                if self.prompt.expanded.is_empty() {
+                    let count = self
+                        .prompt
+                        .cache
+                        .borrow()
+                        .as_ref()
+                        .map(|cache| cache.sections.len())
+                        .unwrap_or(0);
+                    self.prompt.expanded.extend(0..count);
+                } else {
+                    self.prompt.expanded.clear();
+                }
+                self.prompt.scroll = 0;
+            }
+            KeyCode::Up => ui::prompt::select_previous(&mut self.prompt),
+            KeyCode::Down => ui::prompt::select_next(&mut self.prompt),
             KeyCode::PageUp => self.prompt.scroll = self.prompt.scroll.saturating_sub(15),
             KeyCode::PageDown => {
                 self.prompt.scroll = (self.prompt.scroll + 15).min(self.prompt.max_scroll.get());
             }
-            KeyCode::Home => self.prompt.scroll = 0,
-            KeyCode::End => self.prompt.scroll = self.prompt.max_scroll.get(),
+            KeyCode::Home => ui::prompt::select_first(&mut self.prompt),
+            KeyCode::End => ui::prompt::select_last(&mut self.prompt),
             KeyCode::Char('o') => self.refresh_prompt(),
             _ => {}
         }
@@ -892,12 +961,14 @@ impl App {
     }
 
     fn start_daemon(&mut self) {
-        if matches!(self.daemon, DaemonState::Running) {
+        if !matches!(self.daemon, DaemonState::Stopped | DaemonState::Error(_)) {
             self.settings.message = Some("Hearth is already running.".to_owned());
             return;
         }
         let start = self.settings.daemon.start.clone();
         self.settings.message = Some("Starting the daemon...".to_owned());
+        self.daemon = DaemonState::Starting;
+        self.sync_daemon_controls();
         self.workers.spawn_daemon_action(
             self.home.clone(),
             DaemonAction::Start,
@@ -907,14 +978,17 @@ impl App {
     }
 
     fn stop_daemon(&mut self) {
-        if matches!(self.ownership, Some(Ownership::Attached) | None) {
-            self.settings.message = Some(
-                "This daemon was already running; start and stop it from its own service."
-                    .to_owned(),
-            );
+        if matches!(self.daemon, DaemonState::Stopped) {
+            self.settings.message = Some("Hearth is already stopped.".to_owned());
+            return;
+        }
+        if matches!(self.daemon, DaemonState::Stopping) {
+            self.settings.message = Some("Hearth is already stopping.".to_owned());
             return;
         }
         self.settings.message = Some("Stopping the daemon...".to_owned());
+        self.daemon = DaemonState::Stopping;
+        self.sync_daemon_controls();
         let ownership = self.ownership.clone().unwrap_or(Ownership::Attached);
         self.workers.spawn_daemon_action(
             self.home.clone(),
@@ -925,13 +999,21 @@ impl App {
     }
 
     fn restart_daemon(&mut self) {
-        if matches!(self.ownership, Some(Ownership::Attached) | None) {
-            self.settings.message = Some(
-                "This daemon was already running; restart it from its own service.".to_owned(),
-            );
+        if matches!(self.daemon, DaemonState::Stopping) {
+            self.settings.message = Some("Hearth is still stopping.".to_owned());
+            return;
+        }
+        if matches!(self.daemon, DaemonState::Stopped) {
+            self.start_daemon();
+            return;
+        }
+        if matches!(self.daemon, DaemonState::Starting) {
+            self.settings.message = Some("Hearth is still starting.".to_owned());
             return;
         }
         self.settings.message = Some("Restarting the daemon...".to_owned());
+        self.daemon = DaemonState::Starting;
+        self.sync_daemon_controls();
         let ownership = self.ownership.clone().unwrap_or(Ownership::Attached);
         self.workers.spawn_daemon_action(
             self.home.clone(),
@@ -952,6 +1034,8 @@ impl App {
         let start = self.settings.daemon.start.clone();
         let ownership = self.ownership.clone().unwrap_or(Ownership::Attached);
         self.settings.message = Some(format!("Applying {}...", start_label(&start)));
+        self.daemon = DaemonState::Starting;
+        self.sync_daemon_controls();
         self.workers
             .spawn_service(self.home.clone(), start, ownership);
     }
@@ -975,11 +1059,16 @@ impl App {
             AppEvent::Status(result) => match result {
                 Ok(status) => {
                     self.status = Some(status);
-                    self.daemon = DaemonState::Running;
+                    if !matches!(self.daemon, DaemonState::Stopping) {
+                        self.daemon = DaemonState::Running;
+                    }
                 }
                 Err(_) => {
                     self.status = None;
-                    if !matches!(self.daemon, DaemonState::Starting | DaemonState::Error(_)) {
+                    if !matches!(
+                        self.daemon,
+                        DaemonState::Starting | DaemonState::Stopping | DaemonState::Error(_)
+                    ) {
                         self.daemon = DaemonState::Stopped;
                     }
                 }
@@ -1055,28 +1144,27 @@ impl App {
                     self.ownership = None;
                     self.settings.message = Some("Daemon stopped.".to_owned());
                 }
-                Err(error) => self.settings.message = Some(error),
+                Err(error) => {
+                    self.daemon = DaemonState::Error(error.clone());
+                    self.settings.message = Some(error);
+                }
             },
             AppEvent::Prompt(result) => {
                 self.prompt.loading = false;
                 match result {
-                    Ok(Some(document)) => {
-                        self.prompt.document = Some(document);
-                        self.prompt.scroll = 0;
-                    }
-                    Ok(None) => {
-                        if self.prompt.document.is_none() {
-                            self.prompt.document = None;
-                        } else {
+                    Ok(exchanges) => {
+                        if exchanges.is_empty() && !self.prompt.exchanges.is_empty() {
                             self.banner = Some(
-                                "No newer saved prompt was found; showing the last one.".to_owned(),
+                                "No saved prompts were found; showing the last loaded set."
+                                    .to_owned(),
                             );
+                        } else {
+                            self.prompt.exchanges = exchanges;
+                            self.prompt.selected = 0;
+                            self.prompt.scroll = 0;
                         }
                     }
                     Err(error) => {
-                        if self.prompt.document.is_none() {
-                            self.prompt.document = None;
-                        }
                         self.banner = Some(error);
                     }
                 }
@@ -1119,6 +1207,7 @@ impl App {
                 }
             }
         }
+        self.sync_daemon_controls();
     }
 
     fn finish_onboarding(&mut self) {
@@ -1154,6 +1243,15 @@ impl SkillsView {
         }
         self.stats = self.library.stats().ok();
         self.selected = self.selected.min(self.skills.len().saturating_sub(1));
+        self.load_selected();
+    }
+
+    pub(crate) fn load_selected(&mut self) {
+        self.body = self
+            .skills
+            .get(self.selected)
+            .and_then(|skill| self.library.load_body(&skill.name).ok().flatten());
+        self.scroll = 0;
     }
 }
 
@@ -1205,12 +1303,15 @@ fn load_dashboard(
         );
     }
     match hearth_config::load(home) {
-        Ok(settings) => {
+        Ok(mut settings) => {
             let banner = settings
                 .validate_for_run()
                 .err()
                 .map(|error| error.to_string());
             let daemon = migrate_daemon(home, &settings);
+            // Keep the in-memory view in step with a migrated daemon section so
+            // a later settings save does not think the start mode changed.
+            settings.daemon = daemon.clone();
             (
                 Screen::Dashboard,
                 Some(settings),
@@ -1253,7 +1354,8 @@ fn migrate_daemon(home: &std::path::Path, settings: &Settings) -> Daemon {
         keep_running: true,
     };
     let _ = hearth_config::save_daemon(home, &daemon);
-    let _ = hearth_runtime::service::install(home, true);
+    // The unit is already installed. Never rewrite it from whatever binary
+    // happens to open the TUI; a test or ad-hoc build must not capture the unit.
     daemon
 }
 

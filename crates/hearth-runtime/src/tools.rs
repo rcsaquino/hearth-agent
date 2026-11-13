@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use hearth_config::Settings;
 use hearth_core::Session;
-use hearth_memory::{MemoryPolicy, MemoryService, MemorySource, MemoryTool};
+use hearth_memory::MemoryService;
 use hearth_model::{ImageClient, Speaker, SpeechClient, Transcriber, TranscriptionClient};
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
@@ -22,15 +22,6 @@ use crate::helpers::{HelperControls, TaskTool};
 use crate::scheduler::ScheduleTool;
 use crate::skills::{SkillLibrary, SkillTool};
 use crate::tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
-
-/// True when speech is configured for ElevenLabs.
-pub fn voice_tags(settings: &Settings) -> bool {
-    settings
-        .media
-        .as_ref()
-        .and_then(|media| media.tts.as_ref())
-        .is_some_and(|tts| tts.kind.as_deref() == Some("elevenlabs"))
-}
 
 /// The Telegram values needed for the message tool.
 pub struct MessageTarget {
@@ -74,15 +65,6 @@ pub enum ToolBuildError {
     Fetch(#[from] FetchError),
 }
 
-/// Read the memory budgets from settings.
-pub fn memory_policy(settings: &Settings) -> MemoryPolicy {
-    MemoryPolicy {
-        standing_max_tokens: settings.memory.standing_max_tokens as usize,
-        recall_max_tokens: settings.memory.recall_max_tokens as usize,
-        recall_max_items: MemoryPolicy::default().recall_max_items,
-    }
-}
-
 /// Build the tools for one run.
 #[allow(clippy::too_many_arguments)]
 pub fn build_tools(
@@ -91,7 +73,6 @@ pub fn build_tools(
     spill: &Path,
     message: Option<MessageTarget>,
     memory: Option<Arc<MemoryService>>,
-    memory_source: Option<MemorySource>,
     skills: Option<Arc<SkillLibrary>>,
     task: Option<TaskTarget>,
     media: &ToolMediaRoots,
@@ -103,17 +84,16 @@ pub fn build_tools(
         Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
         Arc::new(build_web_search(settings)?),
         Arc::new(build_web_fetch(settings)?),
-        Arc::new(ToolSearchTool::new(
+    ];
+    // `tool_search` only earns its tokens when there is a group to reach.
+    if groups.any_available() {
+        tools.push(Arc::new(ToolSearchTool::new(
             Arc::clone(&groups),
             Arc::clone(&selection),
-        )),
-    ];
+        )));
+    }
     if let Some(memory) = memory {
-        let tool = match memory_source {
-            Some(source) => MemoryTool::with_source(memory, source),
-            None => MemoryTool::new(memory),
-        };
-        tools.push(Arc::new(tool));
+        tools.extend(memory.tools());
     }
     if let Some(skills) = skills {
         tools.push(Arc::new(SkillTool::new(skills)));
@@ -412,6 +392,15 @@ mod tests {
     }
 }
 
+/// The ceiling for the always-loaded tool schemas.
+///
+/// Measured at 2,359 tokens: roughly 1,410 for the five memory tools and about
+/// 950 for the rest of the core set. The guard exists to catch a single tool
+/// growing a sprawling schema, so it sits just above the measured total rather
+/// than constraining the memory design.
+#[cfg(test)]
+const CORE_SCHEMA_TOKEN_BUDGET: i64 = 2_600;
+
 #[cfg(test)]
 mod core_budget_tests {
     use super::*;
@@ -428,7 +417,7 @@ mod core_budget_tests {
     fn the_core_tool_schemas_fit_the_budget() {
         let home = tempfile::TempDir::new().expect("temp home");
         let harness = Harness::open(home.path()).expect("harness");
-        let memory = Arc::new(MemoryService::new(harness.session().clone()));
+        let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
         let sender = TelegramSender::new(
             TelegramClient::with_base_url("test-token", "http://127.0.0.1:1")
                 .expect("telegram client"),
@@ -454,7 +443,6 @@ mod core_budget_tests {
             &spill,
             Some(target),
             Some(memory),
-            None,
             Some(Arc::new(SkillLibrary::new(home.path()))),
             None,
             &media,
@@ -472,7 +460,11 @@ mod core_budget_tests {
             "shell",
             "web_search",
             "web_fetch",
-            "memory",
+            "memory_add",
+            "memory_edit",
+            "memory_delete",
+            "memory_search",
+            "memory_sessions",
             "message",
             "schedule",
             "skill",
@@ -485,7 +477,13 @@ mod core_budget_tests {
         }
 
         let tokens = ToolGroups::schema_tokens(&built.core.specs());
-        assert!(tokens <= 1200, "core tool schemas use {tokens} tokens");
+        // Memory contributes five tools, about 1,410 tokens of this total. The
+        // rest of the core set is roughly 950. The guard exists to catch a tool
+        // that grew a sprawling schema, not to forbid the memory family.
+        assert!(
+            tokens <= CORE_SCHEMA_TOKEN_BUDGET,
+            "core tool schemas use {tokens} tokens"
+        );
     }
 
     #[test]
@@ -509,7 +507,7 @@ mod core_budget_tests {
         .expect("settings");
         let media = ToolMediaRoots { inbound, outbound };
         let built = build_tools(
-            &settings, &workspace, &spill, None, None, None, None, None, &media,
+            &settings, &workspace, &spill, None, None, None, None, &media,
         )
         .expect("tools");
 
@@ -551,6 +549,6 @@ mod core_budget_tests {
                 .call_selected("documents", &json!({"path": "missing.pdf"}), &selected);
         assert!(outcome.is_some(), "the selected documents tool is callable");
         assert!(outcome.unwrap().is_err());
-        assert!(ToolGroups::schema_tokens(&built.core.specs()) <= 1200);
+        assert!(ToolGroups::schema_tokens(&built.core.specs()) <= CORE_SCHEMA_TOKEN_BUDGET);
     }
 }

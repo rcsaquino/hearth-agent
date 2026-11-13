@@ -151,10 +151,8 @@ fn agent(home: &std::path::Path, harness: &Harness, provider: Arc<dyn Provider>)
             model: "test-model".to_owned(),
             provider_name: "scripted".to_owned(),
             owner: "owner".to_owned(),
-            max_turns: 6,
             tools: ToolRegistry::new(vec![Arc::new(Echo)]),
             spill_dir: home.join("spill"),
-            voice_tags: false,
             guidance: String::new(),
         },
     )

@@ -297,18 +297,21 @@ terminal application. There are no subcommands or flags.
 | Area | What it does |
 |---|---|
 | Onboarding | First run replaces `hearth init`: bot token, user id, provider, API key, model picker, thinking, agent name, optional media, start mode, keep-running. |
-| Overview | Runtime, model, thinking, context, turn limit, usage and cache, tasks, memory, Telegram, providers, media, workspace, and recent activity. |
+| Overview | Runtime, model, thinking, context, usage and cache, tasks, memory, Telegram, providers, media, workspace, and recent activity. |
 | Activity | The live event stream from the daemon, with coalesced stream deltas and a readable event detail. |
 | Memory | Browse and search saved memory records. |
-| Skills | Browse skills; create and edit user skills; learned skills stay read-only. |
-| Prompt | The newest saved prompt document and every XML section, with token counts and a raw JSON view. |
+| Skills | Browse skills with automatic, scrollable body preview; create and edit user skills; learned skills stay read-only. |
+| Prompt | Two bordered read-only cards: a left list of wire items and a right detail card showing the selected item in full, with token counts and a raw JSON view. |
 | Doctor | Offline and live checks. |
 | Settings | The last tab. Every option is shown inline, with SOUL.md and HEARTH.md actions, daemon controls, a raw JSON editor, changed-row markers, and reset to default. |
 
 The TUI is a control plane. Conversations happen in Telegram; the TUI configures,
 observes, audits, and controls the daemon. A TUI-started daemon runs detached from
-the terminal. Closing the TUI signals a daemon it owns and exits without waiting
-for it to release the lock; the Stop action still waits for a clean stop.
+the terminal. The Settings daemon controls show Start while the daemon is stopped
+and Stop plus Restart while it is starting, running, or stopping. An attached
+daemon can be stopped and restarted from this window. Closing the TUI signals a
+daemon it owns and exits without waiting for it to release the lock; the Stop
+action still waits for a clean stop.
 
 ### 2.4 One user at a time
 
@@ -594,6 +597,9 @@ The rules:
 - New inputs during a run are saved as submissions and queued.
 - At each turn boundary, the generation task should incorporate queued inputs as
   new user entries before the next model request. This is steering.
+- If a queued entry lands between a tool call and its result, prompt assembly moves
+  the result next to the call and drops unmatched calls or results. A provider
+  never sees an unanswered `tool_calls` message.
 - A run never changes a model request that is already running. Cancellation takes
   effect at the next boundary or through a provider abort.
 - A message that is only `stop` aborts the active run and settles the submission as
@@ -619,10 +625,10 @@ admit input -> submission queued -> generation task
                save tool results -> next turn
 ```
 
-A run ends when the model returns a final answer with no tool calls, the turn limit
-is reached, the task fails, or the user cancels. The default turn limit is 120 and is
-configurable. Hitting the limit produces a final `notice` entry and an `unanswered`
-submission with reason `turn_limit`.
+A run ends when the model returns a final answer with no tool calls, the task fails,
+or the user cancels. There is no turn limit. A tool loop runs until the model stops
+asking for tools or the user cancels, matching the durable-agent behavior Hearth
+borrowed its ideas from.
 
 ### 5.2 Turning the record into a prompt
 
@@ -826,10 +832,18 @@ preambles and no server-side additions.
 
 - The exact prompt text is saved in `prompt_blobs` before the request and linked from
   the generation checkpoint.
-- The Prompt tab reads the newest saved document read-only and renders every XML
-  section: identity (`SOUL.md`), project guidance, tools, standing memory, skills
-  index, relevant memory, transcript, and the runtime note. It shows per-section
-  token counts and also offers the raw JSON.
+- The Prompt tab shows only the latest saved request in two bordered cards, like
+  Activity. The left card lists every wire item as a one-line label in exact
+  request order: system identity (`SOUL.md`), guidance, standing memory, skills,
+  every transcript item with relevant memory immediately before the newest user,
+  the runtime note, the request `tools` field, and the saved response. The right
+  card always shows the selected item in full.
+- Up/Down select a row, Home/End jump to the first or last row, and
+  PageUp/PageDown scroll the detail card. Tool definitions show argument names,
+  types, enums, and required markers instead of pretty-printed schema JSON. `r`
+  shows the raw JSON. Rows are cached by request, width, and response revision;
+  detail is cached by selection, so selecting and scrolling do not rebuild or
+  rewrap the whole prompt.
 - The view is read-only. Saved prompt content is redacted by the save path.
 - Prompt blobs are pruned after 30 days by default.
 
@@ -957,13 +971,13 @@ query
        - 0.15 * staleness
   -> diversity filter: at most two items per kind, near-duplicates collapsed
   -> budget 900 tokens, at most 6 items
-  -> render compactly with id, kind, date, and importance
+  -> render only the remembered text, one bullet per item
 ```
 
 A recalled item looks like this:
 
 ```
-[m_01J...] preference, 2026-10-12, p=90: prefers short replies; uses metric units.
+- prefers short replies; uses metric units
 ```
 
 The agent can call `memory search` for deeper recall, `memory get` for full content,
@@ -1436,7 +1450,6 @@ Optional overrides, only when needed:
 | Key | Default | Purpose |
 |---|---|---|
 | `agent.workspace` | `$HEARTH_HOME/workspace` | Tool sandbox |
-| `agent.max_turns` | `120` | Run limit |
 | `compaction.idle_minutes` | `60` | Idle time before auto compaction |
 | `compaction.idle_min_tokens` | `100000` | Minimum context for idle compaction |
 | `compaction.soft_compact` | `0.65` | Soft compaction fraction of usable context |
@@ -1678,7 +1691,7 @@ a whole answer end to end. S7 checks crash recovery. S8 checks the commands.
 | S3 Provider adapter | `Provider` trait driven by recorded streaming fixtures and a fake HTTP server | Protocol errors, tool-call assembly, retries, usage mapping, cache hints | Live provider quirks, real latency |
 | S4 Memory and skills | `Memory` and `Skills` APIs: save, search, update, forget, consolidate; skill lifecycle | Retrieval ranking, provenance, supersession, budget, decay, promotion, quarantine | Human relevance judgment |
 | S5 Telegram | Bot API client against a fake server | Authorization, update dedupe, offset persistence, chunking, attachments | Live rate limits, real Telegram edge cases |
-| S6 Agent loop | End-to-end run with a fake provider, real core, temp SQLite | Tool loops, compaction, budget enforcement, recall injection, turn limit | Model answer quality |
+| S6 Agent loop | End-to-end run with a fake provider, real core, temp SQLite | Tool loops, compaction, budget enforcement, recall injection, unbounded loop until cancel | Model answer quality |
 | S7 Crash recovery | The daemon runs as a separate process and is killed at named failure points | Durability, effect retry policy, no duplicate ending | Performance, non-crash concurrency |
 | S8 Operator surface | `hearth` binary: config validation, doctor, backup, watch | Settings errors, migration safety, command contracts | Internal design |
 
