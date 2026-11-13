@@ -233,13 +233,19 @@ impl Agent {
     }
 
     fn compactor(&self) -> Compactor {
-        Compactor::new(
+        let mut compactor = Compactor::new(
             self.session.clone(),
             Arc::clone(&self.provider),
             self.config.model.clone(),
             self.config.provider_name.clone(),
             self.config.owner.clone(),
-        )
+        );
+        if let Some(memory) = &self.memory
+            && memory.embeddings_configured()
+        {
+            compactor = compactor.with_memory(Arc::clone(memory));
+        }
+        compactor
     }
 
     fn try_compact(&self, conversation_id: &str) -> bool {

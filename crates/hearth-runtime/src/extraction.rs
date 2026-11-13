@@ -107,7 +107,16 @@ impl MemoryExtractor {
     /// Run one extraction pass for a conversation.
     pub fn extract(&self, conversation_id: &str) -> Result<ExtractionReport, ExtractionError> {
         let history = self.session.history_for_prompt(conversation_id)?;
-        let transcript = render_transcript(&history);
+        self.extract_entries(conversation_id, &history)
+    }
+
+    /// Run extraction over a bounded slice of entries, used by compaction.
+    pub fn extract_entries(
+        &self,
+        conversation_id: &str,
+        entries: &[Entry],
+    ) -> Result<ExtractionReport, ExtractionError> {
+        let transcript = render_transcript(entries);
         if transcript.trim().is_empty() {
             return Ok(ExtractionReport {
                 created: Vec::new(),

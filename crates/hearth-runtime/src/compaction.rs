@@ -7,9 +7,12 @@ use hearth_core::{
     CompactionPlan, CoreError, Entry, NewEntry, NewTask, NewUsage, Save, Session, StepOutput,
     TerminalOutcome, parse_blocks, summary_content,
 };
+use hearth_memory::MemoryService;
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::json;
 use thiserror::Error;
+
+use crate::extraction::MemoryExtractor;
 
 const ENTRY_PREVIEW_CHARS: usize = 400;
 const RANGE_CHARS_PER_ENTRY: usize = 1200;
@@ -37,6 +40,7 @@ pub struct Compactor {
     model: String,
     provider_name: String,
     owner: String,
+    memory: Option<std::sync::Arc<MemoryService>>,
 }
 
 impl Compactor {
@@ -54,7 +58,14 @@ impl Compactor {
             model,
             provider_name,
             owner,
+            memory: None,
         }
+    }
+
+    /// Enable selective memory extraction before the summary.
+    pub fn with_memory(mut self, memory: std::sync::Arc<MemoryService>) -> Self {
+        self.memory = Some(memory);
+        self
     }
 
     /// Summarize the planned range and save one summary entry.
@@ -85,6 +96,19 @@ impl Compactor {
                 CompactionError::Invalid("the compaction task could not be claimed".to_owned())
             })?;
 
+        if let Some(memory) = &self.memory {
+            let extractor = MemoryExtractor::new(
+                self.session.clone(),
+                Arc::clone(&self.provider),
+                Arc::clone(memory),
+                self.model.clone(),
+                self.provider_name.clone(),
+                format!("{}:extract", self.owner),
+            );
+            if let Err(error) = extractor.extract_entries(conversation_id, &plan.entries) {
+                tracing::warn!(%error, "compaction memory extraction failed");
+            }
+        }
         let instruction = SUMMARY_INSTRUCTION.to_owned();
         let range = render_range(&plan.entries);
         let request = ChatRequest {

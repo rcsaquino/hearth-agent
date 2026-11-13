@@ -602,7 +602,8 @@ impl TelegramWorker {
             self.model.clone(),
             self.provider_name.clone(),
             format!("daemon:idle:{}", self.pid),
-        );
+        )
+        .with_memory(Arc::clone(&self.memory));
         match compactor.compact(conversation_id, &plan) {
             Ok(Some(_)) => {
                 tracing::info!(conversation = conversation_id, "idle compaction complete");
