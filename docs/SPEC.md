@@ -10,7 +10,7 @@
 
 ## A note on language
 
-Draft 0.21 applies the first memory improvement slice: automatic recall now respects the configured item and token budgets, injects short snippets instead of full rows, and omits tags from the injected text. New memory writes are limited to 2,000 characters and 8 tags, credential-shaped content is refused, and Overview reports whether recall is lexical or hybrid. The approved target keeps embeddings default-on with lexical fallback, using a local `bekko-embedding-v1-a8m` index.
+Draft 0.21 adds local hybrid memory: the configured item and token budgets now bound automatic recall, snippets replace full rows, and tags stay out of the injected text. Long-term memory gains INT8 vectors from the local `bekko-embedding-v1-a8m` model, fused with FTS5 by reciprocal rank. A missing model falls back to lexical recall. New writes are limited to 2,000 characters and 8 tags, credential-shaped content is refused, durable cues trigger a background extraction pass, and Overview reports whether recall is lexical or hybrid. Nightly backups now include the memory stores.
 
 Draft 0.20 replaces the two-card Prompt audit with one live, scrollable session export that shows every prompt layer, tool declaration, message, reply, and usage line in full. A reply or settled run refreshes the open view, and a coalesced follow-up read keeps the final saved answer from being missed. `[` and `]` walk older snapshots, and `f` toggles the live tail.
 
@@ -902,7 +902,9 @@ Each long-term memory is one statement with retrieval cues and provenance.
 | `revision` | Increments on edit; used for optimistic writes |
 
 SQLite FTS5 indexes content, tags, and source with Porter stemming and a literal
-substring fallback. Standing memory is a line-oriented file:
+substring fallback. A `memory_vectors` table stores one INT8 vector per memory
+for the active local model; its model name and dimension make a model change
+invalidate stale vectors. Standing memory is a line-oriented file:
 
 ```text
 - [s_abc123] [p=80] Never use em dashes in output.
@@ -913,7 +915,7 @@ content. The serialized file is capped at 5,000 characters.
 
 ### 7.3 How memories get in
 
-The current code has one write path: the model calls a memory tool.
+The primary write path is the model calling a memory tool.
 
 - `memory_add` writes long-term memory by default, or standing memory with
   `store: "standing"`.
@@ -927,9 +929,15 @@ The current code has one write path: the model calls a memory tool.
   bullets can be displaced, and displaced bullets are archived to long-term
   memory with the `standing-archive` tag.
 
-There is no post-run extractor, compaction memory flush, or nightly consolidation
-in the current code. The approved next step is selective, deferred extraction on
-explicit cues and during idle or compaction work, not on every turn.
+A selective post-run extractor runs only when the latest user message contains a
+durable cue such as "remember", "I prefer", "always", "never", "from now on",
+"my name is", or "decision". It sees a bounded tail of the conversation, asks the
+configured model for at most three memories as JSON, and writes through the same
+store rules (2,000 characters, 8 tags, credential rejection, exact dedupe). It
+runs after delivery in the background, not on the hot reply path.
+
+There is no per-turn extractor, compaction memory flush, or nightly consolidation
+in the current code. Those remain deliberate later options.
 
 ### 7.4 How memories come back
 
@@ -938,23 +946,33 @@ Automatic recall runs before a model call:
 ```
 latest user text
   -> skip empty or trivial input (hi, thanks, ok, ...)
-  -> FTS5 keyword search with stemming, bm25 order
-  -> literal substring fallback if FTS has no hit
+  -> lexical FTS5 search with stemming, bm25 order
+  -> local vector search when the model is active
+  -> reciprocal-rank fusion of the two ranked lists
   -> up to memory.recall_max_items hits
-  -> clip each hit to a short snippet
+  -> clip each hit to a 240-character snippet
   -> stop at memory.recall_max_tokens
   -> inject as <relevant_memory> before the newest user message
 ```
 
 Defaults are 8 items and 900 tokens. Tags and ids stay out of the automatic
-recall text to spend the budget on remembered content. Automatic recall is
-lexical only today; the `memory.embeddings` setting is default-on, but the local
-embedding backend is not active yet. The daemon reports both
-`embeddings_configured` and `embeddings_active`, and Overview shows `hybrid` only
-when the backend is active, otherwise `lexical` or `lexical fallback`.
+recall text to spend the budget on remembered content. The default model is
+`bekko-embedding-v1-a8m` at 384 dimensions, stored as INT8 vectors. The model is
+local; there is no embedding network call on the turn path. The daemon reports
+both `embeddings_configured` and `embeddings_active`, and Overview shows `hybrid`
+only when the backend is active, otherwise `lexical` or `lexical fallback`.
 
-There is no score threshold, reciprocal-rank fusion, recency boost, or decay in
-the current path. The model can obtain the rest with the tools:
+The model directory is `memory.embedding_model_dir`, relative to the home unless
+absolute. A release build fetches the pinned files on first use when they are
+missing; `scripts/fetch-embedding-model.sh` fetches them explicitly for debug
+builds or offline preparation. Set `HEARTH_OFFLINE=1` to refuse the first-use
+download entirely.
+
+There is no recency boost or decay in the current path. The vector scan is a
+linear INT8 pass over the cached vectors; the 200k-row benchmark is about 205 ms
+on the target i3, while a 10k-row store is about 10 ms. The model query is about
+2–16 ms for short memory text on the same machine. The model can obtain the rest
+with the tools:
 
 - `memory_search` searches long-term content, tags, and source; an `m_` id reads
   full content in bounded chunks.
@@ -1011,8 +1029,8 @@ The benchmark includes:
 - precision and recall targets;
 - contradiction and supersession cases;
 - temporal queries;
-- paraphrase cases, where the same fact is stored under different words, reported
-  separately because retrieval is lexical;
+- paraphrase cases, where the same fact is stored under different words, measured
+  against both the lexical and hybrid paths;
 - duplicate-write resistance;
 - leakage checks, meaning secrets are never stored.
 
@@ -1492,7 +1510,7 @@ The exact schema is in `SCHEMA.md`. The tables are `meta`, `commits`,
 
 ### 11.3 Backups and retention
 
-- Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly.
+- Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly. The memory database and standing file are snapshotted into same-date `memory-YYYYMMDD.db` and `standing-YYYYMMDD.md` sidecars.
 - Media can be pruned by age, with missing references reported.
 - The Doctor tab verifies integrity, schema version, lock state, settings, and
   provider credentials without printing secrets.

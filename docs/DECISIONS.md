@@ -1525,3 +1525,36 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - The stale SPEC memory section was replaced with the current two-store design
   and the approved target. The old nightly consolidation status remains in the
   status JSON for compatibility but is no longer shown in Overview.
+
+## 2026-11-13: Hybrid memory, local embeddings, and selective extraction
+
+- The primary embedding model is `bekko-embedding-v1-a8m`, 384 dimensions, run
+  locally through ONNX Runtime. Query vectors are computed on the turn path;
+  memory vectors are precomputed at write time and stored as INT8 BLOBs in the
+  memory database. The model is MIT licensed. The pinned files are fetched on
+  first use by a release build, or explicitly by
+  `scripts/fetch-embedding-model.sh`; `HEARTH_OFFLINE=1` disables the download.
+  A missing or broken model selects lexical recall, not a daemon failure.
+- The long-term memory schema is now version 2. `memory_vectors` stores
+  `memory_id`, `model`, `dims`, `content_hash`, `vector`, and `updated_at`.
+  Existing version 1 databases gain the table in place. Add and edit index the
+  text; delete removes the vector; edits remove the old vector before reindexing;
+  startup backfills missing vectors in a background thread.
+- `MemoryStore::search` keeps the lexical modes (`all`, `phrase`, `literal`) and
+  uses reciprocal-rank fusion for the default `any` mode when an embedder is
+  attached. The vector side is a linear INT8 scan over a cached vector set. On the
+  target i3-7100T, a8m query encoding measured about 2.5 ms for a short query,
+  6 ms for 37 tokens, and 16 ms for 123 tokens; a 200k-row, 384-dimension vector
+  scan measured about 205 ms, and a 10k-row scan about 10 ms. This keeps normal
+  recall below 100 ms and the 200k floor under the 500 ms acceptable bound.
+- Automatic recall now renders 240-character snippets, omitted tags and ids, and
+  stops at the configured item and token caps. Overview shows `hybrid` only when
+  the embedding backend is active, otherwise `lexical` or `lexical fallback`.
+- Selective extraction runs after delivery only when the latest user message
+  contains a durable cue. It sends a bounded conversation tail to the configured
+  model, accepts at most three one-line memories as JSON, records usage, and
+  writes through the normal store checks. It is not on the reply path and is not
+  a per-turn extractor.
+- Nightly backups now include same-date `memory-YYYYMMDD.db` and
+  `standing-YYYYMMDD.md` sidecars. Restore copies them back when present, so a
+  main-database restore no longer leaves the memory library behind.

@@ -1,8 +1,8 @@
 # Hearth Schema Reference
 
 Companion to `SPEC.md`. The spec defines behavior and invariants; this file holds the
-exact columns, tables, and indexes. When the two disagree, the spec wins. Memory row
-fields are defined in `SPEC.md` 7.2.
+exact columns, tables, and indexes. When the two disagree, the spec wins. The
+runtime memory stores are separate files documented below and in `SPEC.md` 7.
 
 ## Field tables
 
@@ -122,8 +122,8 @@ keys.
 - `usage_events`: every model call, its input, cache read, cache write, output, and
   reasoning tokens, and latency.
 - `telegram_updates`: deduplication of incoming updates.
-- `memory_items`, `memory_fts`, `memory_events`:
-  the memory library.
+- `memory_items`, `memory_fts`, `memory_events`: legacy tables retained by the
+  migrations. The runtime memory stores are the separate files below.
 
 The exact DDL is the versioned set under `crates/hearth-storage/migrations/`
 (`0001.sql`, `0002.sql`, `0003.sql`, `0004.sql`, `0005.sql`), applied by the matching migrations. The
@@ -141,3 +141,34 @@ importance updates do not reindex a row. Migration 0005 drops the unused
 `entries(conversation_id, seq)`, `tasks(status, next_wake_at)`, `submissions(status)`,
 `memory_items(status, kind)`, `usage_events(ts)`, `effects(status)`, plus the
 partial `memory_items_active_standing` and `memory_items_promotable` indexes.
+
+## Memory store schema
+
+The runtime memory is not in `hearth.db`. It lives beside it:
+
+- `$HEARTH_HOME/memory/long-term.sqlite`
+- `$HEARTH_HOME/memory/standing.md`
+
+The long-term database is signed with `PRAGMA application_id` and schema version
+2. Its tables:
+
+- `memories`: `rowid`, `id`, `content`, JSON `tags`, flattened `tag_text`,
+  `source`, `created_at`, `updated_at`, `revision`.
+- `memories_fts`: FTS5 over content, tags, and source with Porter stemming and
+  prefix indexes.
+- `memory_vectors`: `memory_id`, `model`, `dims`, `content_hash`, INT8 `vector`
+  BLOB, `updated_at`. A missing or stale vector is repaired by the embedding
+  backfill.
+
+`standing.md` is a plain text file of one-line bullets:
+
+```text
+- [s_<16 hex>] [p=<0-100>] content
+```
+
+The file is capped at 5,000 serialized characters. Displaced bullets are archived
+into `memories` with the `standing-archive` tag.
+
+Nightly backups include `memory-YYYYMMDD.db` and `standing-YYYYMMDD.md` sidecars
+beside the main `hearth-YYYYMMDD.db` snapshot. Restore copies the sidecars back
+when they are present.

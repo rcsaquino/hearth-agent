@@ -79,6 +79,21 @@ URLs. Leave it out for providers that do not need it.
 - `SOUL.md` holds Hearth's identity and voice. `HEARTH.md` and `AGENTS.md` tell it
   what to do.
 
+### Local embeddings
+
+Memory uses a local embedding model for hybrid recall. The release build fetches
+the pinned `bekko-embedding-v1-a8m` files into
+`~/.hearth/models/bekko-embedding-v1-a8m/` on first use when they are missing. A
+debug build does not download automatically; run:
+
+```bash
+./scripts/fetch-embedding-model.sh
+```
+
+The download is about 157 MB. If the model is unavailable, memory keeps working
+with lexical recall and Overview shows `lexical fallback`. Set `HEARTH_OFFLINE=1`
+to disable the first-use download.
+
 ## 5. Check the install
 
 Open the Doctor tab with `6` (or `Tab`). Press `Enter` for offline checks, or `l`
@@ -122,7 +137,8 @@ send files, albums, and, when you explicitly ask for voice, a spoken reply.
 ## 8. Backups
 
 Snapshots go to `~/.hearth/backups/` and are pruned to seven daily and four
-weekly copies. The daemon writes them automatically.
+weekly copies. The daemon writes them automatically. Each snapshot also includes
+the long-term memory database and `standing.md` as same-date memory sidecars.
 
 ## 9. Troubleshooting
 

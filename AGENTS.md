@@ -203,8 +203,9 @@ it rather than adding a second identity.
 
 ## Known residuals
 
-- Paraphrase recall is 0.650 on the synonym-only benchmark cases; the design is
-  lexical.
+- The earlier lexical baseline scored 0.650 on the synonym-only benchmark
+  cases. Hybrid local-vector recall is now available when the embedding model is
+  installed; the paraphrase benchmark still needs a fresh hybrid run.
 - A genuine standing-memory change can cold-build above 80 ms; the normal 200k
   path is about 5 ms.
 - `deepseek-v4.1-flash` is unpriced in this home; cost is recorded as unpriced

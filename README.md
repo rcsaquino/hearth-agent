@@ -21,7 +21,7 @@ acceptance matrix pass; a seven-day real-time soak is still pending.
 
 - Keeps an append-only conversation record that survives crashes and restarts.
 - Remembers facts, preferences, people, projects, and past work in a local
-  library with full-text search, provenance, and maintenance.
+  library with full-text and local-vector recall, provenance, and backups.
 - Reads your standing rules from `HEARTH.md` and project rules from `AGENTS.md`.
 - Runs an agent loop with tools: files, shell, web search, web fetch, documents,
   media, browser, memory, skills, reminders, helpers, and Telegram files or
