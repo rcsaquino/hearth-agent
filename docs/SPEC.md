@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.22, plain-language edition
+**Status:** Draft 0.23, plain-language edition
 **Date:** 2026-11-14
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,10 @@
 ---
 
 ## A note on language
+
+Draft 0.23 keeps the raw version hash out of the Overview. The memory card names the
+number of standing bullets instead of the 64-bit content hash, which stays in the
+prompt export and the daemon status where it is useful.
 
 Draft 0.22 makes `settings.json` the only bootstrap file. When the home loses its folders, `SOUL.md`, or an empty `HEARTH.md`, the daemon recreates them from the settings on the next start, so a home holding only a valid `settings.json` comes back as if onboarding had just finished. Existing files are never overwritten, and the repair runs only after the daemon holds its lock, so a systemd unit and a TUI-spawned daemon cannot both write.
 
@@ -1598,7 +1602,7 @@ output, cache, and latency totals.
 - The Overview tab combines runtime (daemon, model, thinking, provider, context,
   turn limit, workspace), usage and cache hit rate for today, the last week, the
   last month, and all time, work and memory (tasks, helpers, memory items, standing
-  version, budgets, maintenance, skill review), provider connections, and recent
+  bullets, budgets, maintenance, skill review), provider connections, and recent
   activity. Each usage period shows input tokens, output tokens, and cache reads.
 - The Activity tab follows a live run or task; logs and the usage ledger keep the
   durable record.
