@@ -236,6 +236,13 @@ impl MemoryStore {
         };
         let model = embedder.model().to_owned();
         let dims = embedder.dims() as i64;
+        {
+            let connection = self.lock()?;
+            connection.execute(
+                "DELETE FROM memory_vectors WHERE memory_id NOT IN (SELECT id FROM memories)",
+                [],
+            )?;
+        }
         let memories = {
             let connection = self.lock()?;
             let mut statement = connection.prepare(

@@ -194,11 +194,38 @@ impl HistorySearch {
         let lowered: Vec<String> = terms.iter().map(|term| term.to_lowercase()).collect();
 
         let connection = self.connect()?;
-        let mut statement = connection.prepare(
+        let mut use_fts =
+            mode != HistoryMode::Literal && !terms.is_empty() && fts_available(&connection)?;
+        let mut fts = if use_fts {
+            Some(history_fts_query(&terms, mode))
+        } else {
+            None
+        };
+        if let Some(query) = &fts {
+            let matches: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM entries_fts WHERE entries_fts MATCH ?",
+                [query.as_str()],
+                |row| row.get(0),
+            )?;
+            if matches == 0 {
+                use_fts = false;
+                fts = None;
+            }
+        }
+        let sql = if use_fts {
+            "SELECT e.id, e.conversation_id, e.seq, e.kind, e.content_json, e.created_at \
+             FROM entries_fts f JOIN entries e ON e.rowid=f.rowid \
+             WHERE entries_fts MATCH ? ORDER BY e.conversation_id, e.seq"
+        } else {
             "SELECT id, conversation_id, seq, kind, content_json, created_at FROM entries \
-             ORDER BY conversation_id, seq",
-        )?;
-        let mut rows = statement.query([])?;
+             ORDER BY conversation_id, seq"
+        };
+        let mut statement = connection.prepare(sql)?;
+        let mut rows = if let Some(fts) = &fts {
+            statement.query([fts.as_str()])?
+        } else {
+            statement.query([])?
+        };
 
         let mut results: Vec<HistoryHit> = Vec::new();
         let mut accepted = 0i64;
@@ -240,12 +267,16 @@ impl HistorySearch {
                 continue;
             }
             let haystack = text.to_lowercase();
-            let matched = match mode {
-                HistoryMode::Literal => lowered.is_empty() || haystack.contains(&lowered[0]),
-                HistoryMode::Any => {
-                    lowered.is_empty() || lowered.iter().any(|term| haystack.contains(term))
+            let matched = if use_fts {
+                true
+            } else {
+                match mode {
+                    HistoryMode::Literal => lowered.is_empty() || haystack.contains(&lowered[0]),
+                    HistoryMode::Any => {
+                        lowered.is_empty() || lowered.iter().any(|term| haystack.contains(term))
+                    }
+                    HistoryMode::All => lowered.iter().all(|term| haystack.contains(term)),
                 }
-                HistoryMode::All => lowered.iter().all(|term| haystack.contains(term)),
             };
             if !matched {
                 continue;
@@ -479,6 +510,31 @@ fn date_filter(value: Option<&str>, name: &str) -> Result<Option<i64>> {
 }
 
 /// Render a microsecond timestamp as RFC 3339.
+fn fts_available(connection: &Connection) -> Result<bool> {
+    let found: Option<i64> = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entries_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
+fn history_fts_query(terms: &[String], mode: HistoryMode) -> String {
+    let joiner = if mode == HistoryMode::All {
+        " AND "
+    } else {
+        " OR "
+    };
+    terms
+        .iter()
+        .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(joiner)
+}
+
+/// Render a microsecond timestamp as RFC 3339.
 fn format_micros(micros: i64) -> String {
     time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(micros) * 1_000)
         .ok()
@@ -553,6 +609,34 @@ mod tests {
                 .unwrap();
         }
         (directory, path)
+    }
+
+    fn add_fts(connection: &Connection) {
+        connection
+            .execute_batch(
+                "CREATE VIRTUAL TABLE entries_fts USING fts5(content_json, tokenize='porter unicode61');
+                 INSERT INTO entries_fts(rowid, content_json) SELECT rowid, content_json FROM entries;",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_keyword_search_uses_the_transcript_index() {
+        let (_directory, path) = transcript();
+        let connection = Connection::open(&path).unwrap();
+        add_fts(&connection);
+        drop(connection);
+        let reader = HistorySearch::new(&path);
+        let response = reader
+            .search(&HistoryQuery {
+                query: Some("October".to_owned()),
+                mode: Some(HistoryMode::Any),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].citation, "c1#2");
+        assert_eq!(response.candidate_entries, 1);
     }
 
     #[test]
