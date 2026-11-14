@@ -56,7 +56,10 @@ pub fn ensure_with(
     }
     let installed = unit_installed(home);
     if installed && start != "tui" {
-        hearth_runtime::service::start().map_err(|error| error.to_string())?;
+        // A unit that is still active can hold a daemon whose home was wiped or
+        // whose settings changed underneath it. Restarting re-reads both; on an
+        // inactive unit systemd treats restart as a start.
+        hearth_runtime::service::restart().map_err(|error| error.to_string())?;
         let status = wait_for_status(home)?;
         return Ok((Ownership::ServiceManaged, status));
     }

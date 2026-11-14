@@ -132,6 +132,11 @@ pub fn stop() -> Result<(), ServiceError> {
     run_systemctl(&["stop", "hearth.service"])
 }
 
+/// Restart the installed user unit so it re-reads its home and settings.
+pub fn restart() -> Result<(), ServiceError> {
+    run_systemctl(&["restart", "hearth.service"])
+}
+
 /// Apply a daemon start mode: `tui`, `login`, or `startup`.
 pub fn apply_start_mode(home: &Path, start: &str) -> Result<StartModeReport, ServiceError> {
     let directory = config_dir()?;
