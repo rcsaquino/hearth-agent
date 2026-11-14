@@ -1726,6 +1726,21 @@ recall and latency inside the same targets, but a 200k store was not re-measured
 after the rewrite, and the honest expectation is that the vector scan grows
 linearly from about 10 ms at 4k.
 
+**Reviewed before landing.** The subsystem was read end to end by an independent
+reviewer on a different model once the suite was green, and it found five defects
+that the tests had passed over. Two changed behaviour: the prompt layer and the
+digest both emitted the `<rules>` and `<memory>` wrappers, so every live prompt
+carried them twice, and the duplicate check matched on content alone, so a fact
+promoted to a pinned rule returned the fact and the rule never entered the prompt.
+Three were silent failures: the over-budget loop trimmed the rendered digest and
+ate the closing tag and then the coverage line, the rules budget was checked
+outside the write transaction, and provenance was a service-wide slot that stamped
+helper writes with the user's entry. It also found three benchmark checks that
+could not fail, one of them a supersession predicate that reduced to the
+automatic-recall score, and it is why the transaction claim above reads as a soft
+reference. Treat a green suite as evidence about what the tests cover, not about
+the subsystem.
+
 This entry supersedes the memory decisions of 2026-11-08 (M4a through M6e) and
 the prompt layer names and memory limits in the 2026-11-09 entries. Those stay as
 the record of what was decided then; section 7 of `SPEC.md` is what is true now.
