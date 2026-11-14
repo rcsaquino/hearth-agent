@@ -49,6 +49,66 @@ fn init_daemon_home(home: &Path) {
     }
 }
 
+/// Delete everything in the home except the front door.
+fn strip_to_settings(home: &Path) {
+    for entry in std::fs::read_dir(home).expect("home entries") {
+        let path = entry.expect("entry").path();
+        if path.file_name().and_then(|name| name.to_str()) == Some("settings.json") {
+            continue;
+        }
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path).expect("remove directory");
+        } else {
+            std::fs::remove_file(&path).expect("remove file");
+        }
+    }
+}
+
+#[test]
+fn a_home_with_only_settings_is_restored_by_the_daemon() {
+    let home = TempDir::new().expect("temp home");
+    init_daemon_home(home.path());
+    strip_to_settings(home.path());
+    assert!(!home.path().join("hearth.db").exists());
+    assert!(!home.path().join("workspace").exists());
+
+    let executable = Path::new(env!("CARGO_BIN_EXE_hearth"));
+    let (ownership, status) =
+        daemon_client::ensure_with(home.path(), "tui", executable).expect("start daemon");
+    assert_eq!(status["model"], "fake-model");
+
+    assert!(home.path().join("hearth.db").is_file());
+    for directory in [
+        "workspace",
+        "skills",
+        "skills/learned",
+        "media/inbound",
+        "media/outbound",
+        "spill",
+        "logs",
+        "backups",
+    ] {
+        assert!(
+            home.path().join(directory).is_dir(),
+            "missing directory {directory}"
+        );
+    }
+    let soul = std::fs::read_to_string(home.path().join("SOUL.md")).expect("SOUL.md");
+    assert!(soul.contains("<identity>"), "soul was: {soul}");
+    assert!(
+        std::fs::read_to_string(home.path().join("HEARTH.md"))
+            .expect("HEARTH.md")
+            .is_empty()
+    );
+
+    let mut out = Vec::new();
+    hearth_runtime::doctor_with(home.path(), false, &mut out).expect("doctor after restore");
+    let text = String::from_utf8(out).expect("utf8");
+    assert!(text.contains("database: ok (schema"), "{text}");
+
+    daemon_client::stop(home.path(), &ownership).expect("stop daemon");
+}
+
 #[test]
 fn ensure_starts_attaches_and_stops_the_daemon() {
     let home = TempDir::new().expect("temp home");
