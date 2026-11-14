@@ -23,8 +23,9 @@ keep this file accurate, free of secrets, and free of live personal data.
 - Do not make live Telegram, provider, ElevenLabs, OpenRouter, Groq, search, or
   Camofox calls in tests. Use local fake servers. A live smoke test needs explicit
   approval before it runs.
-- Do not change the configured model or provider, add a paid service, or create a
-  subagent without approval.
+- Do not change the configured model or provider, or add a paid service, without
+  approval.
+- Subagents using the parent's model need no approval. Any other subagent does.
 - Do not restart the development daemon or touch `.devhome/` live data unless the
   task is specifically about that home. `.devhome/` is gitignored.
 - Do not commit `target/`, `dist/`, databases, media, logs, backups, or generated
