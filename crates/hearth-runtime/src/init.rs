@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -49,36 +49,12 @@ pub enum InitError {
 pub fn init(home: &Path, options: InitOptions) -> Result<InitReport, InitError> {
     validate(&options)?;
 
-    fs::create_dir_all(home)?;
-    for directory in [
-        "workspace",
-        "skills",
-        "skills/learned",
-        "media/inbound",
-        "media/outbound",
-        "spill",
-        "logs",
-        "backups",
-    ] {
-        fs::create_dir_all(home.join(directory))?;
-    }
-
+    // The settings file is the front door: refuse before writing anything else.
     let settings_path = home.join(SETTINGS_FILE);
     if settings_path.exists() {
         return Err(InitError::Exists(settings_path));
     }
-
-    let soul_path = home.join("SOUL.md");
-    if !soul_path.exists() {
-        let mut soul = open_settings(&soul_path)?;
-        soul.write_all(hearth_core::default_soul(&options.agent_name).as_bytes())?;
-        soul.flush()?;
-    }
-    let guidance_path = home.join(hearth_core::HEARTH_GUIDANCE_FILE);
-    if !guidance_path.exists() {
-        let mut guidance = open_settings(&guidance_path)?;
-        guidance.flush()?;
-    }
+    crate::home::scaffold(home, &options.agent_name)?;
 
     let timezone = options
         .timezone

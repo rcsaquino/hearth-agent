@@ -11,6 +11,7 @@ mod effect_worker;
 mod events;
 pub mod extraction;
 mod helpers;
+mod home;
 mod init;
 pub mod inspect;
 mod ipc;
@@ -30,6 +31,7 @@ pub use effect_worker::EffectWorker;
 pub use events::{EventBus, EventSink, NoopSink, RunEvent};
 pub use hearth_core::cache_hit_rate;
 pub use helpers::{HelperConfig, HelperControls, HelperPool, TaskTool};
+pub use home::{HomeError, HomeRestore, restore_home};
 pub use init::{InitError, InitOptions, InitReport, init};
 pub use ipc::{IpcError, StatusContext, open_watch, read_status, serve, socket_path};
 pub use scheduler::{

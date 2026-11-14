@@ -84,7 +84,26 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     writeln!(lock, "{}", std::process::id())?;
     lock.flush()?;
 
+    // The lock owner is the only process that may repair the home, so a systemd
+    // unit and a TUI-spawned daemon cannot both write the layout.
+    match crate::home::restore_home(home) {
+        Ok(restore) if !restore.is_empty() => {
+            let created: Vec<String> = restore
+                .created
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+            tracing::info!(created = ?created, "home layout restored from settings");
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!(%error, "home layout could not be restored"),
+    }
+
+    let fresh_record = !home.join("hearth.db").exists();
     let harness = Harness::open(home)?;
+    if fresh_record {
+        tracing::warn!("a new record was created; Telegram may replay recent updates");
+    }
     let session = harness.session().clone();
     let started = Instant::now();
     let recovery = session.recover_tasks()?;

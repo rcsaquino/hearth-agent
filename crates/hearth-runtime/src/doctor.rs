@@ -16,7 +16,7 @@ pub enum DoctorError {
     Config(#[from] ConfigError),
     #[error(transparent)]
     Storage(#[from] hearth_storage::StorageError),
-    #[error("database not found at {0}; run `hearth` to set up the home")]
+    #[error("database not found at {0}; the daemon creates it on start")]
     DatabaseMissing(PathBuf),
     #[error(transparent)]
     Io(#[from] std::io::Error),
