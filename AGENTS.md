@@ -17,9 +17,10 @@ keep this file accurate, free of secrets, and free of live personal data.
 - Never print, log, commit, or echo a token, key, password, private path, real
   name, Telegram id, or personal database. Use the placeholders `USER_NAME`,
   `123456789`, `~/.hearth`, and `example.com` in examples and docs.
-- This repository is local. Do not add a remote, push, open a pull request, use
-  authenticated GitHub tooling, or publish anything unless the maintainer
-  explicitly authorizes it.
+- Publishing is a separate approval. `origin` is public, so a push that adds
+  commits needs explicit instruction, and force-pushing or rewriting published
+  history needs its own. Run `scripts/secret-scan.sh` before a push that grows
+  the history.
 - Do not make live Telegram, provider, ElevenLabs, OpenRouter, Groq, search, or
   Camofox calls in tests. Use local fake servers. A live smoke test needs explicit
   approval before it runs.
@@ -204,8 +205,8 @@ Use short, imperative commits with a conventional prefix:
 - `style: format the runtime`
 
 One behavior per commit. Keep the test commit separate. Do not rewrite published
-history in this local repository. The author identity is already configured; use
-it rather than adding a second identity.
+history. The author identity is configured globally; use it rather than adding a
+second identity.
 
 ## Known residuals
 

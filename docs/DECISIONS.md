@@ -1744,3 +1744,29 @@ the subsystem.
 This entry supersedes the memory decisions of 2026-11-08 (M4a through M6e) and
 the prompt layer names and memory limits in the 2026-11-09 entries. Those stay as
 the record of what was decided then; section 7 of `SPEC.md` is what is true now.
+
+## 2026-11-14: Publication and the remote (supersedes "no remote")
+
+The 2026-11-08 ground rules said “No GitHub, no remote, and no hosted CI until
+publication is explicitly approved.” Publication has already happened. `origin` is
+`github.com/rcsaquino/hearth-agent`, the repository is public, it was created on
+2026-11-11, and it carries the full history. The rule and the tree disagreed, and
+a rule that everyone has already broken stops protecting anything: it only trains
+the next reader to ignore the file. What remains is the part that is still true.
+
+**A push is an approval, a rewrite is its own.** Adding commits needs explicit
+instruction. Force-pushing or rewriting published history is never implied by a
+request to publish, and it needs its own approval. `AGENTS.md` carries the same
+wording, because that file is what a coding agent reads first.
+
+**Scan before the history grows.** `scripts/secret-scan.sh` is the gate and
+`HEARTH_PUBLIC_DENYLIST` names the list kept outside the tree. The list is absent
+on this host, so only the credential-pattern scan runs; an empty list is a partial
+check and is not evidence that history is clean.
+
+**Known residual.** `aaa482e` committed `/root/.hearth-public-denylist`, a private
+home path, into `AGENTS.md`. `787b331` removed it from the tree but not from
+history, where it is still reachable and still public. It is a directory prefix
+rather than a name, an id, or a credential, and the credential-pattern scan is
+clean over the published history. Removing it means rewriting history and
+force-pushing, which is the approval named above and not a step in this change.
