@@ -735,7 +735,7 @@ fn hearth_status_reads_a_running_daemon() {
     add_telegram_base(home.path(), &telegram_base);
     {
         use hearth_core::Harness;
-        use hearth_memory::{MemoryInput, MemoryService};
+        use hearth_memory::{Kind, MemoryService, NewMemory};
         let harness = Harness::open(home.path()).expect("open memory home");
         harness
             .session()
@@ -749,20 +749,14 @@ fn hearth_status_reads_a_running_daemon() {
             .session()
             .set_meta("last_skill_review_changes", "2")
             .expect("review count");
-        let memory = MemoryService::new(harness.session().clone()).expect("memory");
+        let memory = MemoryService::new(harness.session().clone());
         memory
-            .store()
-            .add(&MemoryInput {
-                content: "Prefers short replies.".to_owned(),
-                tags: Some(vec!["preferences".to_owned()]),
-                source: None,
-            })
-            .expect("seed memory");
-        // A standing bullet, injected every turn.
-        memory
-            .standing_store()
-            .add("Prefers short replies.", 90)
-            .expect("seed standing");
+            .write(
+                NewMemory::new("Prefers short replies.")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect("seed rule");
     }
     let daemon = DaemonGuard::new(start_daemon(home.path()));
     wait_for_socket(home.path());
@@ -778,21 +772,28 @@ fn hearth_status_reads_a_running_daemon() {
         assert_eq!(mode, 0o600, "socket mode was {mode:o}");
     }
 
-    let status: Value = hearth_runtime::read_status(home.path()).expect("read status");
+    // The two maintenance tasks are created during startup, so wait for them
+    // rather than racing the socket becoming ready.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let status: Value = loop {
+        let status = hearth_runtime::read_status(home.path()).expect("read status");
+        if status["tasks_asleep"].as_u64() == Some(2) || std::time::Instant::now() > deadline {
+            break status;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
     assert_eq!(status["model"], "fake-model");
     assert!(status["uptime_seconds"].as_u64().is_some());
     assert_eq!(status["tasks_running"], 0);
-    // Backup and skill review. Memory has no scheduled pass: the standing file
-    // is repaired at startup instead.
+    // Backup and skill review. Memory has no scheduled pass.
     assert_eq!(status["tasks_asleep"], 2);
-    // `memory_items` counts long-term memories; the standing bullet is separate.
     assert_eq!(status["memory_items"], 1);
-    assert_eq!(status["standing_bullets"], 1);
-    assert!(status["standing_memory_version"].as_u64().unwrap_or(0) > 0);
+    assert_eq!(status["rules_bullets"], 1);
+    assert!(status["rules_version"].as_u64().unwrap_or(0) > 0);
     assert_eq!(status["memory_recall"]["mode"], "lexical");
     assert_eq!(status["memory_recall"]["embeddings_active"], false);
-    assert_eq!(status["memory_recall"]["max_items"], 8);
-    assert_eq!(status["memory_recall"]["max_tokens"], 900);
+    assert_eq!(status["memory_recall"]["max_items"], 12);
+    assert_eq!(status["memory_recall"]["max_tokens"], 300);
     assert_eq!(status["last_consolidation"], "2026-11-09T03:30:00Z");
     assert_eq!(status["last_skill_review"], "2026-11-09T04:30:00Z");
     assert_eq!(status["last_skill_review_changes"], 2);

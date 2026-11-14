@@ -1,7 +1,5 @@
 use hearth_core::secrets::{contains_secret, is_redactable_value, redact_secrets, redact_value};
-use hearth_core::{
-    CoreError, EffectIntent, Harness, MemoryChange, MemoryWrite, NewMemory, NewTask, Save,
-};
+use hearth_core::{EffectIntent, Harness, NewTask, Save};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -137,36 +135,4 @@ fn the_record_stores_no_credential_shaped_text() {
     let latest = session.latest_prompt().expect("latest").expect("prompt");
     assert_eq!(latest.hash, blob);
     assert!(!latest.text.contains("sk-test"));
-}
-
-#[test]
-fn the_core_refuses_a_secret_memory_write() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("conversation");
-    let error = session
-        .save(Save::new(&conversation.id).memory(MemoryWrite::new(
-            MemoryChange::Add(NewMemory {
-                id: "01a1bbc8-27b8-7254-94e2-c8cd745fcc0a".to_owned(),
-                kind: "fact".to_owned(),
-                content: "the key is sk-test-not-a-real-key".to_owned(),
-                tags: vec![],
-                fingerprint: "fingerprint-secret".to_owned(),
-                importance: 50,
-                status: "active".to_owned(),
-                valid_from: None,
-                valid_to: None,
-                supersedes_id: None,
-                source_kind: "user".to_owned(),
-                source_ref: None,
-                standing: "none".to_owned(),
-                created_at: 1,
-                last_used_at: None,
-            }),
-            "user",
-        )))
-        .expect_err("secret memory must be refused");
-    assert!(matches!(error, CoreError::Invalid(_)));
 }

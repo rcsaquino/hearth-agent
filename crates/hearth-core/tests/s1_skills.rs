@@ -7,8 +7,8 @@ fn input(conversation_id: &str, skills_index: &str) -> PromptInput {
         conversation_id: conversation_id.to_owned(),
         model: "test-model".to_owned(),
         tools: Vec::new(),
-        standing: "PINNED FACT".to_owned(),
-        standing_version: 1,
+        rules: "PINNED FACT".to_owned(),
+        rules_version: 1,
         recall: String::new(),
         skills_index: skills_index.to_owned(),
         guidance: String::new(),
@@ -29,7 +29,7 @@ fn text(message: &hearth_model::ChatMessage) -> String {
 }
 
 #[test]
-fn the_skills_index_is_a_prompt_layer_after_standing() {
+fn the_skills_index_is_a_prompt_layer_after_rules() {
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("harness");
     let conversation = harness
@@ -46,8 +46,8 @@ fn the_skills_index_is_a_prompt_layer_after_standing() {
         .request
         .messages
         .iter()
-        .position(|message| text(message).contains("<standing_memory>"))
-        .expect("standing layer");
+        .position(|message| text(message).contains("<rules>"))
+        .expect("rules layer");
     let skills = prompt
         .request
         .messages

@@ -75,6 +75,4 @@ fn status_reads_count_tasks_and_sum_usage() {
     let future = session.usage_totals_since(i64::MAX).expect("future totals");
     assert_eq!(future.input_tokens, 0);
     assert_eq!(future.output_tokens, 0);
-
-    assert_eq!(session.memory_item_count().expect("memory count"), 0);
 }

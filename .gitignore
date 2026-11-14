@@ -12,3 +12,6 @@ backups/
 
 # Local embedding model cache
 models/
+
+# Local decision trail; docs/DECISIONS.md is the record that ships
+.audit/

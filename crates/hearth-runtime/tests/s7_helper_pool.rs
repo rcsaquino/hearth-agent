@@ -233,7 +233,7 @@ fn a_helper_runs_and_reports_without_the_parent_transcript() {
         Arc::new(SystemSleeper),
     );
     let provider = Arc::new(ScriptedProvider::new("Helper report: done."));
-    let memory = Arc::new(MemoryService::new(session.clone()).expect("memory"));
+    let memory = Arc::new(MemoryService::new(session.clone()));
     let config = Arc::new(HelperConfig {
         settings: Arc::new(settings()),
         session: session.clone(),
@@ -322,7 +322,7 @@ fn a_missing_report_file_is_written_with_private_mode() {
         Arc::new(SystemSleeper),
     );
     let provider = Arc::new(ScriptedProvider::new("Report."));
-    let memory = Arc::new(MemoryService::new(session.clone()).expect("memory"));
+    let memory = Arc::new(MemoryService::new(session.clone()));
     let config = Arc::new(HelperConfig {
         settings: Arc::new(settings()),
         session: session.clone(),
@@ -376,7 +376,7 @@ fn a_slow_helper_sends_one_eta_and_one_settle_notice() {
     let (base, sent, telegram) = fake_telegram_many(2);
     let provider =
         Arc::new(ScriptedProvider::new("Slow report.").with_delay(Duration::from_millis(1_200)));
-    let memory = Arc::new(MemoryService::new(session.clone()).expect("memory"));
+    let memory = Arc::new(MemoryService::new(session.clone()));
     let config = helper_config(
         &home,
         session,
@@ -417,7 +417,7 @@ fn killing_a_running_helper_sends_no_notice_and_saves_no_parent_report() {
     let controls = Arc::new(HelperControls::new());
     let provider =
         Arc::new(ScriptedProvider::new("Late report.").with_delay(Duration::from_millis(300)));
-    let memory = Arc::new(MemoryService::new(session.clone()).expect("memory"));
+    let memory = Arc::new(MemoryService::new(session.clone()));
     let config = helper_config(
         &home,
         session,

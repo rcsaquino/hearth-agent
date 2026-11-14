@@ -41,9 +41,9 @@ fn the_keep_budget_is_capped_at_thirty_five_percent() {
 fn segment_budgets_match_the_spec() {
     assert_eq!(hearth_core::SEGMENT_IDENTITY, 800);
     assert_eq!(hearth_core::SEGMENT_TOOLS, 1_200);
-    assert_eq!(hearth_core::SEGMENT_STANDING, 1_200);
+    assert_eq!(hearth_core::SEGMENT_RULES, 400);
+    assert_eq!(hearth_core::SEGMENT_RECALL, 300);
     assert_eq!(hearth_core::SEGMENT_SKILLS, 300);
-    assert_eq!(hearth_core::SEGMENT_RECALL, 900);
     assert_eq!(hearth_core::SEGMENT_RUNTIME, 150);
     assert_eq!(hearth_core::FIXED_OVERHEAD_TARGET, 4_500);
 }

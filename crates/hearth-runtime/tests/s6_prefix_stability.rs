@@ -1,15 +1,15 @@
 use hearth_core::{Harness, PromptInput};
-use hearth_memory::MemoryService;
+use hearth_memory::{MemoryService, NewMemory};
 use tempfile::TempDir;
 
-fn input(conversation_id: &str, standing: String) -> PromptInput {
+fn input(conversation_id: &str, rules: String) -> PromptInput {
     PromptInput {
         soul: "SOUL".to_owned(),
         conversation_id: conversation_id.to_owned(),
         model: "test-model".to_owned(),
         tools: Vec::new(),
-        standing,
-        standing_version: 0,
+        rules,
+        rules_version: 0,
         recall: String::new(),
         skills_index: String::new(),
         guidance: String::new(),
@@ -17,111 +17,109 @@ fn input(conversation_id: &str, standing: String) -> PromptInput {
     }
 }
 
+fn rule(memory: &MemoryService, content: &str) -> hearth_memory::Memory {
+    memory
+        .write(
+            NewMemory::new(content)
+                .kind(hearth_memory::Kind::Rule)
+                .pinned(true),
+        )
+        .expect("rule")
+        .memory()
+        .clone()
+}
+
 #[test]
-fn editing_a_standing_bullet_changes_the_prefix() {
+fn replacing_a_rule_changes_the_prefix() {
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("open harness");
     let session = harness.session().clone();
-    let memory = MemoryService::new(session.clone()).expect("memory");
+    let memory = MemoryService::new(session.clone());
     let conversation = session
         .create_conversation("Test", "local", "local:1")
         .expect("create conversation");
 
-    let added = memory
-        .standing_store()
-        .add("Use metric units", 90)
-        .expect("first rule");
-    let (before_text, before_version) = memory.standing().expect("standing");
+    rule(&memory, "Use metric units");
+    let before_rules = memory.rules().expect("rules");
     let before = session
-        .build_prompt(input(&conversation.id, before_text))
+        .build_prompt(input(&conversation.id, before_rules.text.clone()))
         .expect("first prompt");
 
-    // Changing the content of a bullet must invalidate the cached prefix.
+    // Replacing the rule must invalidate the cached prefix.
+    let first = memory.rules().expect("rules");
+    let first_id = first.text.split(':').next().expect("id").to_owned();
     memory
-        .standing_store()
-        .edit(&added.memory.id, Some("Use metric units only"), None, None)
-        .expect("edit");
+        .write(
+            NewMemory::new("Use metric units and Celsius only")
+                .kind(hearth_memory::Kind::Rule)
+                .pinned(true)
+                .supersedes(first_id),
+        )
+        .expect("replacement rule");
 
-    let (after_text, after_version) = memory.standing().expect("standing");
-    assert_ne!(before_version, after_version);
+    let after_rules = memory.rules().expect("rules");
+    assert_ne!(before_rules.version, after_rules.version);
+    assert_ne!(before_rules.text, after_rules.text);
     let after = session
-        .build_prompt(input(&conversation.id, after_text))
+        .build_prompt(input(&conversation.id, after_rules.text))
         .expect("second prompt");
 
     assert_ne!(
-        before.prefix_parts.get("standing"),
-        after.prefix_parts.get("standing")
+        before.prefix_parts.get("rules"),
+        after.prefix_parts.get("rules")
     );
     assert_ne!(before.prefix_hash, after.prefix_hash);
 }
 
 #[test]
-fn reading_standing_memory_twice_leaves_the_prefix_unchanged() {
+fn reading_rules_twice_leaves_the_prefix_unchanged() {
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("open harness");
     let session = harness.session().clone();
-    let memory = MemoryService::new(session.clone()).expect("memory");
+    let memory = MemoryService::new(session.clone());
     let conversation = session
         .create_conversation("Test", "local", "local:2")
         .expect("create conversation");
 
-    memory
-        .standing_store()
-        .add("Use metric units", 90)
-        .expect("first rule");
-    memory
-        .standing_store()
-        .add("Use Celsius", 80)
-        .expect("second rule");
+    rule(&memory, "Use metric units");
+    rule(&memory, "Use Celsius");
 
-    let (rendered, version) = memory.standing().expect("standing");
+    let before_rules = memory.rules().expect("rules");
     let before = session
-        .build_prompt(input(&conversation.id, rendered.clone()))
+        .build_prompt(input(&conversation.id, before_rules.text.clone()))
         .expect("first prompt");
 
-    // A read must be pure: no archive, no rewrite, no reordering.
-    let (again, again_version) = memory.standing().expect("standing again");
-    assert_eq!(rendered, again);
-    assert_eq!(version, again_version);
+    // A read must be pure: no write, no reordering.
+    let again = memory.rules().expect("rules again");
+    assert_eq!(before_rules.text, again.text);
+    assert_eq!(before_rules.version, again.version);
     let after = session
-        .build_prompt(input(&conversation.id, again))
+        .build_prompt(input(&conversation.id, again.text))
         .expect("second prompt");
 
     assert_eq!(
-        before.prefix_parts.get("standing"),
-        after.prefix_parts.get("standing")
+        before.prefix_parts.get("rules"),
+        after.prefix_parts.get("rules")
     );
     assert_eq!(before.prefix_hash, after.prefix_hash);
 }
 
 #[test]
-fn standing_bullets_keep_their_priority_order_across_rereads() {
+fn rules_keep_their_creation_order_across_rereads() {
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("open harness");
-    let session = harness.session().clone();
-    let memory = MemoryService::new(session.clone()).expect("memory");
+    let memory = MemoryService::new(harness.session().clone());
 
-    memory
-        .standing_store()
-        .add("Lower priority rule", 60)
-        .expect("low");
-    memory
-        .standing_store()
-        .add("Higher priority rule", 95)
-        .expect("high");
+    rule(&memory, "Low priority rule");
+    rule(&memory, "High priority rule");
 
-    let order = || {
-        memory
-            .standing_store()
-            .entries()
-            .expect("entries")
-            .into_iter()
-            .map(|item| (item.content, item.priority))
-            .collect::<Vec<_>>()
-    };
-
-    // The file keeps insertion order; priority decides eviction, not layout.
-    let before = order();
-    assert_eq!(before.len(), 2);
-    assert_eq!(order(), before);
+    let before = memory.rules().expect("rules").text;
+    let lines: Vec<&str> = before.lines().collect();
+    assert_eq!(lines.len(), 2, "{before}");
+    assert!(
+        lines[0].ends_with("Low priority rule"),
+        "a rule keeps the position it was created in: {before}"
+    );
+    assert!(lines[1].ends_with("High priority rule"), "{before}");
+    assert_eq!(memory.rules().expect("rules").text, before);
 }

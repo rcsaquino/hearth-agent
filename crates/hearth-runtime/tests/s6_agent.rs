@@ -7,7 +7,7 @@ use std::time::Duration;
 use hearth_core::{
     ContextBudget, Harness, NewEntry, NewTask, Save, Submission, SubmissionStatus, TaskStatus,
 };
-use hearth_memory::{MemoryInput, MemorySearchOptions, MemoryService, SearchMode};
+use hearth_memory::{Kind, MemoryService, NewMemory};
 use hearth_model::{
     ChatRequest, ContentBlock, Provider, ProviderError, ProviderStream, Role, StreamEvent,
     ToolCall, Usage,
@@ -954,32 +954,31 @@ fn text_script(answer: &str) -> Script {
     ])
 }
 
-/// Seed one long-term memory and return its id.
-fn seed_memory(memory: &MemoryService, content: &str, tags: &[&str]) -> String {
+/// Seed one statement and return its id.
+fn seed_memory(memory: &MemoryService, content: &str, subject: &str) -> String {
     memory
-        .store()
-        .add(&MemoryInput {
-            content: content.to_owned(),
-            tags: Some(tags.iter().map(|tag| (*tag).to_owned()).collect()),
-            source: None,
-        })
+        .write(NewMemory::new(content).subject(subject))
         .expect("memory")
-        .0
+        .memory()
         .id
+        .clone()
 }
 
 #[test]
 fn the_agent_injects_standing_and_recall_memory() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
-    // A bullet in the standing file is injected without a retrieval cue.
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    // A pinned rule is injected without a retrieval cue.
     memory
-        .standing_store()
-        .add("Use metric units", 90)
-        .expect("standing rule");
-    // A long-term fact is retrieved by search.
-    seed_memory(&memory, "Sam prefers dark roast coffee", &["coffee"]);
+        .write(
+            NewMemory::new("Use metric units")
+                .kind(Kind::Rule)
+                .pinned(true),
+        )
+        .expect("rule");
+    // A statement is retrieved by the digest.
+    seed_memory(&memory, "Sam prefers dark roast coffee", "sam");
     let submission = harness
         .session()
         .submit(
@@ -1003,13 +1002,13 @@ fn the_agent_injects_standing_and_recall_memory() {
     assert!(
         texts
             .iter()
-            .any(|text| text.contains("<standing_memory>") && text.contains("Use metric units")),
-        "missing standing: {texts:?}"
+            .any(|text| text.contains("<rules>") && text.contains("Use metric units")),
+        "missing rules: {texts:?}"
     );
     assert!(
         texts
             .iter()
-            .any(|text| text.contains("<relevant_memory>") && text.contains("dark roast coffee")),
+            .any(|text| text.contains("<memory>") && text.contains("dark roast coffee")),
         "missing recall: {texts:?}"
     );
 }
@@ -1018,12 +1017,15 @@ fn the_agent_injects_standing_and_recall_memory() {
 fn a_trivial_message_gets_standing_but_no_recall() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
     memory
-        .standing_store()
-        .add("Use metric units", 90)
-        .expect("standing rule");
-    seed_memory(&memory, "Sam prefers dark roast coffee", &["coffee"]);
+        .write(
+            NewMemory::new("Use metric units")
+                .kind(Kind::Rule)
+                .pinned(true),
+        )
+        .expect("rule");
+    seed_memory(&memory, "Sam prefers dark roast coffee", "sam");
     // `submit` sends "hi", which carries no topic worth searching for.
     let submission = submit(&harness, &conversation);
     let provider = Arc::new(ScriptedProvider::new(vec![text_script("Hello.")]));
@@ -1038,11 +1040,11 @@ fn a_trivial_message_gets_standing_but_no_recall() {
     assert!(
         texts
             .iter()
-            .any(|text| text.contains("<standing_memory>") && text.contains("Use metric units")),
-        "missing standing: {texts:?}"
+            .any(|text| text.contains("<rules>") && text.contains("Use metric units")),
+        "missing rules: {texts:?}"
     );
     assert!(
-        !texts.iter().any(|text| text.contains("<relevant_memory>")),
+        !texts.iter().any(|text| text.contains("<memory>")),
         "a trivial message got recall: {texts:?}"
     );
 }
@@ -1051,15 +1053,15 @@ fn a_trivial_message_gets_standing_but_no_recall() {
 fn a_memory_failure_does_not_stop_the_answer() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
-    seed_memory(&memory, "Sam prefers dark roast coffee", &["coffee"]);
-    // Break the standing store in a way that survives the plain-file check: a
-    // directory where the file belongs makes every read fail.
-    let standing = memory.base().join("standing.md");
-    if standing.exists() {
-        fs::remove_file(&standing).expect("remove standing");
-    }
-    fs::create_dir(&standing).expect("block standing");
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    seed_memory(&memory, "Sam prefers dark roast coffee", "sam");
+    // Remove the memory table so every read and write fails without taking the
+    // conversation down with it.
+    harness
+        .session()
+        .storage()
+        .write(|writer| writer.execute("DROP TABLE memories", []))
+        .expect("break the store");
     let submission = harness
         .session()
         .submit(
@@ -1090,20 +1092,16 @@ fn a_memory_tool_call_records_the_run_source() {
         .expect("latest")
         .expect("entry");
     // The service stamps its provenance onto saves that do not name a source.
-    let memory = Arc::new(
-        MemoryService::new(harness.session().clone())
-            .expect("memory")
-            .with_source(entry.clone()),
-    );
-    let tools = ToolRegistry::new(memory.tools());
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
+    let tools = ToolRegistry::new(memory.tools_with_source(Some(entry.clone())));
     let provider = Arc::new(ScriptedProvider::new(vec![
         Ok(vec![
             Ok(StreamEvent::ToolCall(ToolCall {
                 id: "call-mem".to_owned(),
-                name: "memory_add".to_owned(),
+                name: "memory_save".to_owned(),
                 arguments: json!({
                     "content": "Sam prefers metric units",
-                    "tags": ["units"]
+                    "subject": "sam"
                 }),
             })),
             Ok(StreamEvent::Usage(Usage {
@@ -1137,22 +1135,12 @@ fn a_memory_tool_call_records_the_run_source() {
         .expect("run submission");
     assert_eq!(outcome.answer_text.as_deref(), Some("saved"));
 
-    let found = memory
-        .store()
-        .search(
-            "metric",
-            SearchMode::Any,
-            10,
-            0,
-            &MemorySearchOptions::default(),
-        )
-        .expect("search");
+    let found = memory.search("metric", None, 10).expect("search");
     let item = found
-        .results
         .iter()
-        .find(|hit| hit.memory.content.contains("metric units"))
+        .find(|memory| memory.content.contains("metric units"))
         .expect("saved memory");
-    assert_eq!(item.memory.source, entry);
+    assert_eq!(item.source_entry.as_deref(), Some(entry.as_str()));
 }
 
 fn tool_result_text(message: &hearth_model::ChatMessage) -> String {
@@ -1170,12 +1158,12 @@ fn tool_result_text(message: &hearth_model::ChatMessage) -> String {
 fn recall_is_bounded_to_fit_the_context_budget() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
-    let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
+    let memory = Arc::new(MemoryService::new(harness.session().clone()));
     for index in 0..10 {
         seed_memory(
             &memory,
             &format!("project fact {index} about Atlas"),
-            &["atlas"],
+            "atlas",
         );
     }
     let submission = harness
@@ -1204,12 +1192,9 @@ fn recall_is_bounded_to_fit_the_context_budget() {
         .iter()
         .filter(|message| message.role == Role::System)
         .map(message_text)
-        .find(|text| text.contains("<relevant_memory>"))
+        .find(|text| text.contains("<memory>"))
         .expect("recall message");
-    let lines = recall
-        .lines()
-        .filter(|line| line.trim_start().starts_with("- "))
-        .count();
+    let lines = recall.lines().filter(|line| line.starts_with("m_")).count();
     // Ten memories match, so a bounded recall must return fewer than all of them.
     assert!(
         lines > 0 && lines < 10,

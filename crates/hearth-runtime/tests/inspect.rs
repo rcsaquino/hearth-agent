@@ -1,5 +1,5 @@
 use hearth_core::{Harness, PromptInput, Save};
-use hearth_memory::{MemoryInput, MemoryService};
+use hearth_memory::{Kind, MemoryService, NewMemory};
 use hearth_runtime::inspect::{latest_prompt, list_memories};
 use hearth_runtime::{InitOptions, init};
 use serde_json::json;
@@ -40,8 +40,8 @@ fn latest_prompt_reads_the_newest_saved_document() {
                 conversation_id: conversation.id.clone(),
                 model: "fake-model".to_owned(),
                 tools: Vec::new(),
-                standing: String::new(),
-                standing_version: 0,
+                rules: String::new(),
+                rules_version: 0,
                 recall: String::new(),
                 skills_index: String::new(),
                 guidance: String::new(),
@@ -80,8 +80,8 @@ fn latest_prompt_is_visible_while_the_harness_keeps_the_database_open() {
             conversation_id: conversation.id.clone(),
             model: "fake-model".to_owned(),
             tools: Vec::new(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -102,22 +102,20 @@ fn list_memories_reads_saved_items_without_a_writer() {
     let home = TempDir::new().expect("temp home");
     init(home.path(), options()).expect("init");
     let harness = Harness::open(home.path()).expect("open harness");
-    let memory = MemoryService::new(harness.session().clone()).expect("memory");
+    let memory = MemoryService::new(harness.session().clone());
     memory
-        .store()
-        .add(&MemoryInput {
-            content: "The user keeps the release checklist in docs/.".to_owned(),
-            tags: Some(vec!["release".to_owned()]),
-            source: Some("test".to_owned()),
-        })
+        .write(
+            NewMemory::new("The user keeps the release checklist in docs/.")
+                .kind(Kind::Rule)
+                .pinned(true),
+        )
         .expect("save memory");
 
     let records = list_memories(home.path(), 100).expect("list memories");
     assert_eq!(records.len(), 1);
-    assert!(!records[0].standing);
-    assert_eq!(records[0].source, "test");
+    assert!(records[0].pinned, "a rule is shown as pinned");
+    assert_eq!(records[0].kind, "rule");
     assert!(records[0].content.contains("release checklist"));
-    assert_eq!(records[0].tags, vec!["release"]);
 }
 
 #[test]

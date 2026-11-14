@@ -13,7 +13,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary project"
     },
     {
       "key": "m002",
@@ -26,7 +27,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "backup drive"
     },
     {
       "key": "m003",
@@ -39,7 +41,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "lab bench"
     },
     {
       "key": "m004",
@@ -52,7 +55,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "meeting room"
     },
     {
       "key": "m005",
@@ -65,7 +69,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "coffee supply"
     },
     {
       "key": "m006",
@@ -78,7 +83,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "inventory code for the sensor kit"
     },
     {
       "key": "m007",
@@ -91,7 +97,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "calibration standard"
     },
     {
       "key": "m008",
@@ -104,7 +111,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary language for the tooling"
     },
     {
       "key": "m009",
@@ -117,7 +125,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "m010",
@@ -130,7 +139,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "archive"
     },
     {
       "key": "m011",
@@ -143,7 +153,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "m012",
@@ -156,7 +167,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary display"
     },
     {
       "key": "m013",
@@ -169,7 +181,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "spare keyboard"
     },
     {
       "key": "m014",
@@ -182,7 +195,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "network switch"
     },
     {
       "key": "m015",
@@ -195,7 +209,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "lab notebook color"
     },
     {
       "key": "m016",
@@ -208,7 +223,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "safety drill"
     },
     {
       "key": "m017",
@@ -221,7 +237,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "parts bin for screws"
     },
     {
       "key": "m018",
@@ -234,7 +251,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "shipping address"
     },
     {
       "key": "m019",
@@ -247,7 +265,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "inventory spreadsheet"
     },
     {
       "key": "m020",
@@ -260,7 +279,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary sensor"
     },
     {
       "key": "m021",
@@ -273,7 +293,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "reference clock"
     },
     {
       "key": "m022",
@@ -286,7 +307,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "spare battery"
     },
     {
       "key": "m023",
@@ -299,7 +321,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "printer"
     },
     {
       "key": "m024",
@@ -312,7 +335,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "lab key"
     },
     {
       "key": "m025",
@@ -325,7 +349,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project mascot"
     },
     {
       "key": "m026",
@@ -338,7 +363,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "main whiteboard"
     },
     {
       "key": "m027",
@@ -351,7 +377,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "tool cart"
     },
     {
       "key": "m028",
@@ -364,7 +391,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "emergency contact"
     },
     {
       "key": "m029",
@@ -377,7 +405,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "backup schedule"
     },
     {
       "key": "m030",
@@ -390,7 +419,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "lab coat size"
     },
     {
       "key": "m031",
@@ -403,7 +433,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "parts supplier"
     },
     {
       "key": "m032",
@@ -416,7 +447,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary protocol"
     },
     {
       "key": "m033",
@@ -429,7 +461,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "local port for the service"
     },
     {
       "key": "m034",
@@ -442,7 +475,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "database file"
     },
     {
       "key": "m035",
@@ -455,7 +489,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "log folder"
     },
     {
       "key": "m036",
@@ -468,7 +503,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "workspace folder"
     },
     {
       "key": "m037",
@@ -481,7 +517,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "spill folder"
     },
     {
       "key": "m038",
@@ -494,7 +531,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "media folder"
     },
     {
       "key": "m039",
@@ -507,7 +545,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "skills folder"
     },
     {
       "key": "m040",
@@ -520,7 +559,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "backups folder"
     },
     {
       "key": "m041",
@@ -533,7 +573,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "main config file"
     },
     {
       "key": "m042",
@@ -546,7 +587,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "identity file"
     },
     {
       "key": "m043",
@@ -559,7 +601,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "lock file"
     },
     {
       "key": "m044",
@@ -572,7 +615,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "socket file"
     },
     {
       "key": "m045",
@@ -585,7 +629,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default timezone"
     },
     {
       "key": "m046",
@@ -598,7 +643,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default model"
     },
     {
       "key": "m047",
@@ -611,7 +657,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "m048",
@@ -624,7 +671,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "m049",
@@ -637,7 +685,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default image model"
     },
     {
       "key": "m050",
@@ -650,7 +699,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default transcription model"
     },
     {
       "key": "m051",
@@ -663,7 +713,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default speech model"
     },
     {
       "key": "m052",
@@ -676,7 +727,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default agent name"
     },
     {
       "key": "m053",
@@ -689,7 +741,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default max turns"
     },
     {
       "key": "m054",
@@ -702,7 +755,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default poll timeout"
     },
     {
       "key": "m055",
@@ -715,7 +769,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default queue cap"
     },
     {
       "key": "m056",
@@ -728,7 +783,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default standing memory budget"
     },
     {
       "key": "m057",
@@ -741,7 +797,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default recall budget"
     },
     {
       "key": "m058",
@@ -754,7 +811,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default recall item cap"
     },
     {
       "key": "m059",
@@ -767,7 +825,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default backup retention"
     },
     {
       "key": "m060",
@@ -780,7 +839,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "default compaction threshold"
     },
     {
       "key": "p001",
@@ -793,7 +853,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p002",
@@ -806,7 +867,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "uses"
     },
     {
       "key": "p003",
@@ -819,7 +881,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p004",
@@ -832,7 +895,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "dislikes"
     },
     {
       "key": "p005",
@@ -845,7 +909,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p006",
@@ -858,7 +923,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes"
     },
     {
       "key": "p007",
@@ -871,7 +937,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p008",
@@ -884,7 +951,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "uses"
     },
     {
       "key": "p009",
@@ -897,7 +965,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p010",
@@ -910,7 +979,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes"
     },
     {
       "key": "p011",
@@ -923,7 +993,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p012",
@@ -936,7 +1007,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "reads"
     },
     {
       "key": "p013",
@@ -949,7 +1021,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p014",
@@ -962,7 +1035,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes"
     },
     {
       "key": "p015",
@@ -975,7 +1049,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p016",
@@ -988,7 +1063,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "avoids"
     },
     {
       "key": "p017",
@@ -1001,7 +1077,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p018",
@@ -1014,7 +1091,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes"
     },
     {
       "key": "p019",
@@ -1027,7 +1105,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p020",
@@ -1040,7 +1119,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "uses"
     },
     {
       "key": "p021",
@@ -1053,7 +1133,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p022",
@@ -1066,7 +1147,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes"
     },
     {
       "key": "p023",
@@ -1079,7 +1161,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p024",
@@ -1092,7 +1175,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "avoids"
     },
     {
       "key": "p025",
@@ -1105,7 +1189,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p026",
@@ -1118,7 +1203,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes sunday"
     },
     {
       "key": "p027",
@@ -1131,7 +1217,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p028",
@@ -1144,7 +1231,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes"
     },
     {
       "key": "p029",
@@ -1157,7 +1245,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "prefers"
     },
     {
       "key": "p030",
@@ -1170,7 +1259,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "likes"
     },
     {
       "key": "n001",
@@ -1183,7 +1273,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "mira"
     },
     {
       "key": "n002",
@@ -1196,7 +1287,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "dr vale"
     },
     {
       "key": "n003",
@@ -1209,7 +1301,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "jonas"
     },
     {
       "key": "n004",
@@ -1222,7 +1315,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "priya"
     },
     {
       "key": "n005",
@@ -1235,7 +1329,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "tomas"
     },
     {
       "key": "n006",
@@ -1248,7 +1343,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "elena"
     },
     {
       "key": "n007",
@@ -1261,7 +1357,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "ravi"
     },
     {
       "key": "n008",
@@ -1274,7 +1371,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "nadia"
     },
     {
       "key": "n009",
@@ -1287,7 +1385,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "owen"
     },
     {
       "key": "n010",
@@ -1300,7 +1399,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "sofia"
     },
     {
       "key": "n011",
@@ -1313,7 +1413,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "leo"
     },
     {
       "key": "n012",
@@ -1326,7 +1427,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "hana"
     },
     {
       "key": "n013",
@@ -1339,7 +1441,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "iris"
     },
     {
       "key": "n014",
@@ -1352,7 +1455,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "sam"
     },
     {
       "key": "n015",
@@ -1365,7 +1469,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "noor"
     },
     {
       "key": "n016",
@@ -1378,7 +1483,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "pavel"
     },
     {
       "key": "n017",
@@ -1391,7 +1497,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "tess"
     },
     {
       "key": "n018",
@@ -1404,7 +1511,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "umar"
     },
     {
       "key": "n019",
@@ -1417,7 +1525,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "vera"
     },
     {
       "key": "n020",
@@ -1430,7 +1539,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "wes"
     },
     {
       "key": "r001",
@@ -1443,7 +1553,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project atlas"
     },
     {
       "key": "r002",
@@ -1456,7 +1567,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project beacon"
     },
     {
       "key": "r003",
@@ -1469,7 +1581,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project cedar"
     },
     {
       "key": "r004",
@@ -1482,7 +1595,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project delta"
     },
     {
       "key": "r005",
@@ -1495,7 +1609,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project ember"
     },
     {
       "key": "r006",
@@ -1508,7 +1623,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project fern"
     },
     {
       "key": "r007",
@@ -1521,7 +1637,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project grove"
     },
     {
       "key": "r008",
@@ -1534,7 +1651,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project harbor"
     },
     {
       "key": "r009",
@@ -1547,7 +1665,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project iris"
     },
     {
       "key": "r010",
@@ -1560,7 +1679,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project juniper"
     },
     {
       "key": "r011",
@@ -1573,7 +1693,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project kestrel"
     },
     {
       "key": "r012",
@@ -1586,7 +1707,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project lumen"
     },
     {
       "key": "r013",
@@ -1599,7 +1721,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project moss"
     },
     {
       "key": "r014",
@@ -1612,7 +1735,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project nova"
     },
     {
       "key": "r015",
@@ -1625,7 +1749,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project orbit"
     },
     {
       "key": "r016",
@@ -1638,7 +1763,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project pine"
     },
     {
       "key": "r017",
@@ -1651,7 +1777,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project quartz"
     },
     {
       "key": "r018",
@@ -1664,7 +1791,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project reed"
     },
     {
       "key": "r019",
@@ -1677,7 +1805,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project sage"
     },
     {
       "key": "r020",
@@ -1690,7 +1819,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project tide"
     },
     {
       "key": "t001",
@@ -1701,9 +1831,10 @@
       ],
       "importance": 56,
       "valid_from": 1735689600000000,
-      "valid_to": 1782863999000000,
+      "valid_to": 1782864000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "lab"
     },
     {
       "key": "t002",
@@ -1716,7 +1847,8 @@
       "valid_from": 1782864000000000,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "lab"
     },
     {
       "key": "t003",
@@ -1727,9 +1859,10 @@
       ],
       "importance": 58,
       "valid_from": 1735689600000000,
-      "valid_to": 1751327999000000,
+      "valid_to": 1751328000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project phase"
     },
     {
       "key": "t004",
@@ -1740,9 +1873,10 @@
       ],
       "importance": 59,
       "valid_from": 1751328000000000,
-      "valid_to": 1767225599000000,
+      "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "project phase"
     },
     {
       "key": "t005",
@@ -1753,9 +1887,10 @@
       ],
       "importance": 60,
       "valid_from": 1735689600000000,
-      "valid_to": 1751327999000000,
+      "valid_to": 1751328000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "tool version"
     },
     {
       "key": "t006",
@@ -1766,9 +1901,10 @@
       ],
       "importance": 61,
       "valid_from": 1751328000000000,
-      "valid_to": 1769903999000000,
+      "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "tool version"
     },
     {
       "key": "t007",
@@ -1779,9 +1915,10 @@
       ],
       "importance": 62,
       "valid_from": 1735689600000000,
-      "valid_to": 1767225599000000,
+      "valid_to": 1767225600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "office"
     },
     {
       "key": "t008",
@@ -1794,7 +1931,8 @@
       "valid_from": 1767225600000000,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "office"
     },
     {
       "key": "t009",
@@ -1805,9 +1943,10 @@
       ],
       "importance": 64,
       "valid_from": 1735689600000000,
-      "valid_to": 1767225599000000,
+      "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "schedule"
     },
     {
       "key": "t010",
@@ -1820,7 +1959,8 @@
       "valid_from": 1767225600000000,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "schedule"
     },
     {
       "key": "t011",
@@ -1831,9 +1971,10 @@
       ],
       "importance": 66,
       "valid_from": 1735689600000000,
-      "valid_to": 1767225599000000,
+      "valid_to": 1767225600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "supplier"
     },
     {
       "key": "t012",
@@ -1844,9 +1985,10 @@
       ],
       "importance": 67,
       "valid_from": 1767225600000000,
-      "valid_to": null,
+      "valid_to": 1769817600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "supplier"
     },
     {
       "key": "t013",
@@ -1857,9 +1999,10 @@
       ],
       "importance": 68,
       "valid_from": 1735689600000000,
-      "valid_to": 1767225599000000,
+      "valid_to": 1767225600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "protocol"
     },
     {
       "key": "t014",
@@ -1870,9 +2013,10 @@
       ],
       "importance": 69,
       "valid_from": 1767225600000000,
-      "valid_to": null,
+      "valid_to": 1769817600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "protocol"
     },
     {
       "key": "t015",
@@ -1883,9 +2027,10 @@
       ],
       "importance": 55,
       "valid_from": 1735689600000000,
-      "valid_to": 1767225599000000,
+      "valid_to": 1767225600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "storage"
     },
     {
       "key": "t016",
@@ -1898,7 +2043,8 @@
       "valid_from": 1767225600000000,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "storage"
     },
     {
       "key": "t017",
@@ -1909,9 +2055,10 @@
       ],
       "importance": 57,
       "valid_from": 1735689600000000,
-      "valid_to": 1767225599000000,
+      "valid_to": 1767225600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "backup"
     },
     {
       "key": "t018",
@@ -1924,7 +2071,8 @@
       "valid_from": 1767225600000000,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "backup"
     },
     {
       "key": "t019",
@@ -1935,9 +2083,10 @@
       ],
       "importance": 59,
       "valid_from": 1735689600000000,
-      "valid_to": 1767225599000000,
+      "valid_to": 1767225600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "model"
     },
     {
       "key": "t020",
@@ -1948,9 +2097,10 @@
       ],
       "importance": 60,
       "valid_from": 1767225600000000,
-      "valid_to": null,
+      "valid_to": 1769817600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "model"
     },
     {
       "key": "c001",
@@ -1960,10 +2110,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary database"
     },
     {
       "key": "c002",
@@ -1973,10 +2124,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c001",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary database"
     },
     {
       "key": "c003",
@@ -1986,10 +2138,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary language"
     },
     {
       "key": "c004",
@@ -1999,10 +2152,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c003",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "primary language"
     },
     {
       "key": "c005",
@@ -2012,10 +2166,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "deployment target"
     },
     {
       "key": "c006",
@@ -2025,10 +2180,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c005",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "deployment target"
     },
     {
       "key": "c007",
@@ -2038,10 +2194,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "backup cadence"
     },
     {
       "key": "c008",
@@ -2051,10 +2208,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c007",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "backup cadence"
     },
     {
       "key": "c009",
@@ -2064,10 +2222,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "main office"
     },
     {
       "key": "c010",
@@ -2077,10 +2236,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c009",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "main office"
     },
     {
       "key": "c011",
@@ -2090,10 +2250,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1769817600000000,
+      "valid_to": 1772409600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "protocol"
     },
     {
       "key": "c012",
@@ -2103,10 +2264,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1772409600000000,
       "valid_to": null,
       "supersedes_key": "c011",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "protocol"
     },
     {
       "key": "c013",
@@ -2116,10 +2278,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1769817600000000,
+      "valid_to": 1772409600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "model"
     },
     {
       "key": "c014",
@@ -2129,10 +2292,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1772409600000000,
       "valid_to": null,
       "supersedes_key": "c013",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "model"
     },
     {
       "key": "c015",
@@ -2142,10 +2306,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1769817600000000,
+      "valid_to": 1772409600000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "supplier"
     },
     {
       "key": "c016",
@@ -2155,10 +2320,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1772409600000000,
       "valid_to": null,
       "supersedes_key": "c015",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "supplier"
     },
     {
       "key": "c017",
@@ -2168,10 +2334,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "storage engine"
     },
     {
       "key": "c018",
@@ -2181,10 +2348,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c017",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "storage engine"
     },
     {
       "key": "c019",
@@ -2194,10 +2362,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "queue limit"
     },
     {
       "key": "c020",
@@ -2207,10 +2376,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c019",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "queue limit"
     },
     {
       "key": "c021",
@@ -2220,10 +2390,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
+      "valid_from": 1785456000000000,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "recall budget"
     },
     {
       "key": "c022",
@@ -2233,10 +2404,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1785456000000000,
       "valid_to": null,
       "supersedes_key": "c021",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "recall budget"
     },
     {
       "key": "c023",
@@ -2246,10 +2418,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
+      "valid_from": 1785456000000000,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "standing budget"
     },
     {
       "key": "c024",
@@ -2259,10 +2432,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1785456000000000,
       "valid_to": null,
       "supersedes_key": "c023",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "standing budget"
     },
     {
       "key": "c025",
@@ -2272,10 +2446,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "c026",
@@ -2285,10 +2460,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c025",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "c027",
@@ -2298,10 +2474,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "c028",
@@ -2311,10 +2488,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c027",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": ""
     },
     {
       "key": "c029",
@@ -2324,10 +2502,11 @@
         "contradiction"
       ],
       "importance": 60,
-      "valid_from": null,
-      "valid_to": null,
+      "valid_from": 1785456000000000,
+      "valid_to": 1788048000000000,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "speech model"
     },
     {
       "key": "c030",
@@ -2337,10 +2516,11 @@
         "contradiction"
       ],
       "importance": 75,
-      "valid_from": null,
+      "valid_from": 1788048000000000,
       "valid_to": null,
       "supersedes_key": "c029",
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "speech model"
     },
     {
       "key": "a001",
@@ -2353,7 +2533,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a002",
@@ -2366,7 +2547,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a003",
@@ -2379,7 +2561,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a004",
@@ -2392,7 +2575,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a005",
@@ -2405,7 +2589,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a006",
@@ -2418,7 +2603,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a007",
@@ -2431,7 +2617,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a008",
@@ -2444,7 +2631,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a009",
@@ -2457,7 +2645,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a010",
@@ -2470,7 +2659,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a011",
@@ -2483,7 +2673,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a012",
@@ -2496,7 +2687,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a013",
@@ -2509,7 +2701,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a014",
@@ -2522,7 +2715,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "a015",
@@ -2535,7 +2729,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": null
+      "duplicate_of": null,
+      "subject": "paraphrase"
     },
     {
       "key": "d001",
@@ -2548,7 +2743,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": "m001"
+      "duplicate_of": "m001",
+      "subject": "primary project"
     },
     {
       "key": "d002",
@@ -2561,7 +2757,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": "m002"
+      "duplicate_of": "m002",
+      "subject": "backup drive"
     },
     {
       "key": "d003",
@@ -2574,7 +2771,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": "m003"
+      "duplicate_of": "m003",
+      "subject": "lab bench"
     },
     {
       "key": "d004",
@@ -2587,7 +2785,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": "m004"
+      "duplicate_of": "m004",
+      "subject": "meeting room"
     },
     {
       "key": "d005",
@@ -2600,7 +2799,8 @@
       "valid_from": null,
       "valid_to": null,
       "supersedes_key": null,
-      "duplicate_of": "m005"
+      "duplicate_of": "m005",
+      "subject": "coffee supply"
     }
   ],
   "questions": [
@@ -4577,7 +4777,7 @@
         "t012"
       ],
       "category": "temporal",
-      "as_of_micros": 1775001600000000,
+      "as_of_micros": 1768521600000000,
       "spot_check": false
     },
     {
@@ -4603,7 +4803,7 @@
         "t014"
       ],
       "category": "temporal",
-      "as_of_micros": 1777593600000000,
+      "as_of_micros": 1768521600000000,
       "spot_check": false
     },
     {
@@ -4681,7 +4881,7 @@
         "t020"
       ],
       "category": "temporal",
-      "as_of_micros": 1785542400000000,
+      "as_of_micros": 1768521600000000,
       "spot_check": false
     },
     {
@@ -5138,83 +5338,6 @@
       "category": "paraphrase",
       "as_of_micros": null,
       "spot_check": false
-    },
-    {
-      "key": "q196",
-      "question": "What is the primary project?",
-      "expected_keys": [
-        "d001"
-      ],
-      "relevant_keys": [
-        "d001"
-      ],
-      "category": "duplicate",
-      "as_of_micros": null,
-      "spot_check": false
-    },
-    {
-      "key": "q197",
-      "question": "What is the backup drive label?",
-      "expected_keys": [
-        "d002"
-      ],
-      "relevant_keys": [
-        "d002"
-      ],
-      "category": "duplicate",
-      "as_of_micros": null,
-      "spot_check": false
-    },
-    {
-      "key": "q198",
-      "question": "Where is the lab bench?",
-      "expected_keys": [
-        "d003"
-      ],
-      "relevant_keys": [
-        "d003"
-      ],
-      "category": "duplicate",
-      "as_of_micros": null,
-      "spot_check": false
-    },
-    {
-      "key": "q199",
-      "question": "What is the meeting room called?",
-      "expected_keys": [
-        "d004"
-      ],
-      "relevant_keys": [
-        "d004"
-      ],
-      "category": "duplicate",
-      "as_of_micros": null,
-      "spot_check": false
-    },
-    {
-      "key": "q200",
-      "question": "Where is the coffee supply?",
-      "expected_keys": [
-        "d005"
-      ],
-      "relevant_keys": [
-        "d005"
-      ],
-      "category": "duplicate",
-      "as_of_micros": null,
-      "spot_check": false
     }
-  ],
-  "secrets": [
-    "<openai-live>",
-    "<github-pat>",
-    "<slack-token>",
-    "<aws-key>",
-    "<telegram-token>",
-    "api_key=abcdefgh12345678",
-    "password=hunter2hunter2",
-    "token=secretvalue123",
-    "secret=topsecretvalue",
-    "Bearer abcdefghijklmnop"
   ]
 }

@@ -38,8 +38,8 @@ fn the_prompt_starts_with_identity_and_ends_with_runtime() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -101,8 +101,8 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -185,8 +185,8 @@ fn a_steering_message_between_a_tool_call_and_its_result_is_reordered() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -270,8 +270,8 @@ fn orphan_tool_results_and_unresolved_calls_are_dropped_from_the_request() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -328,8 +328,8 @@ fn the_request_carries_the_model_tools_and_session() {
                 parameters: serde_json::json!({"type": "object"}),
             }],
             runtime_note: "RUNTIME".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -363,8 +363,8 @@ fn the_audit_document_has_five_segments() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME NOTE".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -402,8 +402,8 @@ fn saving_the_same_prompt_twice_reuses_the_hash() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -482,8 +482,8 @@ fn image_and_file_blocks_survive_the_prompt_and_audit() {
             model: "test-model".to_owned(),
             tools: Vec::new(),
             runtime_note: "RUNTIME".to_owned(),
-            standing: String::new(),
-            standing_version: 0,
+            rules: String::new(),
+            rules_version: 0,
             recall: String::new(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -542,8 +542,8 @@ fn standing_and_recall_are_placed_in_their_layers() {
             conversation_id: conversation.id.clone(),
             model: "test-model".to_owned(),
             tools: Vec::new(),
-            standing: "S1\nS2".to_owned(),
-            standing_version: 0,
+            rules: "S1\nS2".to_owned(),
+            rules_version: 0,
             recall: "R1".to_owned(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -554,9 +554,7 @@ fn standing_and_recall_are_placed_in_their_layers() {
     let messages = &prompt.request.messages;
     let standing = messages
         .iter()
-        .find(|message| {
-            message.role == Role::System && text_of(message).contains("<standing_memory>")
-        })
+        .find(|message| message.role == Role::System && text_of(message).contains("<rules>"))
         .expect("standing message");
     let standing_text = text_of(standing);
     assert!(standing_text.contains("S1"));
@@ -571,13 +569,13 @@ fn standing_and_recall_are_placed_in_their_layers() {
     let newest = *user_positions.last().expect("newest user");
     assert_eq!(messages[newest - 1].role, Role::System);
     let recall_text = text_of(&messages[newest - 1]);
-    assert!(recall_text.contains("<relevant_memory>"));
+    assert!(recall_text.contains("<memory>"));
     assert!(recall_text.contains("R1"));
 
     let last = messages.last().expect("last");
     assert_eq!(last.role, Role::System);
     assert_eq!(text_of(last), "RUNTIME");
-    assert_eq!(prompt.document["standing_memory"], "S1\nS2");
+    assert_eq!(prompt.document["rules"], "S1\nS2");
     assert_eq!(prompt.document["recall"], "R1");
 }
 
@@ -602,8 +600,8 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
                 description: "Read files.".to_owned(),
                 parameters: json!({"type": "object"}),
             }],
-            standing: "S1".to_owned(),
-            standing_version: 0,
+            rules: "S1".to_owned(),
+            rules_version: 0,
             recall: "R1".to_owned(),
             skills_index: String::new(),
             guidance: String::new(),
@@ -618,7 +616,7 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
         tokens.tools,
         estimate(&serde_json::to_string(&prompt.document["tools"]).expect("tools JSON"))
     );
-    assert_eq!(tokens.standing, estimate("S1"));
+    assert_eq!(tokens.rules, estimate("S1"));
     assert_eq!(
         tokens.transcript,
         estimate(&serde_json::to_string(&prompt.document["transcript"]).expect("transcript JSON"))
@@ -628,7 +626,7 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
     assert_eq!(tokens.skills, 0);
     assert_eq!(
         tokens.fixed,
-        tokens.identity + tokens.tools + tokens.standing + tokens.skills + tokens.runtime
+        tokens.identity + tokens.tools + tokens.rules + tokens.skills + tokens.runtime
     );
     assert_eq!(
         tokens.total,
@@ -664,15 +662,15 @@ fn the_prefix_hash_tracks_only_the_stable_layers() {
         parameters: json!({"type": "object"}),
     };
     let build =
-        |soul: &str, tools: Vec<ToolSpec>, standing_version: u64, recall: &str, runtime: &str| {
+        |soul: &str, tools: Vec<ToolSpec>, rules_version: u64, recall: &str, runtime: &str| {
             session
                 .build_prompt(PromptInput {
                     soul: soul.to_owned(),
                     conversation_id: conversation.id.clone(),
                     model: "test-model".to_owned(),
                     tools,
-                    standing: "S1".to_owned(),
-                    standing_version,
+                    rules: "S1".to_owned(),
+                    rules_version,
                     recall: recall.to_owned(),
                     skills_index: String::new(),
                     guidance: String::new(),
@@ -702,7 +700,7 @@ fn the_prefix_hash_tracks_only_the_stable_layers() {
     // The version is an audit value; only the rendered bytes belong in the hash.
     let same_standing = build("SOUL", Vec::new(), 1, "R1", "RUN");
     assert_eq!(first.prefix_hash, same_standing.prefix_hash);
-    assert_eq!(same_standing.document["standing_version"], 1);
+    assert_eq!(same_standing.document["rules_version"], 1);
 
     let runtime = build("SOUL", Vec::new(), 0, "R2", "RUN 2");
     assert_eq!(first.prefix_hash, runtime.prefix_hash);
@@ -722,8 +720,8 @@ fn project_instructions_are_a_system_message_between_identity_and_standing() {
             conversation_id: conversation.id.clone(),
             model: "test-model".to_owned(),
             tools: Vec::new(),
-            standing: "STANDING".to_owned(),
-            standing_version: 1,
+            rules: "STANDING".to_owned(),
+            rules_version: 1,
             recall: String::new(),
             skills_index: String::new(),
             guidance: "PROJECT RULES".to_owned(),
@@ -753,7 +751,7 @@ fn project_instructions_are_a_system_message_between_identity_and_standing() {
         .request
         .messages
         .iter()
-        .position(|message| text_of(message).contains("<standing_memory>"))
+        .position(|message| text_of(message).contains("<rules>"))
         .expect("standing");
     assert!(identity < position, "guidance must follow the identity");
     assert!(position < standing, "guidance must precede standing memory");
@@ -779,8 +777,8 @@ fn the_prefix_hash_tracks_guidance() {
                 conversation_id: conversation.id.clone(),
                 model: "test-model".to_owned(),
                 tools: Vec::new(),
-                standing: String::new(),
-                standing_version: 0,
+                rules: String::new(),
+                rules_version: 0,
                 recall: String::new(),
                 skills_index: String::new(),
                 guidance: guidance.to_owned(),
