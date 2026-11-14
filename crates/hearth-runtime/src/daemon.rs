@@ -29,7 +29,6 @@ use crate::agent::{Agent, AgentConfig, AgentError, RunOutcome};
 use crate::compaction::Compactor;
 use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
-use crate::extraction::MemoryExtractor;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
 use crate::maintenance::{BACKUP_KIND, BackupHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks};
@@ -127,14 +126,14 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         None => home.join("workspace"),
     };
     let spill = home.join("spill");
-    // Memory is not optional: a daemon that cannot reach its store would answer
-    // with silently missing context, so failing to open it stops startup.
+    // Memory shares the conversation database, so opening it cannot fail on its
+    // own: a broken database has already stopped startup.
     let mut memory = MemoryService::new(session.clone())
-        .map_err(|error| std::io::Error::other(format!("memory could not be opened: {error}")))?
-        .with_recall_budget(
-            settings.memory.recall_max_items,
-            settings.memory.recall_max_tokens,
-        )
+        .with_config(hearth_memory::MemoryConfig {
+            rules_max_tokens: settings.memory.rules_max_tokens,
+            recall_max_tokens: settings.memory.recall_max_tokens,
+            recall_max_items: settings.memory.recall_max_items,
+        })
         .with_embeddings(settings.memory.embeddings);
     let directory = embedding_directory(home, &settings.memory.embedding_model_dir);
     let fetch_allowed = should_fetch_embedding_model();
@@ -165,13 +164,45 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             );
         }
     }
+    // A home that ran an earlier release keeps its memory in
+    // `memory/long-term.sqlite` and `memory/standing.md`. Import it once, then
+    // retire the directory so the next start has nothing to do.
+    match hearth_memory::import_legacy(&memory, home) {
+        Ok(report) if report.is_empty() => {}
+        Ok(report) if report.complete() => tracing::info!(
+            statements = report.statements,
+            rules = report.rules,
+            archived = report
+                .archived
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            "previous memory imported"
+        ),
+        Ok(report) => tracing::warn!(
+            statements = report.statements,
+            rules = report.rules,
+            skipped = report.skipped,
+            "some previous memory could not be imported; the old files were kept so the next start retries"
+        ),
+        Err(error) => tracing::warn!(%error, "previous memory could not be imported"),
+    }
+
     let memory = Arc::new(memory);
     if memory.embeddings_active() {
         let backfill = Arc::clone(&memory);
-        thread::spawn(move || match backfill.index_pending_vectors() {
-            Ok(indexed) if indexed > 0 => tracing::info!(indexed, "memory vectors backfilled"),
-            Ok(_) => {}
-            Err(error) => tracing::warn!(%error, "memory vector backfill failed"),
+        thread::spawn(move || {
+            match backfill.prune_vectors() {
+                Ok(removed) if removed > 0 => {
+                    tracing::info!(removed, "stale memory vectors pruned")
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!(%error, "memory vector prune failed"),
+            }
+            match backfill.index_pending_vectors() {
+                Ok(indexed) if indexed > 0 => tracing::info!(indexed, "memory vectors backfilled"),
+                Ok(_) => {}
+                Err(error) => tracing::warn!(%error, "memory vector backfill failed"),
+            }
         });
     } else if fetch_in_background {
         let background = Arc::clone(&memory);
@@ -203,18 +234,6 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             }
         });
     }
-    // Repair an over-budget standing file at startup, as the store intends:
-    // bullets trimmed there are archived to long-term memory first.
-    match memory.standing_store().load() {
-        Ok(snapshot) if !snapshot.archived.is_empty() => tracing::warn!(
-            archived = snapshot.archived.len(),
-            characters = snapshot.characters,
-            "standing memory repaired"
-        ),
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "standing memory could not be loaded"),
-    }
-
     let effect_worker = EffectWorker::new(session.clone(), workspace.clone());
     let recovered = effect_worker.recover_started()?;
     tracing::info!(recovered, "effect recovery complete");
@@ -671,12 +690,21 @@ impl TelegramWorker {
             outbound: self.outbound.clone(),
             speaker: self.speaker.clone(),
         };
+        // A memory the model saves during this run points at the message that
+        // prompted it, so provenance is the user's own words. It rides on the
+        // tool set, not on the shared service.
+        let memory_source = self
+            .session
+            .latest_user_entry_id(&conversation.id)
+            .ok()
+            .flatten();
         let built = match build_tools(
             &self.settings,
             &self.workspace,
             &self.spill,
             Some(target),
             Some(Arc::clone(&self.memory)),
+            memory_source,
             Some(Arc::clone(&self.skills)),
             Some(TaskTarget {
                 depth: 0,
@@ -731,30 +759,22 @@ impl TelegramWorker {
         match outcome {
             Ok(outcome) => {
                 self.deliver(chat_id, thread_id, &outcome);
-                if outcome.answer_text.is_some()
-                    && let Ok(history) = self.session.history_for_prompt(&conversation.id)
-                    && let Some(text) = latest_user_text(&history)
-                    && MemoryExtractor::should_extract(&text)
-                {
-                    let extractor = MemoryExtractor::new(
-                        self.session.clone(),
-                        Arc::clone(&self.provider),
-                        Arc::clone(&self.memory),
-                        self.model.clone(),
-                        self.provider_name.clone(),
-                        format!("daemon:{}:extract", self.pid),
-                    );
+                if outcome.answer_text.is_some() {
+                    let session = self.session.clone();
+                    let memory = Arc::clone(&self.memory);
                     let conversation_id = conversation.id.clone();
-                    thread::spawn(move || match extractor.extract(&conversation_id) {
-                        Ok(report) if !report.created.is_empty() => {
-                            tracing::info!(
-                                created = report.created.len(),
-                                skipped = report.skipped,
-                                "memory extraction complete"
-                            );
+                    thread::spawn(move || {
+                        match crate::extraction::capture_conversation(
+                            &session,
+                            &memory,
+                            &conversation_id,
+                        ) {
+                            Ok(report) if report.written > 0 => {
+                                tracing::info!(written = report.written, "memory captured")
+                            }
+                            Ok(_) => {}
+                            Err(error) => tracing::warn!(%error, "memory capture failed"),
                         }
-                        Ok(_) => {}
-                        Err(error) => tracing::warn!(%error, "memory extraction failed"),
                     });
                 }
                 if let Err(error) = agent.compact_soft(&conversation.id) {
@@ -1064,19 +1084,6 @@ fn embedding_directory(home: &std::path::Path, configured: &str) -> std::path::P
     } else {
         home.join(path)
     }
-}
-
-fn latest_user_text(history: &[hearth_core::Entry]) -> Option<String> {
-    let entry = history.iter().rev().find(|entry| entry.kind == "user")?;
-    let text = hearth_core::parse_blocks(&entry.content)
-        .into_iter()
-        .filter_map(|block| match block {
-            hearth_model::ContentBlock::Text(text) => Some(text),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    (!text.trim().is_empty()).then_some(text)
 }
 
 fn parse_target(key: &str) -> Option<(i64, Option<i64>)> {

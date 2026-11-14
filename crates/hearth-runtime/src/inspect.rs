@@ -117,76 +117,63 @@ pub fn prompt_exchanges(home: &Path, limit: usize) -> Result<Vec<Value>, Inspect
 
 /// One saved memory row for the operator surface.
 ///
-/// Standing bullets and long-term memories are shown in one list because that is
-/// how they are experienced: both are things the agent knows. The `standing` flag
-/// says which file the row came from.
+/// One saved statement, as the operator surface shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryRecord {
     pub id: String,
     pub content: String,
-    pub tags: Vec<String>,
-    /// Provenance for a long-term memory, or the priority for a standing bullet.
+    pub kind: String,
+    pub subject: String,
     pub source: String,
     pub created_at: String,
     pub updated_at: String,
     pub revision: i64,
-    /// True when this row is a bullet from `standing.md`.
-    pub standing: bool,
+    /// True when this row is a rule injected into every request.
+    pub pinned: bool,
 }
 
-/// Read saved memories without touching the database writer.
-///
-/// Long-term memories come from the memory database, standing bullets from the
-/// standing file. A missing file is an empty list, not an error: a fresh install
-/// has nothing saved yet.
-pub fn list_memories(home: &Path, limit: usize) -> Result<Vec<MemoryRecord>, InspectError> {
-    let mut records = Vec::new();
-    let database = home.join("memory").join("long-term.sqlite");
-    if database.is_file() {
-        let connection = hearth_storage::open_read_only(&database)?;
-        let mut statement = connection.prepare(
-            "SELECT id, content, tags, source, created_at, updated_at, revision \
-             FROM memories ORDER BY created_at DESC, rowid DESC LIMIT ?",
-        )?;
-        let rows = statement.query_map((limit as i64,), |row| {
-            let tags: String = row.get(2)?;
-            Ok(MemoryRecord {
-                id: row.get(0)?,
-                content: row.get(1)?,
-                tags: serde_json::from_str(&tags).unwrap_or_default(),
-                source: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
-                revision: row.get(6)?,
-                standing: false,
-            })
-        })?;
-        for row in rows {
-            records.push(row?);
-        }
-    }
+/// A stored microsecond instant as a readable date.
+fn stamp(micros: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp_nanos(micros as i128 * 1_000)
+        .ok()
+        .and_then(|instant| {
+            instant
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_default()
+}
 
-    let standing_path = home.join("memory").join("standing.md");
-    if standing_path.is_file() {
-        let archive: std::sync::Arc<hearth_memory::ArchiveFn> = std::sync::Arc::new(
-            |_: &[hearth_memory::StandingItem]| -> hearth_memory::Result<()> { Ok(()) },
-        );
-        let store = hearth_memory::StandingStore::new(&standing_path, archive);
-        let items = store
-            .entries()
-            .map_err(|error| InspectError::Memory(error.to_string()))?;
-        for item in items {
-            records.push(MemoryRecord {
-                id: item.id,
-                content: item.content,
-                tags: Vec::new(),
-                source: format!("standing.md, priority {}", item.priority),
-                created_at: String::new(),
-                updated_at: String::new(),
-                revision: 0,
-                standing: true,
-            });
-        }
+/// Read saved memories from the main database without touching the writer.
+///
+/// A read-only connection keeps the operator surface from competing with the
+/// daemon for the write lock.
+pub fn list_memories(home: &Path, limit: usize) -> Result<Vec<MemoryRecord>, InspectError> {
+    let database = home.join("hearth.db");
+    if !database.is_file() {
+        return Ok(Vec::new());
+    }
+    let connection = hearth_storage::open_read_only(&database)?;
+    let mut statement = connection.prepare(
+        "SELECT id, content, kind, subject, source_kind, created_at, updated_at, revision, pinned \
+         FROM memories ORDER BY pinned DESC, updated_at DESC, rowid DESC LIMIT ?",
+    )?;
+    let rows = statement.query_map((limit as i64,), |row| {
+        Ok(MemoryRecord {
+            id: row.get(0)?,
+            content: row.get(1)?,
+            kind: row.get(2)?,
+            subject: row.get(3)?,
+            source: row.get(4)?,
+            created_at: stamp(row.get(5)?),
+            updated_at: stamp(row.get(6)?),
+            revision: row.get(7)?,
+            pinned: row.get::<_, i64>(8)? != 0,
+        })
+    })?;
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row?);
     }
     Ok(records)
 }

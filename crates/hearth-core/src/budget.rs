@@ -4,12 +4,13 @@
 pub const SEGMENT_IDENTITY: u64 = 800;
 /// The tool schema budget.
 pub const SEGMENT_TOOLS: u64 = 1_200;
-/// The standing memory budget.
-pub const SEGMENT_STANDING: u64 = 1_200;
+/// The rules budget.
+pub const SEGMENT_RULES: u64 = 400;
+
 /// The skills index budget.
 pub const SEGMENT_SKILLS: u64 = 300;
-/// The automatic recall budget.
-pub const SEGMENT_RECALL: u64 = 900;
+/// The recall digest budget.
+pub const SEGMENT_RECALL: u64 = 300;
 /// The runtime note budget.
 pub const SEGMENT_RUNTIME: u64 = 150;
 /// The fixed prompt overhead target from section 14.
@@ -74,7 +75,7 @@ fn fraction(total: u64, fraction: f64) -> u64 {
 pub struct TokenCounts {
     pub identity: u64,
     pub tools: u64,
-    pub standing: u64,
+    pub rules: u64,
     pub skills: u64,
     pub guidance: u64,
     pub transcript: u64,
@@ -90,19 +91,19 @@ impl TokenCounts {
     pub fn new(
         identity: u64,
         tools: u64,
-        standing: u64,
+        rules: u64,
         skills: u64,
         guidance: u64,
         transcript: u64,
         recall: u64,
         runtime: u64,
     ) -> Self {
-        let total = identity + tools + standing + skills + guidance + transcript + recall + runtime;
-        let fixed = identity + tools + standing + skills + guidance + runtime;
+        let total = identity + tools + rules + skills + guidance + transcript + recall + runtime;
+        let fixed = identity + tools + rules + skills + guidance + runtime;
         Self {
             identity,
             tools,
-            standing,
+            rules,
             skills,
             guidance,
             transcript,
@@ -122,8 +123,8 @@ impl TokenCounts {
         if self.tools > SEGMENT_TOOLS {
             over.push("tools");
         }
-        if self.standing > SEGMENT_STANDING {
-            over.push("standing");
+        if self.rules > SEGMENT_RULES {
+            over.push("rules");
         }
         if self.skills > SEGMENT_SKILLS {
             over.push("skills");

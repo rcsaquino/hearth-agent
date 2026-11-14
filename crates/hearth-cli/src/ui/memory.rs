@@ -136,15 +136,15 @@ fn detail(app: &App, frame: &mut Frame, area: Rect) {
         lines.push(Line::styled(format!("  {line}"), theme::text()));
     }
     lines.push(Line::from(""));
-    meta(&mut lines, "store", crate::app::store_label(record));
+    meta(&mut lines, "kind", &crate::app::store_label(record));
+    if !record.subject.is_empty() {
+        meta(&mut lines, "subject", &record.subject);
+    }
     if !record.source.is_empty() {
         meta(&mut lines, "source", &record.source);
     }
     if record.revision > 0 {
         meta(&mut lines, "revision", &record.revision.to_string());
-    }
-    if !record.tags.is_empty() {
-        meta(&mut lines, "tags", &record.tags.join(", "));
     }
     if !record.created_at.is_empty() {
         meta(&mut lines, "created", &record.created_at);
@@ -161,7 +161,7 @@ fn detail(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 fn status(record: &hearth_runtime::inspect::MemoryRecord) -> (&'static str, Style) {
-    if record.standing {
+    if record.pinned {
         ("★", theme::warn())
     } else {
         ("●", theme::good())

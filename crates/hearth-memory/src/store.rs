@@ -1,0 +1,1004 @@
+//! The rows.
+//!
+//! All memory SQL lives here so the rest of the crate reasons about `Memory`
+//! values. Reads go through the shared reader pool; writes go through the one
+//! writer, which is why a memory can never be half-saved and why provenance can
+//! point at the entry that produced it.
+//!
+//! The write path is deliberately narrow:
+//!
+//! * Exact duplicates are refused and the existing row is returned.
+//! * A near duplicate about the same subject is refused the same way, which is
+//!   what stops eight weeks of "ordered pad thai" from becoming eight rows.
+//! * `supersedes` closes the old row's validity instead of overwriting it, so the
+//!   store keeps history and the ranking can prefer what is true now.
+//! * A credential-shaped string never reaches the table.
+
+use std::collections::HashSet;
+
+use hearth_core::Session;
+use rusqlite::Row;
+use sha2::{Digest, Sha256};
+
+use crate::errors::{Code, MemoryError, Result};
+use crate::model::{Kind, Memory, NewMemory, Source, WriteOutcome};
+use crate::query::normalize;
+
+/// The longest statement a write may store.
+pub const CONTENT_LIMIT: usize = 2_000;
+/// The longest pinned rule, which is also the longest rule line the prompt shows.
+pub const RULE_LIMIT: usize = 400;
+/// The longest subject a write may store.
+pub const SUBJECT_LIMIT: usize = 120;
+/// How similar two statements about one subject must be to count as the same.
+const MERGE_SIMILARITY: f32 = 0.85;
+/// How many same-subject rows a write compares against.
+const MERGE_WINDOW: i64 = 64;
+
+const COLUMNS: &str = "id, kind, content, subject, pinned, source_kind, source_entry, \
+     valid_from, valid_to, superseded_by, created_at, updated_at, revision";
+
+/// The same columns, qualified for a query that joins the index.
+const COLUMNS_OF_M: &str = "m.id, m.kind, m.content, m.subject, m.pinned, m.source_kind, \
+     m.source_entry, m.valid_from, m.valid_to, m.superseded_by, m.created_at, m.updated_at, \
+     m.revision";
+
+/// A vector written beside its memory.
+#[derive(Debug, Clone)]
+pub struct VectorWrite {
+    pub model: String,
+    pub dims: usize,
+    pub values: Vec<f32>,
+}
+
+/// One vector row loaded for scoring.
+#[derive(Debug, Clone)]
+pub struct VectorRow {
+    pub memory_id: String,
+    pub current: bool,
+    pub quantised: Vec<i8>,
+}
+
+/// A statement ready to be written.
+#[derive(Debug, Clone)]
+pub struct Pending {
+    pub item: NewMemory,
+    pub vector: Option<VectorWrite>,
+}
+
+fn map_memory(row: &Row<'_>) -> rusqlite::Result<Memory> {
+    let kind: String = row.get(1)?;
+    let source: String = row.get(5)?;
+    let pinned: i64 = row.get(4)?;
+    Ok(Memory {
+        id: row.get(0)?,
+        kind: kind.parse().unwrap_or(Kind::Fact),
+        content: row.get(2)?,
+        subject: row.get(3)?,
+        pinned: pinned != 0,
+        source: Source::parse(&source),
+        source_entry: row.get(6)?,
+        valid_from: row.get(7)?,
+        valid_to: row.get(8)?,
+        superseded_by: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+        revision: row.get(12)?,
+    })
+}
+
+/// The validity predicate for one alias, without a leading `AND`.
+///
+/// A row is readable at an instant when it had already started and had not yet
+/// been closed. A plain read is the same predicate evaluated at now, so there is
+/// one definition of "current" rather than two that can drift: a statement dated
+/// in the future does not answer a question asked today.
+fn valid_clause(alias: &str) -> String {
+    format!("{alias}.valid_from <= ? AND ({alias}.valid_to IS NULL OR {alias}.valid_to > ?)")
+}
+
+/// The instant a read uses when the caller did not name one.
+fn instant(session: &Session, at: Option<i64>) -> i64 {
+    at.unwrap_or_else(|| session.now_micros())
+}
+
+/// Content tokens used for duplicate comparison.
+///
+/// A single digit is kept even though a single letter is dropped, so `1.0` and
+/// `1.1` stay distinct statements.
+fn content_tokens(text: &str) -> HashSet<String> {
+    text.to_lowercase()
+        .split(|character: char| !character.is_alphanumeric() && character != '.')
+        .filter(|word| {
+            word.chars().count() > 1
+                || (word.len() == 1 && word.starts_with(|c: char| c.is_ascii_digit()))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The Jaccard similarity of two statements.
+pub fn similarity(left: &str, right: &str) -> f32 {
+    let left = content_tokens(left);
+    let right = content_tokens(right);
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let shared = left.intersection(&right).count() as f32;
+    let union = left.union(&right).count() as f32;
+    shared / union
+}
+
+/// Whether a new statement says the same thing as an existing one.
+///
+/// Jaccard alone misses a statement that merely adds a word, which is exactly what
+/// "ordered pad thai on friday again" is. Containment covers that case without
+/// merging a statement that swaps its subject, which is how a contradiction looks.
+fn same_statement(left: &str, right: &str) -> bool {
+    let left = content_tokens(left);
+    let right = content_tokens(right);
+    if left.is_empty() || right.is_empty() {
+        return false;
+    }
+    let shared = left.intersection(&right).count() as f32;
+    if shared < 3.0 {
+        return false;
+    }
+    let union = left.union(&right).count() as f32;
+    let smallest = left.len().min(right.len()) as f32;
+    shared / union >= MERGE_SIMILARITY || shared / smallest >= 0.9
+}
+
+/// The stable digest of a normalised statement.
+pub fn fingerprint(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(normalize(content).as_bytes());
+    let digest = hasher.finalize();
+    digest[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Validate a statement before it reaches the writer.
+pub fn validate(item: &NewMemory) -> Result<()> {
+    let content = item.content.trim();
+    if content.is_empty() {
+        return Err(MemoryError::invalid("memory content cannot be empty."));
+    }
+    if content.chars().count() > CONTENT_LIMIT {
+        return Err(MemoryError::invalid(format!(
+            "memory content must be at most {CONTENT_LIMIT} characters."
+        )));
+    }
+    if content.contains('\0') {
+        return Err(MemoryError::invalid("memory content cannot contain NUL."));
+    }
+    if item.subject.chars().count() > SUBJECT_LIMIT {
+        return Err(MemoryError::invalid(format!(
+            "memory subject must be at most {SUBJECT_LIMIT} characters."
+        )));
+    }
+    if item.pinned && item.kind != Kind::Rule {
+        return Err(MemoryError::invalid(
+            "only a rule can be pinned, because only a rule is injected every turn.",
+        ));
+    }
+    if item.pinned && content.chars().count() > RULE_LIMIT {
+        return Err(MemoryError::invalid(format!(
+            "a pinned rule must be at most {RULE_LIMIT} characters. Split it into separate rules."
+        )));
+    }
+    if hearth_core::secrets::contains_secret(content) {
+        return Err(MemoryError::new(
+            Code::Credential,
+            "credential-like memory content was refused.",
+        ));
+    }
+    Ok(())
+}
+
+/// Refuse a rule that would overflow the rules budget.
+fn check_rules_budget(
+    writer: &hearth_storage::Writer<'_>,
+    content: &str,
+    budget: u64,
+) -> Result<()> {
+    let existing = writer.query(
+        &format!("SELECT {COLUMNS} FROM memories WHERE pinned = 1 ORDER BY created_at, id"),
+        [],
+        map_memory,
+    )?;
+    let used: u64 = existing.iter().map(crate::digest::rule_cost).sum();
+    let adding = crate::digest::rule_cost_text(content);
+    if used + adding <= budget {
+        return Ok(());
+    }
+    let listed: Vec<String> = existing.iter().map(|rule| rule.id.clone()).collect();
+    Err(MemoryError::new(
+        Code::RulesFull,
+        format!(
+            "the rules budget is full at {used} of {budget} tokens; replace or forget one of {}.",
+            listed.join(", ")
+        ),
+    ))
+}
+
+/// Every pinned rule, oldest first.
+pub fn rules(session: &Session) -> Result<Vec<Memory>> {
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                &format!("SELECT {COLUMNS} FROM memories WHERE pinned = 1 ORDER BY created_at, id"),
+                [],
+                map_memory,
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// One memory by id.
+pub fn get(session: &Session, id: &str) -> Result<Option<Memory>> {
+    session
+        .storage()
+        .read(|reader| {
+            reader.query_optional(
+                &format!("SELECT {COLUMNS} FROM memories WHERE id = ?"),
+                [id],
+                map_memory,
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// Every current memory about a subject.
+pub fn by_subject(
+    session: &Session,
+    subject: &str,
+    at: Option<i64>,
+    limit: i64,
+) -> Result<Vec<Memory>> {
+    let filter = valid_clause("m");
+    let observed = instant(session, at);
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(subject.to_owned())];
+    params.push(Box::new(observed));
+    params.push(Box::new(observed));
+    params.push(Box::new(limit.max(1)));
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                &format!(
+                    "SELECT {COLUMNS} FROM memories m WHERE m.subject = ? AND {filter} \
+                     ORDER BY m.created_at DESC LIMIT ?"
+                ),
+                rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
+                map_memory,
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// Current memories whose subject starts with a prefix.
+///
+/// A message that says "Alice" should reach the subject "alice smith". The
+/// comparison is a `LIKE` prefix over a binary-collated index, so SQLite reads the
+/// index for the prefix but still filters each candidate row.
+pub fn by_subject_prefix(
+    session: &Session,
+    prefix: &str,
+    at: Option<i64>,
+    limit: i64,
+) -> Result<Vec<Memory>> {
+    let filter = valid_clause("m");
+    let observed = instant(session, at);
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(format!("{prefix}%"))];
+    params.push(Box::new(observed));
+    params.push(Box::new(observed));
+    params.push(Box::new(limit.max(1)));
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                &format!(
+                    "SELECT {COLUMNS} FROM memories m WHERE m.subject LIKE ? AND {filter} \
+                     ORDER BY m.created_at DESC LIMIT ?"
+                ),
+                rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
+                map_memory,
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// Memories by id, in one query.
+pub fn by_ids(session: &Session, ids: &[String]) -> Result<Vec<Memory>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                &format!("SELECT {COLUMNS} FROM memories WHERE id IN ({placeholders})"),
+                rusqlite::params_from_iter(ids.iter()),
+                map_memory,
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// How many memories exist about a subject, valid at an instant.
+pub fn subject_count(session: &Session, subject: &str, at: Option<i64>) -> Result<usize> {
+    let filter = valid_clause("m");
+    let observed = instant(session, at);
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(subject.to_owned())];
+    params.push(Box::new(observed));
+    params.push(Box::new(observed));
+    session
+        .storage()
+        .read(|reader| {
+            reader.query_row(
+                &format!("SELECT COUNT(*) FROM memories m WHERE m.subject = ? AND {filter}"),
+                rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .map(|count| count as usize)
+        .map_err(Into::into)
+}
+
+/// How many earlier versions exist about a subject.
+pub fn historical_count(session: &Session, subject: &str) -> Result<usize> {
+    session
+        .storage()
+        .read(|reader| {
+            reader.query_row(
+                "SELECT COUNT(*) FROM memories WHERE subject = ? AND valid_to IS NOT NULL",
+                [subject],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .map(|count| count as usize)
+        .map_err(Into::into)
+}
+
+/// Lexical matches, best first.
+pub fn lexical(
+    session: &Session,
+    expression: &str,
+    at: Option<i64>,
+    limit: i64,
+) -> Result<Vec<Memory>> {
+    let filter = valid_clause("m");
+    let observed = instant(session, at);
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(expression.to_owned())];
+    params.push(Box::new(observed));
+    params.push(Box::new(observed));
+    params.push(Box::new(limit.max(1)));
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                &format!(
+                    "SELECT {COLUMNS_OF_M} FROM memories_fts f JOIN memories m ON m.rowid = f.rowid \
+                     WHERE memories_fts MATCH ? AND {filter} \
+                     ORDER BY bm25(memories_fts) LIMIT ?"
+                ),
+                rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
+                map_memory,
+            )
+        })
+        .map_err(|error| match error {
+            hearth_storage::StorageError::Sqlite(inner) => {
+                MemoryError::unavailable(format!("memory index query failed: {inner}"))
+            }
+            other => other.into(),
+        })
+}
+
+/// Recent memories, newest first.
+pub fn recent(session: &Session, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
+    let filter = valid_clause("m");
+    let observed = instant(session, at);
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    params.push(Box::new(observed));
+    params.push(Box::new(observed));
+    params.push(Box::new(limit.max(1)));
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                &format!(
+                    "SELECT {COLUMNS} FROM memories m WHERE {filter} \
+                     ORDER BY m.updated_at DESC, m.id LIMIT ?"
+                ),
+                rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
+                map_memory,
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// Every subject the store holds, longest first.
+pub fn subjects(session: &Session) -> Result<Vec<String>> {
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                "SELECT DISTINCT subject FROM memories WHERE subject <> '' \
+                 ORDER BY LENGTH(subject) DESC",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// The total number of current memories.
+pub fn count(session: &Session) -> Result<usize> {
+    let observed = session.now_micros();
+    session
+        .storage()
+        .read(|reader| {
+            reader.query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM memories m WHERE {}",
+                    valid_clause("m")
+                ),
+                rusqlite::params![observed, observed],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .map(|count| count as usize)
+        .map_err(Into::into)
+}
+
+/// Write one statement.
+///
+/// `rules_budget` is the token budget for pinned rules. It is read and compared
+/// inside the write transaction, so two writes racing to pin a rule cannot both
+/// pass the check.
+pub fn insert(session: &Session, pending: Pending, rules_budget: u64) -> Result<WriteOutcome> {
+    let now = session.now_micros();
+    session
+        .storage()
+        .write(move |writer| insert_in(writer, pending, now, rules_budget))
+}
+
+/// Write several statements in one transaction.
+///
+/// Used by the benchmark and by any bulk import. An ordinary turn writes one
+/// statement at a time, so the single-writer path stays the common one.
+pub fn insert_many(
+    session: &Session,
+    items: Vec<Pending>,
+    rules_budget: u64,
+) -> Result<Vec<WriteOutcome>> {
+    let now = session.now_micros();
+    session.storage().write(move |writer| {
+        let mut outcomes = Vec::with_capacity(items.len());
+        for pending in items {
+            outcomes.push(insert_in(writer, pending, now, rules_budget)?);
+        }
+        Ok::<Vec<WriteOutcome>, MemoryError>(outcomes)
+    })
+}
+
+fn insert_in(
+    writer: &hearth_storage::Writer<'_>,
+    pending: Pending,
+    now: i64,
+    rules_budget: u64,
+) -> Result<WriteOutcome> {
+    let Pending { mut item, vector } = pending;
+    validate(&item)?;
+    if item.pinned {
+        check_rules_budget(writer, &item.content, rules_budget)?;
+    }
+    item.content = item.content.trim().to_owned();
+    item.subject = normalize(&item.subject);
+    let id = format!("m_{}", uuid::Uuid::new_v4().simple());
+    let digest = fingerprint(&item.content);
+    let terms = crate::query::expansions(&item.content, &item.subject).join(" ");
+    let valid_from = item.valid_from.unwrap_or(now);
+    let valid_to = item.valid_to;
+    if valid_to.is_some_and(|end| end <= valid_from) {
+        return Err(MemoryError::invalid(
+            "a memory cannot stop being true before it starts.",
+        ));
+    }
+    let supersedes = item.supersedes.clone();
+
+    // An exact duplicate with the same kind and the same pinning is the same
+    // statement; nothing to write. The same words in a different role are not:
+    // a fact the extractor caught and then a rule the model pinned are different
+    // statements, and returning the fact would leave the rule unpinned.
+    if let Some(existing) = writer.query_optional(
+        &format!(
+            "SELECT {COLUMNS} FROM memories WHERE fingerprint = ? AND valid_to IS NULL \
+             AND kind = ? AND pinned = ? LIMIT 1"
+        ),
+        rusqlite::params![digest, item.kind.as_str(), i64::from(item.pinned)],
+        map_memory,
+    )? {
+        return Ok(WriteOutcome::Unchanged(existing));
+    }
+
+    // The same words in another role replace the earlier row, so the statement
+    // is current once rather than twice.
+    let earlier = if supersedes.is_none() {
+        writer.query_optional(
+            "SELECT id FROM memories WHERE fingerprint = ? AND valid_to IS NULL LIMIT 1",
+            [&digest],
+            |row| row.get::<_, String>(0),
+        )?
+    } else {
+        None
+    };
+
+    // Replacement is deliberate, so it skips the duplicate merge: a caller that
+    // names the row it replaces has already decided.
+    if supersedes.is_none() && earlier.is_none() && !item.subject.is_empty() {
+        let candidates = writer.query(
+            &format!(
+                "SELECT {COLUMNS} FROM memories WHERE subject = ? AND valid_to IS NULL \
+                 ORDER BY updated_at DESC LIMIT {MERGE_WINDOW}"
+            ),
+            [&item.subject],
+            map_memory,
+        )?;
+        if let Some(near) = candidates
+            .into_iter()
+            .find(|candidate| same_statement(&candidate.content, &item.content))
+        {
+            return Ok(WriteOutcome::Unchanged(near));
+        }
+    }
+
+    // A replacement ends when the new statement begins, not when the write
+    // happened. One statement can be written weeks after the change it records.
+    let supersedes = supersedes.or(earlier);
+    if let Some(previous) = &supersedes {
+        let closed = writer.execute(
+            "UPDATE memories SET valid_to = ?, superseded_by = ? WHERE id = ? AND valid_to IS NULL",
+            rusqlite::params![valid_from, id, previous],
+        )?;
+        if closed == 0 {
+            return Err(MemoryError::new(
+                Code::NotFound,
+                format!("memory {previous} does not exist or was already replaced."),
+            ));
+        }
+    }
+
+    writer.execute(
+        "INSERT INTO memories \
+         (id, kind, content, subject, terms, fingerprint, pinned, source_kind, source_entry, \
+          valid_from, valid_to, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            id,
+            item.kind.as_str(),
+            item.content,
+            item.subject,
+            terms,
+            digest,
+            i64::from(item.pinned),
+            item.source.as_str(),
+            item.source_entry,
+            valid_from,
+            valid_to,
+            now,
+            now,
+        ],
+    )?;
+
+    if let Some(vector) = vector {
+        write_vector(writer, &id, &vector, now)?;
+    }
+
+    Ok(WriteOutcome::Created(writer.query_row(
+        &format!("SELECT {COLUMNS} FROM memories WHERE id = ?"),
+        [&id],
+        map_memory,
+    )?))
+}
+
+fn quantise(values: &[f32], dims: usize) -> Result<Vec<i8>> {
+    if values.len() != dims {
+        return Err(MemoryError::invalid(
+            "the embedding length did not match its model.",
+        ));
+    }
+    let norm = values.iter().map(|value| value * value).sum::<f32>().sqrt();
+    let denominator = if norm > 0.0 { norm } else { 1.0 };
+    Ok(values
+        .iter()
+        .map(|value| {
+            let scaled = (value / denominator * 127.0).round();
+            scaled.clamp(-127.0, 127.0) as i8
+        })
+        .collect())
+}
+
+fn write_vector(
+    writer: &hearth_storage::Writer<'_>,
+    id: &str,
+    vector: &VectorWrite,
+    now: i64,
+) -> std::result::Result<(), hearth_storage::StorageError> {
+    let quantised = quantise(&vector.values, vector.dims)
+        .map_err(|error| hearth_storage::StorageError::Integrity(error.to_string()))?;
+    let bytes: Vec<u8> = quantised.iter().map(|value| *value as u8).collect();
+    writer.execute(
+        "INSERT OR REPLACE INTO memory_vectors (memory_id, model, dims, vector, updated_at) \
+         VALUES (?, ?, ?, ?, ?)",
+        rusqlite::params![id, vector.model, vector.dims as i64, bytes, now],
+    )?;
+    Ok(())
+}
+
+/// Delete one memory permanently.
+pub fn forget(session: &Session, id: &str) -> Result<()> {
+    let identifier = id.to_owned();
+    let removed = session.storage().write(move |writer| {
+        writer.execute(
+            "DELETE FROM memory_vectors WHERE memory_id = ?",
+            [&identifier],
+        )?;
+        writer.execute("DELETE FROM memories WHERE id = ?", [&identifier])
+    })?;
+    if removed == 0 {
+        return Err(MemoryError::new(
+            Code::NotFound,
+            format!("memory {id} does not exist."),
+        ));
+    }
+    Ok(())
+}
+
+/// A current statement about the same subject that a new one may replace.
+///
+/// This is the write-time reconciliation signal. The store never decides to
+/// overwrite on its own; it reports the neighbour and its overlap so the model
+/// can replace it in the same turn.
+pub fn related(
+    session: &Session,
+    subject: &str,
+    content: &str,
+    exclude: &str,
+) -> Result<Option<(Memory, f32)>> {
+    if subject.is_empty() {
+        return Ok(None);
+    }
+    let candidates = by_subject(session, subject, None, 32)?;
+    Ok(candidates
+        .into_iter()
+        .filter(|candidate| candidate.id != exclude)
+        .map(|candidate| {
+            let overlap = similarity(&candidate.content, content);
+            (candidate, overlap)
+        })
+        .filter(|(_, overlap)| *overlap >= 0.2)
+        .max_by(|left, right| left.1.total_cmp(&right.1)))
+}
+
+/// Attach or refresh one memory's vector without touching its row.
+pub fn set_vector(session: &Session, id: &str, vector: &VectorWrite) -> Result<()> {
+    let id = id.to_owned();
+    let vector = vector.clone();
+    let now = session.now_micros();
+    session
+        .storage()
+        .write(move |writer| write_vector(writer, &id, &vector, now))?;
+    Ok(())
+}
+
+/// Every stored vector for a model.
+pub fn vectors(session: &Session, model: &str, dims: usize) -> Result<Vec<VectorRow>> {
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                "SELECT v.memory_id, v.vector, m.valid_to IS NULL \
+                 FROM memory_vectors v JOIN memories m ON m.id = v.memory_id \
+                 WHERE v.model = ? AND v.dims = ?",
+                rusqlite::params![model, dims as i64],
+                |row| {
+                    let bytes: Vec<u8> = row.get(1)?;
+                    Ok(VectorRow {
+                        memory_id: row.get(0)?,
+                        current: row.get::<_, i64>(2)? != 0,
+                        quantised: bytes.into_iter().map(|byte| byte as i8).collect(),
+                    })
+                },
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// Current memories that have no vector for the active model.
+pub fn pending_vectors(
+    session: &Session,
+    model: &str,
+    dims: usize,
+    limit: i64,
+) -> Result<Vec<Memory>> {
+    session
+        .storage()
+        .read(|reader| {
+            reader.query(
+                &format!(
+                    "SELECT {COLUMNS} FROM memories m \
+                     WHERE m.valid_to IS NULL AND NOT EXISTS ( \
+                       SELECT 1 FROM memory_vectors v WHERE v.memory_id = m.id AND v.model = ? \
+                       AND v.dims = ?) \
+                     ORDER BY m.updated_at DESC LIMIT ?"
+                ),
+                rusqlite::params![model, dims as i64, limit],
+                map_memory,
+            )
+        })
+        .map_err(Into::into)
+}
+
+/// Remove vectors whose memory is gone, or whose model is no longer active.
+pub fn prune_vectors(session: &Session, model: &str, dims: usize) -> Result<usize> {
+    let model = model.to_owned();
+    session.storage().write(move |writer| {
+        let orphans = writer.execute(
+            "DELETE FROM memory_vectors WHERE memory_id NOT IN (SELECT id FROM memories)",
+            [],
+        )?;
+        let stale = writer.execute(
+            "DELETE FROM memory_vectors WHERE model <> ? OR dims <> ?",
+            rusqlite::params![model, dims as i64],
+        )?;
+        Ok::<usize, MemoryError>(orphans + stale)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MemoryConfig;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
+
+    fn home() -> (TempDir, Session) {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        let session = harness.session().clone();
+        (directory, session)
+    }
+
+    #[test]
+    fn an_identical_statement_is_not_stored_twice() {
+        let (_directory, session) = home();
+        let first = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("Alice manages the OR board."),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("first");
+        assert!(first.created());
+        let second = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("  alice MANAGES the OR board.  "),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("second");
+        assert!(!second.created());
+        assert_eq!(first.memory().id, second.memory().id);
+        assert_eq!(count(&session).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_near_duplicate_about_a_subject_merges() {
+        let (_directory, session) = home();
+        insert(
+            &session,
+            Pending {
+                item: NewMemory::new("ordered pad thai on friday").subject("thai place"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("first");
+        let again = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("ordered pad thai on friday again").subject("thai place"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("second");
+        assert!(!again.created(), "the second order must not be a new row");
+        assert_eq!(count(&session).unwrap(), 1);
+    }
+
+    #[test]
+    fn the_same_words_in_a_new_role_replace_the_old_statement() {
+        let (_directory, session) = home();
+        let fact = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("keep replies short"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("fact");
+        assert!(fact.created());
+        let rule = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("keep replies short")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("rule");
+        assert!(
+            rule.created(),
+            "promoting a fact to a rule must write a row, not return the fact"
+        );
+        assert!(rule.memory().pinned);
+        assert_eq!(rules(&session).unwrap().len(), 1);
+        assert_eq!(count(&session).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_replacement_closes_the_old_row_without_deleting_it() {
+        let (_directory, session) = home();
+        let old = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the primary database is Postgres")
+                    .kind(Kind::Decision)
+                    .subject("primary database"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("old");
+        let new = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the primary database is SQLite")
+                    .kind(Kind::Decision)
+                    .subject("primary database")
+                    .supersedes(old.memory().id.clone()),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("new");
+        assert!(new.created());
+        let closed = get(&session, &old.memory().id).unwrap().expect("old row");
+        assert!(!closed.is_current());
+        assert_eq!(
+            closed.superseded_by.as_deref(),
+            Some(new.memory().id.as_str())
+        );
+        assert_eq!(
+            by_subject(&session, "primary database", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(historical_count(&session, "primary database").unwrap(), 1);
+    }
+
+    #[test]
+    fn a_credential_is_refused_before_it_is_stored() {
+        let (_directory, session) = home();
+        // A token-shaped string, assembled so the repository holds no literal.
+        let secret = format!("api_key={}", "sk-".to_owned() + &"a".repeat(32));
+        let error = insert(
+            &session,
+            Pending {
+                item: NewMemory::new(format!("the deploy uses {secret}")),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect_err("credential");
+        assert_eq!(error.code, Code::Credential);
+        assert_eq!(count(&session).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_pinned_fact_is_refused_because_only_rules_are_injected() {
+        let (_directory, session) = home();
+        let error = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("a fact").pinned(true),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect_err("pinned fact");
+        assert_eq!(error.code, Code::InvalidInput);
+    }
+
+    #[test]
+    fn a_statement_dated_in_the_future_does_not_answer_today() {
+        let (_directory, session) = home();
+        let later = session.now_micros() + 86_400_000_000 * 30;
+        insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the office moves to Lisbon")
+                    .subject("office")
+                    .valid_from(later),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("write");
+        assert!(
+            by_subject(&session, "office", None, 10).unwrap().is_empty(),
+            "a statement that starts being true next month is not true now"
+        );
+        assert_eq!(
+            by_subject(&session, "office", Some(later + 1), 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_as_of_read_sees_the_row_that_was_current_then() {
+        let (_directory, session) = home();
+        let early = session.now_micros();
+        let old = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the lab is in building 4")
+                    .subject("lab")
+                    .valid_from(early),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("old");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let middle = session.now_micros();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let new = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the lab is in building 9")
+                    .subject("lab")
+                    .supersedes(old.memory().id.clone()),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("new");
+
+        let then = by_subject(&session, "lab", Some(middle), 10).unwrap();
+        assert_eq!(then.len(), 1);
+        assert_eq!(then[0].id, old.memory().id);
+        let now = by_subject(&session, "lab", None, 10).unwrap();
+        assert_eq!(now.len(), 1);
+        assert_eq!(now[0].id, new.memory().id);
+    }
+}

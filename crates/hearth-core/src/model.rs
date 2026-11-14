@@ -315,66 +315,6 @@ pub struct Settle {
     pub error: Option<Value>,
 }
 
-/// A new long-term memory row written in a save.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NewMemory {
-    pub id: String,
-    pub kind: String,
-    pub content: String,
-    pub tags: Vec<String>,
-    pub fingerprint: String,
-    pub importance: i64,
-    pub status: String,
-    pub valid_from: Option<i64>,
-    pub valid_to: Option<i64>,
-    pub supersedes_id: Option<String>,
-    pub source_kind: String,
-    pub source_ref: Option<String>,
-    pub standing: String,
-    pub created_at: i64,
-    pub last_used_at: Option<i64>,
-}
-
-/// A partial change to an existing memory row.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct MemoryUpdate {
-    pub id: String,
-    pub content: Option<String>,
-    pub tags: Option<Vec<String>>,
-    pub fingerprint: Option<String>,
-    pub importance: Option<i64>,
-    pub status: Option<String>,
-    pub valid_to: Option<i64>,
-    pub standing: Option<String>,
-    pub last_used_at: Option<i64>,
-}
-
-/// One memory change in a save.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MemoryChange {
-    Add(NewMemory),
-    Update(MemoryUpdate),
-    Forget { id: String },
-    Pin { id: String, standing: String },
-}
-
-/// A memory change and the actor responsible for it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MemoryWrite {
-    pub change: MemoryChange,
-    pub actor: String,
-}
-
-impl MemoryWrite {
-    /// Pair one change with its actor.
-    pub fn new(change: MemoryChange, actor: impl Into<String>) -> Self {
-        Self {
-            change,
-            actor: actor.into(),
-        }
-    }
-}
-
 /// One meta update with an optional expected current value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MetaWrite {
@@ -391,7 +331,6 @@ pub struct Save {
     pub(crate) documents: Vec<DocumentWrite>,
     pub(crate) submissions: Vec<NewSubmission>,
     pub(crate) settles: Vec<Settle>,
-    pub(crate) memory: Vec<MemoryWrite>,
     pub(crate) effects: Vec<EffectIntent>,
     pub(crate) telegram_update: Option<TelegramUpdate>,
     pub(crate) telegram_offset: Option<i64>,
@@ -407,7 +346,6 @@ impl Save {
             documents: Vec::new(),
             submissions: Vec::new(),
             settles: Vec::new(),
-            memory: Vec::new(),
             effects: Vec::new(),
             telegram_update: None,
             telegram_offset: None,
@@ -472,12 +410,6 @@ impl Save {
             answer_entry_id,
             error,
         });
-        self
-    }
-
-    /// Record a memory change that belongs to this save.
-    pub fn memory(mut self, write: MemoryWrite) -> Self {
-        self.memory.push(write);
         self
     }
 

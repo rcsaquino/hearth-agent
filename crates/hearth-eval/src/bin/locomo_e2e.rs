@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use hearth_core::Harness;
-use hearth_memory::{MemoryInput, MemoryService};
+use hearth_memory::{MemoryService, NewMemory};
 use hearth_model::{
     ChatMessage, ChatRequest, ContentBlock, OpenAiCompatibleProvider, Provider, Role, StreamEvent,
 };
@@ -261,20 +261,19 @@ fn main() -> Result<()> {
         let home = TempDir::new()?;
         let harness = Harness::open(home.path())?;
         let session = harness.session().clone();
-        let memory = MemoryService::new(session)?;
+        let memory = MemoryService::new(session);
 
         let ingest = Instant::now();
         let mut id_to_dia: BTreeMap<String, String> = BTreeMap::new();
         for turn in &turns {
-            let (saved, _created) = memory.store().add(&MemoryInput {
-                content: format!("{}: {}", turn.speaker, turn.text),
-                tags: Some(vec![
-                    format!("date {}", turn.session_date),
-                    turn.speaker.clone(),
-                ]),
-                source: Some(turn.dia_id.clone()),
-            })?;
-            id_to_dia.insert(saved.id, turn.dia_id.clone());
+            let saved = memory.write(
+                NewMemory::new(format!(
+                    "{} said on {}: {}",
+                    turn.speaker, turn.session_date, turn.text
+                ))
+                .subject(turn.speaker.clone()),
+            )?;
+            id_to_dia.insert(saved.memory().id.clone(), turn.dia_id.clone());
         }
         println!("   ingest {:.1}s", ingest.elapsed().as_secs_f64());
 
@@ -287,6 +286,7 @@ fn main() -> Result<()> {
             budget -= 1;
             let recalled = memory.recall(&question.question)?;
             let lines: Vec<String> = recalled
+                .items
                 .iter()
                 .filter_map(|item| id_to_dia.get(&item.id))
                 .filter_map(|dia| {

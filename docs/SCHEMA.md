@@ -2,7 +2,7 @@
 
 Companion to `SPEC.md`. The spec defines behavior and invariants; this file holds the
 exact columns, tables, and indexes. When the two disagree, the spec wins. The
-runtime memory stores are separate files documented below and in `SPEC.md` 7.
+memory store is documented below and in `SPEC.md` 7.
 
 ## Field tables
 
@@ -54,7 +54,7 @@ Built-in document kinds:
 - `provider`: provider session identity, used for prompt-cache affinity.
 - `live`: current run and task id, for status display only.
 - `usage`: rolling counters, not the authoritative usage ledger.
-- `memory_state`: standing-memory version and last consolidation time.
+- `last_consolidation`, `last_skill_review`: maintenance bookkeeping.
 - `transport`: transport-channel state that is not in its own table.
 
 A document update inside a save must supply the version it expects. A mismatch
@@ -84,7 +84,7 @@ keys.
 |---|---|
 | `id` | UUIDv7 |
 | `conversation_id`, `parent_task_id` | |
-| `kind`, `version` | For example `generation`, `tool`, `compaction`, `memory.extract` |
+| `kind`, `version` | For example `generation`, `tool`, `compaction` |
 | `status` | `pending`, `running`, `asleep`, `done`, `failed`, `aborted` |
 | `phase` | Current step name |
 | `attempt` | Attempt counter for the current step |
@@ -123,54 +123,62 @@ keys.
 - `usage_events`: every model call, its input, cache read, cache write, output, and
   reasoning tokens, and latency.
 - `telegram_updates`: deduplication of incoming updates.
-- `memory_items`, `memory_fts`, `memory_events`: legacy tables retained by the
-  migrations. The runtime memory stores are the separate files below.
+- `memories`, `memories_fts`, `memory_vectors`: the memory store, documented
+  below.
 
 The exact DDL is the versioned set under `crates/hearth-storage/migrations/`
-(`0001.sql` through `0007.sql`), applied by the matching migrations. The
+(`0001.sql` through `0008.sql`), applied by the matching migrations. The
 migrations are the executable schema authority; if this document and a migration
-disagree, the migration wins. `memory_items` also has a `fingerprint` column and
-index for exact-duplicate detection, and `effects` has a `UNIQUE (kind, key)`
-constraint. Migration 0002 rebuilds `memory_fts` with the porter stemmer. Migration 0003 adds
-partial indexes for active standing rows and promotable candidates. Migration 0004
-limits the FTS update trigger to changes of `content` and `tags`, so last-used and
-importance updates do not reindex a row. Migration 0005 drops the unused
-`usage_events.cost_micros` column. Migration 0007 adds `entries_fts` and rebuilds
-it for existing transcripts.
+disagree, the migration wins. `effects` has a `UNIQUE (kind, key)` constraint.
+Migration 0002 rebuilds the old memory index with the porter stemmer. Migration
+0005 drops the unused `usage_events.cost_micros` column. Migration 0007 adds
+`entries_fts` and rebuilds it for existing transcripts. Migration 0008 replaces
+both earlier memory designs with `memories`, `memories_fts`, and
+`memory_vectors`, and drops `memory_items`, `memory_events`, and the old
+`memory_fts`.
 
 ## Indexes
 
-`entries(conversation_id, seq)`, `tasks(status, next_wake_at)`, `submissions(status)`,
-`memory_items(status, kind)`, `usage_events(ts)`, `effects(status)`, plus the
-partial `memory_items_active_standing` and `memory_items_promotable` indexes.
+`entries(conversation_id, seq)`, `tasks(status, next_wake_at)`,
+`submissions(status)`, `usage_events(ts)`, `effects(status)`, and the memory
+indexes listed below.
 
-## Memory store schema
+## Memory schema
 
-The runtime memory is not in `hearth.db`. It lives beside it:
+Memory is a table in `hearth.db`, so a statement shares one writer, one
+transaction boundary, and one backup with the entry it came from. There is no
+second database file and no markdown store.
 
-- `$HEARTH_HOME/memory/long-term.sqlite`
-- `$HEARTH_HOME/memory/standing.md`
+`memories`:
 
-The long-term database is signed with `PRAGMA application_id` and schema version
-2. Its tables:
+| Field | Notes |
+|---|---|
+| `rowid` | Integer primary key, also the FTS content rowid |
+| `id` | `m_` plus a UUID, unique |
+| `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, `fact` |
+| `content` | One statement |
+| `subject` | Normalised entity, empty when the statement names none |
+| `terms` | Index expansion: head words plus the relation groups they belong to |
+| `fingerprint` | Digest of the normalised content, for exact-duplicate refusal |
+| `pinned` | Injects the statement as a rule; only with `kind = rule` |
+| `source_kind`, `source_entry` | Provenance |
+| `valid_from`, `valid_to` | The window the statement was true; `valid_to` is null while it is current |
+| `superseded_by` | The statement that closed this window |
+| `created_at`, `updated_at`, `revision` | Bookkeeping |
 
-- `memories`: `rowid`, `id`, `content`, JSON `tags`, flattened `tag_text`,
-  `source`, `created_at`, `updated_at`, `revision`.
-- `memories_fts`: FTS5 over content, tags, and source with Porter stemming and
-  prefix indexes.
-- `memory_vectors`: `memory_id`, `model`, `dims`, `content_hash`, INT8 `vector`
-  BLOB, `updated_at`. A missing or stale vector is repaired by the embedding
-  backfill.
+Indexes: `memories(subject, valid_to)` for the entity channel,
+`memories(kind, valid_to)`, `memories(fingerprint)`, and a partial
+`memories(pinned) WHERE pinned = 1` for the rules block.
 
-`standing.md` is a plain text file of one-line bullets:
+`memories_fts`: FTS5 over `content`, `subject`, and `terms`, content-linked to
+`memories`, with Porter stemming, diacritic removal, and two- and three-character
+prefix indexes. Triggers keep it in step on insert, delete, and an update of an
+indexed column only.
 
-```text
-- [s_<16 hex>] [p=<0-100>] content
-```
+`memory_vectors`: one row per statement, holding `memory_id`, `model`, `dims`,
+and an INT8 vector stored unit length, so cosine similarity is a dot product with
+no per-row scale. A model or dimension change
+invalidates the set; the daemon backfills missing vectors off the reply path.
 
-The file is capped at 5,000 serialized characters. Displaced bullets are archived
-into `memories` with the `standing-archive` tag.
-
-Nightly backups include `memory-YYYYMMDD.db` and `standing-YYYYMMDD.md` sidecars
-beside the main `hearth-YYYYMMDD.db` snapshot. Restore copies the sidecars back
-when they are present.
+Nightly backups are the single `hearth-YYYYMMDD.db` snapshot, because memory is
+inside it.

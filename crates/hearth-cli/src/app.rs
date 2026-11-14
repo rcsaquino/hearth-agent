@@ -202,12 +202,12 @@ pub struct MemoryView {
     pub error: Option<String>,
 }
 
-/// The store a memory row came from.
-pub fn store_label(record: &MemoryRecord) -> &'static str {
-    if record.standing {
-        "standing"
+/// The kind of a memory row, marked when it is a pinned rule.
+pub fn store_label(record: &MemoryRecord) -> String {
+    if record.pinned {
+        format!("{} (pinned)", record.kind)
     } else {
-        "long-term"
+        record.kind.clone()
     }
 }
 
@@ -235,10 +235,7 @@ impl MemoryView {
                     || record.content.to_lowercase().contains(&filter)
                     || record.source.to_lowercase().contains(&filter)
                     || store_label(record).to_lowercase().contains(&filter)
-                    || record
-                        .tags
-                        .iter()
-                        .any(|tag| tag.to_lowercase().contains(&filter))
+                    || record.subject.to_lowercase().contains(&filter)
             })
             .collect()
     }

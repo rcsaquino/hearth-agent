@@ -1,109 +1,86 @@
-//! Stable error codes, ported from `src/errors.ts`.
+//! Failures a caller may see.
 //!
-//! The original distinguishes expected, recoverable failures from unexpected
-//! ones so a caller can act. This keeps the same codes and the same rule:
-//! unexpected errors pass through untouched rather than being flattened.
+//! Every message is one sentence and safe to show. A failure carries a code so a
+//! tool result can say `invalid_input` without inventing prose, and so the daemon
+//! can log a category without dumping content.
 
 use std::fmt;
 
-/// Stable codes for expected, recoverable failures.
+/// The category of a failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorCode {
-    /// The caller supplied a value outside the accepted shape or range.
+pub enum Code {
+    /// The caller sent something a memory write cannot accept.
     InvalidInput,
-    /// The referenced id does not exist.
+    /// A credential-shaped string was refused.
+    Credential,
+    /// The rules store is full and nothing was written.
+    RulesFull,
+    /// The named memory does not exist.
     NotFound,
-    /// A revision or expected-content guard rejected a stale write.
-    Conflict,
-    /// A standing edit would have duplicated another standing bullet.
-    DuplicateStandingContent,
-    /// The standing file cannot hold the requested bullet, even after eviction.
-    StandingCapacity,
-    /// SQLite could not be opened or read.
-    StoreUnavailable,
-    /// Another process holds the `standing.md` lock.
-    StandingLocked,
+    /// The store could not be read or written.
+    Unavailable,
 }
 
-impl ErrorCode {
-    /// The wire spelling used by the original.
+impl Code {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InvalidInput => "invalid_input",
+            Self::Credential => "credential_refused",
+            Self::RulesFull => "rules_full",
             Self::NotFound => "not_found",
-            Self::Conflict => "conflict",
-            Self::DuplicateStandingContent => "duplicate_standing_content",
-            Self::StandingCapacity => "standing_capacity",
-            Self::StoreUnavailable => "store_unavailable",
-            Self::StandingLocked => "standing_locked",
+            Self::Unavailable => "memory_unavailable",
         }
     }
 }
 
-/// A failure with a stable code and structured details.
-#[derive(Debug, Clone)]
-pub struct ExpectedError {
-    pub code: ErrorCode,
+/// A memory failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryError {
+    pub code: Code,
     pub message: String,
-    /// Structured context a caller can branch on: field names, ids, revisions,
-    /// and the capacity diagnostics the original returns on refusal.
-    pub details: serde_json::Value,
 }
 
-impl ExpectedError {
-    /// Build an error with no structured details.
-    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+impl MemoryError {
+    pub fn new(code: Code, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
-            details: serde_json::Value::Null,
         }
     }
 
-    /// Build an error carrying structured details.
-    pub fn with_details(
-        code: ErrorCode,
-        message: impl Into<String>,
-        details: serde_json::Value,
-    ) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            details,
-        }
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new(Code::InvalidInput, message)
     }
 
-    /// The error code as a string.
-    pub fn code(&self) -> &'static str {
-        self.code.as_str()
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self::new(Code::Unavailable, message)
     }
 }
 
-impl fmt::Display for ExpectedError {
+impl fmt::Display for MemoryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
     }
 }
 
-impl std::error::Error for ExpectedError {}
+impl std::error::Error for MemoryError {}
 
-/// The crate result type: an expected failure or a store failure.
-pub type Result<T> = std::result::Result<T, ExpectedError>;
-
-impl From<rusqlite::Error> for ExpectedError {
-    fn from(error: rusqlite::Error) -> Self {
-        Self::new(
-            ErrorCode::StoreUnavailable,
-            format!("SQLite is unavailable: {error}"),
-        )
+impl From<hearth_storage::StorageError> for MemoryError {
+    fn from(error: hearth_storage::StorageError) -> Self {
+        Self::unavailable(format!("memory storage failed: {error}"))
     }
 }
 
-impl From<std::io::Error> for ExpectedError {
+impl From<std::io::Error> for MemoryError {
     fn from(error: std::io::Error) -> Self {
-        Self::new(
-            ErrorCode::StoreUnavailable,
-            format!("filesystem is unavailable: {error}"),
-        )
+        Self::unavailable(format!("memory file access failed: {error}"))
     }
 }
+
+impl From<rusqlite::Error> for MemoryError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::unavailable(format!("memory query failed: {error}"))
+    }
+}
+
+pub type Result<T> = std::result::Result<T, MemoryError>;

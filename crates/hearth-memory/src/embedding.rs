@@ -12,7 +12,7 @@ use ort::session::Session;
 use ort::value::Tensor;
 use tokenizers::Tokenizer;
 
-use crate::errors::{ErrorCode, ExpectedError, Result};
+use crate::errors::{Code, MemoryError, Result};
 
 /// The embedding model this build expects.
 pub const MODEL_NAME: &str = "bekko-embedding-v1-a8m";
@@ -144,8 +144,8 @@ fn normalize(vector: &mut [f32]) {
     }
 }
 
-fn embedding_error(message: String) -> ExpectedError {
-    ExpectedError::new(ErrorCode::StoreUnavailable, message)
+fn embedding_error(message: String) -> MemoryError {
+    MemoryError::new(Code::Unavailable, message)
 }
 
 /// The pinned model revision and files used by the first-use downloader.

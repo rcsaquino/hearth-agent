@@ -1618,3 +1618,114 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Unit `Environment=` parsing accepts our own quoted `HEARTH_HOME` line, a combined
   assignment line, and a path that contains spaces. A unit without a home is not
   installed for any home, so the TUI spawns its own daemon instead of guessing.
+
+## 2026-11-14: Memory rebuilt as one store and a four-stage cascade
+
+The tree held two memory systems. `hearth-memory` owned
+`memory/long-term.sqlite` and `memory/standing.md` with five tools and a
+lexical-plus-vector recall path. `hearth-core` and `hearth-storage` owned a
+second, richer `memory_items` design that only tests wrote. This file documented
+the second; the daemon ran the first. `memory_bench`, which this file and
+`AGENTS.md` both name, was deleted with the earlier system, so the live store had
+no measurement at all. The rebuild keeps one implementation and deletes the rest.
+
+**One database.** Memory is a table in `hearth.db`. A statement shares the one
+writer and one backup with the entry it came from. It does not share that entry's
+transaction: memory is written after the turn, and `source_entry` is a soft
+reference. Rolling a conversation save back because a memory write failed would
+lose the user's message, which is the worse failure. Migration 0008 drops
+`memory_items`, `memory_events`, the old `memory_fts`, and the old vector table,
+and creates `memories`, `memories_fts`, and `memory_vectors`. Neither dropped
+table had a production writer, so nothing is lost.
+
+**No stored importance.** The old design stored an importance score and used it
+for standing promotion, decay, and ranking. A stored importance is a number
+nobody can calibrate, and producing it wants a model call at write time. Ranking
+is computed at read time from evidence instead, and the only explicit control the
+model has is `pinned`, whose meaning is unambiguous.
+
+**No tags.** `subject` plus `kind` replaced a tag array. Tags were a second
+vocabulary the model had to invent, they cost schema tokens on every request, and
+the entity channel reaches the same rows with more precision.
+
+**Append, never overwrite.** A replaced statement keeps its row and its window
+closes. This follows the measured experience of mem0's single-pass ADD-only
+extraction (docs.mem0.ai, April 2026 algorithm) and Zep's bi-temporal edges
+(arxiv 2501.13956): overwriting at write time destroys the history that makes
+temporal questions answerable, and reconciliation is where context gets lost.
+Reconciliation here is explicit. The write result names an overlapping statement
+about the same subject, and the model passes `supersedes` on the same turn.
+
+**Zero memory model calls.** Writing, reconciling, ranking, and rendering are
+deterministic. The agent is the model, and it is already making the turn's call.
+The per-cue extraction call is replaced by a four-pattern deterministic extractor
+that runs after delivery for microseconds. Compaction folds extraction into its
+existing summary request as a second JSON key, which removes a whole second
+request over the same range.
+
+**Four tools, not five.** `memory_save`, `memory_recall`, `memory_forget`,
+`memory_transcript`. No store selector, no `s_`/`m_` prefix convention, no tag
+array. The family measures 767 schema tokens against 1,410.
+
+**Retrieval is a recommendation cascade.** Write-time map, candidate generation,
+ranking, and a budgeted slate. Three cheap channels feed one pool of 128: FTS5
+(strict then broad), subject exact and prefix, and INT8 vectors behind a 0.40
+cosine floor. Fusion is reciprocal rank at k=60. Ranking is linear over six
+features: fused relevance, subject match, term coverage, kind prior, still
+current, and recency. The fill sorts by score per token, so a short decisive fact
+is not displaced by a long one. This is the structure the recommender framing of
+long-term memory recommends (arxiv 2610.34673), and the features are the ones its
+ablation found load-bearing: pool position, age, and shared keys outweigh a
+cross-encoder.
+
+**Term coverage is the highest-value feature.** It compares with a prefix in
+either direction, which is the cheap stand-in for a stemmer and is what lets
+"queued" reach "queue". Without it, a question whose words are spread across a
+statement and its neighbours lands on a tie.
+
+**The digest reports coverage.** The uncached position before the newest user
+message is the most expensive place in the prompt, so the digest is terse and
+defaults to 300 tokens. A terse digest that hides what it left out teaches the
+model that the subset is the whole store, so it names the hidden counts per
+subject and the call that fetches them. Measured at 116 tokens at p95.
+
+**An as-of read skips the vector channel.** The vector index holds current
+statements only, so mixing today's meaning into a question about March answers the
+wrong question. As-of reads stay lexical and entity-based.
+
+**The vector floor is 0.40.** Without a floor the top vector hit enters fusion
+with the same weight as the top keyword hit even when it is unrelated, which
+measured as a real regression: paraphrase rose but temporal and contradiction
+fell. At 0.40 the hybrid path reaches 0.99 recoverable and 0.97 automatic
+against 0.99 and 0.945 for lexical alone.
+
+**Rules are rows, not a file.** `kind = rule` and `pinned = 1` replaces
+`standing.md` with its lock file, atomic replace, symlink check, priority
+eviction, archive callback, and startup repair. The budget is enforced at the
+write and the error lists the current rules, so nothing is silently evicted.
+Ordering is by creation so an edit does not reorder the block.
+
+**The fixture is a history, not a pile.** The committed benchmark planted two
+live statements for one question in several places, which no ranking can resolve
+and no conversation produces. The fixture now gives every topic consecutive
+windows, and its `as_of` values were moved into the window of their expected
+statement. The benchmark asserts the coherence it relies on.
+
+**Measured result, lexical then hybrid, on 195 questions.** Recoverable in one
+call 0.99 and 0.99; automatic 0.933 and 0.954; paraphrase automatic 0.65 and 0.85;
+digest tokens p95 139; latency p95 6.4 ms and 11.3 ms on a 200-statement store.
+Contradiction 15 of 15, duplicate writes 0, secret leaks 0. Every stored statement
+is reachable by id, subject, direct term, and enumeration, which is asserted
+separately. Six of the thirteen automatic misses are topics the fixture gives two
+live answers to; the rest are paraphrases.
+
+**Residuals.** Two of the 195 questions need more than one call, both paraphrases
+with no shared vocabulary. The hybrid measurement needs the local model; without
+it the paraphrase category falls to 0.65. The 4,000-row distractor run keeps
+recall and latency inside the same targets, but a 200k store was not re-measured
+after the rewrite, and the honest expectation is that the vector scan grows
+linearly from about 10 ms at 4k.
+
+This entry supersedes the memory decisions of 2026-11-08 (M4a through M6e) and
+the prompt layer names and memory limits in the 2026-11-09 entries. Those stay as
+the record of what was decided then; section 7 of `SPEC.md` is what is true now.

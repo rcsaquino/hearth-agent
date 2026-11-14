@@ -1,225 +1,210 @@
 //! Hearth memory.
 //!
-//! Two stores, one design:
+//! Memory has three jobs and each gets its own shape:
 //!
-//! * **standing memory** is `standing.md`, a plain file of prioritised bullets
-//!   injected before every prompt. It is for requirements that must be present
-//!   without a retrieval cue, capped at [`STANDING_LIMIT`] characters, and the
-//!   only way to make room is to displace a strictly lower-priority bullet,
-//!   which is archived to the database rather than dropped.
-//! * **long-term memory** is a SQLite database with an FTS5 index over content,
-//!   tags, and provenance, using a Porter-stemming tokenizer. A query the index
-//!   cannot answer falls back to a literal substring scan, so a phrase that is
-//!   plainly present is never reported as absent.
+//! * **Rules** are how the user wants things done. They are small, they live in
+//!   the cached prompt prefix, and they are never retrieved because they are
+//!   always present.
+//! * **Knowledge** is what the user said. It is one table with one index,
+//!   reachable by subject, by keyword, and by meaning, and it is shown as a
+//!   compact digest that says when it is showing a subset.
+//! * **Evidence** is the transcript. It is never edited, and it is read only when
+//!   the model asks for it.
 //!
-//! The agent also performs automatic recall for each user message: lexical FTS5
-//! and, when the local model is available, a local vector index are fused with
-//! reciprocal rank. Automatic recall is capped to short snippets. The model can
-//! still reach the full stores through five tools: add, edit, delete, search, and
-//! a history search over the conversation transcript.
+//! The design rule that keeps the system honest: **no memory operation calls a
+//! model.** Writing, reconciling, ranking, and rendering are deterministic. The
+//! agent already is the model; it decides what to remember through a tool call,
+//! and it decides what to replace by naming the row it replaces. Every token of
+//! memory value therefore comes with no extra request and no extra latency.
+//!
+//! Recall itself is four stages, none of them generative: three cheap channels
+//! produce a wide pool, reciprocal rank fuses them, a linear score over cheap
+//! features ranks the pool, and a greedy fill spends the token budget on the best
+//! value per token.
 
-mod database;
+mod digest;
 mod embedding;
 mod errors;
-mod files;
-mod history;
-mod results;
-mod schema;
-mod standing;
-mod text;
+mod extract;
+mod legacy;
+mod model;
+mod query;
+mod rank;
+mod retrieval;
+mod store;
 mod tools;
+mod transcript;
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 use hearth_core::Session;
 
-pub use database::{
-    Memory, MemoryInput, MemoryRead, MemorySearchOptions, MemoryStore, SearchHit, SearchMode,
-    SearchResponse,
-};
+pub use digest::Coverage;
 pub use embedding::{
     BekkoEmbedding, EmbeddingProvider, MODEL_DIMS, MODEL_NAME, download_model, model_files_present,
 };
-pub use errors::{ErrorCode, ExpectedError, Result};
-pub use history::{
-    HistoryHit, HistoryMode, HistoryQuery, HistoryRead, HistoryResponse, HistorySearch,
-};
-pub use results::{
-    render_history_read, render_history_search, render_memory_delete, render_memory_read,
-    render_memory_write, render_search, render_standing_add, render_standing_delete,
-    render_standing_edit,
-};
-pub use standing::{
-    ArchiveFn, StandingAddResult, StandingDeleteResult, StandingEditResult, StandingItem,
-    StandingSnapshot, StandingStore,
-};
-pub use text::{MEMORY_LIMIT, NEW_MEMORY_LIMIT, NEW_TAG_LIMIT, RESULT_BYTES, STANDING_LIMIT};
-pub use tools::{AddTool, DeleteTool, EditTool, HistoryTool, MemoryTools, SearchTool};
+pub use errors::{Code, MemoryError, Result};
+pub use extract::{Candidate, candidates};
+pub use legacy::{LegacyImport, import as import_legacy};
+pub use model::{Kind, Memory, NewMemory, Source, WriteOutcome};
+pub use store::CONTENT_LIMIT;
+pub use tools::{FORGET, RECALL, SAVE, TRANSCRIPT, ToolMemory};
+pub use transcript::{EntryHit, TranscriptRead};
 
-/// The longest remembered text injected by automatic recall.
-const RECALL_ITEM_CHARS: usize = 240;
+/// How much of the prompt memory may occupy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryConfig {
+    /// The budget for rules in the cached prefix.
+    pub rules_max_tokens: u64,
+    /// The budget for the recall digest before the newest user message.
+    pub recall_max_tokens: u64,
+    /// The most statements one digest may show.
+    pub recall_max_items: u64,
+}
 
-/// The memory subsystem handed to a run.
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            rules_max_tokens: 400,
+            recall_max_tokens: 300,
+            recall_max_items: 12,
+        }
+    }
+}
+
+impl MemoryConfig {
+    pub fn bounded(self) -> Self {
+        Self {
+            rules_max_tokens: self.rules_max_tokens.clamp(50, 4_000),
+            recall_max_tokens: self.recall_max_tokens.clamp(50, 4_000),
+            recall_max_items: self.recall_max_items.clamp(1, 64),
+        }
+    }
+}
+
+/// What one recall produced.
+#[derive(Debug, Clone, Default)]
+pub struct Recall {
+    /// The statements chosen for the digest, best first.
+    pub items: Vec<Memory>,
+    /// How much more the store holds about what the message named.
+    pub coverage: Coverage,
+    /// The rendered block, or an empty string when nothing was recalled.
+    pub digest: String,
+}
+
+/// The rendered rules and their version.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rules {
+    pub text: String,
+    pub version: u64,
+    pub count: usize,
+}
+
+/// The cached vector index for one model.
+struct VectorCache {
+    model: String,
+    dims: usize,
+    rows: Vec<store::VectorRow>,
+}
+
+/// Memory as the runtime sees it.
 ///
-/// Holds the three stores and the provenance stamped onto saves. All methods are
-/// cheap: the database is opened once and reused, and the standing file is read
-/// on demand so a hand edit takes effect on the next turn.
+/// Cloning is cheap and shares every internal cache, which is what lets the tool
+/// set hold the same service the agent loop reads from.
+#[derive(Clone)]
 pub struct MemoryService {
-    store: Arc<MemoryStore>,
-    standing: Arc<StandingStore>,
-    history: Arc<HistorySearch>,
-    source: Option<String>,
-    base: PathBuf,
-    recall_max_items: u64,
-    recall_max_tokens: u64,
-    embeddings_configured: AtomicBool,
-    embeddings_active: AtomicBool,
-    embedding_model: Mutex<Option<String>>,
+    inner: Arc<Inner>,
+}
+
+struct Inner {
+    session: Session,
+    config: RwLock<MemoryConfig>,
+    embedder: RwLock<Option<Arc<dyn EmbeddingProvider>>>,
+    configured: AtomicBool,
+    vectors: Mutex<Option<VectorCache>>,
+    subjects: Mutex<Option<Vec<String>>>,
+}
+
+impl std::fmt::Debug for MemoryService {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MemoryService")
+            .field("config", &self.config())
+            .field("semantic", &self.embeddings_active())
+            .finish_non_exhaustive()
+    }
 }
 
 impl MemoryService {
-    /// Open memory beneath a base directory.
+    /// Attach memory to a session's database.
     ///
-    /// The layout is two files: `memory/long-term.sqlite` and
-    /// `memory/standing.md`. Keeping them together means the whole memory can be
-    /// copied, backed up, or inspected as one directory.
-    pub fn open(base: impl AsRef<Path>) -> Result<Self> {
-        let root = base.as_ref().to_path_buf();
-        let base = root.join("memory");
-        std::fs::create_dir_all(&base)?;
-        let database_path = base.join("long-term.sqlite");
-        let standing_path = base.join("standing.md");
-        // The transcript lives in the session database beside the memory
-        // directory, not in the memory database itself. Pointing the history
-        // reader at the wrong file would make every history search fail on a
-        // missing `entries` table.
-        let transcript_path = root.join("hearth.db");
-        let store = Arc::new(MemoryStore::open(&database_path)?);
-        let store_for_archive = Arc::clone(&store);
-        let standing_source = standing_path.display().to_string();
-        let standing = Arc::new(StandingStore::new(
-            &standing_path,
-            Arc::new(move |items: &[StandingItem]| {
-                store_for_archive
-                    .archive(items, &standing_source)
-                    .map(|_| ())
+    /// There is no separate memory file: a memory, its provenance, and the entry
+    /// that produced it share one writer, one transaction boundary, and one
+    /// backup.
+    pub fn new(session: Session) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                session,
+                config: RwLock::new(MemoryConfig::default()),
+                embedder: RwLock::new(None),
+                configured: AtomicBool::new(false),
+                vectors: Mutex::new(None),
+                subjects: Mutex::new(None),
             }),
-        ));
-        Ok(Self {
-            store,
-            standing,
-            history: Arc::new(HistorySearch::new(transcript_path)),
-            source: None,
-            base,
-            recall_max_items: 8,
-            recall_max_tokens: 900,
-            embeddings_configured: AtomicBool::new(false),
-            embeddings_active: AtomicBool::new(false),
-            embedding_model: Mutex::new(None),
-        })
+        }
     }
 
-    /// Open memory for a session, using the directory holding its database.
-    pub fn new(session: Session) -> Result<Self> {
-        let base = session
-            .storage()
-            .path()
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        Self::open(base)
-    }
-
-    /// Record the provenance stamped onto saves that do not name one.
-    pub fn with_source(mut self, source: impl Into<String>) -> Self {
-        self.source = Some(source.into());
+    pub fn with_config(self, config: MemoryConfig) -> Self {
+        self.configure(config);
         self
     }
 
-    /// The directory holding both stores.
-    pub fn base(&self) -> &Path {
-        &self.base
+    /// Apply a new budget without rebuilding the service.
+    pub fn configure(&self, config: MemoryConfig) {
+        if let Ok(mut slot) = self.inner.config.write() {
+            *slot = config.bounded();
+        }
     }
 
-    /// The long-term store.
-    pub fn store(&self) -> &Arc<MemoryStore> {
-        &self.store
-    }
-
-    /// The standing store.
-    pub fn standing_store(&self) -> &Arc<StandingStore> {
-        &self.standing
-    }
-
-    /// The transcript reader.
-    pub fn history(&self) -> &Arc<HistorySearch> {
-        &self.history
-    }
-
-    /// Read the standing memory text and a version for prompt caching.
-    ///
-    /// The version changes whenever the file content changes, which is what lets
-    /// the prompt builder notice that a cached prefix is stale.
-    pub fn standing(&self) -> Result<(String, u64)> {
-        let text = self.standing.text()?;
-        let version = {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            text.hash(&mut hasher);
-            hasher.finish()
-        };
-        Ok((text, version))
-    }
-
-    /// The rendered standing memory for the prompt.
-    ///
-    /// An empty store renders empty so the prompt segment collapses rather than
-    /// announcing an empty section.
-    pub fn render_standing(&self) -> String {
-        self.standing().map(|(text, _)| text).unwrap_or_default()
-    }
-
-    /// Apply the configured recall bounds.
-    pub fn with_recall_budget(mut self, max_items: u64, max_tokens: u64) -> Self {
-        self.recall_max_items = max_items.clamp(1, 50);
-        self.recall_max_tokens = max_tokens.max(1);
-        self
-    }
-
-    /// Record whether semantic recall is configured. The backend reports when
-    /// its index is actually ready.
+    /// Record whether semantic recall is configured at all. The backend reports
+    /// separately whether its model is actually loaded.
     pub fn with_embeddings(self, configured: bool) -> Self {
-        self.embeddings_configured
-            .store(configured, Ordering::Relaxed);
+        self.inner.configured.store(configured, Ordering::Relaxed);
         self
     }
 
-    /// Attach a ready local embedding provider.
+    /// Attach a ready embedder.
     pub fn with_embedder(self, embedder: Arc<dyn EmbeddingProvider>) -> Self {
         self.activate_embedder(embedder);
         self
     }
 
-    /// Attach an embedder after the daemon has already started.
+    /// Attach an embedder after startup.
     pub fn activate_embedder(&self, embedder: Arc<dyn EmbeddingProvider>) {
-        self.embeddings_configured.store(true, Ordering::Relaxed);
-        if let Ok(mut model) = self.embedding_model.lock() {
-            *model = Some(embedder.model().to_owned());
+        self.inner.configured.store(true, Ordering::Relaxed);
+        if let Ok(mut slot) = self.inner.embedder.write() {
+            *slot = Some(embedder);
         }
-        self.store.set_embedder(embedder);
-        self.embeddings_active.store(true, Ordering::Relaxed);
+        self.invalidate_vectors();
     }
 
-    /// Index memories that are missing a vector for the active model.
-    pub fn index_pending_vectors(&self) -> Result<usize> {
-        self.store.index_pending_vectors()
+    pub fn config(&self) -> MemoryConfig {
+        self.inner
+            .config
+            .read()
+            .map(|config| *config)
+            .unwrap_or_default()
     }
 
-    /// The recall path currently in use.
-    pub fn recall_mode(&self) -> &'static str {
+    pub fn session(&self) -> &Session {
+        &self.inner.session
+    }
+
+    /// `hybrid` when a local model is loaded, otherwise `lexical`.
+    pub fn mode(&self) -> &'static str {
         if self.embeddings_active() {
             "hybrid"
         } else {
@@ -227,399 +212,611 @@ impl MemoryService {
         }
     }
 
-    pub fn recall_max_items(&self) -> u64 {
-        self.recall_max_items
-    }
-
-    pub fn recall_max_tokens(&self) -> u64 {
-        self.recall_max_tokens
-    }
-
     pub fn embeddings_configured(&self) -> bool {
-        self.embeddings_configured.load(Ordering::Relaxed)
+        self.inner.configured.load(Ordering::Relaxed)
     }
 
     pub fn embeddings_active(&self) -> bool {
-        self.embeddings_active.load(Ordering::Relaxed)
+        self.inner
+            .embedder
+            .read()
+            .map(|slot| slot.is_some())
+            .unwrap_or(false)
     }
 
     pub fn embedding_model(&self) -> Option<String> {
-        self.embedding_model
-            .lock()
+        self.inner
+            .embedder
+            .read()
             .ok()
-            .and_then(|model| model.clone())
+            .and_then(|slot| slot.as_ref().map(|model| model.model().to_owned()))
     }
 
-    /// Retrieve memories relevant to a query.
+    /// The number of current memories.
+    pub fn count(&self) -> Result<usize> {
+        store::count(&self.inner.session)
+    }
+
+    /// The rendered rules body and a hash of it.
     ///
-    /// This is a keyword search with stemming, plus the literal fallback. It is
-    /// deliberately not a semantic search: relevance comes from the words the
-    /// caller chose, and an empty query retrieves nothing rather than everything.
-    pub fn recall(&self, query: &str) -> Result<Vec<Memory>> {
-        let trimmed = query.trim();
-        if trimmed.is_empty() || is_trivial(trimmed) {
-            return Ok(Vec::new());
-        }
-        let response = self.store.search(
-            trimmed,
-            SearchMode::Any,
-            self.recall_max_items as i64,
-            0,
-            &MemorySearchOptions::default(),
-        )?;
-        Ok(response.results.into_iter().map(|hit| hit.memory).collect())
+    /// The prompt prefix hashes the text itself, so the version is for the audit
+    /// document and the status report: it changes exactly when the rendered block
+    /// changes, which is what an operator watching for a rule edit wants.
+    pub fn rules(&self) -> Result<Rules> {
+        let rules = store::rules(&self.inner.session)?;
+        let text = digest::rules_body(&rules, self.config().rules_max_tokens);
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        Ok(Rules {
+            version: hasher.finish(),
+            count: rules.len(),
+            text,
+        })
     }
 
-    /// Render recalled memories as prompt lines within the token budget.
+    /// Recall what this message needs.
+    pub fn recall(&self, text: &str) -> Result<Recall> {
+        self.recall_at(text, None)
+    }
+
+    /// Recall as of an instant, for a question about what used to be true.
+    pub fn recall_at(&self, text: &str, at: Option<i64>) -> Result<Recall> {
+        self.recall_within(text, at, self.config().recall_max_tokens)
+    }
+
+    /// Recall with a smaller digest budget.
     ///
-    /// Tags stay in the search tool output; automatic recall spends its budget
-    /// on remembered text only. A single oversized hit is clipped rather than
-    /// discarded.
-    pub fn render_recall(&self, items: &[Memory]) -> String {
-        let mut rendered = String::new();
-        let mut used = 0u64;
-        for item in items {
-            let content = clip_chars(&item.content.replace('\n', " "), RECALL_ITEM_CHARS);
-            let bullet = format!("- {content}");
-            let cost = hearth_model::estimate_tokens(&bullet).max(0) as u64;
-            if used > 0 && used + cost > self.recall_max_tokens {
-                break;
-            }
-            if used == 0 && cost > self.recall_max_tokens {
-                let max_chars = (self.recall_max_tokens.saturating_mul(3)) as usize;
-                rendered.push_str(&clip_chars(&bullet, max_chars));
-                break;
-            }
-            if !rendered.is_empty() {
-                rendered.push('\n');
-            }
-            rendered.push_str(&bullet);
-            used += cost;
-            if used >= self.recall_max_tokens {
-                break;
-            }
+    /// A caller that is over the context budget asks for a shorter digest rather
+    /// than trimming the rendered block, which would cut the tags or the coverage
+    /// line and leave the model with a broken segment.
+    pub fn recall_within(&self, text: &str, at: Option<i64>, tokens: u64) -> Result<Recall> {
+        let known = self.known_subjects()?;
+        let parsed = query::analyze(text, &known);
+        if parsed.trivial {
+            return Ok(Recall::default());
         }
-        rendered
-    }
+        let now = self.inner.session.now_micros();
+        let mut memories: HashMap<String, Memory> = HashMap::new();
+        let mut channels: Vec<Vec<String>> = Vec::new();
 
-    /// The tools for this store, with the run's provenance attached.
-    pub fn tools(&self) -> Vec<Arc<dyn hearth_tools::Tool>> {
-        let tools = MemoryTools::new(
-            Arc::clone(&self.standing),
-            Arc::clone(&self.store),
-            self.history.path().to_path_buf(),
+        if let Some(expression) = retrieval::match_all(&parsed.terms) {
+            let items = store::lexical(&self.inner.session, &expression, at, rank::POOL as i64)?;
+            channels.push(absorb(items, &mut memories));
+        }
+        if let Some(expression) =
+            retrieval::match_any(&parsed.terms, &parsed.expanded, &parsed.entities)
+        {
+            let items = store::lexical(&self.inner.session, &expression, at, rank::POOL as i64)?;
+            channels.push(absorb(items, &mut memories));
+        }
+        for entity in parsed.entities.iter().take(4) {
+            let mut found = store::by_subject(&self.inner.session, entity, at, 32)?;
+            found.extend(store::by_subject_prefix(
+                &self.inner.session,
+                entity,
+                at,
+                32,
+            )?);
+            channels.push(absorb(found, &mut memories));
+        }
+        // The vector index carries only current statements, so it cannot answer
+        // a question about a past instant. An as-of read stays lexical and
+        // entity-based rather than being polluted with what is true today.
+        if at.is_none()
+            && let Some(ids) = self.semantic_channel(&parsed.raw)
+        {
+            let items = store::by_ids(&self.inner.session, &ids)?;
+            channels.push(absorb(items, &mut memories));
+        }
+
+        let entities: HashSet<String> = parsed.entities.iter().cloned().collect();
+        let terms: Vec<String> = parsed.terms.iter().map(|term| term.text.clone()).collect();
+        let fused = rank::fuse(&channels);
+        let ranked = rank::rank(&fused, &memories, &entities, &terms, now);
+        let diverse = rank::diversify(ranked, &entities);
+        let config = self.config();
+        let statement_budget = tokens.saturating_sub(digest::COVERAGE_RESERVE).max(1);
+        let items = rank::fill(
+            diverse,
+            statement_budget,
+            config.recall_max_items as usize,
+            digest::line_cost,
         );
-        let tools = match &self.source {
-            Some(source) => tools.with_source(source.clone()),
-            None => tools,
-        };
-        vec![
-            Arc::new(AddTool::new(tools.clone())),
-            Arc::new(EditTool::new(tools.clone())),
-            Arc::new(DeleteTool::new(tools.clone())),
-            Arc::new(SearchTool::new(tools.clone())),
-            Arc::new(HistoryTool::new(tools)),
+
+        let coverage = self.coverage(&parsed.entities, at)?;
+        let digest = digest::recall_body(&items, &coverage, now);
+        Ok(Recall {
+            items,
+            coverage,
+            digest,
+        })
+    }
+
+    /// How much the store holds about each named subject.
+    fn coverage(&self, entities: &[String], at: Option<i64>) -> Result<Coverage> {
+        let mut coverage = Coverage::default();
+        for entity in entities.iter().take(3) {
+            let current = store::subject_count(&self.inner.session, entity, at)?;
+            if current == 0 {
+                continue;
+            }
+            coverage.current.insert(entity.clone(), current);
+            let earlier = store::historical_count(&self.inner.session, entity)?;
+            if earlier > 0 {
+                coverage.earlier.insert(entity.clone(), earlier);
+            }
+        }
+        Ok(coverage)
+    }
+
+    /// The vector channel, when a model is loaded.
+    fn semantic_channel(&self, text: &str) -> Option<Vec<String>> {
+        let embedder = self.inner.embedder.read().ok()?.clone()?;
+        let values = embedder.embed(text).ok()?;
+        if values.len() != embedder.dims() {
+            return None;
+        }
+        let query = retrieval::quantise(&values);
+        let model = embedder.model().to_owned();
+        let dims = embedder.dims();
+        let mut cache = self.inner.vectors.lock().ok()?;
+        let reload = cache
+            .as_ref()
+            .is_none_or(|cached| cached.model != model || cached.dims != dims);
+        if reload {
+            *cache = Some(VectorCache {
+                model,
+                dims,
+                rows: store::vectors(&self.inner.session, embedder.model(), embedder.dims())
+                    .ok()?,
+            });
+        }
+        cache
+            .as_ref()
+            .map(|cached| retrieval::top_vectors(&cached.rows, &query, 24))
+    }
+
+    /// Write one statement.
+    pub fn write(&self, item: NewMemory) -> Result<WriteOutcome> {
+        store::validate(&item)?;
+        let vector = self.embed_for_write(&item);
+        let outcome = store::insert(
+            &self.inner.session,
+            store::Pending { item, vector },
+            self.config().rules_max_tokens,
+        )?;
+        if outcome.created() {
+            self.invalidate_subjects();
+            self.invalidate_vectors();
+        }
+        Ok(outcome)
+    }
+
+    /// Write several statements in one transaction.
+    ///
+    /// This is the import and benchmark path. A conversation turn writes one
+    /// statement at a time, so the single-writer path stays the common one.
+    pub fn write_many(&self, items: Vec<NewMemory>) -> Result<Vec<WriteOutcome>> {
+        for item in &items {
+            store::validate(item)?;
+        }
+        let pending = items
+            .into_iter()
+            .map(|item| {
+                let vector = self.embed_for_write(&item);
+                store::Pending { item, vector }
+            })
+            .collect();
+        let outcomes =
+            store::insert_many(&self.inner.session, pending, self.config().rules_max_tokens)?;
+        self.invalidate_subjects();
+        self.invalidate_vectors();
+        Ok(outcomes)
+    }
+
+    /// Remove one statement permanently.
+    pub fn forget(&self, id: &str) -> Result<()> {
+        store::forget(&self.inner.session, id)?;
+        self.invalidate_subjects();
+        self.invalidate_vectors();
+        Ok(())
+    }
+
+    /// One statement by id.
+    pub fn get(&self, id: &str) -> Result<Option<Memory>> {
+        store::get(&self.inner.session, id)
+    }
+
+    /// Everything known about a subject.
+    pub fn subject(&self, subject: &str, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
+        let normalized = query::normalize(subject);
+        store::by_subject(&self.inner.session, &normalized, at, limit)
+    }
+
+    /// Recent statements when a caller asks for memory without a topic.
+    pub fn recent(&self, limit: i64) -> Result<Vec<Memory>> {
+        store::recent(&self.inner.session, None, limit)
+    }
+
+    /// A keyword, subject, or entity search, for the tool.
+    pub fn search(&self, text: &str, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
+        let known = self.known_subjects()?;
+        let parsed = query::analyze(text, &known);
+        if parsed.trivial {
+            return store::recent(&self.inner.session, at, limit);
+        }
+        let mut seen = HashSet::new();
+        let mut hits = Vec::new();
+        for expression in [
+            retrieval::match_all(&parsed.terms),
+            retrieval::match_any(&parsed.terms, &parsed.expanded, &parsed.entities),
         ]
+        .into_iter()
+        .flatten()
+        {
+            for memory in store::lexical(&self.inner.session, &expression, at, limit)? {
+                if seen.insert(memory.id.clone()) {
+                    hits.push(memory);
+                }
+            }
+        }
+        for entity in parsed.entities.iter().take(3) {
+            for memory in store::by_subject(&self.inner.session, entity, at, limit)? {
+                if seen.insert(memory.id.clone()) {
+                    hits.push(memory);
+                }
+            }
+        }
+        if at.is_none()
+            && hits.len() < limit.max(1) as usize
+            && let Some(ids) = self.semantic_channel(text)
+        {
+            for memory in store::by_ids(&self.inner.session, &ids)? {
+                if seen.insert(memory.id.clone()) {
+                    hits.push(memory);
+                }
+            }
+        }
+        hits.truncate(limit.max(1) as usize);
+        Ok(hits)
+    }
+
+    /// Search the transcript.
+    pub fn transcript(&self, text: &str, limit: i64) -> Result<Vec<EntryHit>> {
+        transcript::search(&self.inner.session, text, limit)
+    }
+
+    /// Read one transcript entry by `conversation#seq`.
+    pub fn entry(&self, reference: &str) -> Result<Option<TranscriptRead>> {
+        transcript::read(&self.inner.session, reference)
+    }
+
+    /// Index memories that have no vector for the active model.
+    ///
+    /// This runs off the reply path. A write can embed inline because it already
+    /// has the text; a backfill happens after a model change or a fresh install.
+    pub fn index_pending_vectors(&self) -> Result<usize> {
+        let Some(embedder) = self.embedder() else {
+            return Ok(0);
+        };
+        let model = embedder.model().to_owned();
+        let dims = embedder.dims();
+        let pending = store::pending_vectors(&self.inner.session, &model, dims, 256)?;
+        let mut indexed = 0;
+        for memory in pending {
+            match embedder.embed(&memory.content) {
+                Ok(values) => {
+                    let vector = store::VectorWrite {
+                        model: model.clone(),
+                        dims,
+                        values,
+                    };
+                    if store::set_vector(&self.inner.session, &memory.id, &vector).is_ok() {
+                        indexed += 1;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if indexed > 0 {
+            self.invalidate_vectors();
+        }
+        Ok(indexed)
+    }
+
+    /// Drop vectors whose memory is gone or whose model is no longer active.
+    pub fn prune_vectors(&self) -> Result<usize> {
+        let Some(embedder) = self.embedder() else {
+            return Ok(0);
+        };
+        let removed = store::prune_vectors(&self.inner.session, embedder.model(), embedder.dims())?;
+        if removed > 0 {
+            self.invalidate_vectors();
+        }
+        Ok(removed)
+    }
+
+    /// The model-facing tools.
+    pub fn tools(&self) -> Vec<Arc<dyn hearth_tools::Tool>> {
+        self.tools_with_source(None)
+    }
+
+    /// The tools, with the entry this run's writes came from.
+    pub fn tools_with_source(&self, source: Option<String>) -> Vec<Arc<dyn hearth_tools::Tool>> {
+        tools::build(&ToolMemory {
+            service: self.clone(),
+            source,
+        })
+    }
+
+    fn embedder(&self) -> Option<Arc<dyn EmbeddingProvider>> {
+        self.inner
+            .embedder
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+
+    fn embed_for_write(&self, item: &NewMemory) -> Option<store::VectorWrite> {
+        let embedder = self.embedder()?;
+        let text = if item.subject.is_empty() {
+            item.content.clone()
+        } else {
+            format!("{} {}", item.subject, item.content)
+        };
+        let values = embedder.embed(&text).ok()?;
+        Some(store::VectorWrite {
+            model: embedder.model().to_owned(),
+            dims: embedder.dims(),
+            values,
+        })
+    }
+
+    fn known_subjects(&self) -> Result<HashSet<String>> {
+        Ok(self.subject_list()?.into_iter().collect())
+    }
+
+    fn subject_list(&self) -> Result<Vec<String>> {
+        if let Ok(cache) = self.inner.subjects.lock()
+            && let Some(subjects) = cache.as_ref()
+        {
+            return Ok(subjects.clone());
+        }
+        let subjects = store::subjects(&self.inner.session)?;
+        if let Ok(mut cache) = self.inner.subjects.lock() {
+            *cache = Some(subjects.clone());
+        }
+        Ok(subjects)
+    }
+
+    fn invalidate_subjects(&self) {
+        if let Ok(mut cache) = self.inner.subjects.lock() {
+            *cache = None;
+        }
+    }
+
+    fn invalidate_vectors(&self) {
+        if let Ok(mut cache) = self.inner.vectors.lock() {
+            *cache = None;
+        }
     }
 }
 
-fn clip_chars(text: &str, max: usize) -> String {
-    let mut clipped: String = text.chars().take(max).collect();
-    if text.chars().count() > max {
-        clipped.push('…');
-    }
-    clipped
-}
-
-/// Inputs that never deserve a memory recall.
+/// Add a channel's rows to the pool, keeping the channel's order and each id
+/// once.
 ///
-/// A greeting carries no topic, so searching for it spends tokens to return
-/// nothing useful. This is a fixed list rather than a heuristic so the behavior
-/// is predictable.
-pub fn is_trivial(text: &str) -> bool {
-    const TRIVIAL: &[&str] = &[
-        "hi",
-        "hello",
-        "hey",
-        "thanks",
-        "thank you",
-        "ok",
-        "okay",
-        "sure",
-        "yes",
-        "no",
-        "good morning",
-        "good afternoon",
-        "good evening",
-        "lol",
-    ];
-    let normalized = text
-        .trim()
-        .trim_matches(|c: char| !c.is_alphanumeric() && c != ' ');
-    if normalized.is_empty() {
-        return true;
+/// A row that two lookups in the same channel both return would otherwise collect
+/// a fusion contribution twice and outrank a row found by two different channels,
+/// which is not what reciprocal rank means.
+fn absorb(items: Vec<Memory>, memories: &mut HashMap<String, Memory>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut ids = Vec::with_capacity(items.len());
+    for memory in items {
+        if !seen.insert(memory.id.clone()) {
+            continue;
+        }
+        ids.push(memory.id.clone());
+        memories.insert(memory.id.clone(), memory);
     }
-    let lowered = normalized.to_lowercase();
-    TRIVIAL.contains(&lowered.as_str())
+    ids
+}
+
+/// The subject a statement suggests, when it opens with a name.
+///
+/// The agent chooses a subject through the tool, and it should: a person knows
+/// that "the board" is the OR board. This is the deterministic fallback the
+/// extractor uses, and it is exported so an import can seed a store with the same
+/// rule the automatic path applies.
+pub fn suggest_subject(content: &str) -> String {
+    extract::leading_subject(content)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
 
-    struct FakeEmbedding;
-
-    impl EmbeddingProvider for FakeEmbedding {
-        fn model(&self) -> &str {
-            "fake"
-        }
-
-        fn dims(&self) -> usize {
-            2
-        }
-
-        fn embed(&self, text: &str) -> Result<Vec<f32>> {
-            let lower = text.to_lowercase();
-            let mut vector = vec![0.0f32; 2];
-            if lower.contains("paint") || lower.contains("art") {
-                vector[0] = 1.0;
-            }
-            if lower.contains("soup") || lower.contains("food") {
-                vector[1] = 1.0;
-            }
-            if vector.iter().all(|value| *value == 0.0) {
-                vector[0] = 0.01;
-            }
-            let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
-            for value in &mut vector {
-                *value /= norm;
-            }
-            Ok(vector)
-        }
-    }
-
-    fn service() -> (tempfile::TempDir, MemoryService) {
-        let directory = tempfile::tempdir().unwrap();
-        let service = MemoryService::open(directory.path()).unwrap();
+    fn service() -> (TempDir, MemoryService) {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        let service = MemoryService::new(harness.session().clone());
         (directory, service)
     }
 
-    #[test]
-    #[ignore = "requires HEARTH_EMBEDDING_MODEL_DIR"]
-    fn the_local_embedding_model_smoke_runs() {
-        let directory =
-            std::env::var("HEARTH_EMBEDDING_MODEL_DIR").expect("set HEARTH_EMBEDDING_MODEL_DIR");
-        let model = BekkoEmbedding::open(directory)
-            .expect("open model")
-            .expect("model files");
-        let vector = model.embed("Alice manages Bob").expect("embed");
-        assert_eq!(vector.len(), MODEL_DIMS);
-        let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 0.001, "norm was {norm}");
+    fn seed(service: &MemoryService, content: &str, subject: &str) -> Memory {
+        service
+            .write(NewMemory::new(content).subject(subject))
+            .expect("write")
+            .memory()
+            .clone()
     }
 
     #[test]
-    #[ignore = "requires HEARTH_EMBEDDING_MODEL_DIR"]
-    fn the_local_model_finds_a_paraphrase() {
-        let directory =
-            std::env::var("HEARTH_EMBEDDING_MODEL_DIR").expect("set HEARTH_EMBEDDING_MODEL_DIR");
-        let model = BekkoEmbedding::open(directory)
-            .expect("open model")
-            .expect("model files");
+    fn a_stored_fact_comes_back_in_the_digest() {
         let (_directory, service) = service();
-        let service = service.with_embedder(Arc::new(model));
-        service
-            .store()
-            .add(&MemoryInput {
-                content: "Alice manages Bob".to_owned(),
-                tags: Some(vec!["work".to_owned()]),
-                ..Default::default()
-            })
-            .unwrap();
-        service
-            .store()
-            .add(&MemoryInput {
-                content: "Alice prefers sour soup".to_owned(),
-                tags: Some(vec!["food".to_owned()]),
-                ..Default::default()
-            })
-            .unwrap();
-        let started = std::time::Instant::now();
-        let items = service.recall("Who is Bob's boss?").unwrap();
-        println!(
-            "paraphrase recall took {:?}: {:?}",
-            started.elapsed(),
-            items.iter().map(|item| &item.content).collect::<Vec<_>>()
-        );
+        seed(&service, "Alice manages the OR board.", "alice");
+        let recall = service.recall("who runs the OR board").expect("recall");
         assert!(
-            items
-                .iter()
-                .any(|item| item.content.contains("manages Bob")),
-            "paraphrase recall missed the manager memory"
+            recall.digest.contains("Alice manages the OR board."),
+            "{}",
+            recall.digest
         );
     }
 
     #[test]
-    fn the_layout_is_two_files_in_one_directory() {
-        let (directory, service) = service();
-        assert!(directory.path().join("memory").is_dir());
-        assert!(service.store().path().ends_with("long-term.sqlite"));
-        assert!(service.standing_store().path().ends_with("standing.md"));
-    }
-
-    #[test]
-    fn a_saved_fact_is_reachable_by_recall() {
+    fn a_question_naming_a_subject_reports_what_was_left_out() {
         let (_directory, service) = service();
-        service
-            .store()
-            .add(&MemoryInput {
-                content: "USER_NAME is allergic to nuts".to_owned(),
-                tags: Some(vec!["health".to_owned()]),
-                source: Some("test".to_owned()),
-            })
-            .unwrap();
-        let items = service.recall("nuts").unwrap();
-        assert_eq!(items.len(), 1);
-        let rendered = service.render_recall(&items);
-        assert!(rendered.contains("nuts"));
-        assert!(
-            !rendered.contains("[health]"),
-            "automatic recall spends its budget on text, not tags: {rendered}"
-        );
-    }
-
-    #[test]
-    fn automatic_recall_stays_within_its_token_budget() {
-        let (_directory, service) = service();
-        for index in 0..4 {
-            service
-                .store()
-                .add(&MemoryInput {
-                    content: format!("needle fact {index} {}", "x".repeat(1_800)),
-                    ..Default::default()
-                })
-                .unwrap();
+        let service = service.with_config(MemoryConfig {
+            recall_max_tokens: 120,
+            recall_max_items: 4,
+            ..MemoryConfig::default()
+        });
+        for (index, topic) in [
+            "hiring", "budget", "roadmap", "launch", "design", "support", "security", "pricing",
+        ]
+        .iter()
+        .enumerate()
+        {
+            seed(
+                &service,
+                &format!("Alice owns the {topic} track for cycle {index}"),
+                "alice",
+            );
         }
-        let items = service.recall("needle").unwrap();
-        let rendered = service.render_recall(&items);
-        let tokens = hearth_model::estimate_tokens(&rendered);
+        let recall = service.recall("what does Alice own").expect("recall");
         assert!(
-            tokens <= 900,
-            "recall rendered {tokens} tokens, over the default budget"
+            recall
+                .coverage
+                .current
+                .get("alice")
+                .is_some_and(|n| *n >= 8),
+            "{:?}",
+            recall.coverage
         );
         assert!(
-            rendered.lines().count() <= 8,
-            "recall returned too many items: {rendered}"
+            recall.digest.contains("more: alice"),
+            "the digest must admit the subset: {}",
+            recall.digest
         );
     }
 
     #[test]
-    fn an_attached_embedder_turns_on_hybrid_recall() {
+    fn a_greeting_recalls_nothing_and_renders_nothing() {
         let (_directory, service) = service();
-        assert_eq!(service.recall_mode(), "lexical");
-        assert!(!service.embeddings_active());
-        let service = service
-            .with_embeddings(true)
-            .with_embedder(Arc::new(FakeEmbedding));
-        assert_eq!(service.recall_mode(), "hybrid");
-        assert!(service.embeddings_configured());
-        assert!(service.embeddings_active());
-        assert_eq!(service.embedding_model().as_deref(), Some("fake"));
+        seed(&service, "a fact about a topic", "topic");
+        let recall = service.recall("hello").expect("recall");
+        assert!(recall.items.is_empty());
+        assert!(recall.digest.is_empty());
+    }
+
+    #[test]
+    fn a_replacement_stops_the_old_answer_from_leading() {
+        let (_directory, service) = service();
+        let old = seed(
+            &service,
+            "the primary database is Postgres",
+            "primary database",
+        );
         service
-            .store()
-            .add(&MemoryInput {
-                content: "she was painting a sunrise".to_owned(),
-                ..Default::default()
-            })
-            .unwrap();
-        let items = service.recall("artwork").unwrap();
+            .write(
+                NewMemory::new("the primary database is SQLite")
+                    .subject("primary database")
+                    .supersedes(old.id.clone()),
+            )
+            .expect("replace");
+        let recall = service
+            .recall("what is the primary database")
+            .expect("recall");
+        assert!(recall.digest.contains("SQLite"), "{}", recall.digest);
         assert!(
-            items
-                .iter()
-                .any(|memory| memory.content.contains("painting")),
-            "hybrid recall missed the vector match"
+            !recall.digest.contains("Postgres"),
+            "a replaced statement must not lead the digest: {}",
+            recall.digest
         );
-    }
-
-    #[test]
-    fn an_embedder_can_be_activated_after_startup() {
-        let (_directory, service) = service();
-        let service = service.with_embeddings(true);
-        assert!(!service.embeddings_active());
-        assert_eq!(service.recall_mode(), "lexical");
-        service.activate_embedder(Arc::new(FakeEmbedding));
-        assert!(service.embeddings_active());
-        assert_eq!(service.recall_mode(), "hybrid");
-        assert_eq!(service.embedding_model().as_deref(), Some("fake"));
-    }
-
-    #[test]
-    fn a_trivial_input_recalls_nothing() {
-        let (_directory, service) = service();
-        service
-            .store()
-            .add(&MemoryInput {
-                content: "a fact".to_owned(),
-                ..Default::default()
-            })
-            .unwrap();
-        assert!(service.recall("hello").unwrap().is_empty());
-        assert!(service.recall("   ").unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_standing_bullet_is_injected_and_versioned() {
-        let (_directory, service) = service();
-        let empty_version = service.standing().unwrap().1;
-        service
-            .standing_store()
-            .add("Never use em dashes.", 90)
-            .unwrap();
-        let (text, version) = service.standing().unwrap();
-        assert!(text.contains("Never use em dashes."));
-        assert_ne!(version, empty_version);
-    }
-
-    #[test]
-    fn a_hand_edit_to_the_standing_file_is_picked_up() {
-        let (directory, service) = service();
-        std::fs::write(
-            directory.path().join("memory/standing.md"),
-            "- I prefer plain English.\n",
-        )
-        .unwrap();
         assert!(
-            service
-                .render_standing()
-                .contains("I prefer plain English.")
+            recall.digest.contains("earlier: primary database"),
+            "{}",
+            recall.digest
         );
     }
 
     #[test]
-    fn the_tool_set_is_the_five_memory_tools() {
+    fn a_rule_is_injected_and_versioned() {
         let (_directory, service) = service();
-        let names: Vec<String> = service
-            .tools()
-            .iter()
-            .map(|tool| tool.spec().name)
-            .collect();
-        assert_eq!(
-            names,
-            vec![
-                "memory_add",
-                "memory_edit",
-                "memory_delete",
-                "memory_search",
-                "memory_sessions"
-            ]
+        let before = service.rules().expect("rules");
+        service
+            .write(
+                NewMemory::new("Never use em dashes.")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect("rule");
+        let after = service.rules().expect("rules");
+        assert!(
+            after.text.contains("Never use em dashes."),
+            "{}",
+            after.text
+        );
+        assert_ne!(before.version, after.version);
+        assert_eq!(after.count, 1);
+    }
+
+    #[test]
+    fn the_rules_budget_is_enforced_at_the_write() {
+        let (_directory, service) = service();
+        let service = service.with_config(MemoryConfig {
+            rules_max_tokens: 80,
+            ..MemoryConfig::default()
+        });
+        service
+            .write(
+                NewMemory::new("Keep answers short.")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect("first");
+        let error = service
+            .write(
+                NewMemory::new("b".repeat(400))
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect_err("full");
+        assert_eq!(error.code, Code::RulesFull);
+        assert!(
+            error.message.contains("replace or forget one of m_"),
+            "the refusal must name what to replace: {}",
+            error.message
         );
     }
 
     #[test]
-    fn trivial_inputs_are_recognized() {
-        assert!(is_trivial("hello"));
-        assert!(is_trivial("  Hello!  "));
-        assert!(is_trivial(""));
-        assert!(!is_trivial("what did we decide about the OR board"));
+    fn a_rule_longer_than_one_line_is_refused() {
+        let (_directory, service) = service();
+        let error = service
+            .write(
+                NewMemory::new("r".repeat(401))
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect_err("too long");
+        assert_eq!(error.code, Code::InvalidInput);
+    }
+
+    #[test]
+    fn forgetting_removes_the_row() {
+        let (_directory, service) = service();
+        let memory = seed(&service, "ephemeral", "ephemeral");
+        service.forget(&memory.id).expect("forget");
+        assert!(service.get(&memory.id).expect("get").is_none());
+    }
+
+    #[test]
+    fn the_tool_set_is_four_tools() {
+        let (_directory, service) = service();
+        let names: Vec<String> = service.tools().iter().map(|t| t.spec().name).collect();
+        assert_eq!(names, vec![FORGET, RECALL, SAVE, TRANSCRIPT]);
     }
 }

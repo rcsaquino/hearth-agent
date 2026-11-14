@@ -19,3 +19,6 @@ pub const MIGRATION_0006: &str = include_str!("../migrations/0006.sql");
 
 /// Migration 0007 adds the transcript FTS index.
 pub const MIGRATION_0007: &str = include_str!("../migrations/0007.sql");
+
+/// Migration 0008 replaces both older memory designs with `memories`.
+pub const MIGRATION_0008: &str = include_str!("../migrations/0008.sql");

@@ -7,20 +7,30 @@ use hearth_core::{
     CompactionPlan, CoreError, Entry, NewEntry, NewTask, NewUsage, Save, Session, StepOutput,
     TerminalOutcome, parse_blocks, summary_content,
 };
-use hearth_memory::MemoryService;
+use hearth_memory::{Kind, MemoryService, NewMemory, Source};
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::json;
 use thiserror::Error;
 
-use crate::extraction::MemoryExtractor;
-
 const ENTRY_PREVIEW_CHARS: usize = 400;
 const RANGE_CHARS_PER_ENTRY: usize = 1200;
+/// The most memories one summary may carry.
+const MAX_SUMMARY_MEMORIES: usize = 3;
 
-const SUMMARY_INSTRUCTION: &str = "You summarize an older part of a conversation so it can be \
-replaced by your summary. Preserve decisions, open threads, names, dates, numbers, and user \
-preferences. Drop small talk and superseded detail. Return only the summary text, with no \
-preamble and no JSON.";
+/// One call returns both the summary and the durable statements in the range.
+///
+/// Folding the two used to cost a second request over the same text for every
+/// compaction. The model already has the range in front of it, so asking for the
+/// memories in the same answer costs a few dozen output tokens instead of a whole
+/// second prompt.
+const SUMMARY_INSTRUCTION: &str = "You compress an older part of a conversation so it \
+can be replaced by your output. Return one JSON object with two keys and nothing else. \
+`summary` is a compact paragraph that keeps decisions, open threads, names, dates, numbers, \
+and user preferences, and drops small talk and superseded detail. `memories` is a list of at \
+most three durable statements from the range, each a JSON object with `content` (one statement), \
+`kind` (one of fact, preference, person, decision, commitment, episode), and `subject` (the \
+person, project, or thing it is about). Use an empty list when nothing in the range is worth \
+recalling later. Do not record requests, greetings, tool output, or credentials.";
 
 /// A failure that stopped a compaction.
 #[derive(Debug, Error)]
@@ -62,7 +72,7 @@ impl Compactor {
         }
     }
 
-    /// Enable selective memory extraction before the summary.
+    /// Write the durable statements the summary pass finds, in the same save.
     pub fn with_memory(mut self, memory: std::sync::Arc<MemoryService>) -> Self {
         self.memory = Some(memory);
         self
@@ -96,19 +106,6 @@ impl Compactor {
                 CompactionError::Invalid("the compaction task could not be claimed".to_owned())
             })?;
 
-        if let Some(memory) = &self.memory {
-            let extractor = MemoryExtractor::new(
-                self.session.clone(),
-                Arc::clone(&self.provider),
-                Arc::clone(memory),
-                self.model.clone(),
-                self.provider_name.clone(),
-                format!("{}:extract", self.owner),
-            );
-            if let Err(error) = extractor.extract_entries(conversation_id, &plan.entries) {
-                tracing::warn!(%error, "compaction memory extraction failed");
-            }
-        }
         let instruction = SUMMARY_INSTRUCTION.to_owned();
         let range = render_range(&plan.entries);
         let request = ChatRequest {
@@ -159,14 +156,26 @@ impl Compactor {
         let latency_ms = started.elapsed().as_millis() as i64;
         self.record_usage(&claimed.id, conversation_id, usage, latency_ms)?;
 
-        let summary = text.trim();
+        let (summary, memories) = parse_summary(&text);
         if summary.is_empty() {
             self.fail_task(&claimed.id, "the summary was empty")?;
             return Err(CompactionError::Invalid("the summary was empty".to_owned()));
         }
+        if let Some(memory) = &self.memory {
+            let source = plan.entries.last().map(|entry| entry.id.clone());
+            for candidate in memories.into_iter().take(MAX_SUMMARY_MEMORIES) {
+                let item = candidate
+                    .into_new()
+                    .source(Source::Extract)
+                    .from_entry(source.clone());
+                if let Err(error) = memory.write(item) {
+                    tracing::warn!(%error, "a compacted memory was not written");
+                }
+            }
+        }
         let entry = NewEntry {
             kind: "summary".to_owned(),
-            content: summary_content(summary, plan),
+            content: summary_content(&summary, plan),
             source: None,
             prompt_hash: Some(prompt_hash),
         };
@@ -223,6 +232,77 @@ impl Compactor {
         )?;
         Ok(())
     }
+}
+
+/// One durable statement a summary pass decided to keep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedMemory {
+    content: String,
+    kind: Kind,
+    subject: String,
+}
+
+impl ParsedMemory {
+    fn into_new(self) -> NewMemory {
+        NewMemory::new(self.content)
+            .kind(self.kind)
+            .subject(self.subject)
+    }
+}
+
+/// Read the summary and the memories out of one answer.
+///
+/// A model that ignores the format must not lose the summary, so anything that
+/// does not parse is taken at face value as prose and the memories are dropped.
+fn parse_summary(text: &str) -> (String, Vec<ParsedMemory>) {
+    let trimmed = text.trim();
+    let Some(start) = trimmed.find('{') else {
+        return (trimmed.to_owned(), Vec::new());
+    };
+    let Some(end) = trimmed.rfind('}') else {
+        return (trimmed.to_owned(), Vec::new());
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&trimmed[start..=end]) else {
+        return (trimmed.to_owned(), Vec::new());
+    };
+    let summary = value
+        .get("summary")
+        .and_then(|summary| summary.as_str())
+        .map(str::trim)
+        .filter(|summary| !summary.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| trimmed.to_owned());
+    let memories = value
+        .get("memories")
+        .and_then(|memories| memories.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let content = item.get("content")?.as_str()?.trim();
+                    if content.is_empty() {
+                        return None;
+                    }
+                    let kind = item
+                        .get("kind")
+                        .and_then(|kind| kind.as_str())
+                        .and_then(|kind| kind.parse().ok())
+                        .unwrap_or(Kind::Fact);
+                    let subject = item
+                        .get("subject")
+                        .and_then(|subject| subject.as_str())
+                        .unwrap_or("")
+                        .to_owned();
+                    Some(ParsedMemory {
+                        content: content.to_owned(),
+                        kind,
+                        subject,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (summary, memories)
 }
 
 fn render_range(entries: &[Entry]) -> String {

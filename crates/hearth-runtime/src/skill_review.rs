@@ -227,12 +227,13 @@ impl SkillReviewer {
             }
             skills.push_str(&line);
         }
-        let (memory, _version) = self
+        let rules = self
             .memory
-            .standing()
+            .rules()
             .map_err(|error| SkillReviewError::Memory(error.to_string()))?;
         let user_text = format!(
-            "## Recent successful runs\n{recent}\n\n## Skills\n{skills}\n\n## Memory\n{memory}"
+            "## Recent successful runs\n{recent}\n\n## Skills\n{skills}\n\n## Rules\n{}",
+            rules.text
         );
         let request = ChatRequest {
             model: self.model.clone(),

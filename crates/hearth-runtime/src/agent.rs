@@ -209,27 +209,32 @@ impl Agent {
         Ok(())
     }
 
+    /// The rules block, the recall digest, and the rules version.
+    ///
+    /// Both reads are local SQLite work with no model call, so this runs on the
+    /// turn path. A failure degrades to an empty segment and never blocks the
+    /// answer.
     fn memory_context(&self, query: Option<&str>) -> (String, String, u64) {
         let Some(memory) = &self.memory else {
             return (String::new(), String::new(), 0);
         };
-        let (standing, standing_version) = match memory.standing() {
-            Ok((text, version)) => (text, version),
+        let (rules, version) = match memory.rules() {
+            Ok(rules) => (rules.text, rules.version),
             Err(error) => {
-                tracing::warn!(%error, "standing memory could not be read");
+                tracing::warn!(%error, "rules could not be read");
                 (String::new(), 0)
             }
         };
         let recall = query
             .and_then(|query| match memory.recall(query) {
-                Ok(items) => Some(memory.render_recall(&items)),
+                Ok(recall) => Some(recall.digest),
                 Err(error) => {
                     tracing::warn!(%error, "memory recall failed");
                     None
                 }
             })
             .unwrap_or_default();
-        (standing, recall, standing_version)
+        (rules, recall, version)
     }
 
     fn compactor(&self) -> Compactor {
@@ -240,9 +245,7 @@ impl Agent {
             self.config.provider_name.clone(),
             self.config.owner.clone(),
         );
-        if let Some(memory) = &self.memory
-            && memory.embeddings_configured()
-        {
+        if let Some(memory) = &self.memory {
             compactor = compactor.with_memory(Arc::clone(memory));
         }
         compactor
@@ -283,7 +286,7 @@ impl Agent {
     pub fn compact_soft(&self, conversation_id: &str) -> Result<bool, AgentError> {
         let history = self.session.history_for_prompt(conversation_id)?;
         let runtime_note = self.runtime_note(conversation_id);
-        let (standing, recall, standing_version) =
+        let (rules, recall, rules_version) =
             self.memory_context(latest_user_text(&history).as_deref());
         let prompt = build_prompt(
             PromptInput {
@@ -291,8 +294,8 @@ impl Agent {
                 conversation_id: conversation_id.to_owned(),
                 model: self.config.model.clone(),
                 tools: self.tool_specs(),
-                standing,
-                standing_version,
+                rules,
+                rules_version,
                 recall,
                 skills_index: self.skills_index(),
                 guidance: self.config.guidance.clone(),
@@ -478,7 +481,7 @@ impl Agent {
             let history = self
                 .session
                 .history_for_prompt(&submission.conversation_id)?;
-            let (standing, recall, standing_version) =
+            let (rules, recall, rules_version) =
                 self.memory_context(latest_user_text(&history).as_deref());
             let tools = self.tool_specs();
             let make_input = |recall: String| PromptInput {
@@ -486,8 +489,8 @@ impl Agent {
                 conversation_id: submission.conversation_id.clone(),
                 model: self.config.model.clone(),
                 tools: tools.clone(),
-                standing: standing.clone(),
-                standing_version,
+                rules: rules.clone(),
+                rules_version,
                 recall,
                 skills_index: self.skills_index(),
                 guidance: self.config.guidance.clone(),
@@ -495,11 +498,29 @@ impl Agent {
             };
             let mut recall_text = recall;
             let mut prompt = build_prompt(make_input(recall_text.clone()), &history)?;
-            while prompt.tokens.total > self.budget.usable && !recall_text.is_empty() {
-                let mut lines: Vec<&str> = recall_text.lines().collect();
-                lines.pop();
-                recall_text = lines.join("\n");
-                prompt = build_prompt(make_input(recall_text.clone()), &history)?;
+            // Shaving tokens off the rendered digest would cut the block tag or
+            // the coverage line, which is the part that says what is missing.
+            // Ask the store for a smaller digest instead.
+            let mut recall_tokens = self
+                .memory
+                .as_ref()
+                .map(|memory| memory.config().recall_max_tokens)
+                .unwrap_or(0);
+            while prompt.tokens.total > self.budget.usable
+                && recall_tokens > digest_floor()
+                && let (Some(memory), Some(query)) = (&self.memory, latest_user_text(&history))
+            {
+                recall_tokens = recall_tokens * 2 / 3;
+                match memory.recall_within(&query, None, recall_tokens) {
+                    Ok(smaller) => {
+                        recall_text = smaller.digest;
+                        prompt = build_prompt(make_input(recall_text.clone()), &history)?;
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "recall could not be shrunk");
+                        break;
+                    }
+                }
             }
             if prompt.tokens.total > self.budget.usable {
                 let shrunk = shrink_tool_results(&history);
@@ -1031,6 +1052,11 @@ fn write_private(path: &std::path::Path, content: &str) -> std::io::Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
+}
+
+/// The smallest digest budget worth asking for.
+fn digest_floor() -> u64 {
+    64
 }
 
 fn latest_user_text(history: &[Entry]) -> Option<String> {

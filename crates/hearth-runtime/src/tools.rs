@@ -73,6 +73,7 @@ pub fn build_tools(
     spill: &Path,
     message: Option<MessageTarget>,
     memory: Option<Arc<MemoryService>>,
+    memory_source: Option<String>,
     skills: Option<Arc<SkillLibrary>>,
     task: Option<TaskTarget>,
     media: &ToolMediaRoots,
@@ -93,7 +94,7 @@ pub fn build_tools(
         )));
     }
     if let Some(memory) = memory {
-        tools.extend(memory.tools());
+        tools.extend(memory.tools_with_source(memory_source));
     }
     if let Some(skills) = skills {
         tools.push(Arc::new(SkillTool::new(skills)));
@@ -394,12 +395,16 @@ mod tests {
 
 /// The ceiling for the always-loaded tool schemas.
 ///
-/// Measured at 2,359 tokens: roughly 1,410 for the five memory tools and about
-/// 950 for the rest of the core set. The guard exists to catch a single tool
-/// growing a sprawling schema, so it sits just above the measured total rather
-/// than constraining the memory design.
+/// Four memory tools replaced five, and each schema lost a store selector, an id
+/// prefix convention, and a tag array. Measured at 767 tokens for the memory
+/// family against 1,410 for the five it replaced. The guard sits just above the
+/// measured total so a single tool growing a sprawling schema is caught.
 #[cfg(test)]
-const CORE_SCHEMA_TOKEN_BUDGET: i64 = 2_600;
+const CORE_SCHEMA_TOKEN_BUDGET: i64 = 1_800;
+
+/// The memory family's share of the core schema budget.
+#[cfg(test)]
+const MEMORY_SCHEMA_TOKEN_BUDGET: i64 = 800;
 
 #[cfg(test)]
 mod core_budget_tests {
@@ -417,7 +422,7 @@ mod core_budget_tests {
     fn the_core_tool_schemas_fit_the_budget() {
         let home = tempfile::TempDir::new().expect("temp home");
         let harness = Harness::open(home.path()).expect("harness");
-        let memory = Arc::new(MemoryService::new(harness.session().clone()).expect("memory"));
+        let memory = Arc::new(MemoryService::new(harness.session().clone()));
         let sender = TelegramSender::new(
             TelegramClient::with_base_url("test-token", "http://127.0.0.1:1")
                 .expect("telegram client"),
@@ -443,6 +448,7 @@ mod core_budget_tests {
             &spill,
             Some(target),
             Some(memory),
+            None,
             Some(Arc::new(SkillLibrary::new(home.path()))),
             None,
             &media,
@@ -460,11 +466,10 @@ mod core_budget_tests {
             "shell",
             "web_search",
             "web_fetch",
-            "memory_add",
-            "memory_edit",
-            "memory_delete",
-            "memory_search",
-            "memory_sessions",
+            "memory_save",
+            "memory_recall",
+            "memory_forget",
+            "memory_transcript",
             "message",
             "schedule",
             "skill",
@@ -477,12 +482,20 @@ mod core_budget_tests {
         }
 
         let tokens = ToolGroups::schema_tokens(&built.core.specs());
-        // Memory contributes five tools, about 1,410 tokens of this total. The
-        // rest of the core set is roughly 950. The guard exists to catch a tool
-        // that grew a sprawling schema, not to forbid the memory family.
         assert!(
             tokens <= CORE_SCHEMA_TOKEN_BUDGET,
             "core tool schemas use {tokens} tokens"
+        );
+        let memory_tokens: i64 = built
+            .core
+            .specs()
+            .iter()
+            .filter(|spec| spec.name.starts_with("memory_"))
+            .map(|spec| ToolGroups::schema_tokens(std::slice::from_ref(spec)))
+            .sum();
+        assert!(
+            memory_tokens <= MEMORY_SCHEMA_TOKEN_BUDGET,
+            "the four memory schemas use {memory_tokens} tokens"
         );
     }
 
@@ -507,7 +520,7 @@ mod core_budget_tests {
         .expect("settings");
         let media = ToolMediaRoots { inbound, outbound };
         let built = build_tools(
-            &settings, &workspace, &spill, None, None, None, None, &media,
+            &settings, &workspace, &spill, None, None, None, None, None, &media,
         )
         .expect("tools");
 

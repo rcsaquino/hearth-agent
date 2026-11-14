@@ -1745,7 +1745,7 @@ fn humanize(key: &str) -> String {
         "soft_compact" => "Soft compaction",
         "hard_compact" => "Hard compaction",
         "keep_recent_tokens" => "Keep recent tokens",
-        "standing_max_tokens" => "Standing memory budget",
+        "rules_max_tokens" => "Rules budget",
         "recall_max_tokens" => "Recall budget",
         "level" => "Log level",
         _ => {
@@ -1878,7 +1878,7 @@ fn tooltip_for(key: &str, kind: RowKind) -> &'static str {
         "keep_recent_tokens" => {
             "Recent conversation tokens kept verbatim when older turns are compacted."
         }
-        "standing_max_tokens" => "Token budget for standing memory included in every prompt.",
+        "rules_max_tokens" => "Token budget for pinned rules included in every prompt.",
         "recall_max_tokens" => "Token budget for memories recalled for each user message.",
         "level" => {
             "Diagnostic verbosity: trace, debug, info, warn, or error. Enter cycles through the choices."

@@ -514,6 +514,7 @@ impl HelperPool {
             Some(target),
             Some(Arc::clone(&self.config.memory)),
             None,
+            None,
             Some(task_target),
             &self.config.media,
         ) {

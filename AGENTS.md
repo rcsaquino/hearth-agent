@@ -70,14 +70,16 @@ credential-pattern scan. Never add the deny-list to the repository.
 Benchmarks, from the workspace:
 
 ```bash
-cargo test -p hearth-eval --test memory_bench
-cargo test -p hearth-eval --test tokens_bench
+cargo test -p hearth-eval --test memory_bench -- --nocapture
+cargo test -p hearth-eval --test memory_reachability
+HEARTH_EMBEDDING_MODEL_DIR=~/.hearth/models/bekko-embedding-v1-a8m \
+  cargo test -p hearth-eval --test memory_bench the_hybrid -- --ignored --nocapture
 ```
 
-The memory benchmark must keep recall@10 at or above 0.90 and zero secret leaks.
-The token benchmark must keep the fixed overhead, cache share, save, assembly,
-and recall timings within the section 14 targets when no guidance file is
-present.
+The memory benchmark must keep one-call recovery at or above 0.98, automatic
+recall at or above 0.92, digest tokens at or below 300 at p95, retrieval at or
+below 100 ms at p95, and zero secret leaks. `HEARTH_BENCH_VERBOSE=1` prints every
+question the digest missed.
 
 Useful focused runs:
 
@@ -140,7 +142,7 @@ nonblocking accept so a failed test cannot hang the suite.
 | `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, compaction, guidance, memory records. |
 | `hearth-storage` | SQLite connections, one writer and a read pool, migrations, snapshots, FTS5. |
 | `hearth-model` | OpenAI-compatible streaming, tool calls, usage, pricing, media clients. |
-| `hearth-memory` | Memory store, dedupe, standing memory, recall, extraction, consolidation. |
+| `hearth-memory` | Statements, rules, the retrieval cascade, the digest, and four tools. |
 | `hearth-tools` | Files, shell, web search, web fetch, documents, media, browser, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, and the message tool. |
 | `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket. |
@@ -159,12 +161,15 @@ Key invariants:
 - Telegram sends use at-most-once delivery effects. An uncertain send becomes
   Unknown and is recovered, never silently duplicated.
 - Prompt layers have fixed budgets and a prefix hash. Changes to the identity,
-  tools, guidance, standing memory, or skills must be visible in the Prompt tab
+  tools, guidance, rules, or skills must be visible in the Prompt tab
   and must name the changed layer.
 - Guidance comes from `HEARTH.md` in the home and `AGENTS.md` from the filesystem
   root down to the workspace. Each file is capped at 16 KB and the total at 32 KB.
-- Memory is lexical: FTS5 with porter stemming, RRF k=60, 0.85 Jaccard dedupe, and
-  a 180-day half-life. Do not add embeddings without a spec decision.
+- Memory is one table in `hearth.db`. Never overwrite a statement: close its
+  window and point `superseded_by` at the replacement. Recall is three cheap
+  channels (FTS5, subject, INT8 vectors behind a 0.40 floor) fused by RRF k=60,
+  ranked by a linear score over cheap features, then filled into a token budget.
+  No memory operation calls a model. The digest reports what it left out.
 - Optional tool groups are lazy. Their schemas enter a request only after
   `tool_search` selects them; the core prompt budget must not grow.
 - A message is acknowledged by the typing indicator, not a reaction.
@@ -203,15 +208,19 @@ it rather than adding a second identity.
 
 ## Known residuals
 
-- The earlier lexical baseline scored 0.650 on the synonym-only benchmark
-  cases. Hybrid local-vector recall is now available when the embedding model is
-  installed; the paraphrase benchmark still needs a fresh hybrid run.
-- A genuine standing-memory change can cold-build above 80 ms; the normal 200k
-  path is about 5 ms.
+- Memory recall is 0.933 automatic and 0.99 recoverable in one call on the lexical
+  path, and 0.954 and 0.99 with the local encoder installed. Paraphrase is the
+  weak category at 0.85 hybrid and 0.65 lexical.
+- Two of the 195 benchmark questions need more than one tool call. Both are
+  paraphrases with no shared vocabulary. Six of the thirteen automatic misses are
+  topics the fixture gives two live answers to.
+- Retrieval p95 is 6.4 ms lexical and 11.3 ms hybrid on a 200-statement store, and
+  24 ms with 4k distractors. A 200k store was not re-measured after the rewrite;
+  the vector scan is linear from about 10 ms at 4k.
 - `deepseek-v4.1-flash` is unpriced in this home; cost is recorded as unpriced
   rather than invented.
 - The seven-day soak remains open; the first public release is 0.1.0 alpha. The bounded
   soak and the local acceptance matrix are green.
 - The aarch64 package is built only when the target toolchain is present.
-- The old dev-home memory row saved before the provenance fix still has the old
-  `assistant/null` source. New rows are correct.
+- `AGENTS.md` is also read as guidance, so the memory notes here and `SPEC.md` 7
+  must stay in step.

@@ -276,8 +276,11 @@ mod tests {
 
         let started = Instant::now();
         stop_on_exit(home.path(), &Ownership::Spawned(child.id()), false);
+        // The child sleeps for 30 seconds, so a bound of two seconds still proves
+        // the exit did not wait for it, while leaving room for a loaded machine to
+        // schedule the signal.
         assert!(
-            started.elapsed() < Duration::from_millis(500),
+            started.elapsed() < Duration::from_secs(2),
             "exit waited for the daemon"
         );
 

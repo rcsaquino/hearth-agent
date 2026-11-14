@@ -32,8 +32,6 @@ pub enum BackupError {
 #[derive(Debug, Clone)]
 pub struct BackupReport {
     pub path: PathBuf,
-    pub memory: Option<PathBuf>,
-    pub standing: Option<PathBuf>,
     pub removed: Vec<PathBuf>,
 }
 
@@ -42,8 +40,6 @@ pub struct BackupReport {
 pub struct RestoreReport {
     pub restored: PathBuf,
     pub pre_restore: Option<PathBuf>,
-    pub memory_restored: Option<PathBuf>,
-    pub standing_restored: Option<PathBuf>,
 }
 
 /// Snapshot the database into `backups/hearth-YYYYMMDD.db` and prune retention.
@@ -58,29 +54,8 @@ pub fn backup(home: &Path) -> Result<BackupReport, BackupError> {
     let today = now.date();
     let path = backups.join(backup_name(today));
     snapshot(&database, &path)?;
-    let memory_source = home.join("memory").join("long-term.sqlite");
-    let memory = if memory_source.is_file() {
-        let destination = backups.join(memory_name(today));
-        snapshot(&memory_source, &destination)?;
-        Some(destination)
-    } else {
-        None
-    };
-    let standing_source = home.join("memory").join("standing.md");
-    let standing = if standing_source.is_file() {
-        let destination = backups.join(standing_name(today));
-        fs::copy(&standing_source, &destination)?;
-        Some(destination)
-    } else {
-        None
-    };
     let removed = prune(&backups, today)?;
-    Ok(BackupReport {
-        path,
-        memory,
-        standing,
-        removed,
-    })
+    Ok(BackupReport { path, removed })
 }
 
 /// Prune snapshots to seven daily and four weekly copies.
@@ -123,17 +98,10 @@ pub fn prune(backups: &Path, today: Date) -> Result<Vec<PathBuf>, BackupError> {
     keep.extend(weekly.values().rev().take(WEEKLY_KEEP).cloned());
 
     let mut removed = Vec::new();
-    for (date, path) in entries {
+    for (_date, path) in entries {
         if !keep.contains(&path) {
             fs::remove_file(&path)?;
             removed.push(path);
-            for sidecar in [memory_name(date), standing_name(date)] {
-                let sidecar = backups.join(sidecar);
-                if sidecar.is_file() {
-                    fs::remove_file(&sidecar)?;
-                    removed.push(sidecar);
-                }
-            }
         }
     }
     Ok(removed)
@@ -188,86 +156,11 @@ pub fn restore(home: &Path, source: &Path) -> Result<RestoreReport, BackupError>
         let _ = directory.sync_all();
     }
     verify(&database).map_err(|error| BackupError::InvalidBackup(error.to_string()))?;
-    let (memory_restored, standing_restored) = restore_memory(home, source)?;
     drop(lock);
     Ok(RestoreReport {
         restored: database,
         pre_restore,
-        memory_restored,
-        standing_restored,
     })
-}
-
-fn restore_memory(
-    home: &Path,
-    source: &Path,
-) -> Result<(Option<PathBuf>, Option<PathBuf>), BackupError> {
-    let Some(name) = source.file_name().and_then(|name| name.to_str()) else {
-        return Ok((None, None));
-    };
-    let Some(date) = parse_backup_name(name) else {
-        return Ok((None, None));
-    };
-    let backups = home.join("backups");
-    let memory_backup = backups.join(memory_name(date));
-    let standing_backup = backups.join(standing_name(date));
-    let memory_dir = home.join("memory");
-    fs::create_dir_all(&memory_dir)?;
-    let mut memory_restored = None;
-    if memory_backup.is_file() {
-        verify_memory(&memory_backup)?;
-        let destination = memory_dir.join("long-term.sqlite");
-        let temporary = memory_dir.join(".long-term-restore.tmp");
-        let _ = fs::remove_file(&temporary);
-        fs::copy(&memory_backup, &temporary)?;
-        let _ = fs::remove_file(memory_dir.join("long-term.sqlite-wal"));
-        let _ = fs::remove_file(memory_dir.join("long-term.sqlite-shm"));
-        fs::rename(&temporary, &destination)?;
-        memory_restored = Some(destination);
-    }
-    let mut standing_restored = None;
-    if standing_backup.is_file() {
-        let destination = memory_dir.join("standing.md");
-        let temporary = memory_dir.join(".standing-restore.tmp");
-        let _ = fs::remove_file(&temporary);
-        fs::copy(&standing_backup, &temporary)?;
-        fs::rename(&temporary, &destination)?;
-        standing_restored = Some(destination);
-    }
-    Ok((memory_restored, standing_restored))
-}
-
-fn verify_memory(path: &Path) -> Result<(), BackupError> {
-    let connection = hearth_storage::rusqlite::Connection::open_with_flags(
-        path,
-        hearth_storage::rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|error| BackupError::InvalidBackup(error.to_string()))?;
-    let check: String = connection
-        .query_row("PRAGMA quick_check", [], |row| row.get(0))
-        .map_err(|error| BackupError::InvalidBackup(error.to_string()))?;
-    if check != "ok" {
-        return Err(BackupError::InvalidBackup(check));
-    }
-    Ok(())
-}
-
-fn memory_name(date: Date) -> String {
-    format!(
-        "memory-{:04}{:02}{:02}.db",
-        date.year(),
-        u8::from(date.month()),
-        date.day()
-    )
-}
-
-fn standing_name(date: Date) -> String {
-    format!(
-        "standing-{:04}{:02}{:02}.md",
-        date.year(),
-        u8::from(date.month()),
-        date.day()
-    )
 }
 
 fn backup_name(date: Date) -> String {

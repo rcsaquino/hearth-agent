@@ -554,12 +554,7 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
             "guidance",
             theme::accent_style(),
         ),
-        (
-            "system · standing memory",
-            "standing",
-            "standing_memory",
-            theme::accent_style(),
-        ),
+        ("system · rules", "rules", "rules", theme::accent_style()),
         (
             "system · skills index",
             "skills",
@@ -992,7 +987,7 @@ mod tests {
                 "model": "test-model",
                 "identity": identity,
                 "guidance": "PROJECT RULES",
-                "standing_memory": "STANDING LINES",
+                "rules": "STANDING LINES",
                 "skills_index": "skill-one: does things",
                 "tools": [
                     {
@@ -1112,7 +1107,7 @@ mod tests {
         for label in [
             "system · identity",
             "system · guidance",
-            "system · standing memory",
+            "system · rules",
             "system · skills index",
             "request · tools",
             "system · relevant memory",

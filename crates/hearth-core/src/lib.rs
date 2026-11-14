@@ -13,8 +13,8 @@ mod soul;
 mod task;
 
 pub use budget::{
-    ContextBudget, FIXED_OVERHEAD_TARGET, SEGMENT_IDENTITY, SEGMENT_RECALL, SEGMENT_RUNTIME,
-    SEGMENT_SKILLS, SEGMENT_STANDING, SEGMENT_TOOLS, TokenCounts,
+    ContextBudget, FIXED_OVERHEAD_TARGET, SEGMENT_IDENTITY, SEGMENT_RECALL, SEGMENT_RULES,
+    SEGMENT_RUNTIME, SEGMENT_SKILLS, SEGMENT_TOOLS, TokenCounts,
 };
 pub use clock::{Clock, IdGen, SystemClock, UuidV7};
 pub use compaction::{
@@ -27,9 +27,9 @@ pub use guidance::{
 };
 pub use model::{
     Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,
-    EffectStatus, Entry, MemoryChange, MemoryUpdate, MemoryWrite, NewEntry, NewMemory,
-    NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission, SubmissionStatus, SubmitResult,
-    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals, cache_hit_rate,
+    EffectStatus, Entry, NewEntry, NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission,
+    SubmissionStatus, SubmitResult, TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent,
+    UsageTotals, cache_hit_rate,
 };
 pub use prompt::{Prompt, PromptInput, build as build_prompt, parse_blocks, prefix_cause};
 pub use session::{Harness, Session};

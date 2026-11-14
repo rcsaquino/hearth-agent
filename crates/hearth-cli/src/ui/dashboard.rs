@@ -224,8 +224,8 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
                 .and_then(|recall| recall["max_tokens"].as_u64())
                 .unwrap_or(settings.memory.recall_max_tokens);
             format!(
-                "{} standing · {items}×{} recall",
-                compact_count(settings.memory.standing_max_tokens),
+                "{} rules · {items}×{} recall",
+                compact_count(settings.memory.rules_max_tokens),
                 compact_count(tokens)
             )
         })

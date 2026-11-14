@@ -469,7 +469,7 @@ mod tests {
             "output_tokens": 5,
             "cache_hit_rate": 0.5,
             "memory_items": 3,
-            "standing_memory_version": 1,
+            "rules_version": 1,
         }));
         let text = buffer_text(&app, 110, 34);
         assert!(text.contains("Overview"), "{text}");
@@ -494,7 +494,7 @@ mod tests {
         app.status = Some(json!({
             "model": "fake-model",
             "memory_items": 3,
-            "standing_memory_version": 1,
+            "rules_version": 1,
             "memory_recall": {
                 "mode": "lexical",
                 "embeddings_configured": true,
@@ -514,7 +514,7 @@ mod tests {
         app.status = Some(json!({
             "model": "fake-model",
             "memory_items": 3,
-            "standing_memory_version": 1,
+            "rules_version": 1,
             "memory_recall": {
                 "mode": "hybrid",
                 "embeddings_configured": true,
@@ -538,7 +538,7 @@ mod tests {
             "memory_items": 12,
             "standing_bullets": 3,
             "standing_characters": 812,
-            "standing_memory_version": 347690056787881111_u64,
+            "rules_version": 347690056787881111_u64,
         }));
         let text = buffer_text(&app, 130, 34);
         assert!(text.contains("3 standing"), "{text}");
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn memory_tab_shows_saved_memories() {
         use hearth_core::Harness;
-        use hearth_memory::{MemoryInput, MemoryService};
+        use hearth_memory::{MemoryService, NewMemory};
 
         let home = TempDir::new().expect("temp home");
         init(
@@ -610,14 +610,9 @@ mod tests {
         .expect("init");
         {
             let harness = Harness::open(home.path()).expect("harness");
-            let memory = MemoryService::new(harness.session().clone()).expect("memory");
+            let memory = MemoryService::new(harness.session().clone());
             memory
-                .store()
-                .add(&MemoryInput {
-                    content: "The release checklist lives in docs/.".to_owned(),
-                    tags: Some(vec!["release".to_owned()]),
-                    source: None,
-                })
+                .write(NewMemory::new("The release checklist lives in docs/.").subject("release"))
                 .expect("memory");
         }
         let mut app = App::new(home.path().to_path_buf());
@@ -626,7 +621,7 @@ mod tests {
         let text = buffer_text(&app, 110, 34);
         assert!(text.contains("Memory"), "{text}");
         assert!(text.contains("release checklist"), "{text}");
-        assert!(text.contains("LONG-TERM"), "{text}");
+        assert!(text.contains("FACT"), "{text}");
     }
 
     #[test]
@@ -850,7 +845,7 @@ mod tests {
                 "model": "test-model",
                 "identity": identity,
                 "guidance": "PROJECT RULES",
-                "standing_memory": "STANDING LINES",
+                "rules": "STANDING LINES",
                 "skills_index": "skill-one: does things",
                 "recall": "MEMORY HIT",
                 "transcript": [

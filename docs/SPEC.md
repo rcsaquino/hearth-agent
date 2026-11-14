@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.23, plain-language edition
+**Status:** Draft 0.24, plain-language edition
 **Date:** 2026-11-14
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -10,8 +10,18 @@
 
 ## A note on language
 
+Draft 0.24 rebuilds memory. Two parallel stores, a hand-edited `standing.md`, five
+tools with an id-prefix convention, and a per-turn extraction model call are
+replaced by one table in the main database, three retrieval channels, a linear
+ranker over cheap features, and four tools that never call a model. Rules live in
+the cached prefix and the digest sits in the uncached suffix, so the per-turn cost
+is 116 tokens at the 95th percentile instead of 900. The digest now reports how
+much it left out, and a replaced statement keeps its history instead of being
+overwritten. Section 7 is the new contract, and section 7.9 carries the measured
+numbers.
+
 Draft 0.23 keeps the raw version hash out of the Overview. The memory card names the
-number of standing bullets instead of the 64-bit content hash, which stays in the
+number of rules instead of the 64-bit content hash, which stays in the
 prompt export and the daemon status where it is useful.
 
 Draft 0.22 makes `settings.json` the only bootstrap file. When the home loses its folders, `SOUL.md`, or an empty `HEARTH.md`, the daemon recreates them from the settings on the next start, so a home holding only a valid `settings.json` comes back as if onboarding had just finished. Existing files are never overwritten, and the repair runs only after the daemon holds its lock, so a systemd unit and a TUI-spawned daemon cannot both write.
@@ -288,7 +298,7 @@ tested and reasoned about alone. The names are literal.
 | `hearth-core` | The permanent record: entries, saves, documents, submissions, tasks, scheduler, and prompt assembly. |
 | `hearth-storage` | Owns SQLite connections, migrations, full-text search, and backups. |
 | `hearth-model` | Talks to providers: streaming, tool calls, retries, token estimates, and the media clients (image, transcription, speech). |
-| `hearth-memory` | Extraction, deduplication, retrieval, standing memory, consolidation, forgetting. |
+| `hearth-memory` | Statements, rules, retrieval, ranking, the digest, and four tools. |
 | `hearth-tools` | The built-in tools, output spill, and workspace confinement. |
 | `hearth-telegram` | The Bot API client, polling, rendering, and attachments. |
 | `hearth-runtime` | Wires everything together: daemon, agent loop, notifications, shutdown. |
@@ -650,7 +660,7 @@ lose the conversation.
 
 ```
 admit input -> submission queued -> generation task
-  assemble context (instructions, standing memory, recall, transcript)
+  assemble context (instructions, rules, recall, transcript)
   model request (stream)
   no tool calls -> save answer -> settle submission -> done
   tool calls -> save answer with calls
@@ -681,7 +691,7 @@ The rules:
   the provider and model support them.
 - `HEARTH.md` and the workspace's `AGENTS.md` chain become one
   `<project_instructions>` system message after the identity message and before
-  standing memory. The files are read at run start, capped, and shown in the
+  rules. The files are read at run start, capped, and shown in the
   Prompt tab.
 
 ### 5.3 Tools
@@ -778,19 +788,19 @@ Every request is assembled in the same order:
 | L0 identity | `SOUL.md`, voice, hard rules | Stable | 800 tokens |
 | L1 project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | 32 KB text |
 | L2 tools | Core tool schemas | Stable | 1200 |
-| L3 standing memory | Pinned rules and facts, versioned | Rare | 1200 |
+| L3 rules | Pinned instructions, versioned | Rare | 400 |
 | L4 skills index | Skill names and one-line descriptions | Rare | 300 |
 | L5 transcript | Entries, summaries, tool results | Append-only | Remaining |
 | L6 recall | Memory retrieved for this input | Every turn | 900 |
 | L7 runtime | Time, chat, budget, model | Every turn | 150 |
 
 L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
-guidance files, tools, standing memory, or skills change. L5 is append-only, so the provider's prefix cache
+guidance files, tools, rules, or skills change. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
 message; it never rewrites the prefix. L7 is the last system note.
 
 Each section after identity is wrapped in an XML tag: `<project_instructions>`,
-`<standing_memory>`, `<skills>`, `<relevant_memory>`, and
+`<rules>`, `<skills>`, `<memory>`, and
 `<summary_of_earlier_conversation>`. The default `SOUL.md` uses `<identity>`,
 `<voice>`, and `<rules>`.
 
@@ -845,7 +855,7 @@ The details:
 - It supports `api_key`, an optional `headers` map, and an optional `session_header`
   sent with the conversation id, as opencode-go requires.
 - The prefix hash is stored with each generation checkpoint. A prefix change is
-  logged with its cause: `SOUL.md`, tools, standing-memory version, or skills index.
+  logged with its cause: `SOUL.md`, tools, rules version, or skills index.
 - Cache reads and writes are recorded separately in the usage ledger.
 
 ### 6.5 One model
@@ -867,7 +877,7 @@ preambles and no server-side additions.
   the generation checkpoint.
 - The Prompt tab is one live, scrollable session export. The newest saved exchange
   is shown in full with the stable layers first: system identity (`SOUL.md`),
-  guidance, standing memory, skills, and the request `tools` field, followed by
+  guidance, rules, skills, and the request `tools` field, followed by
   relevant memory immediately before the newest user, every transcript item, the
   runtime note, and the saved response. A usage row appears only when the exchange
   has a linked usage record; an unlinked one is omitted rather than shown empty.
@@ -896,191 +906,247 @@ preambles and no server-side additions.
 
 ## 7. Memory
 
-**In plain terms.** Memory is two stores and the conversation record. A small
-standing file is always on the desk. A searchable library holds everything else.
-The transcript remains the evidence of what was said. The model writes memory
-through tools; automatic recall brings back a short, budgeted set of reminders.
+**In plain terms.** Memory answers three different questions, and it gives each
+its own shape. What does the user want done? That is a rule, and it belongs in
+front of the model on every turn without being searched for. What did the user
+say? That is knowledge, and it belongs in an index that can be reached by name,
+by word, and by meaning. What was actually said, word for word? That is the
+transcript, and it is never edited.
 
 Memory is global. There is one library for the user, not a scope per chat or per
-project. Every conversation and background task reads and writes the same stores.
+project. Every conversation and background task reads and writes the same rows.
 
-### 7.1 Two stores and the transcript
+### 7.1 Three stores and one database
 
 | Store | What it holds | Where it lives | When it is loaded |
 |---|---|---|---|
-| Standing | Durable rules and facts that need no retrieval cue | `$HEARTH_HOME/memory/standing.md` | Every request, before the transcript |
-| Long-term | Facts, preferences, people, projects, decisions | `$HEARTH_HOME/memory/long-term.sqlite` | Automatically, up to 900 tokens; deeper on demand |
-| Transcript | Every saved conversation entry | `$HEARTH_HOME/hearth.db` | On demand through the FTS-backed `memory_sessions` |
-| Working | The assembled prompt | RAM | Every request |
+| Rules | Instructions that must be obeyed without a retrieval cue | `memories` rows with `pinned = 1` | Every request, in the cached prefix |
+| Knowledge | Facts, people, preferences, decisions, commitments, episodes | `memories` rows | A digest before the newest user message; detail on demand |
+| Evidence | Every saved conversation entry | `entries`, indexed by `entries_fts` | Only when the model asks |
 
-The current code has no separate episode store, no importance/decay fields, and
-no nightly consolidation. Skills are versioned Markdown files and are not memory
-rows.
+All three live in `hearth.db`. A memory is written by the same writer thread as
+the entry it came from and is included in the same backup. A memory write is its
+own transaction, not a rider on the conversation save: the agent writes memory
+after the turn, and a memory that outlived a failed save is harmless while a save
+rolled back because of a memory would not be. `source_entry` is therefore a soft
+reference to the entry that produced it. There is no second database file and no
+hand-edited markdown store.
 
-### 7.2 What a long-term memory looks like
+Rules are not a separate table because a rule is a statement with a flag, not a
+different kind of evidence.
 
-Each long-term memory is one statement with retrieval cues and provenance.
+### 7.2 What a memory is
+
+One row is one statement the user would recognise as one thing they said.
 
 | Field | Notes |
 |---|---|
-| `id` | Stable `m_` UUID |
-| `content` | One fact; new writes are capped at 2,000 characters |
-| `tags` | JSON array; new writes allow up to 8 tags |
-| `source` | Optional provenance |
-| `created_at`, `updated_at` | RFC 3339 timestamps |
-| `revision` | Increments on edit; used for optimistic writes |
+| `id` | Stable `m_` id |
+| `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, or `fact` |
+| `content` | One statement; a write is capped at 2,000 characters |
+| `subject` | The normalised person, project, or thing it is about |
+| `pinned` | Injects the statement as a rule; only valid with `kind = rule` |
+| `source_kind`, `source_entry` | Provenance, down to the entry the user typed |
+| `valid_from`, `valid_to` | The window the statement was true |
+| `superseded_by` | The statement that replaced this one |
+| `created_at`, `updated_at`, `revision` | Bookkeeping |
 
-SQLite FTS5 indexes content, tags, and source with Porter stemming and a literal
-substring fallback. A `memory_vectors` table stores one INT8 vector per memory
-for the active local model; its model name and dimension make a model change
-invalidate stale vectors. Standing memory is a line-oriented file:
+There is **no importance score**. A stored importance is a number no one can
+calibrate, and it invites a write-time model call to produce it. Ranking is
+computed from evidence at read time instead.
 
-```text
-- [s_abc123] [p=80] Never use em dashes in output.
-```
+A plain read is the same validity rule evaluated at now. A statement dated in the
+future does not answer a question asked today, and a closed statement answers
+only an as-of read inside its window.
 
-Each bullet has a stable `s_` id, a priority from 0 to 100, and one line of
-content. The serialized file is capped at 5,000 characters.
+`valid_to` is what makes contradiction cheap. A statement is never overwritten.
+When a newer statement replaces it, the old row's window closes and
+`superseded_by` points at the replacement. "What is true now" reads the open
+windows; "what did we think in March" reads the closed ones. Nothing is lost, and
+no reconciliation model call is needed to keep the two apart.
+
+`subject` is the strongest retrieval signal a personal memory has, because a
+personal question almost always names somebody or something. The model sets it
+when it writes, and the statement's expansions are indexed beside it.
 
 ### 7.3 How memories get in
 
-The primary write path is the model calling a memory tool.
+Two paths, and neither one makes a model call beyond the turn that is already
+happening.
 
-- `memory_add` writes long-term memory by default, or standing memory with
-  `store: "standing"`.
-- `memory_edit` changes content, tags, source, or standing priority.
-- `memory_delete` removes a row permanently.
-- Identical content is reused rather than duplicated.
-- Long-term edits can require `expected_revision`; standing edits can require
-  `expected_content`.
-- Credential-shaped content is refused.
-- Standing capacity is protected by priority: only strictly lower-priority
-  bullets can be displaced, and displaced bullets are archived to long-term
-  memory with the `standing-archive` tag.
+**The agent writes.** `memory_save` is the primary path. The model calls it when
+the user says something lasting. It names the subject, chooses the kind, and can
+name the statement it replaces. The write result reports any current statement
+about the same subject that overlaps the new one, so a contradiction is visible
+and repairable on the same turn rather than discovered by a later question.
 
-A selective post-run extractor runs only when the latest user message contains a
-durable cue such as "remember", "I prefer", "always", "never", "from now on",
-"my name is", or "decision". It sees a bounded tail of the conversation, asks the
-configured model for at most three memories as JSON, and writes through the same
-store rules (2,000 characters, 8 tags, credential rejection, exact dedupe). It
-runs after delivery in the background, not on the hot reply path. Compaction also
-runs the same extractor over the range it is about to summarize, so durable details
-survive the summary.
+**A deterministic net catches explicit requests.** After the answer is delivered,
+four phrasings are read from the user's message without a model: "remember
+that", "my X is Y", "X is my Y", and a stated preference. At most three
+statements per message. Precision is worth more than recall here, because a
+noisy store spends tokens on every turn from then on and a wrong row is one
+`memory_forget` away from gone.
 
-There is no per-turn extractor or nightly consolidation in the current code.
-Those remain deliberate later options.
+**Compaction carries extraction in the same call.** The summary request already
+contains the range, so it returns the summary and up to three durable statements
+in one JSON object. This replaces a second request over the same text.
+
+Write rules:
+
+- Identical content is refused and the existing row is returned.
+- A near duplicate about the same subject is refused the same way, which is what
+  stops eight weeks of "ordered pad thai" from becoming eight rows. A duplicate
+  is judged by token containment, and a statement that swaps its own subject is
+  never a duplicate.
+- A pinned rule must fit the rules budget; a write that would overflow it is
+  refused with the current rules listed, so the model can replace one.
+- Credential-shaped content is refused before it reaches the table.
+- A rule is capped at 400 characters, which is also the longest rule line the
+  prompt shows, so the budget check and the render measure the same text.
 
 ### 7.4 How memories come back
 
-Automatic recall runs before a model call:
+Retrieval is a four-stage cascade, and every stage is local work.
 
 ```
-latest user text
-  -> skip empty or trivial input (hi, thanks, ok, ...)
-  -> lexical FTS5 search with stemming, bm25 order
-  -> local vector search when the model is active
-  -> reciprocal-rank fusion of the two ranked lists
-  -> up to memory.recall_max_items hits
-  -> clip each hit to a 240-character snippet
-  -> stop at memory.recall_max_tokens
-  -> inject as <relevant_memory> before the newest user message
+message
+  -> analyse: drop scaffolding, keep names, expand the forty relation groups
+  -> candidate generation, three cheap channels into one pool of 128
+       lexical   FTS5 porter + prefix, strict then broad
+       entity    exact and prefix match on subject
+       semantic  local INT8 vectors, cosine floor 0.40
+  -> fuse by reciprocal rank, k = 60
+  -> rank by a linear score over cheap features
+  -> diversify, then fill the token budget greedily by value per token
 ```
 
-Defaults are 8 items and 900 tokens. Tags and ids stay out of the automatic
-recall text to spend the budget on remembered content. The default model is
-`bekko-embedding-v1-a8m` at 384 dimensions, stored as INT8 vectors. The model is
-local; there is no embedding network call on the turn path. The daemon reports
-both `embeddings_configured` and `embeddings_active`, and Overview shows `hybrid`
-only when the backend is active, otherwise `lexical` or `lexical fallback`.
+The ranking features are the evidence a personal message actually provides.
 
-The model directory is `memory.embedding_model_dir`, relative to the home unless
-absolute. A release build fetches the pinned files on first use when they are
-missing; `scripts/fetch-embedding-model.sh` fetches them explicitly for debug
-builds or offline preparation. Set `HEARTH_OFFLINE=1` to refuse the first-use
-download entirely.
+| Feature | Weight | Why |
+|---|---|---|
+| Fused relevance | 1.00 | What the channels agreed on |
+| Subject match | 0.70 | The message named this statement's subject |
+| Term coverage | 0.80 | Share of the message's own words the statement answers |
+| Kind prior | 0.25 | A preference is more often the answer than an episode |
+| Still current | 0.35 | A closed window is history, not the answer |
+| Recency | 0.10 | A tie-break, never a filter |
 
-There is no recency boost or decay in the current path. The vector scan is a
-linear INT8 pass over the cached vectors; the 200k-row benchmark is about 205 ms
-on the target i3, while a 10k-row store is about 10 ms. The model query is about
-2–16 ms for short memory text on the same machine. The model can obtain the rest
-with the tools:
+Term coverage compares with a prefix in either direction, which is the cheap
+stand-in for a stemmer and is what lets "queued" find "queue". The fill sorts by
+score per token, so a short decisive fact is not displaced by a long lukewarm
+one, and it spends the whole budget instead of cutting at a fixed count.
 
-- `memory_search` searches long-term content, tags, and source; an `m_` id reads
-  full content in bounded chunks.
-- `memory_sessions` searches the FTS-indexed transcript or reads one entry by
-  `conversation#seq` citation. The keyword modes use `entries_fts`; literal
-  substring mode keeps the exact scan fallback.
+An as-of read skips the semantic channel. The vector index holds only current
+statements, and mixing today's meaning into a question about March would answer
+the wrong question.
 
-### 7.5 Standing memory
+### 7.5 The digest, and why it says what it hides
 
-Standing memory is injected as a system message before the transcript. It is
-reserved for instructions that must be present without a retrieval cue.
+Automatic recall sits immediately before the newest user message, which is the
+one prompt position that is never cached. Every token there is paid in full on
+every turn, so a line is terse:
 
-- The whole file is capped at 5,000 serialized characters.
-- New bullets are one line and limited to 2,000 characters.
-- Priority controls eviction; equal or higher priorities are never displaced.
-- Evicted bullets are archived to long-term memory with `standing-archive`.
-- Writes use an in-process mutex and a lock file, replace the file atomically,
-  refuse symlinks, and repair an over-budget file at startup.
-- The content hash is the standing version, so a change invalidates the prompt
-  cache prefix.
+```text
+m_4f2a1c8b9d7e person alice 12d: Alice manages the OR board
+m_9c01ab2d3e4f pref 3mo: prefers dark roast coffee
+more: alice 6 | memory_recall(subject) for the rest
+```
 
-### 7.6 Forgetting and secrets
+A line is the id, the kind when it is not `fact`, the subject, the age, and the
+statement. The ids are there so a follow-up call is one shot instead of a second
+search.
 
-- `memory_delete` removes a long-term row or a standing bullet permanently.
-- Standing eviction archives the displaced bullet; ordinary deletion does not.
-- There is no decay, tombstone, or automatic archival of old long-term memories
-  in the current code.
-- Credential-shaped content is rejected before a long-term or standing write.
-- A manually edited standing file is not controlled by the tool path; treat it
-  as trusted local input.
+The coverage line is the part that makes recall honest. For each subject the
+message named, the store counts what it holds and reports the difference. A digest
+that silently shows six of fourteen facts teaches the model that six is all
+there is. Naming the remainder, and the call that fetches it, is the difference
+between a bounded digest and a bounded memory.
 
-### 7.7 The memory tools
+Default budgets are 400 tokens for rules and 300 for the digest, with at most 12
+statements. The digest is measured at 116 tokens at the 95th percentile on the
+benchmark.
 
-There are five tools, not one dispatcher:
+### 7.6 Rules
 
-- `memory_add`
-- `memory_edit`
-- `memory_delete`
-- `memory_search`
-- `memory_sessions`
+Rules are injected as a system message in the cached prefix, ordered by creation
+so an edit does not reorder the block and the prefix hash only moves when the
+text moves.
 
-Standing operations use `store: "standing"` or `s_` ids; long-term operations use
-`m_` ids. The tools return structured results, compact excerpts, and explicit
-hints when a caller uses the wrong store.
+- The block is capped at 400 tokens. A write that would exceed the cap is
+  refused, not silently evicted.
+- Any rule that does not fit the render is named as `N more rules were not
+  shown`, so a hand-edited store cannot hide content silently.
+- The content hash is the rules version, so a change invalidates the cached
+  prefix and the Prompt tab names `rules` as the changed layer.
+- A statement that is not a rule cannot be pinned. Pinning a fact would repeat it
+  on every turn, which is the rule's job.
 
-### 7.8 How we know it works
+### 7.7 Forgetting and secrets
 
-**In plain terms.** Memory is measured, not assumed. A versioned benchmark asks
-questions whose answers were planted across years of synthetic conversation, then
-checks whether Hearth finds them without spending too many tokens.
+- `memory_forget` removes one statement permanently, including its vector.
+- A replaced statement is not deleted. It leaves the current set and stays
+  readable by id and by `as_of`.
+- There is no decay and no automatic archival. A statement stops being current
+  only when another statement replaces it or when the user removes it.
+- Credential-shaped content is refused before a write. The check runs in the
+  store, so every path shares it.
 
-A reachability guard also stores every row in a fixture, browses every page, and
-checks that each row is reachable by its direct term and by the vector-only path.
-The benchmark includes:
+### 7.8 The memory tools
 
-- 200 curated recall questions over synthetic years of conversation;
-- precision and recall targets;
-- contradiction and supersession cases;
-- temporal queries;
-- paraphrase cases, where the same fact is stored under different words, measured
-  against both the lexical and hybrid paths;
-- duplicate-write resistance;
-- leakage checks, meaning secrets are never stored.
+Four verbs, and each one does one thing.
 
-Targets for the memory plan:
+| Tool | Use |
+|---|---|
+| `memory_save` | Store one statement, optionally replacing another |
+| `memory_recall` | Search, read by id, read a subject, or read as of an instant |
+| `memory_forget` | Remove one statement permanently |
+| `memory_transcript` | Search the saved conversation record, or read one citation |
 
-- 100% indexed reachability: every stored memory is findable by at least one
-  deterministic path (content, tag, id, literal, or browse);
-- automatic recall@5 of 0.95 or better, with every automatic miss recoverable by
-  one memory tool call;
-- automatic recall p95 at or below 100 ms at 10k memories, and tool search p95 at
-  or below 500 ms;
-- automatic recall stays within the configured 900-token budget at the 95th
-  percentile;
-- zero secrets stored in the adversarial test set.
+There is no store selector, no id-prefix convention, and no tag array. The four
+schemas measure 767 tokens against 1,410 for the five they replace, and the
+saving is paid on every request.
 
-The 200 questions are versioned with the repository; the user spot-checks 20.
+### 7.9 How we know it works
+
+**In plain terms.** Memory is measured on a fixed fixture, and the numbers are
+printed with the target beside them.
+
+`crates/hearth-eval/tests/memory_bench.rs` replays 200 planted statements as the
+history they describe, then asks 195 questions across seven categories. It
+reports two numbers on purpose:
+
+- **Automatic recall** is what the digest put in front of the model.
+- **Recoverable** is automatic recall, or the answer appearing in one
+  `memory_recall` call.
+
+The second number is the honest form of "nothing is lost", because a bounded
+digest will always miss something. Measured on the committed fixture:
+
+| Measurement | Target | Result |
+|---|---|---|
+| Recoverable in one call, lexical | 0.98 | 0.99 |
+| Recoverable in one call, hybrid | 0.98 | 0.99 |
+| Automatic recall, lexical | 0.92 | 0.933 |
+| Automatic recall, hybrid | 0.92 | 0.954 |
+| Paraphrase, automatic, hybrid | 0.85 | 0.850 |
+| Digest tokens, p95 | 300 | 139 |
+| Retrieval latency, p95 | 100 ms | 6.4 ms lexical, 11.3 ms hybrid |
+| Contradiction answered by the current statement | all | 15 of 15 |
+| Duplicate writes that became new rows | 0 | 0 |
+| Secrets stored | 0 | 0 |
+
+`crates/hearth-eval/tests/memory_reachability.rs` proves the stronger property
+that makes 100% a construction rather than a hope: every stored statement is
+reachable by its id, by its subject, by a direct term, and by paging the whole
+store. Enumeration is always available, so a statement can be unreachable by a
+question but never by the system.
+
+The residual is stated rather than hidden. Two of the 195 questions need more
+than one call, and both are paraphrases with no shared vocabulary. Six of the
+thirteen automatic misses sit on a topic the fixture gives two live answers to,
+which is an ambiguity no ranking can settle. The vector channel is measured only
+when the local model is installed; without it recall falls back to lexical and
+the paraphrase category drops to 0.65.
 
 ---
 
@@ -1159,7 +1225,7 @@ reaction to the message.
 - Voice replies use the configured `media.tts` service; the default is ElevenLabs
   with the voice and model from settings, returned as OGG/Opus. They are sent only
   when the user explicitly asks for voice. This is a behavioral rule in `SOUL.md`
-  and standing memory, not merely a transport feature.
+  and a memory, not merely a transport feature.
 - When `media.tts.kind` is `elevenlabs`, the speech tools tell the model to use
   sparse Eleven v4 audio tags in square brackets, for example
   `[warm, composed voice]` or `[softly]`. The tags are sent to ElevenLabs verbatim;
@@ -1174,7 +1240,7 @@ handles it with tools or says why it cannot.
 - To stop a run, send `stop`. It aborts the active run and settles the submission as
   `cancelled`.
 - Status, memory edits, reminders, and voice preferences are requests to the agent.
-  Preferences are saved as standing memory.
+  Preferences are saved as rules.
 - Compaction runs automatically at the thresholds in 5.5. There is no manual
   trigger.
 - The TUI Overview shows the daemon state; the agent has no command-line tool.
@@ -1455,9 +1521,9 @@ Optional overrides, only when needed:
 | `models.context_window` | `128000` | Model context window in tokens; a local value that models.dev can refresh |
 | `models.max_output_tokens` | `32000` | Local reply reserve; not sent |
 | `tasks.eta_reminder_seconds` | `1` | Delay after a task’s expected finish before its reminder |
-| `memory.standing_max_tokens` | `1200` | Standing-memory budget |
-| `memory.recall_max_tokens` | `900` | Per-turn automatic-recall token budget |
-| `memory.recall_max_items` | `8` | Per-turn automatic-recall item cap |
+| `memory.rules_max_tokens` | `400` | Rules budget, in the cached prefix |
+| `memory.recall_max_tokens` | `300` | Per-turn digest token budget |
+| `memory.recall_max_items` | `12` | Per-turn digest item cap |
 | `memory.embeddings` | `true` | Request the local hybrid recall path; lexical fallback remains active |
 | `memory.embedding_model_dir` | `models/bekko-embedding-v1-a8m` | Local embedding model directory |
 | `media.image.model` | `openai/gpt-image-2.6-sunburst` | Image model |
@@ -1539,12 +1605,12 @@ ordinary, inspectable, and backed up by copying it in a consistent way.
 
 The exact schema is in `SCHEMA.md`. The tables are `meta`, `commits`,
 `conversations`, `entries`, `prompt_blobs`, `documents`, `submissions`, `tasks`,
-`effects`, `usage_events`, `telegram_updates`, `memory_items`, `memory_fts`, and
-`memory_events`.
+`effects`, `usage_events`, `telegram_updates`, `memories`, `memories_fts`, and
+`memory_vectors`.
 
 ### 11.3 Backups and retention
 
-- Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly. The memory database and standing file are snapshotted into same-date `memory-YYYYMMDD.db` and `standing-YYYYMMDD.md` sidecars.
+- Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly. Memory lives in that database, so the snapshot is the whole store.
 - Media can be pruned by age, with missing references reported.
 - The Doctor tab verifies integrity, schema version, lock state, settings, and
   provider credentials without printing secrets.
@@ -1601,7 +1667,7 @@ output, cache, and latency totals.
   recorded in the same ledger.
 - The Overview tab combines runtime (daemon, model, thinking, provider, context,
   turn limit, workspace), usage and cache hit rate for today, the last week, the
-  last month, and all time, work and memory (tasks, helpers, memory items, standing
+  last month, and all time, work and memory (tasks, helpers, statements, rules
   bullets, budgets, maintenance, skill review), provider connections, and recent
   activity. Each usage period shows input tokens, output tokens, and cache reads.
 - The Activity tab follows a live run or task; logs and the usage ledger keep the
@@ -1625,7 +1691,7 @@ Reference host: 4 CPU cores, 8 GB RAM, SSD.
 | Save time, 95th percentile | 15 ms or less | Most saves finish before a person notices. |
 | Memory retrieval, 200k items | 80 ms or less | Recall is fast even after years. |
 | Time to first token, excluding provider | 300 ms or less | Hearth's own overhead is small. |
-| Fixed prompt overhead | 4.5k tokens or less | The standing token overhead per turn stays bounded. |
+| Fixed prompt overhead | 4.5k tokens or less | The token overhead per turn stays bounded. |
 | Prompt cache hit, consecutive turns | 80% or more of prefix tokens | The provider reuses most of the stable prefix. |
 | Annual database size | 2 GB or less | Years of personal use fit on a small disk. |
 
@@ -1883,7 +1949,7 @@ install contains nothing personal.
 | Fetch order | Jina, then direct HTTP/HTTPS | 9.5 |
 | Memory decay | 5% per 90 days, floor 15 | 7.6 |
 | Archive threshold | 3 years unused and importance below 20 | 7.6 |
-| Nightly consolidation | 03:30 local time | 7.3 |
+| No scheduled memory pass | 03:30 local time | 7.3 |
 | Backups | 7 daily, 4 weekly | 11.3 |
 | Idle compaction timer | 60 minutes | 5.5 |
 | Idle compaction threshold | 100k tokens or 65% of usable | 5.5 |

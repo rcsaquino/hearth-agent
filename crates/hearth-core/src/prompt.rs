@@ -18,8 +18,8 @@ pub struct PromptInput {
     pub conversation_id: String,
     pub model: String,
     pub tools: Vec<ToolSpec>,
-    pub standing: String,
-    pub standing_version: u64,
+    pub rules: String,
+    pub rules_version: u64,
     pub recall: String,
     pub skills_index: String,
     pub guidance: String,
@@ -55,8 +55,8 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     messages.push(ChatMessage {
         role: Role::System,
         blocks: vec![ContentBlock::Text(format!(
-            "<standing_memory>\n{}\n</standing_memory>",
-            input.standing
+            "<rules>\n{}\n</rules>",
+            input.rules
         ))],
     });
     messages.push(ChatMessage {
@@ -75,7 +75,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             messages.push(ChatMessage {
                 role: Role::System,
                 blocks: vec![ContentBlock::Text(format!(
-                    "<relevant_memory>\n{}\n</relevant_memory>",
+                    "<memory>\n{}\n</memory>",
                     input.recall
                 ))],
             });
@@ -117,7 +117,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     let tokens = TokenCounts::new(
         tokens_for(&input.soul),
         tokens_for(&tools_text),
-        tokens_for(&input.standing),
+        tokens_for(&input.rules),
         tokens_for(&input.skills_index),
         tokens_for(&input.guidance),
         tokens_for(&transcript_text),
@@ -128,7 +128,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     let mut prefix_parts = BTreeMap::new();
     prefix_parts.insert("identity".to_owned(), hash_part(&input.soul));
     prefix_parts.insert("tools".to_owned(), hash_part(&tools_text));
-    prefix_parts.insert("standing".to_owned(), hash_part(&input.standing));
+    prefix_parts.insert("rules".to_owned(), hash_part(&input.rules));
     prefix_parts.insert("skills".to_owned(), hash_part(&skills_text));
     prefix_parts.insert("guidance".to_owned(), hash_part(&input.guidance));
     let prefix_hash = hash_part(
@@ -141,8 +141,8 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     let document = json!({
         "identity": input.soul,
         "tools": tools,
-        "standing_memory": input.standing,
-        "standing_version": input.standing_version,
+        "rules": input.rules,
+        "rules_version": input.rules_version,
         "skills_index": input.skills_index,
         "guidance": input.guidance,
         "recall": input.recall,
@@ -155,7 +155,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "tokens": {
             "identity": tokens.identity,
             "tools": tokens.tools,
-            "standing": tokens.standing,
+            "rules": tokens.rules,
             "skills": tokens.skills,
             "guidance": tokens.guidance,
             "transcript": tokens.transcript,
@@ -202,7 +202,7 @@ pub fn prefix_cause(previous: Option<&Value>, current: &BTreeMap<String, String>
         let label = match part.as_str() {
             "identity" => "SOUL.md",
             "tools" => "tools",
-            "standing" => "standing memory",
+            "rules" => "rules",
             "skills" => "skills index",
             "guidance" => "AGENTS.md/HEARTH.md",
             _ => part.as_str(),

@@ -1,712 +1,611 @@
-//! The five model-facing tools, ported from `index.ts`.
+//! The memory tools.
 //!
-//! Names, parameters, and defaults are the original's, so the guidance block that
-//! tells the model to use the memory tools stays accurate:
-//! `memory_add`, `memory_edit`, `memory_delete`, `memory_search`, and
-//! `memory_sessions`.
+//! Four verbs, not one dispatcher. Each does one thing to one kind of object, so
+//! the model never has to choose a store, remember an id prefix, or discover that
+//! a parameter was wrong for a different mode. That is worth more than the
+//! handful of tokens a combined schema would save: a tool the model uses
+//! correctly on the first call is the cheapest tool there is.
 //!
-//! The `s_` versus `m_` split is enforced exactly as the original does it, by
-//! inspecting the id prefix. A caller that passes a standing id to a long-term
-//! operation gets a specific message telling it where to look, rather than a
-//! generic not-found that invites a pointless retry.
+//! The write result carries one extra signal. When a new statement lands beside
+//! an existing one about the same subject, the reply names the neighbour and its
+//! overlap, so the model can replace it on the same turn instead of leaving two
+//! contradictory facts for a later question to trip over.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use hearth_model::ToolSpec;
 use hearth_tools::{Tool, ToolError, ToolOutput};
 use serde_json::{Value, json};
 
-use crate::database::{MemoryInput, MemorySearchOptions, MemoryStore, SearchMode};
-use crate::errors::{ErrorCode, ExpectedError};
-use crate::history::{HistoryMode, HistoryQuery, HistorySearch};
-use crate::results::{
-    render_history_read, render_history_search, render_memory_delete, render_memory_read,
-    render_memory_write, render_search, render_standing_add, render_standing_delete,
-    render_standing_edit,
-};
-use crate::standing::StandingStore;
-use crate::text::{MEMORY_LIMIT, NEW_MEMORY_LIMIT, NEW_TAG_LIMIT, integer, nonempty, tags};
+use crate::errors::{Code, MemoryError};
+use crate::model::{Kind, Memory, NewMemory};
+use crate::{MemoryService, digest, store};
 
-/// Convert an expected failure into a tool error.
-fn tool_error(error: ExpectedError) -> ToolError {
-    let retryable = matches!(error.code, ErrorCode::StandingLocked);
-    let mut tool = if retryable {
-        ToolError::temporary(error.code.as_str(), error.message.clone())
-    } else {
-        ToolError::invalid(error.code.as_str(), error.message.clone())
-    };
-    if error.details != Value::Null {
-        tool = tool.with_detail(serde_json::to_string(&error.details).unwrap_or_default());
-    }
-    tool
-}
+pub const SAVE: &str = "memory_save";
+pub const RECALL: &str = "memory_recall";
+pub const FORGET: &str = "memory_forget";
+pub const TRANSCRIPT: &str = "memory_transcript";
 
-/// Run a closure, mapping expected failures.
-fn guard(work: impl FnOnce() -> crate::errors::Result<String>) -> Result<ToolOutput, ToolError> {
-    match work() {
-        Ok(content) => Ok(ToolOutput {
-            content,
-            is_error: false,
-        }),
-        Err(error) => Err(tool_error(error)),
-    }
-}
-
-/// Everything a memory tool needs to reach the stores.
+/// Everything the tools need.
+///
+/// `source` is the entry this run's writes came from. It lives on the tool set
+/// rather than on the service, because the service is shared with the helper
+/// pool, the scheduler, and compaction, and a service-wide slot would stamp their
+/// writes with the user's entry too.
 #[derive(Clone)]
-pub struct MemoryTools {
-    pub standing: Arc<StandingStore>,
-    pub database: Arc<MemoryStore>,
-    pub sessions: Arc<HistorySearch>,
-    /// Provenance recorded on a long-term save when the caller omits one.
+pub struct ToolMemory {
+    pub service: MemoryService,
     pub source: Option<String>,
 }
 
-impl MemoryTools {
-    /// Build the tool set.
-    pub fn new(
-        standing: Arc<StandingStore>,
-        database: Arc<MemoryStore>,
-        session_path: impl Into<PathBuf>,
-    ) -> Self {
-        Self {
-            standing,
-            database,
-            sessions: Arc::new(HistorySearch::new(session_path)),
-            source: None,
-        }
-    }
+/// Build the four tools.
+pub fn build(memory: &ToolMemory) -> Vec<Arc<dyn Tool>> {
+    vec![
+        Arc::new(ForgetTool {
+            memory: memory.clone(),
+        }),
+        Arc::new(RecallTool {
+            memory: memory.clone(),
+        }),
+        Arc::new(SaveTool {
+            memory: memory.clone(),
+        }),
+        Arc::new(TranscriptTool {
+            memory: memory.clone(),
+        }),
+    ]
+}
 
-    /// Record this run's provenance on saves that do not name one.
-    pub fn with_source(mut self, source: impl Into<String>) -> Self {
-        self.source = Some(source.into());
-        self
+fn failure(error: MemoryError) -> ToolError {
+    match error.code {
+        Code::Unavailable => ToolError::temporary(error.code.as_str(), error.message),
+        _ => ToolError::invalid(error.code.as_str(), error.message),
     }
 }
 
-/// Read a required string argument.
-fn required_str(arguments: &Value, field: &str) -> crate::errors::Result<String> {
-    arguments
-        .get(field)
+fn spec(name: &str, description: &str, parameters: Value) -> ToolSpec {
+    ToolSpec {
+        name: name.to_owned(),
+        description: description.to_owned(),
+        parameters,
+    }
+}
+
+fn text(content: impl Into<String>) -> ToolOutput {
+    ToolOutput {
+        content: content.into(),
+        is_error: false,
+    }
+}
+
+fn required(value: &Value, name: &str) -> Result<String, ToolError> {
+    value
+        .get(name)
         .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
         .map(str::to_owned)
-        .ok_or_else(|| {
-            ExpectedError::with_details(
-                ErrorCode::InvalidInput,
-                format!("{field} is required."),
-                json!({ "field": field }),
-            )
-        })
+        .ok_or_else(|| ToolError::invalid("invalid_input", format!("{name} is required.")))
 }
 
-/// Read an optional string argument.
-fn optional_str(arguments: &Value, field: &str) -> Option<String> {
-    arguments
-        .get(field)
+fn optional(value: &Value, name: &str) -> Option<String> {
+    value
+        .get(name)
         .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
         .map(str::to_owned)
 }
 
-/// Read an optional integer argument.
-fn optional_int(arguments: &Value, field: &str) -> Option<i64> {
-    arguments.get(field).and_then(Value::as_i64)
+fn optional_flag(value: &Value, name: &str) -> bool {
+    value.get(name).and_then(Value::as_bool).unwrap_or(false)
 }
 
-/// Read an optional string array argument.
-fn optional_tags(arguments: &Value, field: &str) -> Option<Vec<String>> {
-    arguments.get(field).and_then(Value::as_array).map(|items| {
-        items
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect()
-    })
+fn limit(value: &Value, default: i64) -> i64 {
+    value
+        .get("limit")
+        .and_then(Value::as_i64)
+        .unwrap_or(default)
+        .clamp(1, 50)
 }
 
-/// Normalize and bound tags on a write. Search filters keep the wider cap.
-fn bounded_tags(arguments: &Value) -> crate::errors::Result<Option<Vec<String>>> {
-    let Some(raw) = optional_tags(arguments, "tags") else {
-        return Ok(None);
-    };
-    let normalized = tags(Some(&raw))?;
-    if normalized.len() > NEW_TAG_LIMIT {
-        return Err(ExpectedError::with_details(
-            ErrorCode::InvalidInput,
-            format!("Use at most {NEW_TAG_LIMIT} tags for a memory."),
-            json!({ "field": "tags", "max_items": NEW_TAG_LIMIT }),
-        ));
-    }
-    Ok(Some(normalized))
+struct SaveTool {
+    memory: ToolMemory,
 }
 
-/// `memory_add`.
-pub struct AddTool {
-    tools: MemoryTools,
-}
-
-impl AddTool {
-    /// Build the tool.
-    pub fn new(tools: MemoryTools) -> Self {
-        Self { tools }
-    }
-}
-
-impl Tool for AddTool {
+impl Tool for SaveTool {
     fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "memory_add".to_owned(),
-            description: "Save durable memory after checking for an existing fact. long_term (default) is retrievable by search; identical content reuses the existing row and returns created=false. standing is injected before every prompt, so use it only for instructions that need no retrieval cue: one line, 5,000-char total cap, content and priority only. A higher-priority bullet displaces lower-priority ones, which are archived to long_term.".to_owned(),
-            parameters: json!({
+        spec(
+            SAVE,
+            "Store one durable statement about the user or their world: a preference, a person, \
+             a decision, a commitment, or a fact. Use it when the user says something lasting. \
+             Give `subject` the person, project, or thing the statement is about, because that \
+             is what makes it findable later. To replace something already stored, pass its id \
+             as `supersedes`; the old statement is kept as history. Pin only a rule that must be \
+             obeyed on every turn.",
+            json!({
                 "type": "object",
                 "properties": {
-                    "content": { "type": "string", "minLength": 1, "maxLength": NEW_MEMORY_LIMIT },
-                    "store": {
+                    "content": {
                         "type": "string",
-                        "enum": ["long_term", "standing"],
-                        "description": "Default long_term for retrievable facts. standing for standing instructions needed in every session; use only content and optional priority."
+                        "description": "One statement, in the user's terms."
                     },
-                    "tags": {
-                        "type": "array",
-                        "items": { "type": "string", "minLength": 1, "maxLength": 80 },
-                        "maxItems": NEW_TAG_LIMIT,
-                        "description": "SQLite only: up to eight retrieval cues such as fruit and preferences. Omit for standing memory; supplied tags are ignored and reported."
+                    "kind": {
+                        "type": "string",
+                        "enum": ["rule", "preference", "person", "decision", "commitment", "episode", "fact"],
+                        "description": "Defaults to fact."
                     },
-                    "source": { "type": "string", "maxLength": 2_000, "description": "SQLite only: provenance. Omit on add to use the current session. Ignored and reported for standing memory." },
-                    "priority": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Hot-memory importance; default 50. Only strictly lower-priority entries can be displaced." }
-                },
-                "required": ["content"],
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
-        guard(|| {
-            let content = nonempty(
-                &required_str(arguments, "content")?,
-                "content",
-                NEW_MEMORY_LIMIT,
-            )?;
-            let store = optional_str(arguments, "store").unwrap_or_else(|| "long_term".to_owned());
-            if store == "standing" {
-                let priority = optional_int(arguments, "priority").unwrap_or(50);
-                let result = self.tools.standing.add(&content, priority)?;
-                return Ok(render_standing_add("memory_add", &result));
-            }
-            if optional_int(arguments, "priority").is_some() {
-                return Err(ExpectedError::with_details(
-                    ErrorCode::InvalidInput,
-                    "priority applies only to standing memory.",
-                    json!({ "field": "priority" }),
-                ));
-            }
-            let source = optional_str(arguments, "source")
-                .or_else(|| self.tools.source.clone())
-                .unwrap_or_default();
-            let (memory, created) = self.tools.database.add(&MemoryInput {
-                content,
-                tags: bounded_tags(arguments)?,
-                source: if source.is_empty() {
-                    None
-                } else {
-                    Some(source)
-                },
-            })?;
-            Ok(render_memory_write("memory_add", &memory, Some(created)))
-        })
-    }
-}
-
-/// `memory_edit`.
-pub struct EditTool {
-    tools: MemoryTools,
-}
-
-impl EditTool {
-    /// Build the tool.
-    pub fn new(tools: MemoryTools) -> Self {
-        Self { tools }
-    }
-}
-
-impl Tool for EditTool {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "memory_edit".to_owned(),
-            description: "Edit an existing memory by ID, preserving unspecified fields. s_ ids are standing.md, m_ ids are long_term. Pass expected_revision (m_) or expected_content (s_) to reject a stale write. Standing content must be one line and may not duplicate another bullet.".to_owned(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "description": "Stable s_... standing-memory or m_... SQLite memory ID." },
-                    "content": { "type": "string", "minLength": 1, "maxLength": NEW_MEMORY_LIMIT },
-                    "tags": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 80 }, "maxItems": NEW_TAG_LIMIT },
-                    "source": { "type": "string", "maxLength": 2_000 },
-                    "priority": { "type": "integer", "minimum": 0, "maximum": 100 },
-                    "expected_revision": { "type": "integer", "minimum": 1 },
-                    "expected_content": { "type": "string", "minLength": 1, "maxLength": MEMORY_LIMIT }
-                },
-                "required": ["id"],
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
-        guard(|| {
-            let id = required_str(arguments, "id")?;
-            let content = optional_str(arguments, "content")
-                .map(|content| nonempty(&content, "content", NEW_MEMORY_LIMIT))
-                .transpose()?;
-            let priority = optional_int(arguments, "priority");
-            let expected_revision = optional_int(arguments, "expected_revision");
-            let expected_content = optional_str(arguments, "expected_content");
-
-            if id.starts_with("s_") {
-                if expected_revision.is_some() {
-                    return Err(ExpectedError::with_details(
-                        ErrorCode::InvalidInput,
-                        "Use expected_content for standing memory, not expected_revision.",
-                        json!({ "field": "expected_revision" }),
-                    ));
-                }
-                if content.is_none() && priority.is_none() {
-                    return Err(ExpectedError::with_details(
-                        ErrorCode::InvalidInput,
-                        "Provide content or priority to edit.",
-                        json!({ "field": "content" }),
-                    ));
-                }
-                let result = self.tools.standing.edit(
-                    &id,
-                    content.as_deref(),
-                    priority,
-                    expected_content.as_deref(),
-                )?;
-                return Ok(render_standing_edit("memory_edit", &result));
-            }
-
-            if priority.is_some() || expected_content.is_some() {
-                return Err(ExpectedError::with_details(
-                    ErrorCode::InvalidInput,
-                    "SQLite edits use expected_revision, not priority/expected_content.",
-                    json!({
-                        "field": if priority.is_some() { "priority" } else { "expected_content" }
-                    }),
-                ));
-            }
-            let tags = bounded_tags(arguments)?;
-            let source = optional_str(arguments, "source");
-            if content.is_none() && tags.is_none() && source.is_none() {
-                return Err(ExpectedError::with_details(
-                    ErrorCode::InvalidInput,
-                    "Provide content, tags, or source to edit.",
-                    json!({ "field": "content" }),
-                ));
-            }
-            let memory = self.tools.database.edit(
-                &id,
-                content.as_deref(),
-                tags.as_deref(),
-                source.as_deref(),
-                expected_revision,
-            )?;
-            Ok(render_memory_write("memory_edit", &memory, None))
-        })
-    }
-}
-
-/// `memory_delete`.
-pub struct DeleteTool {
-    tools: MemoryTools,
-}
-
-impl DeleteTool {
-    /// Build the tool.
-    pub fn new(tools: MemoryTools) -> Self {
-        Self { tools }
-    }
-}
-
-impl Tool for DeleteTool {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "memory_delete".to_owned(),
-            description: "Delete a memory by s_ or m_ ID. Does not archive it, and does not erase conversation history.".to_owned(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "description": "Stable s_... standing-memory or m_... SQLite memory ID." },
-                    "expected_revision": { "type": "integer", "minimum": 1 },
-                    "expected_content": { "type": "string", "minLength": 1, "maxLength": MEMORY_LIMIT }
-                },
-                "required": ["id"],
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
-        guard(|| {
-            let id = required_str(arguments, "id")?;
-            let expected_revision = optional_int(arguments, "expected_revision");
-            let expected_content = optional_str(arguments, "expected_content");
-            if id.starts_with("s_") {
-                if expected_revision.is_some() {
-                    return Err(ExpectedError::with_details(
-                        ErrorCode::InvalidInput,
-                        "Use expected_content for standing memory.",
-                        json!({ "field": "expected_revision" }),
-                    ));
-                }
-                let result = self
-                    .tools
-                    .standing
-                    .delete(&id, expected_content.as_deref())?;
-                return Ok(render_standing_delete(&result));
-            }
-            if expected_content.is_some() {
-                return Err(ExpectedError::with_details(
-                    ErrorCode::InvalidInput,
-                    "Use expected_revision for SQLite memory.",
-                    json!({ "field": "expected_content" }),
-                ));
-            }
-            let deleted = self.tools.database.delete(&id, expected_revision)?;
-            Ok(render_memory_delete(&deleted))
-        })
-    }
-}
-
-/// `memory_search`.
-pub struct SearchTool {
-    tools: MemoryTools,
-}
-
-impl SearchTool {
-    /// Build the tool.
-    pub fn new(tools: MemoryTools) -> Self {
-        Self { tools }
-    }
-}
-
-impl Tool for SearchTool {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "memory_search".to_owned(),
-            description: "Search long_term memory over content, tags, and source. Modes: any (default, keyword prefix with stemming plus local-vector fusion when available), all, phrase, literal (substring). Empty query browses all. tags requires every listed tag exactly. Pass an m_ id with text_offset to read full content. Standing bullets are injected already, not searchable here. If a result is empty or uncertain, verify with memory_sessions before claiming absence.".to_owned(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "maxLength": 2_000 },
-                    "id": { "type": "string", "description": "long_term m_... memory ID only. Standing s_... entries are in the injected standing.md, not searchable by this tool." },
-                    "mode": { "type": "string", "enum": ["any", "all", "phrase", "literal"] },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
-                    "offset": { "type": "integer", "minimum": 0, "description": "Pass the previous response's next_offset to continue." },
-                    "text_offset": { "type": "integer", "minimum": 0 },
-                    "tags": {
-                        "type": "array",
-                        "items": { "type": "string", "minLength": 1, "maxLength": 80 },
-                        "maxItems": 30,
-                        "description": "Require every supplied tag exactly (case-sensitive) in the stored tags array. Applied inside SQL before pagination."
+                    "subject": {
+                        "type": "string",
+                        "description": "The person, project, or thing it is about, such as alice or or board."
+                    },
+                    "supersedes": {
+                        "type": "string",
+                        "description": "The id of the statement this one replaces."
+                    },
+                    "pin": {
+                        "type": "boolean",
+                        "description": "Injects a rule into every request. Only for kind rule."
                     }
                 },
-                "additionalProperties": false
+                "required": ["content"]
             }),
-        }
+        )
     }
 
     fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
-        guard(|| {
-            if let Some(id) = optional_str(arguments, "id") {
-                if optional_tags(arguments, "tags").is_some() {
-                    return Err(ExpectedError::with_details(
-                        ErrorCode::InvalidInput,
-                        "tags apply to searches, not to reading a memory by id.",
-                        json!({ "field": "tags" }),
-                    ));
-                }
-                if id.starts_with("s_") {
-                    return Err(ExpectedError::with_details(
-                        ErrorCode::InvalidInput,
-                        "memory_search reads long_term m_ IDs only. Standing s_ memories are injected from standing.md.",
-                        json!({ "id": id }),
-                    ));
-                }
-                let text_offset = optional_int(arguments, "text_offset").unwrap_or(0);
-                let offset = integer(text_offset, "text_offset", 0, i64::MAX)? as usize;
-                let read = self.tools.database.read(&id, offset)?;
-                return Ok(render_memory_read(&read));
+        let content = required(arguments, "content")?;
+        let kind = match optional(arguments, "kind") {
+            Some(value) => value
+                .parse::<Kind>()
+                .map_err(|error| ToolError::invalid(error.code.as_str(), error.message))?,
+            None => Kind::Fact,
+        };
+        let mut item = NewMemory::new(content.clone()).kind(kind);
+        if let Some(subject) = optional(arguments, "subject") {
+            item = item.subject(subject);
+        }
+        if let Some(previous) = optional(arguments, "supersedes") {
+            item = item.supersedes(previous);
+        }
+        if optional_flag(arguments, "pin") {
+            item = item.pinned(true);
+        }
+        let item = match &self.memory.source {
+            Some(entry) => item.from_entry(Some(entry.clone())),
+            None => item,
+        };
+        let outcome = self.memory.service.write(item).map_err(failure)?;
+        let now = self.memory.service.session().now_micros();
+        let memory = outcome.memory();
+        if !outcome.created() {
+            return Ok(text(format!(
+                "already stored as {}: {}",
+                memory.id, memory.content
+            )));
+        }
+        let mut reply = format!(
+            "saved {}{}{}",
+            memory.id,
+            if memory.pinned { " pinned" } else { "" },
+            if memory.subject.is_empty() {
+                String::new()
+            } else {
+                format!(" about {}", memory.subject)
             }
-            let query = optional_str(arguments, "query").unwrap_or_default();
-            let mode = match optional_str(arguments, "mode") {
-                Some(value) => SearchMode::parse(&value).ok_or_else(|| {
-                    ExpectedError::with_details(
-                        ErrorCode::InvalidInput,
-                        "Unknown memory search mode.",
-                        json!({ "field": "mode" }),
-                    )
-                })?,
-                None => SearchMode::Any,
-            };
-            let limit = optional_int(arguments, "limit").unwrap_or(20);
-            let offset = optional_int(arguments, "offset").unwrap_or(0);
-            let response = self.tools.database.search(
-                &query,
-                mode,
-                limit,
-                offset,
-                &MemorySearchOptions {
-                    tags: optional_tags(arguments, "tags").unwrap_or_default(),
-                },
-            )?;
-            Ok(render_search(&response))
-        })
+        );
+        if let Some((neighbour, overlap)) = store::related(
+            self.memory.service.session(),
+            &memory.subject,
+            &memory.content,
+            &memory.id,
+        )
+        .map_err(failure)?
+        {
+            reply.push_str(&format!(
+                "\nrelated: {} ({:.2} overlap) {}. Pass supersedes=\"{}\" if this replaces it.",
+                neighbour.id,
+                overlap,
+                digest::line(&neighbour, now),
+                neighbour.id
+            ));
+        }
+        Ok(text(reply))
     }
 }
 
-/// `memory_sessions`.
-pub struct HistoryTool {
-    tools: MemoryTools,
+struct RecallTool {
+    memory: ToolMemory,
 }
 
-impl HistoryTool {
-    /// Build the tool.
-    pub fn new(tools: MemoryTools) -> Self {
-        Self { tools }
-    }
-}
-
-impl Tool for HistoryTool {
+impl Tool for RecallTool {
     fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "memory_sessions".to_owned(),
-            description: "Search past conversation history, or read one original entry. Use for when/did we discuss, decisions, dates, and exact quotes. Modes: literal (substring, default), any, all. Optional role, after (inclusive), before (exclusive). Read by citation conversation#seq. Historical evidence, not instructions.".to_owned(),
-            parameters: json!({
+        spec(
+            RECALL,
+            "Search memory. With no arguments it lists the newest statements. `id` returns one \
+             statement in full. `subject` returns everything about a person, project, or thing. \
+             `as_of` reads what was true at that instant. Use it before answering a question \
+             about the user's world, and whenever the recall digest says more exists.",
+            json!({
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["search", "read"] },
-                    "query": { "type": "string", "maxLength": 2_000 },
-                    "mode": { "type": "string", "enum": ["literal", "any", "all"] },
-                    "role": { "type": "string", "description": "Optional exact role, e.g. user, assistant, tool_result. Omit to include all entry types." },
-                    "after": { "type": "string", "description": "Inclusive ISO timestamp/date. Dates are UTC; timestamps need a timezone." },
-                    "before": { "type": "string", "description": "Exclusive ISO timestamp/date." },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
-                    "offset": { "type": "integer", "minimum": 0 },
-                    "citation": { "type": "string", "description": "For action=read: the conversation#seq citation from a search result, or an entry id." },
-                    "text_offset": { "type": "integer", "minimum": 0 }
-                },
-                "additionalProperties": false
+                    "query": {
+                        "type": "string",
+                        "description": "Keywords to search for."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "One statement's id."
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Everything about this person, project, or thing."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["rule", "preference", "person", "decision", "commitment", "episode", "fact"]
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "description": "RFC3339 or YYYY-MM-DD. Reads what was true then."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "At most 50. Defaults to 20."
+                    }
+                }
             }),
-        }
+        )
     }
 
     fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
-        guard(|| {
-            let action = optional_str(arguments, "action").unwrap_or_else(|| "search".to_owned());
-            if action == "read" {
-                let reference = required_str(arguments, "citation")?;
-                let text_offset = optional_int(arguments, "text_offset").unwrap_or(0);
-                let offset = integer(text_offset, "text_offset", 0, i64::MAX)? as usize;
-                let read = self.tools.sessions.read(&reference, offset)?;
-                return Ok(render_history_read(&read));
-            }
-            let mode = match optional_str(arguments, "mode") {
-                Some(value) => HistoryMode::parse(&value).ok_or_else(|| {
-                    ExpectedError::with_details(
-                        ErrorCode::InvalidInput,
-                        "Unknown session search mode.",
-                        json!({ "field": "mode" }),
-                    )
-                })?,
-                None => HistoryMode::Literal,
+        let at = match optional(arguments, "as_of") {
+            Some(value) => Some(parse_instant(&value)?),
+            None => None,
+        };
+        let count = limit(arguments, 20);
+        let now = self.memory.service.session().now_micros();
+
+        if let Some(id) = optional(arguments, "id") {
+            let memory = self
+                .memory
+                .service
+                .get(&id)
+                .map_err(failure)?
+                .ok_or_else(|| {
+                    ToolError::invalid("not_found", format!("memory {id} does not exist."))
+                })?;
+            let subject = if memory.subject.is_empty() {
+                "no subject".to_owned()
+            } else {
+                memory.subject.clone()
             };
-            let response = self.tools.sessions.search(&HistoryQuery {
-                query: optional_str(arguments, "query"),
-                mode: Some(mode),
-                role: optional_str(arguments, "role"),
-                after: optional_str(arguments, "after"),
-                before: optional_str(arguments, "before"),
-                limit: optional_int(arguments, "limit"),
-                offset: optional_int(arguments, "offset"),
-            })?;
-            Ok(render_history_search(&response))
-        })
+            let history = if memory.is_current() {
+                String::new()
+            } else {
+                format!(
+                    "\nreplaced by {}",
+                    memory
+                        .superseded_by
+                        .as_deref()
+                        .unwrap_or("a newer statement")
+                )
+            };
+            return Ok(text(format!(
+                "{} [{}, {}, {}]: {}\n{}{}",
+                memory.id,
+                memory.kind,
+                subject,
+                if memory.pinned { "pinned" } else { "unpinned" },
+                memory.content,
+                format_args!(
+                    "source {} since {}",
+                    memory.source.as_str(),
+                    memory.valid_from
+                ),
+                history
+            )));
+        }
+
+        let kind_filter = match optional(arguments, "kind") {
+            Some(value) => Some(
+                value
+                    .parse::<Kind>()
+                    .map_err(|error| ToolError::invalid(error.code.as_str(), error.message))?,
+            ),
+            None => None,
+        };
+
+        let found = if let Some(subject) = optional(arguments, "subject") {
+            self.memory
+                .service
+                .subject(&subject, at, count)
+                .map_err(failure)?
+        } else if let Some(query) = optional(arguments, "query") {
+            self.memory
+                .service
+                .search(&query, at, count)
+                .map_err(failure)?
+        } else {
+            self.memory.service.recent(count).map_err(failure)?
+        };
+
+        let selected: Vec<&Memory> = found
+            .iter()
+            .filter(|memory| kind_filter.is_none_or(|kind| memory.kind == kind))
+            .collect();
+        if selected.is_empty() {
+            return Ok(text("no memories matched."));
+        }
+        let mut lines: Vec<String> = selected
+            .iter()
+            .map(|memory| digest::line(memory, now))
+            .collect();
+        let hidden = found.len().saturating_sub(selected.len());
+        if hidden > 0 {
+            lines.push(format!("{hidden} other kinds were not shown."));
+        }
+        Ok(text(lines.join("\n")))
+    }
+}
+
+/// Parse an RFC3339 instant or a date.
+fn parse_instant(value: &str) -> Result<i64, ToolError> {
+    if let Ok(instant) =
+        time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+    {
+        return Ok(instant.unix_timestamp_nanos().div_euclid(1_000) as i64);
+    }
+    let date = time::Date::parse(
+        value,
+        time::macros::format_description!("[year]-[month]-[day]"),
+    )
+    .map_err(|_| {
+        ToolError::invalid(
+            "invalid_input",
+            "as_of must be an RFC3339 instant or a YYYY-MM-DD date.",
+        )
+    })?;
+    Ok(date
+        .midnight()
+        .assume_utc()
+        .unix_timestamp_nanos()
+        .div_euclid(1_000) as i64)
+}
+
+struct ForgetTool {
+    memory: ToolMemory,
+}
+
+impl Tool for ForgetTool {
+    fn spec(&self) -> ToolSpec {
+        spec(
+            FORGET,
+            "Delete one statement permanently. Prefer `memory_save` with `supersedes` when a fact \
+             changed, because the old version is worth keeping as history. Delete when the \
+             statement was wrong, private, or never true.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The statement's id."
+                    }
+                },
+                "required": ["id"]
+            }),
+        )
+    }
+
+    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
+        let id = required(arguments, "id")?;
+        self.memory.service.forget(&id).map_err(failure)?;
+        Ok(text(format!("forgotten {id}")))
+    }
+}
+
+struct TranscriptTool {
+    memory: ToolMemory,
+}
+
+impl Tool for TranscriptTool {
+    fn spec(&self) -> ToolSpec {
+        spec(
+            TRANSCRIPT,
+            "Search the saved conversation record, or read one entry by its conversation#seq \
+             reference. Use it for what was literally said in an earlier conversation.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Words to search for."
+                    },
+                    "reference": {
+                        "type": "string",
+                        "description": "A conversation#seq citation."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "At most 50. Defaults to 10."
+                    }
+                }
+            }),
+        )
+    }
+
+    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
+        if let Some(reference) = optional(arguments, "reference") {
+            let entry = self
+                .memory
+                .service
+                .entry(&reference)
+                .map_err(failure)?
+                .ok_or_else(|| {
+                    ToolError::invalid("not_found", format!("{reference} is not a saved entry."))
+                })?;
+            return Ok(text(format!(
+                "{}#{} {} {}\n{}",
+                entry.conversation_id, entry.seq, entry.kind, entry.created_at, entry.text
+            )));
+        }
+        let query = required(arguments, "query")?;
+        let hits = self
+            .memory
+            .service
+            .transcript(&query, limit(arguments, 10))
+            .map_err(failure)?;
+        if hits.is_empty() {
+            return Ok(text("no saved entries matched."));
+        }
+        let lines: Vec<String> = hits
+            .iter()
+            .map(|hit| format!("{} [{}] {}", hit.reference(), hit.kind, hit.snippet))
+            .collect();
+        Ok(text(lines.join("\n")))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
 
-    fn fixture() -> (tempfile::TempDir, MemoryTools) {
-        let directory = tempfile::tempdir().unwrap();
-        let database =
-            Arc::new(MemoryStore::open(directory.path().join("long-term.sqlite")).unwrap());
-        let database_for_archive = Arc::clone(&database);
-        let standing = Arc::new(StandingStore::new(
-            directory.path().join("standing.md"),
-            Arc::new(move |entries: &[crate::standing::StandingItem]| {
-                database_for_archive
-                    .archive(entries, "standing.md")
-                    .map(|_| ())
-            }),
-        ));
-        let tools = MemoryTools::new(
-            standing,
-            Arc::clone(&database),
-            directory.path().join("hearth.sqlite"),
+    fn memory() -> (TempDir, MemoryService) {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        (directory, MemoryService::new(harness.session().clone()))
+    }
+
+    fn registry(service: &MemoryService) -> hearth_tools::ToolRegistry {
+        hearth_tools::ToolRegistry::new(service.tools())
+    }
+
+    #[test]
+    fn a_saved_statement_can_be_recalled_by_id() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let saved = tools
+            .call(
+                SAVE,
+                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+            )
+            .expect("call")
+            .expect("result");
+        assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
+        let id = saved.content.split_whitespace().nth(1).expect("id");
+        let recalled = tools
+            .call(RECALL, &json!({"id": id}))
+            .expect("call")
+            .expect("result");
+        assert!(
+            recalled.content.contains("OR board"),
+            "{}",
+            recalled.content
         );
-        (directory, tools)
-    }
-
-    fn output(result: Result<ToolOutput, ToolError>) -> String {
-        match result {
-            Ok(output) => output.content,
-            Err(error) => panic!("tool failed: {}", error.message),
-        }
     }
 
     #[test]
-    fn add_defaults_to_long_term() {
-        let (_directory, tools) = fixture();
-        let rendered = output(AddTool::new(tools).call(&json!({ "content": "a durable fact" })));
-        assert!(rendered.contains("\"store\": \"long_term\""));
-        assert!(rendered.contains("\"created\": true"));
-    }
-
-    #[test]
-    fn add_can_target_hot() {
-        let (_directory, tools) = fixture();
-        let rendered = output(
-            AddTool::new(tools)
-                .call(&json!({ "content": "standing rule", "store": "standing", "priority": 80 })),
+    fn a_statement_beside_a_related_one_names_the_neighbour() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        tools
+            .call(
+                SAVE,
+                &json!({"content": "the primary database is Postgres", "subject": "primary database"}),
+            )
+            .expect("call")
+            .expect("result");
+        let second = tools
+            .call(
+                SAVE,
+                &json!({"content": "the primary database is SQLite now", "subject": "primary database"}),
+            )
+            .expect("call")
+            .expect("result");
+        assert!(
+            second.content.contains("Pass supersedes"),
+            "the write must teach the model to replace: {}",
+            second.content
         );
-        assert!(rendered.contains("\"store\": \"standing\""));
-        assert!(rendered.contains("\"priority\": 80"));
     }
 
     #[test]
-    fn add_rejects_an_oversized_memory() {
-        let (_directory, tools) = fixture();
-        let content = "x".repeat(2_001);
-        let error = AddTool::new(tools)
-            .call(&json!({ "content": content }))
-            .unwrap_err();
+    fn a_replaced_statement_is_kept_as_history() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let first = tools
+            .call(
+                SAVE,
+                &json!({"content": "the lab is in building 4", "subject": "lab"}),
+            )
+            .expect("call")
+            .expect("result");
+        let id = first
+            .content
+            .split_whitespace()
+            .nth(1)
+            .expect("id")
+            .to_owned();
+        tools
+            .call(
+                SAVE,
+                &json!({"content": "the lab is in building 9", "subject": "lab", "supersedes": id}),
+            )
+            .expect("call")
+            .expect("result");
+
+        let current = tools
+            .call(RECALL, &json!({"query": "where is the lab"}))
+            .expect("call")
+            .expect("result");
+        assert!(
+            current.content.contains("building 9"),
+            "{}",
+            current.content
+        );
+        assert!(
+            !current.content.contains("building 4"),
+            "a replaced statement must not answer a current question: {}",
+            current.content
+        );
+
+        let historical = tools
+            .call(RECALL, &json!({"id": id}))
+            .expect("call")
+            .expect("result");
+        assert!(
+            historical.content.contains("building 4"),
+            "{}",
+            historical.content
+        );
+        assert!(
+            historical.content.contains("replaced by"),
+            "{}",
+            historical.content
+        );
+    }
+
+    #[test]
+    fn forgetting_a_missing_statement_says_so() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let error = tools
+            .call(FORGET, &json!({"id": "m_missing"}))
+            .expect("call")
+            .expect_err("missing");
+        assert!(error.message.contains("does not exist"), "{error:?}");
+    }
+
+    #[test]
+    fn a_greeting_is_refused_as_content() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let error = tools
+            .call(SAVE, &json!({"content": "   "}))
+            .expect("call")
+            .expect_err("empty");
         assert_eq!(error.code, "invalid_input");
-    }
-
-    #[test]
-    fn add_rejects_too_many_tags() {
-        let (_directory, tools) = fixture();
-        let tags: Vec<String> = (0..9).map(|index| format!("tag-{index}")).collect();
-        let error = AddTool::new(tools)
-            .call(&json!({ "content": "a fact", "tags": tags }))
-            .unwrap_err();
-        assert_eq!(error.code, "invalid_input");
-    }
-
-    #[test]
-    fn add_rejects_priority_for_long_term() {
-        let (_directory, tools) = fixture();
-        let error = AddTool::new(tools)
-            .call(&json!({ "content": "x", "priority": 50 }))
-            .unwrap_err();
-        assert_eq!(error.code, "invalid_input");
-    }
-
-    #[test]
-    fn a_long_term_round_trip_through_the_tools() {
-        let (_directory, tools) = fixture();
-        let added = output(AddTool::new(tools.clone()).call(&json!({
-            "content": "USER_NAME likes sour pork soup",
-            "tags": ["food", "user"]
-        })));
-        let value: Value = serde_json::from_str(&added).unwrap();
-        let id = value["memory"]["id"].as_str().unwrap().to_owned();
-
-        let searched = output(SearchTool::new(tools.clone()).call(&json!({ "query": "soup" })));
-        assert!(searched.contains("soup"));
-
-        let edited = output(EditTool::new(tools.clone()).call(&json!({
-            "id": id,
-            "content": "USER_NAME likes very sour pork soup",
-            "expected_revision": 1
-        })));
-        assert!(edited.contains("very sour"));
-
-        let deleted = output(DeleteTool::new(tools).call(&json!({ "id": id })));
-        assert!(deleted.contains("\"deleted\""));
-    }
-
-    #[test]
-    fn a_hot_id_in_search_is_redirected() {
-        let (_directory, tools) = fixture();
-        let error = SearchTool::new(tools)
-            .call(&json!({ "id": "s_abc" }))
-            .unwrap_err();
-        assert!(error.message.contains("standing.md"), "{}", error.message);
-    }
-
-    #[test]
-    fn a_hot_edit_with_a_revision_is_rejected() {
-        let (_directory, tools) = fixture();
-        let added = output(AddTool::new(tools.clone()).call(&json!({
-            "content": "rule", "store": "standing"
-        })));
-        let value: Value = serde_json::from_str(&added).unwrap();
-        let id = value["memory"]["id"].as_str().unwrap().to_owned();
-        let error = EditTool::new(tools)
-            .call(&json!({ "id": id, "content": "new rule", "expected_revision": 1 }))
-            .unwrap_err();
-        assert_eq!(error.code, "invalid_input");
-        assert!(error.message.contains("expected_content"));
-    }
-
-    #[test]
-    fn a_hot_delete_needs_no_long_term_fields() {
-        let (_directory, tools) = fixture();
-        let added = output(AddTool::new(tools.clone()).call(&json!({
-            "content": "temporary rule", "store": "standing"
-        })));
-        let value: Value = serde_json::from_str(&added).unwrap();
-        let id = value["memory"]["id"].as_str().unwrap().to_owned();
-        let rendered = output(DeleteTool::new(tools).call(&json!({ "id": id })));
-        assert!(rendered.contains("\"deleted\""));
-        assert!(rendered.contains("temporary rule"));
-    }
-
-    #[test]
-    fn an_unknown_search_mode_is_rejected() {
-        let (_directory, tools) = fixture();
-        let error = SearchTool::new(tools)
-            .call(&json!({ "query": "x", "mode": "fuzzy" }))
-            .unwrap_err();
-        assert_eq!(error.code, "invalid_input");
-    }
-
-    #[test]
-    fn sessions_reports_a_missing_store_rather_than_pretending_it_is_empty() {
-        let (_directory, tools) = fixture();
-        let error = HistoryTool::new(tools)
-            .call(&json!({ "query": "anything" }))
-            .unwrap_err();
-        assert_eq!(error.code, "store_unavailable");
-    }
-
-    #[test]
-    fn every_tool_declares_a_distinct_name() {
-        let (_directory, tools) = fixture();
-        let names = [
-            AddTool::new(tools.clone()).spec().name,
-            EditTool::new(tools.clone()).spec().name,
-            DeleteTool::new(tools.clone()).spec().name,
-            SearchTool::new(tools.clone()).spec().name,
-            HistoryTool::new(tools).spec().name,
-        ];
-        let unique: std::collections::BTreeSet<_> = names.iter().collect();
-        assert_eq!(unique.len(), 5);
-        assert_eq!(names[0], "memory_add");
-        assert_eq!(names[4], "memory_sessions");
     }
 }

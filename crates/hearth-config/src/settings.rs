@@ -289,8 +289,8 @@ impl Default for Compaction {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Memory {
-    #[serde(default = "default_standing_max_tokens")]
-    pub standing_max_tokens: u64,
+    #[serde(default = "default_rules_max_tokens")]
+    pub rules_max_tokens: u64,
     #[serde(default = "default_recall_max_tokens")]
     pub recall_max_tokens: u64,
     #[serde(default = "default_recall_max_items")]
@@ -306,7 +306,7 @@ pub struct Memory {
 impl Default for Memory {
     fn default() -> Self {
         Self {
-            standing_max_tokens: default_standing_max_tokens(),
+            rules_max_tokens: default_rules_max_tokens(),
             recall_max_tokens: default_recall_max_tokens(),
             recall_max_items: default_recall_max_items(),
             embeddings: default_embeddings(),
@@ -417,16 +417,16 @@ fn default_idle_min_tokens() -> u64 {
     100_000
 }
 
-fn default_standing_max_tokens() -> u64 {
-    1200
+fn default_rules_max_tokens() -> u64 {
+    400
 }
 
 fn default_recall_max_tokens() -> u64 {
-    900
+    300
 }
 
 fn default_recall_max_items() -> u64 {
-    8
+    12
 }
 
 fn default_embeddings() -> bool {
@@ -501,7 +501,7 @@ pub fn default_settings_value() -> Value {
             "keep_recent_tokens": default_keep_recent_tokens(),
         },
         "memory": {
-            "standing_max_tokens": default_standing_max_tokens(),
+            "rules_max_tokens": default_rules_max_tokens(),
             "recall_max_tokens": default_recall_max_tokens(),
         },
         "logging": {"level": default_log_level()},

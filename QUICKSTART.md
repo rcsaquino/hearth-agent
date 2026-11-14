@@ -137,8 +137,8 @@ send files, albums, and, when you explicitly ask for voice, a spoken reply.
 ## 8. Backups
 
 Snapshots go to `~/.hearth/backups/` and are pruned to seven daily and four
-weekly copies. The daemon writes them automatically. Each snapshot also includes
-the long-term memory database and `standing.md` as same-date memory sidecars.
+weekly copies. The daemon writes them automatically. Memory lives in
+`hearth.db`, so one snapshot holds the transcript and everything remembered.
 
 ## 9. Troubleshooting
 
