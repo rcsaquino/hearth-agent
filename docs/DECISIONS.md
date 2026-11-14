@@ -1561,3 +1561,21 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Nightly backups now include same-date `memory-YYYYMMDD.db` and
   `standing-YYYYMMDD.md` sidecars. Restore copies them back when present, so a
   main-database restore no longer leaves the memory library behind.
+
+## 2026-11-13: Transcript FTS and reachability guard
+
+- `entries_fts` is an FTS5 external-content index over `entries.content_json`,
+  with insert/delete/update triggers and a rebuild migration for existing
+  transcripts. `memory_sessions` uses it for the `any` and `all` keyword modes;
+  `literal` keeps the case-insensitive substring scan. If the index is absent or
+  the query has no token match, search falls back to the scan so an old or
+  unusual database does not lose reachability.
+- The JSON itself is indexed. The tokenizer ignores punctuation and searches the
+  decoded text values; this avoids a second shadow text column and keeps writes
+  to the transcript unchanged.
+- `hearth-eval/tests/memory_reachability.rs` stores 128 unique facts plus a
+  vector-only fact, checks every direct term, browses every page, and verifies the
+  vector-only paraphrase. It is deterministic and runs without the embedding
+  model.
+- Startup vector maintenance removes orphaned `memory_vectors` rows before the
+  resumable backfill.

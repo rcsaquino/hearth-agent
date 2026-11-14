@@ -881,7 +881,7 @@ project. Every conversation and background task reads and writes the same stores
 |---|---|---|---|
 | Standing | Durable rules and facts that need no retrieval cue | `$HEARTH_HOME/memory/standing.md` | Every request, before the transcript |
 | Long-term | Facts, preferences, people, projects, decisions | `$HEARTH_HOME/memory/long-term.sqlite` | Automatically, up to 900 tokens; deeper on demand |
-| Transcript | Every saved conversation entry | `$HEARTH_HOME/hearth.db` | On demand through `memory_sessions` |
+| Transcript | Every saved conversation entry | `$HEARTH_HOME/hearth.db` | On demand through the FTS-backed `memory_sessions` |
 | Working | The assembled prompt | RAM | Every request |
 
 The current code has no separate episode store, no importance/decay fields, and
@@ -978,8 +978,9 @@ with the tools:
 
 - `memory_search` searches long-term content, tags, and source; an `m_` id reads
   full content in bounded chunks.
-- `memory_sessions` searches or reads the conversation transcript by
-  `conversation#seq` citation.
+- `memory_sessions` searches the FTS-indexed transcript or reads one entry by
+  `conversation#seq` citation. The keyword modes use `entries_fts`; literal
+  substring mode keeps the exact scan fallback.
 
 ### 7.5 Standing memory
 
@@ -1025,6 +1026,8 @@ hints when a caller uses the wrong store.
 questions whose answers were planted across years of synthetic conversation, then
 checks whether Hearth finds them without spending too many tokens.
 
+A reachability guard also stores every row in a fixture, browses every page, and
+checks that each row is reachable by its direct term and by the vector-only path.
 The benchmark includes:
 
 - 200 curated recall questions over synthetic years of conversation;
