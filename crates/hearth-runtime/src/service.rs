@@ -80,20 +80,20 @@ pub fn install_at(
     Ok(ServiceReport { unit })
 }
 
-/// Report whether the unit is installed.
+/// Report whether the unit is installed for this home.
 pub fn status(home: &Path) -> Result<ServiceStatus, ServiceError> {
-    let _ = home;
     let directory = config_dir()?;
-    status_at(&directory)
+    status_at(&directory, home)
 }
 
 /// Report the state of a unit in a chosen directory.
-pub fn status_at(config_dir: &Path) -> Result<ServiceStatus, ServiceError> {
+///
+/// A unit that names another home is not installed for this one: starting it
+/// would run a daemon against the wrong record.
+pub fn status_at(config_dir: &Path, home: &Path) -> Result<ServiceStatus, ServiceError> {
     let unit = config_dir.join("hearth.service");
-    Ok(ServiceStatus {
-        installed: unit.is_file(),
-        unit,
-    })
+    let installed = unit.is_file() && unit_home(&unit).is_some_and(|named| named == home);
+    Ok(ServiceStatus { unit, installed })
 }
 
 /// Stop, disable, and remove the user unit.
@@ -223,6 +223,36 @@ fn escape(value: &str) -> String {
         .replace('%', "%%")
 }
 
+/// The home a unit names, or `None` when it names none or cannot be read.
+fn unit_home(unit: &Path) -> Option<PathBuf> {
+    let text = fs::read_to_string(unit).ok()?;
+    for line in text.lines() {
+        let Some(rest) = line.trim().strip_prefix("Environment=") else {
+            continue;
+        };
+        let rest = rest.trim();
+        let value = rest
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap_or(rest);
+        // A quoted value may hold one assignment whose path contains spaces, or
+        // several space-separated assignments.
+        if let Some(home) = value.strip_prefix("HEARTH_HOME=")
+            && !home.is_empty()
+        {
+            return Some(PathBuf::from(home));
+        }
+        for assignment in value.split_whitespace() {
+            if let Some(home) = assignment.strip_prefix("HEARTH_HOME=")
+                && !home.is_empty()
+            {
+                return Some(PathBuf::from(home));
+            }
+        }
+    }
+    None
+}
+
 fn enable_linger() -> Result<(), ServiceError> {
     let user = current_user()?;
     run_loginctl(&["enable-linger", &user])
@@ -275,4 +305,61 @@ fn config_dir() -> Result<PathBuf, ServiceError> {
             ServiceError::Config("HOME is not set; pass an XDG config directory".into())
         })?;
     Ok(base.join("systemd/user"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_home_a_unit_names() {
+        let directory = tempfile::TempDir::new().expect("temp dir");
+        let unit = directory.path().join("hearth.service");
+        fs::write(
+            &unit,
+            "[Service]\nEnvironment=\"HEARTH_DAEMON=1\"\n\
+             Environment=\"HEARTH_HOME=/home/USER_NAME/.hearth\"\n",
+        )
+        .expect("unit");
+        assert_eq!(
+            unit_home(&unit),
+            Some(PathBuf::from("/home/USER_NAME/.hearth"))
+        );
+    }
+
+    #[test]
+    fn reads_a_home_from_a_combined_environment_line() {
+        let directory = tempfile::TempDir::new().expect("temp dir");
+        let unit = directory.path().join("hearth.service");
+        fs::write(
+            &unit,
+            "[Service]\nEnvironment=\"HEARTH_DAEMON=1 HEARTH_HOME=/srv/hearth\"\n",
+        )
+        .expect("unit");
+        assert_eq!(unit_home(&unit), Some(PathBuf::from("/srv/hearth")));
+    }
+
+    #[test]
+    fn reads_a_home_that_contains_spaces() {
+        let directory = tempfile::TempDir::new().expect("temp dir");
+        let unit = directory.path().join("hearth.service");
+        fs::write(
+            &unit,
+            "[Service]\nEnvironment=\"HEARTH_HOME=/home/USER_NAME/My Files/.hearth\"\n",
+        )
+        .expect("unit");
+        assert_eq!(
+            unit_home(&unit),
+            Some(PathBuf::from("/home/USER_NAME/My Files/.hearth"))
+        );
+    }
+
+    #[test]
+    fn a_unit_without_a_home_names_none() {
+        let directory = tempfile::TempDir::new().expect("temp dir");
+        let unit = directory.path().join("hearth.service");
+        fs::write(&unit, "[Service]\nEnvironment=\"HEARTH_DAEMON=1\"\n").expect("unit");
+        assert_eq!(unit_home(&unit), None);
+        assert_eq!(unit_home(&directory.path().join("missing.service")), None);
+    }
 }
