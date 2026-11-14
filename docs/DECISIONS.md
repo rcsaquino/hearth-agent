@@ -1602,3 +1602,19 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   pending updates would silently drop unread messages.
 - `DoctorError::DatabaseMissing` now says the daemon creates the database on start
   instead of telling the user to run `hearth` from inside `hearth`.
+
+## 2026-11-14: A unit manages only the home it names
+
+- `service::status` reports a unit as installed for a home only when the unit's
+  `HEARTH_HOME` names that home. Before, any unit on the machine made every home
+  take the systemd path, so a recovered home holding a copied `settings.json` waited
+  30 seconds for a daemon the unit was never running.
+- The unit path calls `systemctl --user restart` instead of `start`. A unit that is
+  still active can hold a daemon whose home was wiped underneath it, which is the
+  recovery case this record adds, and `start` is a no-op there. Restart re-reads the
+  home and settings; on an inactive unit systemd treats it as a start. The path only
+  runs after the status probe fails, so a healthy daemon is still attached, never
+  restarted.
+- Unit `Environment=` parsing accepts our own quoted `HEARTH_HOME` line, a combined
+  assignment line, and a path that contains spaces. A unit without a home is not
+  installed for any home, so the TUI spawns its own daemon instead of guessing.

@@ -461,6 +461,9 @@ overwritten, so a healthy home is left untouched and a restore is safe to repeat
 - The repair is idempotent and never rewrites an existing `SOUL.md` or `HEARTH.md`.
 - Only the daemon repairs, and only after it holds `hearth.lock`; the TUI still never
   opens a database writer.
+- A start-mode unit is used only when it names this home; otherwise the TUI starts
+  its own daemon. An active unit is restarted rather than started, so a daemon left
+  running after its home was wiped comes back against the restored record.
 - Only credentials and personal choices live in `settings.json`; deleting it returns
   the user to the setup wizard.
 - A record created from scratch logs one warning that Telegram may replay recent
