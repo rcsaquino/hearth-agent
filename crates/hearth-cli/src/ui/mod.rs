@@ -530,6 +530,25 @@ mod tests {
     }
 
     #[test]
+    fn overview_names_the_standing_bullets_not_the_hash() {
+        let (_home, mut app) = initialized_app();
+        app.daemon = DaemonState::Running;
+        app.status = Some(json!({
+            "model": "fake-model",
+            "memory_items": 12,
+            "standing_bullets": 3,
+            "standing_characters": 812,
+            "standing_memory_version": 347690056787881111_u64,
+        }));
+        let text = buffer_text(&app, 130, 34);
+        assert!(text.contains("3 standing"), "{text}");
+        assert!(
+            !text.contains("347690056787881111"),
+            "the overview printed the version hash: {text}"
+        );
+    }
+
+    #[test]
     fn hovering_a_setting_shows_its_tooltip() {
         let (_home, mut app) = initialized_app();
         app.handle_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));
