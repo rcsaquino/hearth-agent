@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.21, plain-language edition
-**Date:** 2026-11-13
+**Status:** Draft 0.22, plain-language edition
+**Date:** 2026-11-14
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -9,6 +9,8 @@
 ---
 
 ## A note on language
+
+Draft 0.22 makes `settings.json` the only bootstrap file. When the home loses its folders, `SOUL.md`, or an empty `HEARTH.md`, the daemon recreates them from the settings on the next start, so a home holding only a valid `settings.json` comes back as if onboarding had just finished. Existing files are never overwritten, and the repair runs only after the daemon holds its lock, so a systemd unit and a TUI-spawned daemon cannot both write.
 
 Draft 0.21 adds local hybrid memory: the configured item and token budgets now bound automatic recall, snippets replace full rows, and tags stay out of the injected text. Long-term memory gains INT8 vectors from the local `bekko-embedding-v1-a8m` model, fused with FTS5 by reciprocal rank. A missing model falls back to lexical recall. New writes are limited to 2,000 characters and 8 tags, credential-shaped content is refused, durable cues trigger a background extraction pass, and Overview reports whether recall is lexical or hybrid. Nightly backups now include the memory stores.
 
@@ -444,6 +446,26 @@ be mode `0600`; the daemon refuses to start otherwise.
 - Settings changes are written atomically with mode `0600`; a start-mode change
   restarts the daemon.
 - Every value remains editable in `settings.json`, including `identity.timezone`.
+
+### 3.5 Recovery
+
+**In plain terms.** `settings.json` is the only file Hearth cannot rebuild.
+
+If the home folder loses everything except a valid `settings.json`, the next daemon
+start restores the post-onboarding state: `workspace/`, `skills/`, `skills/learned/`,
+`media/inbound/`, `media/outbound/`, `spill/`, `logs/`, and `backups/` exist again,
+`SOUL.md` is written from `identity.agent_name`, and `HEARTH.md` is created empty.
+`hearth.db` is created and migrated on the same start. Nothing that still exists is
+overwritten, so a healthy home is left untouched and a restore is safe to repeat.
+
+- The repair is idempotent and never rewrites an existing `SOUL.md` or `HEARTH.md`.
+- Only the daemon repairs, and only after it holds `hearth.lock`; the TUI still never
+  opens a database writer.
+- Only credentials and personal choices live in `settings.json`; deleting it returns
+  the user to the setup wizard.
+- A record created from scratch logs one warning that Telegram may replay recent
+  updates. No offset sentinel is added: a fresh setup starts at zero too, and
+  dropping the pending updates instead would lose unread messages.
 
 ---
 

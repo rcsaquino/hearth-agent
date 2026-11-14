@@ -1579,3 +1579,26 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   model.
 - Startup vector maintenance removes orphaned `memory_vectors` rows before the
   resumable backfill.
+
+## 2026-11-14: Home recovery from settings.json
+
+- `settings.json` is the only bootstrap authority. After taking `hearth.lock` and
+  before opening the database, the daemon recreates the onboarding layout when it is
+  missing: the eight folders, `SOUL.md` from `identity.agent_name`, and an empty
+  `HEARTH.md`. Existing files and folders are never overwritten, so the pass is
+  idempotent and quiet on a healthy home.
+- The repair lives in `hearth_runtime::restore_home`. `init` and the repair share
+  one layout definition (`home::scaffold`), so onboarding and recovery cannot drift.
+- Repair is daemon-only. The TUI must not open a database writer, and the lock owner
+  is the single process allowed to write the layout, so a systemd unit and a
+  TUI-spawned daemon cannot race. The TUI already tolerates every missing artifact
+  (skills list, memory views, identity editors), so nothing is user-visible before
+  the daemon starts.
+- `restore_home` never opens the database. Creating and migrating `hearth.db` stays
+  the daemon's write through `Harness::open`.
+- A record minted from zero migrations logs one warning that Telegram may replay
+  recent updates. No offset sentinel is added: a fresh setup starts at offset zero
+  too, a sentinel would be new state that itself needs recovery, and draining the
+  pending updates would silently drop unread messages.
+- `DoctorError::DatabaseMissing` now says the daemon creates the database on start
+  instead of telling the user to run `hearth` from inside `hearth`.
