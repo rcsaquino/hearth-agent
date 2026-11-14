@@ -43,11 +43,11 @@ fn install_refuses_a_different_unit_without_force() {
 fn status_reports_installed_and_missing() {
     let home = TempDir::new().expect("temp home");
     let config = TempDir::new().expect("systemd config");
-    let missing = status_at(config.path()).expect("status");
+    let missing = status_at(config.path(), home.path()).expect("status");
     assert!(!missing.installed);
 
     install_at(home.path(), config.path(), false, false).expect("install");
-    let installed = status_at(config.path()).expect("status");
+    let installed = status_at(config.path(), home.path()).expect("status");
     assert!(installed.installed);
     assert_eq!(installed.unit, config.path().join("hearth.service"));
 }
@@ -92,8 +92,33 @@ fn uninstall_removes_the_unit_and_is_idempotent() {
     assert!(removed.removed);
     assert_eq!(removed.unit, config.path().join("hearth.service"));
     assert!(!removed.unit.exists());
-    assert!(!status_at(config.path()).expect("status").installed);
+    assert!(
+        !status_at(config.path(), home.path())
+            .expect("status")
+            .installed
+    );
 
     let again = uninstall_at(config.path(), false).expect("idempotent uninstall");
     assert!(!again.removed);
+}
+
+#[test]
+fn a_unit_that_names_another_home_is_not_installed_for_this_one() {
+    let ours = TempDir::new().expect("temp home");
+    let theirs = TempDir::new().expect("other home");
+    let config = TempDir::new().expect("systemd config");
+    install_at(theirs.path(), config.path(), false, false).expect("install");
+
+    assert!(
+        status_at(config.path(), theirs.path())
+            .expect("status")
+            .installed,
+        "the unit names its own home"
+    );
+    assert!(
+        !status_at(config.path(), ours.path())
+            .expect("status")
+            .installed,
+        "a unit for another home must not manage this one"
+    );
 }
