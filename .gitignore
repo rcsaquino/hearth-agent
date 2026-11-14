@@ -12,3 +12,7 @@ backups/
 
 # Local embedding model cache
 models/
+
+# Local agent skills and their lock file
+.agents/
+skills-lock.json
