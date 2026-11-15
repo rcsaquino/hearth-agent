@@ -1,10 +1,11 @@
 //! The nightly skill review and its scheduler handler.
 
 use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use hearth_core::{CoreError, Entry, NewUsage, Session, SubmissionStatus, parse_blocks};
+use hearth_core::{CoreError, Entry, NewUsage, Session, SubmissionStatus, Zone, parse_blocks};
 use hearth_memory::MemoryService;
 use hearth_model::{ChatMessage, ChatRequest, ContentBlock, Provider, Role, StreamEvent, Usage};
 use serde_json::{Value, json};
@@ -12,9 +13,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::maintenance::{
-    SKILL_REVIEW_HOUR, SKILL_REVIEW_MINUTE, local_offset, next_daily_micros, rfc3339,
-};
+use crate::maintenance::{SKILL_REVIEW_HOUR, SKILL_REVIEW_MINUTE, rfc3339};
 use crate::scheduler::{TaskHandler, TaskHandlerError};
 use crate::skills::{Skill, SkillError, SkillLibrary, SkillSave, SkillScope, SkillStatus};
 
@@ -411,12 +410,17 @@ impl SkillReviewer {
 pub struct SkillReviewHandler {
     session: Session,
     reviewer: Arc<SkillReviewer>,
+    home: PathBuf,
 }
 
 impl SkillReviewHandler {
     /// Build the handler.
-    pub fn new(session: Session, reviewer: Arc<SkillReviewer>) -> Self {
-        Self { session, reviewer }
+    pub fn new(session: Session, reviewer: Arc<SkillReviewer>, home: impl Into<PathBuf>) -> Self {
+        Self {
+            session,
+            reviewer,
+            home: home.into(),
+        }
     }
 }
 
@@ -426,7 +430,8 @@ impl TaskHandler for SkillReviewHandler {
         task: &hearth_core::ClaimedTask,
     ) -> Result<hearth_core::StepOutput, TaskHandlerError> {
         let now = self.session.now_micros();
-        let next = next_daily_micros(now, local_offset(), SKILL_REVIEW_HOUR, SKILL_REVIEW_MINUTE);
+        let zone = Zone::resolve(&hearth_config::identity_timezone(&self.home));
+        let next = zone.next_at(now, SKILL_REVIEW_HOUR, SKILL_REVIEW_MINUTE);
         let report = match self.reviewer.run(&task.id, now) {
             Ok(report) => report,
             Err(error) => {

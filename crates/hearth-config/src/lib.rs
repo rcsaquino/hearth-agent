@@ -68,6 +68,26 @@ pub fn load(home: &Path) -> Result<Settings, ConfigError> {
     Ok(settings)
 }
 
+/// The configured display time zone, falling back to UTC on any read problem.
+///
+/// This is a display path, so a missing or malformed file must never fail.
+pub fn identity_timezone(home: &Path) -> String {
+    let Ok(text) = fs::read_to_string(home.join(SETTINGS_FILE)) else {
+        return Identity::default().timezone;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return Identity::default().timezone;
+    };
+    value
+        .get("identity")
+        .and_then(|identity| identity.get("timezone"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|timezone| !timezone.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| Identity::default().timezone)
+}
+
 /// Update the `daemon` section in place and omit values that match defaults.
 ///
 /// The file is replaced atomically with mode 0600 and reloaded for validation.

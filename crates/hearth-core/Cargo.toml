@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 hearth-model = { path = "../hearth-model" }
 hearth-storage = { path = "../hearth-storage" }
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 serde_json = "1"
 thiserror = "2"
 uuid = { version = "1", features = ["v5", "v7"] }

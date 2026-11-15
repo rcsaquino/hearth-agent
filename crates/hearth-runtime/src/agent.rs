@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use hearth_core::{
     ContextBudget, CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session,
-    StepOutput, Submission, SubmissionStatus, TerminalOutcome, build_prompt, parse_blocks,
+    StepOutput, Submission, SubmissionStatus, TerminalOutcome, Zone, build_prompt, parse_blocks,
     plan_compaction, prefix_cause,
 };
 use hearth_memory::MemoryService;
@@ -17,8 +17,6 @@ use hearth_tools::{ToolError, ToolRegistry};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use thiserror::Error;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use crate::compaction::Compactor;
 use crate::events::{EventSink, NoopSink, RunEvent};
@@ -32,6 +30,7 @@ pub struct AgentConfig {
     pub provider_name: String,
     pub owner: String,
     pub tools: ToolRegistry,
+    pub home: PathBuf,
     pub spill_dir: PathBuf,
     pub guidance: String,
 }
@@ -268,24 +267,18 @@ impl Agent {
         }
     }
 
-    fn runtime_note(&self, conversation_id: &str) -> String {
-        let now = OffsetDateTime::now_utc()
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| "unknown time".to_owned());
-        let note = format!(
-            "Current time: {now}. Conversation: {conversation_id}. Model: {}.",
-            self.config.model
-        );
-        // The audio-tag guidance lives in the message tool description only. It
-        // used to be repeated here, where it was paid fresh on every turn.
-        note
+    fn runtime_note(&self) -> String {
+        let zone = Zone::resolve(&hearth_config::identity_timezone(&self.config.home));
+        // The note is paid fresh on every turn, and the conversation id already
+        // travels with the request.
+        format!("Current time: {}.", zone.iso(self.session.now_micros()))
     }
 
     /// Compact after a settled turn when the visible prompt exceeds the soft
     /// threshold. The answer is already durable and delivered before this runs.
     pub fn compact_soft(&self, conversation_id: &str) -> Result<bool, AgentError> {
         let history = self.session.history_for_prompt(conversation_id)?;
-        let runtime_note = self.runtime_note(conversation_id);
+        let runtime_note = self.runtime_note();
         let (rules, recall, rules_version) =
             self.memory_context(latest_user_text(&history).as_deref());
         let prompt = build_prompt(
@@ -477,7 +470,7 @@ impl Agent {
                 "turn_started",
                 json!({"turn": turn}),
             );
-            let runtime_note = self.runtime_note(&submission.conversation_id);
+            let runtime_note = self.runtime_note();
             let history = self
                 .session
                 .history_for_prompt(&submission.conversation_id)?;

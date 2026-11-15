@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use hearth_core::{Local, Zone};
 use hearth_storage::{snapshot, verify};
 use thiserror::Error;
 use time::{Date, Duration, Month, OffsetDateTime};
@@ -50,8 +51,7 @@ pub fn backup(home: &Path) -> Result<BackupReport, BackupError> {
     }
     let backups = home.join("backups");
     fs::create_dir_all(&backups)?;
-    let now = now_local();
-    let today = now.date();
+    let today = local_date(local_now(home));
     let path = backups.join(backup_name(today));
     snapshot(&database, &path)?;
     let removed = prune(&backups, today)?;
@@ -126,7 +126,7 @@ pub fn restore(home: &Path, source: &Path) -> Result<RestoreReport, BackupError>
     let pre_restore = if database.is_file() {
         let backups = home.join("backups");
         fs::create_dir_all(&backups)?;
-        let path = backups.join(format!("pre-restore-{}.db", timestamp(now_local())));
+        let path = backups.join(format!("pre-restore-{}.db", timestamp(local_now(home))));
         snapshot(&database, &path)?;
         Some(path)
     } else {
@@ -183,20 +183,24 @@ fn parse_backup_name(name: &str) -> Option<Date> {
     Date::from_calendar_date(year, Month::try_from(month).ok()?, day).ok()
 }
 
-fn timestamp(now: OffsetDateTime) -> String {
+fn timestamp(local: Local) -> String {
     format!(
         "{:04}{:02}{:02}T{:02}{:02}{:02}",
-        now.year(),
-        u8::from(now.month()),
-        now.day(),
-        now.hour(),
-        now.minute(),
-        now.second()
+        local.year, local.month, local.day, local.hour, local.minute, local.second
     )
 }
 
-fn now_local() -> OffsetDateTime {
-    OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc())
+fn local_now(home: &Path) -> Local {
+    let micros = OffsetDateTime::now_utc()
+        .unix_timestamp_nanos()
+        .div_euclid(1_000) as i64;
+    Zone::resolve(&hearth_config::identity_timezone(home)).local(micros)
+}
+
+fn local_date(local: Local) -> Date {
+    let month = Month::try_from(local.month).unwrap_or(Month::January);
+    Date::from_calendar_date(i32::from(local.year), month, local.day)
+        .unwrap_or_else(|_| Date::from_calendar_date(1970, Month::January, 1).expect("epoch"))
 }
 
 fn open_lock(path: &Path) -> std::io::Result<File> {

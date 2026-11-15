@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use hearth_config::{ConfigError, Media, Settings};
 use hearth_core::{
-    ContextBudget, CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission,
+    ContextBudget, CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission, Zone,
     plan_compaction,
 };
 use hearth_model::{
@@ -444,7 +444,11 @@ impl TelegramRuntime {
                 )
                 .register(
                     SKILL_REVIEW_KIND,
-                    Arc::new(SkillReviewHandler::new(session.clone(), reviewer)),
+                    Arc::new(SkillReviewHandler::new(
+                        session.clone(),
+                        reviewer,
+                        home.to_path_buf(),
+                    )),
                 )
                 .register(
                     BACKUP_KIND,
@@ -456,7 +460,8 @@ impl TelegramRuntime {
             registry,
             format!("scheduler:{}", std::process::id()),
         );
-        ensure_maintenance_tasks(&session)?;
+        let zone = Zone::resolve(&hearth_config::identity_timezone(home));
+        ensure_maintenance_tasks(&session, &zone)?;
         let helper_config = Arc::new(HelperConfig {
             settings: Arc::clone(&settings),
             session: session.clone(),

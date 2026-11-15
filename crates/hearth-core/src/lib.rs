@@ -11,6 +11,7 @@ pub mod secrets;
 mod session;
 mod soul;
 mod task;
+mod zone;
 
 pub use budget::{
     ContextBudget, FIXED_OVERHEAD_TARGET, SEGMENT_IDENTITY, SEGMENT_RECALL, SEGMENT_RULES,
@@ -37,3 +38,4 @@ pub use soul::default_soul;
 pub use task::{
     ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus, TerminalOutcome,
 };
+pub use zone::{Local, Zone};
