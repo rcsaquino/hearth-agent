@@ -407,6 +407,26 @@ mod tests {
     }
 
     #[test]
+    fn a_scrolled_doctor_pane_stays_on_its_text() {
+        let (_home, mut app) = initialized_app();
+        app.tab = crate::app::Tab::Doctor;
+        app.doctor.output = Some("first line\nsecond line\nthird line".to_owned());
+        app.doctor.scroll = 50;
+
+        let text = buffer_text(&app, 100, 20);
+        assert!(
+            text.contains("third line"),
+            "the pane must clamp a scroll past the end: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ));
+        assert_eq!(app.doctor.scroll, 0, "a new check starts at the top");
+    }
+
+    #[test]
     fn welcome_screen_renders_the_setup_entry() {
         let (_home, app) = fresh_app();
         let text = buffer_text(&app, 100, 32);
