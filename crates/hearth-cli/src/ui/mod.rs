@@ -157,7 +157,6 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
         Tab::Activity => theme::hints(&[
             ("↑↓", "select"),
             ("p", "pause"),
-            ("g", "top"),
             ("home/end", "ends"),
             ("q", "quit"),
         ]),

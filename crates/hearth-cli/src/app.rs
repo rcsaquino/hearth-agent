@@ -803,10 +803,6 @@ impl App {
                 self.activity_selected = 0;
                 self.activity_paused = true;
             }
-            KeyCode::Char('g') => {
-                self.activity_selected = 0;
-                self.activity_paused = true;
-            }
             KeyCode::End => {
                 self.activity_selected =
                     crate::ui::activity::row_count(&self.events).saturating_sub(1);
