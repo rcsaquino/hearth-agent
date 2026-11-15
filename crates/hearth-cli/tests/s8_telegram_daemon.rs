@@ -119,6 +119,7 @@ struct TelegramState {
     rich_sends: AtomicUsize,
     stop: AtomicBool,
     rate_limit: AtomicBool,
+    batch: Mutex<Option<Vec<Value>>>,
 }
 
 fn write_response_status(stream: &mut TcpStream, status: u16, body: &Value) {
@@ -174,7 +175,9 @@ fn fake_telegram_script_with_delays(
                                     thread::sleep(Duration::from_millis(5));
                                 }
                             }
-                            if let Some(update) = updates.get(index) {
+                            if let Some(batch) = thread_state.batch.lock().expect("batch").clone() {
+                                json!({"ok": true, "result": batch})
+                            } else if let Some(update) = updates.get(index) {
                                 json!({"ok": true, "result": [update.clone()]})
                             } else {
                                 thread::sleep(Duration::from_millis(20));
@@ -1277,5 +1280,59 @@ fn a_rate_limited_delivery_is_left_for_recovery() {
     assert!(
         !waiting.is_empty(),
         "a rate-limited answer must stay recoverable, not fail permanently"
+    );
+}
+
+#[test]
+fn a_stop_in_the_message_batch_cancels_the_run() {
+    use hearth_core::{Harness, SubmissionStatus};
+
+    let (provider_base, provider_thread) = fake_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    *telegram_state.batch.lock().expect("batch") = Some(vec![
+        json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 10,
+                "date": 1_730_000_000,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "text": "hello"
+            }
+        }),
+        json!({
+            "update_id": 2,
+            "message": {
+                "message_id": 11,
+                "date": 1_730_000_001,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "text": "stop"
+            }
+        }),
+    ]);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    thread::sleep(Duration::from_secs(2));
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    // The provider is never called, so that server still waits for a request.
+    drop(provider_thread);
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let submission = harness
+        .session()
+        .submission_by_request_id("tg:42:10")
+        .expect("submission lookup")
+        .expect("submission");
+    assert_eq!(
+        submission.status,
+        SubmissionStatus::Cancelled,
+        "a stop that arrives with the message must cancel the run: {:?}",
+        submission.status
     );
 }
