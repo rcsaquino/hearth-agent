@@ -165,7 +165,10 @@ pub fn apply_start_mode_at(
     let unit = config_dir.join("hearth.service");
     match start {
         "tui" => {
-            if unit.is_file() {
+            // A dangling link outlives the unit it named, so the unit's own
+            // presence is not enough to decide whether there is anything to do.
+            let present = unit.is_file() || fs::symlink_metadata(wants_link(config_dir)).is_ok();
+            if present {
                 uninstall_at(config_dir, run)?;
             }
             if run {
@@ -176,7 +179,7 @@ pub fn apply_start_mode_at(
                 unit,
                 installed: false,
                 linger: false,
-                repaired: false,
+                repaired: present,
             })
         }
         "login" => {
