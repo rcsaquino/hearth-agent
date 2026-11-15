@@ -454,6 +454,15 @@ fn text_field(object: &serde_json::Map<String, Value>) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The characters an image entry contributes to the estimate.
+///
+/// The adapter re-encodes the image at up to 1568 pixels on its long edge and the
+/// provider bills roughly one token per 750 pixels, about 3,300 tokens in the
+/// worst case. The estimator counts characters, so this length stands in for that
+/// cost and keeps the local budget from passing a request the provider will
+/// refuse.
+const IMAGE_CHARS: usize = 12_000;
+
 /// Estimate the tokens an entry contributes.
 pub fn estimate_content(value: &Value) -> i64 {
     let blocks = parse_blocks(value);
@@ -466,7 +475,7 @@ pub fn estimate_content(value: &Value) -> i64 {
             ContentBlock::Text(text) | ContentBlock::Thinking(text) => text.clone(),
             ContentBlock::ToolCall(call) => format!("{} {}", call.name, call.arguments),
             ContentBlock::ToolResult { content, .. } => content.clone(),
-            ContentBlock::Image { path, .. } => path.clone(),
+            ContentBlock::Image { .. } => "x".repeat(IMAGE_CHARS),
             ContentBlock::File { name, .. } => name.clone(),
         })
         .collect::<Vec<_>>()
