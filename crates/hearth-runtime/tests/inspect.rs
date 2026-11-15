@@ -213,3 +213,25 @@ fn memory_stamps_follow_the_configured_zone() {
         assert_eq!(bytes[16], b':', "{stamp}");
     }
 }
+
+#[test]
+fn latest_prompt_survives_redaction_of_an_ordinary_path() {
+    let home = TempDir::new().expect("temp home");
+    init(home.path(), options()).expect("init");
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        let session = harness.session();
+        let text = json!({
+            "identity": "SOUL TEXT",
+            "tools": [{"name": "files", "note": "spill/task-id.txt"}]
+        })
+        .to_string();
+        session.save_prompt_blob(&text).expect("save prompt");
+        let stored = session.latest_prompt().expect("latest").expect("blob");
+        serde_json::from_str::<serde_json::Value>(&stored.text).expect("stored text still JSON");
+    }
+    let document = latest_prompt(home.path())
+        .expect("inspect prompt")
+        .expect("the prompt is readable");
+    assert_eq!(document["identity"], "SOUL TEXT");
+}
