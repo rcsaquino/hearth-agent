@@ -42,6 +42,10 @@ if printf '%s' "$output" | grep -q 'planted-private-value'; then
     echo "public scan printed the private value" >&2
     exit 1
 fi
+if printf '%s' "$output" | grep -q 'plan'; then
+    echo "public scan printed a prefix of the private value" >&2
+    exit 1
+fi
 if ! printf '%s' "$output" | grep -q 'notes.txt'; then
     echo "public scan did not name the offending file" >&2
     exit 1
@@ -84,6 +88,10 @@ if ! printf '%s' "$output" | grep -q 'credential.txt'; then
 fi
 if printf '%s' "$output" | grep -q 'sk-test-planted-credential-value'; then
     echo "public scan printed the credential value" >&2
+    exit 1
+fi
+if printf '%s' "$output" | grep -q 'sk-t'; then
+    echo "public scan printed a prefix of the credential value" >&2
     exit 1
 fi
 
