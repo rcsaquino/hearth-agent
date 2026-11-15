@@ -164,18 +164,41 @@ fn archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>, ToolError> {
     })
 }
 
+/// The largest uncompressed entry a document read will load.
+///
+/// Deflate reaches roughly 1000:1, so a small archive can otherwise expand to
+/// gigabytes during extraction.
+pub const MAX_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
+
 fn archive_text(archive: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<String, ToolError> {
     let mut file = archive
         .by_name(name)
         .map_err(|_| ToolError::invalid("corrupt_document", format!("missing {name}")))?;
+    if file.size() > MAX_ENTRY_BYTES {
+        return Err(too_large(name));
+    }
     let mut text = String::new();
-    file.read_to_string(&mut text).map_err(|error| {
-        ToolError::invalid(
-            "corrupt_document",
-            format!("could not read {name}: {error}"),
-        )
-    })?;
+    let read = file
+        .by_ref()
+        .take(MAX_ENTRY_BYTES + 1)
+        .read_to_string(&mut text)
+        .map_err(|error| {
+            ToolError::invalid(
+                "corrupt_document",
+                format!("could not read {name}: {error}"),
+            )
+        })?;
+    if read as u64 > MAX_ENTRY_BYTES {
+        return Err(too_large(name));
+    }
     Ok(text)
+}
+
+fn too_large(name: &str) -> ToolError {
+    ToolError::invalid(
+        "document_too_large",
+        format!("{name} is larger than {MAX_ENTRY_BYTES} bytes when expanded"),
+    )
 }
 
 fn docx_text(bytes: &[u8]) -> Result<String, ToolError> {

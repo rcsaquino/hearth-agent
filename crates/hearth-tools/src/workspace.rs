@@ -70,6 +70,7 @@ impl Workspace {
                 format!("not a file: {path}"),
             ));
         }
+        require_size(&target, path, MAX_TEXT_BYTES)?;
         fs::read_to_string(&target).map_err(ToolError::from)
     }
 
@@ -82,6 +83,7 @@ impl Workspace {
                 format!("not a file: {path}"),
             ));
         }
+        require_size(&target, path, MAX_DOCUMENT_BYTES)?;
         fs::read(&target).map_err(ToolError::from)
     }
 
@@ -331,6 +333,23 @@ fn validate_relative(path: &str) -> Result<PathBuf, ToolError> {
         }
     }
     Ok(relative.to_path_buf())
+}
+
+/// The largest text file a read will load.
+pub const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The largest document archive a byte read will load.
+pub const MAX_DOCUMENT_BYTES: u64 = 32 * 1024 * 1024;
+
+fn require_size(target: &Path, path: &str, limit: u64) -> Result<(), ToolError> {
+    let size = fs::metadata(target).map_err(ToolError::from)?.len();
+    if size > limit {
+        return Err(ToolError::invalid(
+            "file_too_large",
+            format!("{path} is {size} bytes; the limit is {limit}"),
+        ));
+    }
+    Ok(())
 }
 
 fn escape(path: &str) -> ToolError {
