@@ -18,6 +18,12 @@ while IFS= read -r invocation; do
     fi
 done < <(grep -hoE 'cargo test -p [a-z-]+ --test [a-z0-9_]+' "$root"/scripts/*.sh | sort -u)
 
+fetch_depth="$(sed -n 's/.*fetch-depth: *//p' "$root/.github/workflows/ci.yml" | head -1)"
+if [ "$fetch_depth" != "0" ]; then
+    echo "CI checkout does not fetch the history the scan walks" >&2
+    exit 1
+fi
+
 mkdir -p "$work/repo"
 cd "$work/repo"
 git init -q
