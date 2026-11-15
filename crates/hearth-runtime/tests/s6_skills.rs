@@ -155,3 +155,63 @@ fn the_agent_indexes_skills_and_can_load_one() {
     assert_eq!(skill.uses, 1);
     assert!(skill.last_used.is_some());
 }
+
+fn write_named_skill(home: &Path, name: &str, last_used: &str) {
+    let path = home.join("skills/learned").join(format!("{name}.md"));
+    fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+    fs::write(
+        path,
+        format!(
+            "---\nname: {name}\ndescription: {name} skill\nversion: 1\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\nlast_used: {last_used}\nuses: 4\nsuccesses: 3\nfailures: 0\nevidence: [entry-1]\n---\n\n## When to use\n\nWhen {name} work appears.\n\n## Steps\n\nDo it.\n"
+        ),
+    )
+    .expect("skill file");
+}
+
+#[test]
+fn the_prompt_index_archives_the_overflow() {
+    let home = TempDir::new().expect("temp home");
+    for index in 0..60 {
+        write_named_skill(home.path(), &format!("skill-{index:02}"), "2026-11-01");
+    }
+    let harness = Harness::open(home.path()).expect("harness");
+    let conversation = harness
+        .session()
+        .create_conversation("Test", "local", "local:1")
+        .expect("conversation");
+    let submission = harness
+        .session()
+        .submit(&conversation.id, "req-1", "input", json!({"text": "hello"}))
+        .expect("submit")
+        .submission;
+    let library = Arc::new(SkillLibrary::new(home.path()));
+    let provider = Arc::new(ScriptedProvider::new(vec![done()]));
+    let agent = Agent::new(
+        harness.session().clone(),
+        provider,
+        AgentConfig {
+            soul: "test soul".to_owned(),
+            model: "test-model".to_owned(),
+            provider_name: "scripted".to_owned(),
+            owner: "owner".to_owned(),
+            tools: ToolRegistry::default(),
+            home: home.path().to_path_buf(),
+            spill_dir: home.path().join("spill"),
+            guidance: String::new(),
+        },
+    )
+    .with_skills(library);
+
+    agent.run_submission(&submission.id).expect("run");
+
+    let archived = SkillLibrary::new(home.path())
+        .load_all()
+        .expect("load")
+        .iter()
+        .filter(|skill| skill.status == hearth_runtime::skills::SkillStatus::Archived)
+        .count();
+    assert!(
+        archived > 0,
+        "the prompt index must archive learned skills past the cap"
+    );
+}
