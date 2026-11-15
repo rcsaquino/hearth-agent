@@ -316,16 +316,27 @@ impl MemoryService {
         let ranked = rank::rank(&fused, &memories, &entities, &terms, now);
         let diverse = rank::diversify(ranked, &entities);
         let config = self.config();
-        let statement_budget = tokens.saturating_sub(digest::COVERAGE_RESERVE).max(1);
-        let items = rank::fill(
+        let mut coverage = self.coverage(&parsed.entities, at)?;
+        let statement_budget = tokens
+            .saturating_sub(digest::coverage_cost(&coverage))
+            .max(1);
+        let mut items = rank::fill(
             diverse,
             statement_budget,
             config.recall_max_items as usize,
             digest::line_cost,
         );
 
-        let coverage = self.coverage(&parsed.entities, at)?;
-        let digest = digest::recall_body(&items, &coverage, now);
+        // The fill's per-line estimate and the rendered text can differ, and a
+        // long subject can make the coverage lines outweigh the reserve. Drop
+        // from the end until the rendered digest fits the budget the caller set.
+        let mut digest = digest::recall_body(&items, &coverage, now);
+        while hearth_model::estimate_tokens(&digest) > tokens as i64 {
+            if items.pop().is_none() && !digest::trim_coverage(&mut coverage) {
+                break;
+            }
+            digest = digest::recall_body(&items, &coverage, now);
+        }
         Ok(Recall {
             items,
             coverage,
@@ -687,10 +698,24 @@ mod tests {
             }
         }
 
-        let recall = service.recall(&subjects.join(" ")).expect("recall");
+        let message = subjects.join(" ");
+        let recall = service.recall(&message).expect("recall");
         assert!(
             hearth_model::estimate_tokens(&recall.digest) <= 120,
             "the digest must fit its budget: {} tokens\n{}",
+            hearth_model::estimate_tokens(&recall.digest),
+            recall.digest
+        );
+
+        let tiny = service.with_config(MemoryConfig {
+            recall_max_tokens: 60,
+            recall_max_items: 1,
+            ..MemoryConfig::default()
+        });
+        let recall = tiny.recall(&message).expect("recall");
+        assert!(
+            hearth_model::estimate_tokens(&recall.digest) <= 60,
+            "a tiny budget must drop coverage lines: {} tokens\n{}",
             hearth_model::estimate_tokens(&recall.digest),
             recall.digest
         );
