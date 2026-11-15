@@ -143,3 +143,18 @@ fn init_refuses_to_overwrite_settings() {
     let error = init(home.path(), options()).expect_err("second init");
     assert!(error.to_string().contains("already exists"), "{error}");
 }
+
+#[test]
+fn a_failed_init_can_be_retried() {
+    let home = TempDir::new().expect("temp home");
+    std::fs::create_dir_all(home.path().join("hearth.db")).expect("block the database path");
+
+    init(home.path(), options()).expect_err("the database path is a directory");
+    assert!(
+        !home.path().join("settings.json").exists(),
+        "a failed init must not leave the settings file that blocks a retry"
+    );
+
+    std::fs::remove_dir_all(home.path().join("hearth.db")).expect("clear the blockage");
+    init(home.path(), options()).expect("a retry must finish the home");
+}
