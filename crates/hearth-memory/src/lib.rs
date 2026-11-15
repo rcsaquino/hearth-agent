@@ -667,6 +667,36 @@ mod tests {
     }
 
     #[test]
+    fn the_digest_never_exceeds_its_budget() {
+        let (_directory, service) = service();
+        let service = service.with_config(MemoryConfig {
+            recall_max_tokens: 120,
+            recall_max_items: 1,
+            ..MemoryConfig::default()
+        });
+        let subjects: Vec<String> = (0..3)
+            .map(|index| format!("topic{index}{}", "x".repeat(100)))
+            .collect();
+        for (index, subject) in subjects.iter().enumerate() {
+            for round in 0..2 {
+                seed(
+                    &service,
+                    &format!("the {subject} note says {index} {round}"),
+                    subject,
+                );
+            }
+        }
+
+        let recall = service.recall(&subjects.join(" ")).expect("recall");
+        assert!(
+            hearth_model::estimate_tokens(&recall.digest) <= 120,
+            "the digest must fit its budget: {} tokens\n{}",
+            hearth_model::estimate_tokens(&recall.digest),
+            recall.digest
+        );
+    }
+
+    #[test]
     fn a_question_naming_a_subject_reports_what_was_left_out() {
         let (_directory, service) = service();
         let service = service.with_config(MemoryConfig {
