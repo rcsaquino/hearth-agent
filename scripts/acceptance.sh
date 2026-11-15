@@ -30,7 +30,8 @@ echo "== memory benchmark =="
 cargo test -p hearth-eval --test memory_bench
 
 echo "== prompt cache and overhead =="
-cargo test -p hearth-eval --test tokens_bench
+cargo test -p hearth-runtime --test s6_prefix_stability
+cargo test -p hearth-core --test s1_prompt the_prompt_reports_segment_tokens_and_fixed_overhead
 
 echo "== backup, doctor, and restart soak =="
 ./scripts/soak.sh
