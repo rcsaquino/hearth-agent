@@ -220,6 +220,7 @@ pub fn validate(item: &NewMemory) -> Result<()> {
 fn check_rules_budget(
     writer: &hearth_storage::Writer<'_>,
     content: &str,
+    replaces: Option<&str>,
     budget: u64,
 ) -> Result<()> {
     let existing = writer.query(
@@ -227,12 +228,18 @@ fn check_rules_budget(
         [],
         map_memory,
     )?;
-    let used: u64 = existing.iter().map(crate::digest::rule_cost).sum();
+    // The row this write replaces stops being live in the same transaction, so
+    // its cost is not part of the space the new rule needs.
+    let counted: Vec<&crate::model::Memory> = existing
+        .iter()
+        .filter(|rule| Some(rule.id.as_str()) != replaces)
+        .collect();
+    let used: u64 = counted.iter().map(|rule| crate::digest::rule_cost(rule)).sum();
     let adding = crate::digest::rule_cost_text(content);
     if used + adding <= budget {
         return Ok(());
     }
-    let listed: Vec<String> = existing.iter().map(|rule| rule.id.clone()).collect();
+    let listed: Vec<String> = counted.iter().map(|rule| rule.id.clone()).collect();
     Err(MemoryError::new(
         Code::RulesFull,
         format!(
@@ -518,7 +525,12 @@ fn insert_in(
     let Pending { mut item, vector } = pending;
     validate(&item)?;
     if item.pinned {
-        check_rules_budget(writer, &item.content, rules_budget)?;
+        check_rules_budget(
+            writer,
+            &item.content,
+            item.supersedes.as_deref(),
+            rules_budget,
+        )?;
     }
     item.content = item.content.trim().to_owned();
     item.subject = normalize(&item.subject);
@@ -994,6 +1006,7 @@ mod tests {
             check_rules_budget(
                 writer,
                 "a new rule",
+                None,
                 crate::digest::rule_cost_text("a new rule"),
             )
         });
