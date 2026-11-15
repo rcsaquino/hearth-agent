@@ -48,6 +48,9 @@ fn budget_settings_accept_a_custom_window() {
 fn agent_has_no_turn_limit_setting() {
     let settings: Settings = serde_json::from_str(&models()).expect("settings");
     assert_eq!(settings.agent.workspace, None);
+
+    let rejected = serde_json::from_str::<Settings>(r#"{"agent":{"max_turns":10}}"#);
+    assert!(rejected.is_err(), "agent.max_turns must not be accepted");
 }
 
 #[test]
