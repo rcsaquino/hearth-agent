@@ -1915,3 +1915,19 @@ force-pushing, which is the approval named above and not a step in this change.
 - The alternative, treating an empty list as clean everywhere, is what made the
   check decorative. The alternative of failing every fork PR would block outside
   contributors on a secret they cannot have.
+
+## 2026-11-15: Redaction cuts the token, not the word
+
+- `secrets::redact_secrets` finds the credential's byte range inside a word and
+  replaces only that range. A prefix counts only at a token start, so `task-id`
+  and `risk-free` are ordinary text, and the punctuation around a real token
+  survives, so a saved prompt blob stays parseable and the Prompt tab keeps it.
+- A `key=value` or `key:value` pair replaces only the value and keeps the key and
+  the separator. A `Bearer` token replaces only the token after it.
+- A settings document that does not deserialize is reported as the section and
+  field that failed, found by removing candidates and retrying the parse. The raw
+  serde message carries the unexpected value, which can be a credential pasted
+  into the wrong field, so it is never shown.
+- A provider key that still holds a `${NAME}` reference counts as unset.
+  `hearth_config::is_resolved` is the one test, used by both the search and fetch
+  chains, so a placeholder never becomes a credential.
