@@ -21,3 +21,11 @@ jobs:
         env:
           PUBLIC_DENYLIST: ${{ secrets.HEARTH_PUBLIC_DENYLIST }}
         run: ./scripts/ci-secret-scan.sh
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89
+      - name: Build with the declared minimum Rust
+        run: cargo build --workspace --all-targets
