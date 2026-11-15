@@ -19,6 +19,14 @@ pub use settings::{
 /// The name of the settings file inside the home folder.
 pub const SETTINGS_FILE: &str = "settings.json";
 
+/// Whether a configured value is present and fully resolved from the environment.
+///
+/// A value that still holds a `${NAME}` reference is not a usable credential:
+/// the variable was unset when the settings were expanded.
+pub fn is_resolved(value: &str) -> bool {
+    !value.is_empty() && unresolved(value).is_none()
+}
+
 /// A settings problem with a single-sentence, user-facing explanation.
 #[derive(Debug, Error)]
 pub enum ConfigError {

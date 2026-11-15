@@ -250,7 +250,7 @@ fn build_web_search(settings: &Settings) -> Result<WebSearchTool, SearchError> {
             .providers
             .get(name)
             .and_then(|provider| provider.api_key.clone())
-            .filter(|key| !key.is_empty());
+            .filter(|key| hearth_config::is_resolved(key));
         match name.as_str() {
             "exa" => providers.push(Arc::new(ExaSearch::new(
                 "https://mcp.exa.ai",
@@ -319,7 +319,7 @@ fn build_fetch_providers(
             .providers
             .get(name)
             .and_then(|provider| provider.api_key.clone())
-            .filter(|key| !key.is_empty());
+            .filter(|key| hearth_config::is_resolved(key));
         match name.as_str() {
             "jina" => providers.push(Arc::new(JinaFetch::new("https://r.jina.ai", key)?)),
             "http" | "https" => {
