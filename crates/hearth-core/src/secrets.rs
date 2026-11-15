@@ -19,26 +19,15 @@ pub fn is_redactable_value(value: &str) -> bool {
 
 /// Whether the text contains a credential-shaped token.
 pub fn contains_secret(content: &str) -> bool {
-    let lower = content.to_ascii_lowercase();
-    for prefix in ["sk-", "ghp_", "xoxb-", "akia", "-----begin"] {
-        if lower.contains(prefix) {
-            return true;
-        }
-    }
-
     let mut words = content.split_whitespace().peekable();
     while let Some(word) = words.next() {
+        if contains_word_secret(word) {
+            return true;
+        }
         if word.eq_ignore_ascii_case("bearer")
             && words
                 .peek()
                 .is_some_and(|next| credential_value(next).is_some())
-        {
-            return true;
-        }
-        if let Some((left, right)) = word.split_once(':')
-            && left.len() >= 8
-            && left.chars().all(|character| character.is_ascii_digit())
-            && right.len() >= 20
         {
             return true;
         }
@@ -70,15 +59,7 @@ pub fn redact_secrets(content: &str) -> String {
         let word = &rest[..end];
         rest = &rest[end..];
 
-        let redacted = if previous_bearer {
-            credential_value(word).map(|_| "[redacted]".to_owned())
-        } else if let Some((key, _)) = key_value_secret(word) {
-            Some(format!("{key}=[redacted]"))
-        } else if contains_word_secret(word) {
-            Some("[redacted]".to_owned())
-        } else {
-            None
-        };
+        let redacted = secret_span(word, previous_bearer).map(|span| redact_span(word, span));
 
         match redacted {
             Some(value) => output.push_str(&value),
@@ -106,36 +87,88 @@ pub fn redact_value(value: &Value) -> Value {
 }
 
 fn contains_word_secret(word: &str) -> bool {
+    credential_span(word).is_some() || bot_token(word) || key_value_secret(word).is_some()
+}
+
+/// The byte range to redact inside one whitespace-delimited word.
+///
+/// Punctuation outside the credential stays, so a serialized document still
+/// parses after redaction.
+fn secret_span(word: &str, previous_bearer: bool) -> Option<std::ops::Range<usize>> {
+    if previous_bearer {
+        return token_span(word);
+    }
+    if let Some((_, span)) = key_value_secret(word) {
+        return Some(span);
+    }
+    if bot_token(word) {
+        return Some(0..word.len());
+    }
+    credential_span(word)
+}
+
+/// The byte range of a credential inside one word.
+///
+/// A prefix only counts at the start of a token, so ordinary words such as
+/// `task-id` and `risk-free` are not credentials.
+fn credential_span(word: &str) -> Option<std::ops::Range<usize>> {
     let lower = word.to_ascii_lowercase();
     for prefix in ["sk-", "ghp_", "xoxb-", "akia", "-----begin"] {
-        if lower.contains(prefix) {
-            return true;
+        let mut search = 0;
+        while let Some(found) = lower[search..].find(prefix) {
+            let start = search + found;
+            let at_start = word[..start]
+                .chars()
+                .next_back()
+                .is_none_or(|before| !is_token_char(before));
+            if at_start {
+                let mut end = start + prefix.len();
+                while let Some(character) = word[end..].chars().next() {
+                    if !is_token_char(character) {
+                        break;
+                    }
+                    end += character.len_utf8();
+                }
+                return Some(start..end);
+            }
+            search = start + prefix.len();
         }
     }
-    if let Some((left, right)) = word.split_once(':')
-        && left.len() >= 8
-        && left.chars().all(|character| character.is_ascii_digit())
-        && right.len() >= 20
-    {
-        return true;
-    }
-    false
+    None
+}
+
+fn is_token_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '-' || character == '_'
+}
+
+/// A Telegram bot token, `12345678:abcdefghijklmnopqrstuvwx`.
+fn bot_token(word: &str) -> bool {
+    word.split_once(':').is_some_and(|(left, right)| {
+        left.len() >= 8
+            && left.chars().all(|character| character.is_ascii_digit())
+            && right.len() >= 20
+    })
+}
+
+fn redact_span(word: &str, span: std::ops::Range<usize>) -> String {
+    format!("{}[redacted]{}", &word[..span.start], &word[span.end..])
 }
 
 fn credential_value(word: &str) -> Option<&str> {
-    let trimmed = word.trim_matches(|character: char| {
-        !character.is_ascii_alphanumeric() && character != '-' && character != '_'
-    });
-    if trimmed.len() >= MIN_SECRET_LENGTH && !trimmed.starts_with('$') {
-        Some(trimmed)
-    } else {
-        None
-    }
+    Some(&word[token_span(word)?])
 }
 
-/// Return the key part when a word is a `key=value` or `key:value` credential
-/// pair with a credential-shaped value.
-fn key_value_secret(word: &str) -> Option<(&str, &str)> {
+/// The range of a bare credential token, without its surrounding punctuation.
+fn token_span(word: &str) -> Option<std::ops::Range<usize>> {
+    let trimmed = word.trim_matches(|character: char| !is_token_char(character));
+    let start = word.len() - word.trim_start_matches(|character: char| !is_token_char(character)).len();
+    let end = start + trimmed.len();
+    (trimmed.len() >= MIN_SECRET_LENGTH && !trimmed.starts_with('$')).then_some(start..end)
+}
+
+/// Return the key part and the value's byte range when a word is a `key=value`
+/// or `key:value` credential pair with a credential-shaped value.
+fn key_value_secret(word: &str) -> Option<(&str, std::ops::Range<usize>)> {
     let (left, right) = word.split_once(['=', ':'])?;
     let key = left
         .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '_')
@@ -146,11 +179,21 @@ fn key_value_secret(word: &str) -> Option<(&str, &str)> {
     if !known {
         return None;
     }
-    let value = right.trim_matches(|character: char| {
-        character == '"' || character == '\'' || character == ',' || character == ';'
-    });
+    let leading = right.len()
+        - right
+            .trim_start_matches(['"', '\'', ',', ';'])
+            .len();
+    let value = &right[leading..];
+    let length = value
+        .find(|character: char| {
+            character.is_whitespace()
+                || matches!(character, '"' | '\'' | ',' | ';' | '}' | ']')
+        })
+        .unwrap_or(value.len());
+    let value = &value[..length];
     if value.len() < MIN_SECRET_LENGTH || value.starts_with('$') {
         return None;
     }
-    Some((left, right))
+    let start = left.len() + 1 + leading;
+    Some((left, start..start + value.len()))
 }
