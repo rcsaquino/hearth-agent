@@ -1502,3 +1502,51 @@ fn a_submission_with_no_user_content_is_refused() {
     );
 }
 
+
+#[test]
+fn a_replayed_shell_call_does_not_run_again() {
+    use hearth_tools::ShellTool;
+
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    harness
+        .session()
+        .save(Save::new(&conversation).entry(
+            "assistant",
+            json!([{
+                "type": "tool_call",
+                "id": "call-1",
+                "name": "shell",
+                "arguments": {"command": "touch replay-marker"}
+            }]),
+        ))
+        .expect("assistant entry with a pending call");
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("done".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let tools = ToolRegistry::new(vec![Arc::new(ShellTool::new(
+        home.path(),
+        Duration::from_secs(10),
+    ))]);
+    let agent = agent_with(home.path(), &harness, provider, tools);
+    agent.run_submission(&submission.id).expect("run");
+
+    assert!(
+        !home.path().join("replay-marker").exists(),
+        "a replayed shell command must not run a second time"
+    );
+    let history = harness.session().history(&conversation).expect("history");
+    let result = history
+        .iter()
+        .find(|entry| entry.kind == "tool_result")
+        .expect("a tool result for the pending call");
+    assert!(
+        result.content.to_string().contains("not re-run"),
+        "the model must be told the call was not replayed: {}",
+        result.content
+    );
+}
