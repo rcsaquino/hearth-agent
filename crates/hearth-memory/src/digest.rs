@@ -311,10 +311,10 @@ mod tests {
     #[test]
     fn the_rules_block_stops_at_its_budget() {
         let rules: Vec<Memory> = (0..20)
-            .map(|index| memory(&format!("m_{index}"), "", &"x".repeat(200)))
+            .map(|index| memory(&format!("m_{index}"), "", &"x".repeat(228)))
             .collect();
         let block = rules_body(&rules, 200);
-        assert!(hearth_model::estimate_tokens(&block) <= 240, "{block}");
+        assert!(hearth_model::estimate_tokens(&block) <= 200, "{block}");
         assert!(block.contains("more rules were not shown"), "{block}");
     }
 }
