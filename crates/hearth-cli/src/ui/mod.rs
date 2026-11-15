@@ -352,7 +352,7 @@ mod tests {
     use crate::daemon_client::DaemonState;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use hearth_config::Daemon;
-    use hearth_runtime::{InitOptions, init};
+    use hearth_runtime::{InitOptions, Zone, init};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use serde_json::json;
@@ -456,7 +456,7 @@ mod tests {
     fn dashboard_renders_status_and_tabs() {
         let (_home, mut app) = initialized_app();
         app.daemon = DaemonState::Running;
-        app.local_offset = time::UtcOffset::UTC;
+        app.zone = Zone::utc();
         app.events
             .push_back(json!({"ts": 0, "kind": "run_started", "task_id": "t", "data": {}}));
         app.status = Some(json!({
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn prompt_and_activity_stamps_follow_the_configured_zone() {
         let (_home, mut app) = initialized_app_in("Asia/Manila");
-        let expected = if hearth_core::Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
+        let expected = if Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
             "2023-11-15T06:13:20+08:00"
         } else {
             // This host has no Asia/Manila entry, so the zone falls back to UTC.

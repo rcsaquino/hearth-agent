@@ -4,13 +4,13 @@
 //! item, and response block is shown in full. The newest saved exchange is shown
 //! by default; `[` and `]` walk older snapshots and `f` resumes the live tail.
 
+use hearth_runtime::Zone;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use serde_json::Value;
-use time::{OffsetDateTime, UtcOffset};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, PromptView};
@@ -130,10 +130,11 @@ struct CacheKey {
     response_id: String,
     raw: bool,
     width: u16,
+    zone: String,
 }
 
 impl CacheKey {
-    fn new(exchange: &Value, width: u16, raw: bool) -> Self {
+    fn new(exchange: &Value, width: u16, raw: bool, zone: &Zone) -> Self {
         Self {
             prompt_hash: exchange["prompt_hash"]
                 .as_str()
@@ -146,6 +147,7 @@ impl CacheKey {
                 .to_owned(),
             raw,
             width,
+            zone: zone.name().to_owned(),
         }
     }
 }
@@ -201,7 +203,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         return;
     };
 
-    let key = CacheKey::new(exchange, inner.width, app.prompt.raw);
+    let key = CacheKey::new(exchange, inner.width, app.prompt.raw, &app.zone);
     let mut slot = app.prompt.cache.borrow_mut();
     if slot.as_ref().is_none_or(|cache| cache.key != key) {
         *slot = Some(build_cache(app, exchange, &key, usize::from(inner.width)));
@@ -236,7 +238,7 @@ fn build_cache(app: &App, exchange: &Value, key: &CacheKey, width: usize) -> Pro
         snapshot: app.prompt.cursor,
         peers: if own.is_some() { peers } else { 0 },
         follow: app.prompt.follow,
-        offset: app.local_offset,
+        zone: &app.zone,
         width,
     };
 
@@ -320,7 +322,7 @@ struct View<'a> {
     /// Loaded exchanges sharing this request's prefix hash.
     peers: usize,
     follow: bool,
-    offset: UtcOffset,
+    zone: &'a Zone,
     width: usize,
 }
 
@@ -375,7 +377,7 @@ fn push_header(lines: &mut Vec<Line<'static>>, view: &View<'_>) {
         },
     );
     row.push("  ·  asked ", theme::faint());
-    row.push(stamp(requested, view.offset), theme::muted());
+    row.push(view.zone.iso(requested), theme::muted());
     row.push("  ·  session ", theme::faint());
     row.push(short(session, 8), theme::text());
     let previous_count = view.total.saturating_sub(view.snapshot + 1);
@@ -890,21 +892,6 @@ fn token(document: &Value, name: &str) -> Option<u64> {
     document["tokens"][name].as_u64()
 }
 
-fn stamp(micros: i64, offset: UtcOffset) -> String {
-    let time = OffsetDateTime::from_unix_timestamp_nanos(i128::from(micros) * 1_000)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .to_offset(offset);
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        time.year(),
-        u8::from(time.month()),
-        time.day(),
-        time.hour(),
-        time.minute(),
-        time.second()
-    )
-}
-
 /// Wrap text without losing leading indentation. Long words are hard-split.
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     let width = width.max(8);
@@ -1065,6 +1052,7 @@ mod tests {
     }
 
     fn render_audit(exchange: &Value, older: Option<&Value>) -> String {
+        let zone = Zone::utc();
         let view = View {
             exchange,
             older,
@@ -1072,7 +1060,7 @@ mod tests {
             snapshot: 0,
             peers: 2,
             follow: true,
-            offset: UtcOffset::UTC,
+            zone: &zone,
             width: 110,
         };
         let mut text = String::new();
@@ -1258,6 +1246,7 @@ mod tests {
     fn narrow_widths_clamp_instead_of_underflowing() {
         for width in [0usize, 1, 12, 40, 75, 76, 200] {
             let exchange = sample("SOUL TEXT");
+            let zone = Zone::utc();
             let view = View {
                 exchange: &exchange,
                 older: None,
@@ -1265,7 +1254,7 @@ mod tests {
                 snapshot: 0,
                 peers: 1,
                 follow: true,
-                offset: UtcOffset::UTC,
+                zone: &zone,
                 width,
             };
             let rows = build_rows(&view);

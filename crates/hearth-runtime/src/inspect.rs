@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use hearth_core::Zone;
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -132,18 +133,6 @@ pub struct MemoryRecord {
     pub pinned: bool,
 }
 
-/// A stored microsecond instant as a readable date.
-fn stamp(micros: i64) -> String {
-    time::OffsetDateTime::from_unix_timestamp_nanos(micros as i128 * 1_000)
-        .ok()
-        .and_then(|instant| {
-            instant
-                .format(&time::format_description::well_known::Rfc3339)
-                .ok()
-        })
-        .unwrap_or_default()
-}
-
 /// Read saved memories from the main database without touching the writer.
 ///
 /// A read-only connection keeps the operator surface from competing with the
@@ -154,6 +143,7 @@ pub fn list_memories(home: &Path, limit: usize) -> Result<Vec<MemoryRecord>, Ins
         return Ok(Vec::new());
     }
     let connection = hearth_storage::open_read_only(&database)?;
+    let zone = Zone::resolve(&hearth_config::identity_timezone(home));
     let mut statement = connection.prepare(
         "SELECT id, content, kind, subject, source_kind, created_at, updated_at, revision, pinned \
          FROM memories ORDER BY pinned DESC, updated_at DESC, rowid DESC LIMIT ?",
@@ -165,8 +155,8 @@ pub fn list_memories(home: &Path, limit: usize) -> Result<Vec<MemoryRecord>, Ins
             kind: row.get(2)?,
             subject: row.get(3)?,
             source: row.get(4)?,
-            created_at: stamp(row.get(5)?),
-            updated_at: stamp(row.get(6)?),
+            created_at: zone.iso(row.get(5)?),
+            updated_at: zone.iso(row.get(6)?),
             revision: row.get(7)?,
             pinned: row.get::<_, i64>(8)? != 0,
         })

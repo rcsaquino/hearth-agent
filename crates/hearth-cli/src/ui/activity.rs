@@ -2,13 +2,13 @@
 
 use std::collections::VecDeque;
 
+use hearth_runtime::Zone;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use serde_json::Value;
-use time::{OffsetDateTime, UtcOffset};
 
 use crate::app::App;
 use crate::theme;
@@ -90,7 +90,7 @@ fn list(app: &App, frame: &mut Frame, area: Rect, rows: &[ActivityRow], selected
         let is_selected = index == selected;
         let marker = if is_selected { "▶" } else { " " };
         let (tag, style) = kind_badge(&row.kind, row.first, app);
-        let time = event_time(row.timestamp, app.local_offset);
+        let time = event_time(row.timestamp, &app.zone);
         let summary_width = inner.width.saturating_sub(24) as usize;
         let summary = short(&row.summary, summary_width.max(8));
         let spans = vec![
@@ -143,7 +143,7 @@ fn detail(app: &App, frame: &mut Frame, area: Rect, rows: &[ActivityRow], select
                 style.add_modifier(ratatui::style::Modifier::BOLD),
             ),
             Span::styled(
-                format!("  {}", event_time_full(row.timestamp, app.local_offset)),
+                format!("  {}", event_time_full(row.timestamp, &app.zone)),
                 theme::muted(),
             ),
         ]),
@@ -358,31 +358,12 @@ fn kind_badge(kind: &str, first: usize, app: &App) -> (&'static str, Style) {
     }
 }
 
-pub(crate) fn event_time(micros: i64, offset: UtcOffset) -> String {
-    let time = OffsetDateTime::from_unix_timestamp_nanos(i128::from(micros) * 1_000)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
-    let local = time.to_offset(offset);
-    format!(
-        "{:02}:{:02}:{:02}",
-        local.hour(),
-        local.minute(),
-        local.second()
-    )
+pub(crate) fn event_time(micros: i64, zone: &Zone) -> String {
+    zone.local(micros).clock()
 }
 
-fn event_time_full(micros: i64, offset: UtcOffset) -> String {
-    let time = OffsetDateTime::from_unix_timestamp_nanos(i128::from(micros) * 1_000)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
-    let local = time.to_offset(offset);
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        local.year(),
-        u8::from(local.month()),
-        local.day(),
-        local.hour(),
-        local.minute(),
-        local.second()
-    )
+fn event_time_full(micros: i64, zone: &Zone) -> String {
+    zone.iso(micros)
 }
 
 #[cfg(test)]

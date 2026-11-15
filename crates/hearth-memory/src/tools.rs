@@ -444,9 +444,14 @@ impl Tool for TranscriptTool {
                 .ok_or_else(|| {
                     ToolError::invalid("not_found", format!("{reference} is not a saved entry."))
                 })?;
+            // A stored citation instant, not a personal timestamp, so keep it in UTC.
             return Ok(text(format!(
                 "{}#{} {} {}\n{}",
-                entry.conversation_id, entry.seq, entry.kind, entry.created_at, entry.text
+                entry.conversation_id,
+                entry.seq,
+                entry.kind,
+                hearth_core::Zone::utc().iso(entry.created_at),
+                entry.text
             )));
         }
         let query = required(arguments, "query")?;

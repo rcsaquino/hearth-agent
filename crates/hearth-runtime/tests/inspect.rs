@@ -163,7 +163,7 @@ fn memory_stamps_follow_the_configured_zone() {
 
     let records = list_memories(home.path(), 100).expect("list memories");
     assert_eq!(records.len(), 1);
-    let offset = if hearth_core::Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
+    let offset = if hearth_runtime::Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
         "+08:00"
     } else {
         // This host has no Asia/Manila entry, so the zone falls back to UTC.

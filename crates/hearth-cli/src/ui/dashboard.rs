@@ -6,6 +6,8 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use hearth_runtime::Zone;
+
 use crate::app::{App, DaemonState};
 use crate::theme;
 use crate::ui::{activity, format_uptime, short};
@@ -322,7 +324,7 @@ fn connections_card(app: &App, frame: &mut Frame, area: Rect) {
 fn recent_card(app: &App, frame: &mut Frame, area: Rect) {
     let rows = activity::rows(&app.events);
     let limit = recent_limit(area);
-    let lines = recent_lines(&rows, limit, app.local_offset);
+    let lines = recent_lines(&rows, limit, &app.zone);
     card(frame, area, "Recent activity", lines);
 }
 
@@ -333,11 +335,7 @@ fn recent_limit(area: Rect) -> usize {
 }
 
 /// Newest-last list of activity rows, trimmed to the newest `limit` entries.
-fn recent_lines(
-    rows: &[activity::ActivityRow],
-    limit: usize,
-    offset: time::UtcOffset,
-) -> Vec<Line<'static>> {
+fn recent_lines(rows: &[activity::ActivityRow], limit: usize, zone: &Zone) -> Vec<Line<'static>> {
     if rows.is_empty() {
         return vec![Line::styled(
             "No live events yet. Send Hearth a Telegram message.",
@@ -351,7 +349,7 @@ fn recent_lines(
         .into_iter()
         .rev()
         .map(|row| {
-            let time = activity::event_time(row.timestamp, offset);
+            let time = activity::event_time(row.timestamp, zone);
             Line::from(vec![
                 Span::styled(format!("  {time} "), theme::muted()),
                 Span::styled(
@@ -484,7 +482,7 @@ mod tests {
         let rows = activity_rows(40);
         let limit = recent_limit(Rect::new(0, 0, 40, 6));
         assert_eq!(limit, 4);
-        let lines = recent_lines(&rows, limit, time::UtcOffset::UTC);
+        let lines = recent_lines(&rows, limit, &Zone::utc());
         assert_eq!(lines.len(), limit, "the newest rows must fill the card");
         let rendered = lines.iter().map(text).collect::<Vec<_>>();
         assert!(
@@ -506,14 +504,10 @@ mod tests {
         let rows = activity_rows(3);
         assert_eq!(recent_limit(Rect::new(0, 0, 20, 1)), 1);
         assert_eq!(recent_limit(Rect::new(0, 0, 20, 0)), 1);
-        let lines = recent_lines(
-            &rows,
-            recent_limit(Rect::new(0, 0, 40, 2)),
-            time::UtcOffset::UTC,
-        );
+        let lines = recent_lines(&rows, recent_limit(Rect::new(0, 0, 40, 2)), &Zone::utc());
         assert_eq!(lines.len(), 1);
         assert!(text(&lines[0]).contains("reply 2"));
-        let empty = recent_lines(&[], 4, time::UtcOffset::UTC);
+        let empty = recent_lines(&[], 4, &Zone::utc());
         assert_eq!(empty.len(), 1);
         assert!(text(&empty[0]).contains("No live events yet"));
     }

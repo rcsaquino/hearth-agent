@@ -12,9 +12,9 @@ use crossterm::event::{
 use crossterm::execute;
 use ratatui::DefaultTerminal;
 use serde_json::Value;
-use time::UtcOffset;
 
 use hearth_config::{Daemon, SETTINGS_FILE, Settings};
+use hearth_runtime::Zone;
 use hearth_runtime::inspect::MemoryRecord;
 use hearth_runtime::skills::{Skill, SkillLibrary, SkillScope, SkillStats};
 
@@ -254,7 +254,7 @@ pub struct App {
     pub status: Option<Value>,
     pub ownership: Option<Ownership>,
     pub events: VecDeque<Value>,
-    pub local_offset: UtcOffset,
+    pub zone: Zone,
     pub activity_selected: usize,
     pub activity_paused: bool,
     pub doctor: DoctorView,
@@ -275,6 +275,10 @@ pub struct App {
 impl App {
     pub fn new(home: PathBuf) -> Self {
         let (screen, settings_data, settings, mut banner) = load_dashboard(&home);
+        let zone = settings_data
+            .as_ref()
+            .map(|settings| Zone::resolve(&settings.identity.timezone))
+            .unwrap_or_else(Zone::utc);
         let settings_form = if screen == Screen::Dashboard {
             match SettingsForm::open(&home.join(SETTINGS_FILE)) {
                 Ok(form) => Some(form),
@@ -308,7 +312,7 @@ impl App {
             status: None,
             ownership: None,
             events: VecDeque::new(),
-            local_offset: UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC),
+            zone,
             activity_selected: 0,
             activity_paused: false,
             doctor: DoctorView::default(),
@@ -710,6 +714,7 @@ impl App {
     fn reload_settings(&mut self) {
         match hearth_config::load(&self.home) {
             Ok(settings) => {
+                self.zone = Zone::resolve(&settings.identity.timezone);
                 self.banner = settings
                     .validate_for_run()
                     .err()
@@ -1257,6 +1262,7 @@ impl App {
         self.tab = Tab::Overview;
         self.settings_data = hearth_config::load(&self.home).ok();
         if let Some(settings) = &self.settings_data {
+            self.zone = Zone::resolve(&settings.identity.timezone);
             self.settings.daemon = settings.daemon.clone();
         }
         self.start_dashboard_workers();
