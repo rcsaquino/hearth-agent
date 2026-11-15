@@ -820,7 +820,7 @@ Every request is assembled in the same order:
 | L3 rules | Pinned instructions, versioned | Rare | 400 |
 | L4 skills index | Skill names and one-line descriptions | Rare | 300 |
 | L5 transcript | Entries, summaries, tool results | Append-only | Remaining |
-| L6 recall | Memory retrieved for this input | Every turn | 900 |
+| L6 recall | Memory retrieved for this input | Every turn | 300 |
 | L7 runtime | Current time in `identity.timezone`, ISO 8601 | Every turn | 150 |
 
 L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
@@ -1721,7 +1721,7 @@ output, cache, and latency totals.
   latency for every model request. Media calls (image, transcription, speech) are
   recorded in the same ledger.
 - The Overview tab combines runtime (daemon, model, thinking, provider, context,
-  turn limit, workspace), usage and cache hit rate for today, counted from local
+  workspace), usage and cache hit rate for today, counted from local
   midnight in `identity.timezone`, the last week, the last month, and all time,
   work and memory (tasks, helpers, statements, rules
   bullets, budgets, maintenance, skill review), provider connections, and recent
@@ -1973,15 +1973,13 @@ install contains nothing personal.
 | Database mode | `0600` | 11.1 |
 | Save durability | `synchronous=FULL` | 4.4 |
 | Read connections | 4 | 11.1 |
-| Turn limit | 120 | 5.1 |
+| Recall budget | 300 tokens, 12 items | 6.1, 7.4 |
 | Context window | 128,000 tokens | 6.2 |
 | Reserved reply | 32,000 tokens local reserve | 6.2 |
 | Soft compaction | 65% of usable context | 5.5 |
 | Hard compaction | 85% of usable context | 5.5 |
 | Keep recent tokens | 20,000 | 5.5 |
 | Inline tool output cap | 4,000 tokens | 6.3 |
-| Standing memory | 1,200 tokens | 6.1, 7.5 |
-| Recall budget | 900 tokens, 6 items | 6.1, 7.4 |
 | Fixed prompt overhead | 4,500 tokens or less | 14 |
 | Telegram message limit | 32,768 UTF-8 characters rich; 4,096 fallback | 8.3 |
 | Telegram download limit | 20 MB | 8.4 |
@@ -2003,9 +2001,6 @@ install contains nothing personal.
 | Search results returned | 10 at most | 9.5 |
 | Search order | Exa, then Brave, DeepSeek, Firecrawl, TinyFish | 9.5 |
 | Fetch order | Jina, then direct HTTP/HTTPS | 9.5 |
-| Memory decay | 5% per 90 days, floor 15 | 7.6 |
-| Archive threshold | 3 years unused and importance below 20 | 7.6 |
-| No scheduled memory pass | 03:30 in `identity.timezone` | 7.3 |
 | Backups | 7 daily, 4 weekly | 11.3 |
 | Idle compaction timer | 60 minutes | 5.5 |
 | Idle compaction threshold | 100k tokens or 65% of usable | 5.5 |
