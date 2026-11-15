@@ -2083,4 +2083,6 @@ force-pushing, which is the approval named above and not a step in this change.
 - The p95 is not the vector scan. It is the lexical channel when a question shares
   a word with the noise, which the synthetic noise makes common. The hybrid vector
   scan at 200,000 rows is still unmeasured because backfilling 200,000 vectors is
-  not a routine check.
+  not a routine check. Linear extrapolation from about 10 ms at 4,000 rows gives
+  about 500 ms at 200,000, so the 100 ms gate is not claimed for the hybrid path
+  at that size.
