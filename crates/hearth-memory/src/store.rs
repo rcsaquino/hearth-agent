@@ -546,13 +546,25 @@ fn insert_in(
     // is current once rather than twice.
     let earlier = if supersedes.is_none() {
         writer.query_optional(
-            "SELECT id FROM memories WHERE fingerprint = ? AND valid_to IS NULL LIMIT 1",
+            &format!(
+                "SELECT {COLUMNS} FROM memories WHERE fingerprint = ? AND valid_to IS NULL LIMIT 1"
+            ),
             [&digest],
-            |row| row.get::<_, String>(0),
+            map_memory,
         )?
     } else {
         None
     };
+
+    // The pin is why a rule is injected, so an unpinned copy of it is a no-op:
+    // the rule stands and the copy is not written. Retiring it takes a write
+    // that names the row.
+    if let Some(current) = &earlier
+        && current.pinned
+        && !item.pinned
+    {
+        return Ok(WriteOutcome::Unchanged(current.clone()));
+    }
 
     // Replacement is deliberate, so it skips the duplicate merge: a caller that
     // names the row it replaces has already decided.
@@ -575,7 +587,7 @@ fn insert_in(
 
     // A replacement ends when the new statement begins, not when the write
     // happened. One statement can be written weeks after the change it records.
-    let supersedes = supersedes.or(earlier);
+    let supersedes = supersedes.or(earlier.map(|earlier| earlier.id));
     if let Some(previous) = &supersedes {
         let closed = writer.execute(
             "UPDATE memories SET valid_to = ?, superseded_by = ?, pinned = 0 \
