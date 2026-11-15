@@ -270,6 +270,22 @@ impl ReminderHandler {
             EffectStatus::Unknown => "unknown",
             _ => "unknown",
         };
+        if status == EffectStatus::Unknown
+            && let Some(conversation_id) = task.conversation_id.as_deref()
+        {
+            // At-most-once holds, so an interrupted send is not retried. The
+            // person still has to learn that the reminder did not arrive.
+            let text = format!(
+                "A reminder could not be confirmed as sent. If it did not arrive, ask me to reschedule it: {}",
+                task.input
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("the reminder")
+            );
+            self.session
+                .save(Save::new(conversation_id).entry("notice", json!({"text": text})))
+                .map_err(TaskHandlerError::from_core)?;
+        }
         if let Some(seconds) = repeat {
             let now = self.session.now_micros();
             let next = now.saturating_add(seconds.saturating_mul(1_000_000));
