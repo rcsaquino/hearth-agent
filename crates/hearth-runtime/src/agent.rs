@@ -434,7 +434,7 @@ impl Agent {
             .history_for_prompt(&submission.conversation_id)?;
         let pending = pending_calls(&history);
         if !pending.is_empty() {
-            self.execute_calls(&submission, &claimed.id, &pending, events)?;
+            self.execute_calls(&submission, &claimed.id, &pending, true, events)?;
             turn += 1;
             self.session.checkpoint_task(
                 &claimed.id,
@@ -660,7 +660,7 @@ impl Agent {
 
             if !calls.is_empty() {
                 self.save_assistant(&submission, &prompt_hash, &thinking, &text, &calls)?;
-                self.execute_calls(&submission, &claimed.id, &calls, events)?;
+                self.execute_calls(&submission, &claimed.id, &calls, false, events)?;
                 if cancel.load(Ordering::Relaxed) {
                     return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
                 }
@@ -778,6 +778,7 @@ impl Agent {
         submission: &Submission,
         task_id: &str,
         calls: &[ToolCall],
+        replay: bool,
         events: &dyn EventSink,
     ) -> Result<(), AgentError> {
         let mut blocks = Vec::new();
@@ -798,11 +799,20 @@ impl Agent {
                     groups.call_selected(&call.name, &call.arguments, &selection)
                 })
             });
-            let outcome = self
-                .config
-                .tools
-                .call(&call.name, &call.arguments)
-                .or(selected);
+            let outcome = if replay && !replay_safe(&call.name) {
+                Some(Err(ToolError::invalid(
+                    "not_replayed",
+                    format!(
+                        "{} was not re-run after an interruption; re-issue it if it is still needed",
+                        call.name
+                    ),
+                )))
+            } else {
+                self.config
+                    .tools
+                    .call(&call.name, &call.arguments)
+                    .or(selected)
+            };
             let (content, is_error) = match outcome {
                 Some(Ok(output)) => {
                     let (content, spill_failed) = self.spill_output(&call.id, &output.content);
@@ -985,6 +995,16 @@ impl Drop for Reservation<'_> {
             reserved.remove(&self.conversation_id);
         }
     }
+}
+
+/// Whether a pending call may run again after a crash.
+///
+/// A tool that acts outside the database has no effect row and no idempotency
+/// key, so replaying it can run a command or send a message twice. Those calls
+/// are answered with a not-replayed result instead, and the model decides
+/// whether to issue them again.
+fn replay_safe(name: &str) -> bool {
+    !matches!(name, "shell" | "message" | "schedule" | "browser" | "media")
 }
 
 fn pending_calls(history: &[Entry]) -> Vec<ToolCall> {
