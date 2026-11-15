@@ -1950,3 +1950,28 @@ force-pushing, which is the approval named above and not a step in this change.
 - `memory_recall` with `as_of` and no topic now reads the store at that instant,
   and a recall by id renders `since` with `Zone::iso`. Both are the one timestamp
   rule in SPEC 6: every instant shown to the model is zoned ISO 8601.
+
+## 2026-11-15: Bounds, guards, and ownership at the tool boundary
+
+- A pooled read connection is owned by a guard whose `Drop` returns it, so a
+  panic in a read closure no longer shrinks the pool toward a permanent block.
+- A snapshot is vacuumed inside a 0700 staging folder and chmodded to 0600
+  before the rename. SQLite creates the vacuum target with the process umask, so
+  the old `.tmp` file was readable by every local user for the length of the copy.
+- A write checks the deepest existing ancestor of its target before creating any
+  directory. The old order created the parent first, so a symlinked directory let
+  a refused write leave a tree outside the workspace.
+- Error bodies are read through one 8 KiB cap. Only a few hundred characters
+  reach a message, so buffering the rest let the peer choose the allocation.
+  Document archives are read at most 32 MiB, a text file at most 16 MiB, and one
+  uncompressed archive entry at most 16 MiB, which matters because deflate reaches
+  roughly 1000:1.
+- `ToolError::from(io::Error)` marks only a transient kind retryable. A
+  deterministic failure such as invalid UTF-8 or a name that is too long now tells
+  the model not to repeat the call.
+- The browser applies the fetch tool's public-address guard to the URL the model
+  names. The browser group exists for pages plain fetch cannot render, not for a
+  second route to the host or a metadata service; `shell` is the deliberate route.
+- One image entry is estimated at 12,000 characters, about 3,300 tokens, which is
+  the worst case for the 1568-pixel long edge the adapter sends. The old estimate
+  counted the path and let an image-heavy turn pass every local budget.
