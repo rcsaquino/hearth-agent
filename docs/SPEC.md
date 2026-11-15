@@ -1079,7 +1079,7 @@ there is. Naming the remainder, and the call that fetches it, is the difference
 between a bounded digest and a bounded memory.
 
 Default budgets are 400 tokens for rules and 300 for the digest, with at most 12
-statements. The digest is measured at 116 tokens at the 95th percentile on the
+statements. The digest is measured at 139 tokens at the 95th percentile on the
 benchmark.
 
 ### 7.6 Rules
