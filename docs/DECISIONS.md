@@ -270,7 +270,8 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   message with the soul and operation text, the transcript in order, and a final
   system message with the runtime note. The audit document keeps five segments:
   identity, operation, tools, transcript, and runtime. The transcript segment
-  excludes the identity and runtime system messages.
+  excludes the identity and runtime system messages. (The runtime note now rides
+  with the newest input message; see 2026-11-16.)
 - Entry content is parsed permissively: strings and `{text: ...}` objects are text;
   typed blocks support text, thinking, tool_call, and tool_result. Thinking is
   stored but filtered out of provider requests.
@@ -1834,9 +1835,11 @@ force-pushing, which is the approval named above and not a step in this change.
   not shift when a display preference changes. The recall digest keeps its relative
   age because the digest is paid on every turn, and the runtime note in the same
   prompt is its absolute anchor.
-- The runtime note is `Current time: <ISO>.` and nothing else. It is the one
-  uncached line in every request, so the conversation id and the model name, both
-  already implied by the request, no longer ride there.
+- The runtime note is `<runtime>Current time: <ISO>.</runtime>` and nothing else.
+  It is the one uncached line in every request, so the conversation id and the
+  model name, both already implied by the request, no longer ride there. The tags
+  mark it as context, and it is appended to the newest input message rather than
+  sent as a separate system message.
 - The transcript tool's citation stamp and a bare `as_of` date follow the zone too.
   The tools are rebuilt for every message, so the zone is resolved per run and a
   settings change applies on the next message with no new state. A bare `as_of`
@@ -2036,3 +2039,18 @@ force-pushing, which is the approval named above and not a step in this change.
   transcript or a remembered tool shape does not fail the spawn.
 - `wall_seconds` stays. It bounds a run by time and fails as `Cancelled`, which
   names the real cause.
+
+## 2026-11-16: The runtime note rides with the newest input
+
+- A standalone trailing system message is the strongest instruction position. A
+  continuation turn whose only new content was the clock was answered as though
+  the clock were the request, because the note was the last message in the request.
+- The note is now appended to the newest user or tool message: the newest user
+  message on the first turn and after steering, the last tool result on a
+  continuation. It stays one tag-wrapped line, paid fresh every turn, with no
+  conversation or model identifier.
+- The Prompt tab labels it `runtime note · newest input`, and the audit transcript
+  still shows the stored conversation, so an operator can see that a continuation
+  added a tool result and no user message.
+- A conversation with neither a user nor a tool message has nowhere to carry the
+  note; it is dropped rather than put back in instruction position.

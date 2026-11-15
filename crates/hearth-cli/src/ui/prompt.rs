@@ -649,7 +649,7 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
 
     rows.push(
         PromptRow::text(
-            "system · runtime note",
+            "runtime note · newest input",
             theme::muted(),
             view.request()["runtime"].as_str().unwrap_or_default(),
         )

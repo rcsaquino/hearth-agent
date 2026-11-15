@@ -270,8 +270,12 @@ impl Agent {
     fn runtime_note(&self) -> String {
         let zone = Zone::resolve(&hearth_config::identity_timezone(&self.config.home));
         // The note is paid fresh on every turn, and the conversation id already
-        // travels with the request.
-        format!("Current time: {}.", zone.iso(self.session.now_micros()))
+        // travels with the request. The tag keeps the clock distinct from the
+        // message that carries it.
+        format!(
+            "<runtime>Current time: {}.</runtime>",
+            zone.iso(self.session.now_micros())
+        )
     }
 
     /// Compact after a settled turn when the visible prompt exceeds the soft

@@ -82,10 +82,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         }
         messages.push(message.clone());
     }
-    messages.push(ChatMessage {
-        role: Role::System,
-        blocks: vec![ContentBlock::Text(input.runtime_note.clone())],
-    });
+    attach_runtime_note(&mut messages, &input.runtime_note);
 
     let transcript: Vec<Value> = history_messages
         .iter()
@@ -182,6 +179,38 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         prefix_hash,
         prefix_parts,
     })
+}
+
+/// Attach the fresh clock to the message that carried this turn's input.
+///
+/// A standalone trailing system message sits in the strongest instruction
+/// position, so a continuation whose only new content is the clock was answered
+/// as though the clock were the request. The note rides with the newest user or
+/// tool message instead, where it is read as context next to the content it
+/// describes. A conversation with neither has nowhere to put it, so the note is
+/// dropped rather than returned to instruction position.
+fn attach_runtime_note(messages: &mut [ChatMessage], note: &str) {
+    let Some(message) = messages
+        .iter_mut()
+        .rev()
+        .find(|message| matches!(message.role, Role::User | Role::Tool))
+    else {
+        return;
+    };
+    if message.role == Role::Tool
+        && let Some(ContentBlock::ToolResult { content, .. }) = message
+            .blocks
+            .iter_mut()
+            .rev()
+            .find(|block| matches!(block, ContentBlock::ToolResult { .. }))
+    {
+        content.push_str("\n\n");
+        content.push_str(note);
+        return;
+    }
+    message
+        .blocks
+        .push(ContentBlock::Text(format!("\n\n{note}")));
 }
 
 fn hash_part(text: &str) -> String {

@@ -826,8 +826,14 @@ Every request is assembled in the same order:
 L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
 guidance files, tools, rules, or skills change. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
-message; it never rewrites the prefix. L7 is the last system note and carries only
-the time: the conversation id and the model already travel with the request.
+message; it never rewrites the prefix. L7 is a `<runtime>` line paid fresh on every
+turn and carried by the newest input message, not by a separate system message: it
+is appended to the last tool result on a continuation and to the newest user message
+otherwise. A trailing system note sits in instruction position, so a continuation
+whose only new content is the clock can be answered as though the clock were the
+request. The tags keep the note distinct from the message that carries it, and it
+carries only the time: the conversation id and the model already travel with the
+request.
 
 Each section after identity is wrapped in an XML tag: `<project_instructions>`,
 `<rules>`, `<skills>`, `<memory>`, and
