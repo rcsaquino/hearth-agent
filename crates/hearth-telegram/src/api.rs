@@ -189,10 +189,35 @@ impl TelegramClient {
             }),
             Some(request_timeout),
         )?;
-        serde_json::from_value(result).map_err(|error| TelegramError::Protocol {
-            method: "getUpdates".to_owned(),
-            detail: format!("invalid update list: {error}"),
-        })
+        let items = result
+            .as_array()
+            .ok_or_else(|| TelegramError::Protocol {
+                method: "getUpdates".to_owned(),
+                detail: "the update list is not an array".to_owned(),
+            })?
+            .clone();
+        // Decode one update at a time. A single unrecognized shape must not
+        // discard the batch and stall every chat behind the same update, so an
+        // update that cannot be decoded becomes an ignored id and the offset
+        // still advances past it.
+        let mut updates = Vec::with_capacity(items.len());
+        for item in items {
+            match serde_json::from_value::<Update>(item.clone()) {
+                Ok(update) => updates.push(update),
+                Err(error) => {
+                    let Some(update_id) = item.get("update_id").and_then(Value::as_i64) else {
+                        tracing::warn!(%error, "skipped a telegram update with no id");
+                        continue;
+                    };
+                    tracing::warn!(update_id, %error, "skipped an undecodable telegram update");
+                    updates.push(Update {
+                        update_id,
+                        message: None,
+                    });
+                }
+            }
+        }
+        Ok(updates)
     }
 
     /// Read the bot identity.
