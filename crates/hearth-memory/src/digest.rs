@@ -174,27 +174,87 @@ fn coverage_lines(items: &[Memory], coverage: &Coverage) -> Vec<String> {
 /// not reorder the rest and the prefix hash only moves when the text moves. The
 /// tags belong to the prompt layer.
 pub fn rules_body(rules: &[Memory], max_tokens: u64) -> String {
-    if rules.is_empty() {
-        return String::new();
+    let lines: Vec<String> = rules
+        .iter()
+        .map(|rule| rule_line(&rule.id, &rule.content))
+        .collect();
+    fill_rule_lines(&lines, max_tokens).1
+}
+
+/// Whether every rule, including one that is not stored yet, fits the render.
+///
+/// The write check and the prompt must measure the same block, or a write can
+/// be admitted that the render then has to hide behind a notice.
+pub fn rules_fit(existing: &[&Memory], content: &str, max_tokens: u64) -> bool {
+    let mut lines: Vec<String> = existing
+        .iter()
+        .map(|rule| rule_line(&rule.id, &rule.content))
+        .collect();
+    lines.push(rule_line(crate::store::ID_SAMPLE, content));
+    fill_rule_lines(&lines, max_tokens).0 == lines.len()
+}
+
+/// The token cost of rendering every rule, with no notice.
+pub fn rules_cost(existing: &[&Memory]) -> u64 {
+    let text = existing
+        .iter()
+        .map(|rule| rule_line(&rule.id, &rule.content))
+        .collect::<Vec<_>>()
+        .join("\n");
+    cost_of_chars(text.chars().count() as u64)
+}
+
+/// Fill rule lines against a budget, reserving the notice when lines are left out.
+///
+/// Returns the number of lines shown and the rendered block. The block never
+/// costs more than `max_tokens`; a budget too small for the notice renders nothing.
+fn fill_rule_lines(lines: &[String], max_tokens: u64) -> (usize, String) {
+    if lines.is_empty() {
+        return (0, String::new());
     }
-    let mut lines: Vec<String> = Vec::with_capacity(rules.len());
-    let mut used = 0u64;
-    for rule in rules {
-        let line = rule_line(&rule.id, &rule.content);
-        let cost = hearth_model::estimate_tokens(&line).max(1) as u64;
-        if used + cost > max_tokens {
+    let mut selected = 0usize;
+    let mut chars = 0u64;
+    for (index, line) in lines.iter().enumerate() {
+        let line_chars = line.chars().count() as u64;
+        let omitted = lines.len() - index - 1;
+        // The newlines between lines, plus the newline and text of a notice
+        // when this line would still leave rules out.
+        let mut projected = chars + line_chars + selected as u64;
+        if omitted > 0 {
+            projected += 1 + omitted_notice(omitted).chars().count() as u64;
+        }
+        if cost_of_chars(projected) > max_tokens {
             break;
         }
-        used += cost;
-        lines.push(line);
+        chars += line_chars;
+        selected += 1;
     }
-    if lines.len() < rules.len() {
-        lines.push(format!(
-            "{} more rules were not shown.",
-            rules.len() - lines.len()
-        ));
+    if selected == lines.len() {
+        return (selected, lines.join("\n"));
     }
-    lines.join("\n")
+    let notice = omitted_notice(lines.len() - selected);
+    let mut rendered: Vec<&str> = lines[..selected].iter().map(String::as_str).collect();
+    rendered.push(&notice);
+    let block = rendered.join("\n");
+    if cost_of_chars(block.chars().count() as u64) > max_tokens {
+        // A budget smaller than the notice can name nothing without breaking
+        // the bound it was given.
+        return (0, String::new());
+    }
+    (selected, block)
+}
+
+/// The line that names the rules a budget left out.
+fn omitted_notice(omitted: usize) -> String {
+    format!("{omitted} more rules were not shown.")
+}
+
+/// The token cost of a rendered block, from its character count.
+fn cost_of_chars(chars: u64) -> u64 {
+    if chars == 0 {
+        return 0;
+    }
+    ((chars as f64 / 4.0) * 1.10).ceil() as u64
 }
 
 /// What the coverage lines cost when no statement is shown.

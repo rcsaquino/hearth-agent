@@ -234,14 +234,10 @@ fn check_rules_budget(
         .iter()
         .filter(|rule| Some(rule.id.as_str()) != replaces)
         .collect();
-    let used: u64 = counted
-        .iter()
-        .map(|rule| crate::digest::rule_cost(rule))
-        .sum();
-    let adding = crate::digest::rule_cost_text(content);
-    if used + adding <= budget {
+    if crate::digest::rules_fit(&counted, content, budget) {
         return Ok(());
     }
+    let used = crate::digest::rules_cost(&counted);
     let listed: Vec<String> = counted.iter().map(|rule| rule.id.clone()).collect();
     Err(MemoryError::new(
         Code::RulesFull,
