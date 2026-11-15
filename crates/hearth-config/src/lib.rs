@@ -244,6 +244,11 @@ fn expand_string(text: &str) -> String {
 }
 
 /// The first unresolved `${NAME}` reference in `value`, if any.
+/// Expand `${NAME}` references in every string of the document.
+pub fn expand_document(value: &mut Value) {
+    expand_value(value);
+}
+
 pub(crate) fn unresolved(value: &str) -> Option<String> {
     let start = value.find("${")?;
     let after = &value[start + 2..];

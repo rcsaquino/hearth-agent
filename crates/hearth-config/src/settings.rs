@@ -503,6 +503,9 @@ pub fn default_settings_value() -> Value {
         "memory": {
             "rules_max_tokens": default_rules_max_tokens(),
             "recall_max_tokens": default_recall_max_tokens(),
+            "recall_max_items": default_recall_max_items(),
+            "embeddings": default_embeddings(),
+            "embedding_model_dir": default_embedding_model_dir(),
         },
         "logging": {"level": default_log_level()},
     })

@@ -1692,8 +1692,11 @@ fn names_value(names: Vec<String>) -> Value {
 }
 
 fn validate(document: &Value) -> Result<(), String> {
-    let settings: hearth_config::Settings = serde_json::from_value(document.clone())
-        .map_err(|error| format!("Check this setting: {error}"))?;
+    // The daemon expands `${NAME}` before validating, and the form recommends
+    // that form for secrets, so the form has to expand it too.
+    let mut expanded = document.clone();
+    hearth_config::expand_document(&mut expanded);
+    let settings = hearth_config::settings_from_value(expanded).map_err(|error| error.to_string())?;
     settings.validate().map_err(|error| error.to_string())
 }
 
