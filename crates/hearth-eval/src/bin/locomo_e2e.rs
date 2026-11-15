@@ -312,7 +312,7 @@ fn main() -> Result<()> {
         let mut seeded: Vec<String> = vec![String::new(); jobs.len()];
         let mut pending = 0usize;
         for (slot, (position, _, _, _, _)) in jobs.iter().enumerate() {
-            let key = format!("{sample}:{position}");
+            let key = cache_key(&model, &sample, *position);
             if let Some(text) = cache.get(&key) {
                 seeded[slot] = text.clone();
             } else {
@@ -371,7 +371,10 @@ fn main() -> Result<()> {
         let failed = failures.load(Ordering::Relaxed);
         for (slot, (position, _, _, _, _)) in jobs.iter().enumerate() {
             if !answers[slot].is_empty() {
-                cache.insert(format!("{sample}:{position}"), answers[slot].clone());
+                cache.insert(
+                    cache_key(&model, &sample, *position),
+                    answers[slot].clone(),
+                );
             }
         }
         if let Ok(text) = serde_json::to_string_pretty(&cache) {
@@ -495,4 +498,25 @@ fn parse_conversation(conversation: &Value) -> Result<(Vec<Turn>, Vec<Question>)
         });
     }
     Ok((turns, questions))
+}
+
+/// The cache key for one answer.
+///
+/// The model is part of the key: a run with a different model must call the
+/// provider rather than relabel another model's answers.
+fn cache_key(model: &str, sample: &str, position: usize) -> String {
+    format!("{sample}:{position}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cache_entry_belongs_to_one_model() {
+        assert_ne!(
+            cache_key("model-a", "sample", 3),
+            cache_key("model-b", "sample", 3)
+        );
+    }
 }
