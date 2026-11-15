@@ -23,6 +23,7 @@ pub enum ServiceError {
 #[derive(Debug, Clone)]
 pub struct ServiceReport {
     pub unit: PathBuf,
+    pub created: bool,
 }
 
 /// The current unit state.
@@ -46,6 +47,7 @@ pub struct StartModeReport {
     pub unit: PathBuf,
     pub installed: bool,
     pub linger: bool,
+    pub repaired: bool,
 }
 
 /// Write and enable the user unit for the current binary and home.
@@ -66,18 +68,21 @@ pub fn install_at(
     fs::create_dir_all(config_dir)?;
     let unit = config_dir.join("hearth.service");
     let content = unit_content(home)?;
-    if let Ok(existing) = fs::read_to_string(&unit)
+    let existing = fs::read_to_string(&unit).ok();
+    if let Some(existing) = existing.as_deref()
         && existing != content
         && !force
     {
         return Err(ServiceError::DifferentUnit(unit));
     }
+    let created = existing.as_deref() != Some(content.as_str());
     fs::write(&unit, content)?;
+    link_unit(config_dir, &unit)?;
     if enable {
         run_systemctl(&["daemon-reload"])?;
         run_systemctl(&["enable", "hearth.service"])?;
     }
-    Ok(ServiceReport { unit })
+    Ok(ServiceReport { unit, created })
 }
 
 /// Report whether the unit is installed for this home.
@@ -116,6 +121,11 @@ pub fn uninstall_at(config_dir: &Path, systemctl: bool) -> Result<ServiceRemoval
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(ServiceError::Io(error)),
     };
+    match fs::remove_file(wants_link(config_dir)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(ServiceError::Io(error)),
+    }
     if systemctl {
         run_systemctl(&["daemon-reload"])?;
     }
@@ -166,10 +176,12 @@ pub fn apply_start_mode_at(
                 unit,
                 installed: false,
                 linger: false,
+                repaired: false,
             })
         }
         "login" => {
-            install_at(home, config_dir, true, run)?;
+            let linked = link_points_at(config_dir, &unit);
+            let report = install_at(home, config_dir, true, run)?;
             if run {
                 let _ = disable_linger();
             }
@@ -178,11 +190,15 @@ pub fn apply_start_mode_at(
                 unit,
                 installed: true,
                 linger: false,
+                repaired: report.created || !linked,
             })
         }
         "startup" => {
-            install_at(home, config_dir, true, run)?;
+            let linked = link_points_at(config_dir, &unit);
+            let report = install_at(home, config_dir, true, run)?;
+            let mut repaired = report.created || !linked;
             if run {
+                repaired |= !linger_present()?;
                 enable_linger()?;
             }
             Ok(StartModeReport {
@@ -190,12 +206,40 @@ pub fn apply_start_mode_at(
                 unit,
                 installed: true,
                 linger: true,
+                repaired,
             })
         }
         other => Err(ServiceError::Config(format!(
             "unknown daemon start mode: {other}"
         ))),
     }
+}
+
+fn wants_link(config_dir: &Path) -> PathBuf {
+    config_dir
+        .join("default.target.wants")
+        .join("hearth.service")
+}
+
+fn link_points_at(config_dir: &Path, unit: &Path) -> bool {
+    fs::read_link(wants_link(config_dir)).is_ok_and(|target| target == unit)
+}
+
+fn link_unit(config_dir: &Path, unit: &Path) -> Result<bool, ServiceError> {
+    let link = wants_link(config_dir);
+    if let Some(directory) = link.parent() {
+        fs::create_dir_all(directory)?;
+    }
+    if fs::read_link(&link).is_ok_and(|target| target == unit) {
+        return Ok(false);
+    }
+    match fs::remove_file(&link) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(ServiceError::Io(error)),
+    }
+    std::os::unix::fs::symlink(unit, &link)?;
+    Ok(true)
 }
 
 fn unit_content(home: &Path) -> Result<String, ServiceError> {
@@ -256,6 +300,11 @@ fn unit_home(unit: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn linger_present() -> Result<bool, ServiceError> {
+    let user = current_user()?;
+    Ok(Path::new("/var/lib/systemd/linger").join(user).is_file())
 }
 
 fn enable_linger() -> Result<(), ServiceError> {
