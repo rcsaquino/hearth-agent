@@ -136,3 +136,29 @@ fn the_record_stores_no_credential_shaped_text() {
     assert_eq!(latest.hash, blob);
     assert!(!latest.text.contains("sk-test"));
 }
+
+#[test]
+fn ordinary_hyphenated_words_are_not_credentials() {
+    for text in [
+        "open the task-id file",
+        "prefers a disk-backed cache",
+        "the risk-free path",
+        "check the desk-top copy",
+        "an asterisk-based rule",
+    ] {
+        assert!(!contains_secret(text), "{text} must not be a credential");
+        assert_eq!(redact_secrets(text), text, "{text} must survive intact");
+    }
+}
+
+#[test]
+fn redaction_keeps_a_serialized_document_parseable() {
+    let clean = r#"{"text":"spill/task-id.txt"}"#;
+    assert_eq!(redact_secrets(clean), clean);
+
+    let secret = r#"{"api_key":"sk-test-not-a-real-key","number":1}"#;
+    let redacted = redact_secrets(secret);
+    assert!(!redacted.contains("sk-test-not-a-real-key"));
+    let parsed: serde_json::Value = serde_json::from_str(&redacted).expect("still JSON");
+    assert_eq!(parsed["number"], 1);
+}
