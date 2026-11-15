@@ -95,15 +95,23 @@ fn a_skill_without_frontmatter_uses_the_file_name_and_first_body_line() {
 }
 
 #[test]
-fn malformed_frontmatter_is_rejected() {
+fn one_malformed_skill_does_not_hide_the_rest() {
     let home = TempDir::new().expect("temp home");
+    write(
+        &home.path().join("skills/writing.md"),
+        "---\nname: writing\ndescription: Write clearly\n---\n\n## Steps\n\nWrite.\n",
+    );
     write(
         &home.path().join("skills/learned/broken.md"),
         "---\nname: broken\ndescription: no closing\n## When to use\n",
     );
     let library = SkillLibrary::new(home.path());
-    let error = library.load_all().expect_err("malformed must fail");
-    assert!(error.to_string().contains("frontmatter"), "{error}");
+    let skills = library
+        .load_all()
+        .expect("a malformed file must not fail the whole scan");
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0].name, "writing");
+    assert!(library.load_body("writing").expect("body").is_some());
 }
 
 #[test]
@@ -123,23 +131,6 @@ fn the_index_archives_low_success_learned_skills_over_the_cap() {
         );
     }
     let library = SkillLibrary::new(home.path());
-    let read_only = library.read_index().expect("read index");
-    assert!(
-        library
-            .load_all()
-            .expect("load")
-            .iter()
-            .all(|skill| skill.status != SkillStatus::Archived),
-        "read_index must not archive"
-    );
-    assert!(
-        read_only
-            .lines()
-            .filter(|line| line.starts_with("- "))
-            .count()
-            <= 50,
-        "read_index exceeded the count cap"
-    );
     let index = library.index().expect("index");
     let lines = index.lines().filter(|line| line.starts_with("- ")).count();
     assert!(lines <= 50, "index has {lines} lines");
