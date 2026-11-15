@@ -91,19 +91,42 @@ impl Storage {
         }
         let connection = readers.pop().expect("the pool is non-empty");
         drop(readers);
-        let outcome = run(&Reader {
-            connection: &connection,
-        });
-        if let Ok(mut readers) = self.readers.lock() {
-            readers.push(connection);
-            self.reader_ready.notify_one();
-        }
-        outcome
+        // The guard returns the connection on both paths. A panic in a read
+        // closure unwinds through its Drop instead of shrinking the pool.
+        let guard = PooledReader {
+            connection: Some(connection),
+            readers: &self.readers,
+            ready: &self.reader_ready,
+        };
+        run(&Reader {
+            connection: guard
+                .connection
+                .as_ref()
+                .expect("the guard holds a connection"),
+        })
     }
 
     /// Read the schema version from a pooled read connection.
     pub fn schema_version(&self) -> Result<i64, StorageError> {
         self.read(|reader| reader.query_row("PRAGMA user_version", [], |row| row.get(0)))
+    }
+}
+
+/// One checked-out read connection, returned to the pool when it drops.
+struct PooledReader<'a> {
+    connection: Option<Connection>,
+    readers: &'a Mutex<Vec<Connection>>,
+    ready: &'a Condvar,
+}
+
+impl Drop for PooledReader<'_> {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take()
+            && let Ok(mut readers) = self.readers.lock()
+        {
+            readers.push(connection);
+            self.ready.notify_one();
+        }
     }
 }
 
