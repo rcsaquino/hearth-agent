@@ -2004,3 +2004,18 @@ force-pushing, which is the approval named above and not a step in this change.
   bounds the disk without an unbounded family of files.
 - `session.recover_interrupted` and `prune_prompt_blobs` write SQL directly, like
   the other recovery paths, because they must run before any run exists.
+
+## 2026-11-16: The rules budget is 800 tokens
+
+- The prompt rules segment and `memory.rules_max_tokens` both default to 800.
+  The fixed overhead target has room: the live prompt measured 3,548 tokens with
+  272 of rules, so 800 rules leaves 424 under 4,500.
+- The prompt constant, the settings default, and the `MemoryConfig` default are
+  one number, pinned by `segment_budgets_match_the_spec`,
+  `the_rules_budget_matches_the_prompt_segment`, and
+  `the_memory_default_rules_budget_matches_the_prompt_segment`.
+- The write check and the render share `digest::rules_fit`, so a rule admitted by
+  the write is a rule the block shows. The notice line and the joining newlines
+  are inside the budget.
+- `RULE_CHARS` stays 400 characters. It caps one rule's content and is not the
+  token budget.

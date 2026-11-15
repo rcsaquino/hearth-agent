@@ -418,7 +418,7 @@ fn default_idle_min_tokens() -> u64 {
 }
 
 fn default_rules_max_tokens() -> u64 {
-    400
+    800
 }
 
 fn default_recall_max_tokens() -> u64 {

@@ -817,7 +817,7 @@ Every request is assembled in the same order:
 | L0 identity | `SOUL.md`, voice, hard rules | Stable | 800 tokens |
 | L1 project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | 32 KB text |
 | L2 tools | Core tool schemas | Stable | 1200 |
-| L3 rules | Pinned instructions, versioned | Rare | 400 |
+| L3 rules | Pinned instructions, versioned | Rare | 800 |
 | L4 skills index | Skill names and one-line descriptions | Rare | 300 |
 | L5 transcript | Entries, summaries, tool results | Append-only | Remaining |
 | L6 recall | Memory retrieved for this input | Every turn | 300 |
@@ -1094,7 +1094,7 @@ that silently shows six of fourteen facts teaches the model that six is all
 there is. Naming the remainder, and the call that fetches it, is the difference
 between a bounded digest and a bounded memory.
 
-Default budgets are 400 tokens for rules and 300 for the digest, with at most 12
+Default budgets are 800 tokens for rules and 300 for the digest, with at most 12
 statements. The digest is measured at 139 tokens at the 95th percentile on the
 benchmark.
 
@@ -1104,7 +1104,7 @@ Rules are injected as a system message in the cached prefix, ordered by creation
 so an edit does not reorder the block and the prefix hash only moves when the
 text moves.
 
-- The block is capped at 400 tokens. A write that would exceed the cap is
+- The block is capped at 800 tokens. A write that would exceed the cap is
   refused, not silently evicted.
 - Any rule that does not fit the render is named as `N more rules were not
   shown`, so a hand-edited store cannot hide content silently.
@@ -1560,7 +1560,7 @@ Optional overrides, only when needed:
 | `models.context_window` | `128000` | Model context window in tokens; a local value that models.dev can refresh |
 | `models.max_output_tokens` | `32000` | Local reply reserve; not sent |
 | `tasks.eta_reminder_seconds` | `1` | Delay after a task’s expected finish before its reminder |
-| `memory.rules_max_tokens` | `400` | Rules budget, in the cached prefix |
+| `memory.rules_max_tokens` | `800` | Rules budget, in the cached prefix |
 | `memory.recall_max_tokens` | `300` | Per-turn digest token budget |
 | `memory.recall_max_items` | `12` | Per-turn digest item cap |
 | `memory.embeddings` | `true` | Request the local hybrid recall path; lexical fallback remains active |

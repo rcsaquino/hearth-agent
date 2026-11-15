@@ -67,7 +67,7 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            rules_max_tokens: 400,
+            rules_max_tokens: 800,
             recall_max_tokens: 300,
             recall_max_items: 12,
         }

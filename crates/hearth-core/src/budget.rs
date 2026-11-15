@@ -5,7 +5,7 @@ pub const SEGMENT_IDENTITY: u64 = 800;
 /// The tool schema budget.
 pub const SEGMENT_TOOLS: u64 = 1_200;
 /// The rules budget.
-pub const SEGMENT_RULES: u64 = 400;
+pub const SEGMENT_RULES: u64 = 800;
 
 /// The skills index budget.
 pub const SEGMENT_SKILLS: u64 = 300;
