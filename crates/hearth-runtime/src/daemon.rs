@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -545,11 +545,19 @@ struct TelegramWorker {
 #[derive(Default)]
 struct CancellationRegistry {
     tokens: Mutex<HashMap<i64, Arc<AtomicBool>>>,
+    pending: Mutex<HashSet<i64>>,
 }
 
 impl CancellationRegistry {
     fn register(self: &Arc<Self>, chat_id: i64) -> RunCancellation {
         let token = Arc::new(AtomicBool::new(false));
+        // A stop that arrived before the worker picked the submission is
+        // observed here, so the run starts already cancelled.
+        if let Ok(mut pending) = self.pending.lock()
+            && pending.remove(&chat_id)
+        {
+            token.store(true, Ordering::Relaxed);
+        }
         if let Ok(mut tokens) = self.tokens.lock() {
             tokens.insert(chat_id, Arc::clone(&token));
         }
@@ -570,11 +578,21 @@ impl CancellationRegistry {
         let Ok(tokens) = self.tokens.lock() else {
             return false;
         };
-        let Some(token) = tokens.get(&chat_id) else {
-            return false;
-        };
-        token.store(true, Ordering::Relaxed);
-        true
+        if let Some(token) = tokens.get(&chat_id) {
+            token.store(true, Ordering::Relaxed);
+            return true;
+        }
+        drop(tokens);
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.insert(chat_id);
+        }
+        false
+    }
+
+    fn clear_pending(&self, chat_id: i64) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(&chat_id);
+        }
     }
 }
 
@@ -601,6 +619,10 @@ struct RegistryStop(Arc<CancellationRegistry>);
 impl StopHandler for RegistryStop {
     fn stop(&self, chat_id: i64) -> bool {
         self.0.set_cancelled(chat_id)
+    }
+
+    fn admit(&self, chat_id: i64) {
+        self.0.clear_pending(chat_id);
     }
 }
 

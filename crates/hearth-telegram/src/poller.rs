@@ -32,7 +32,11 @@ pub enum PollError {
 
 /// A handler asked to stop the active run in a chat.
 pub trait StopHandler: Send + Sync {
+    /// Ask the chat's active run to stop. Returns whether a run was registered.
     fn stop(&self, chat_id: i64) -> bool;
+
+    /// A new message was admitted, so a stop recorded before it does not apply.
+    fn admit(&self, chat_id: i64);
 }
 
 /// What one poll changed.
@@ -219,6 +223,9 @@ impl TelegramPoller {
             }
 
             let request_id = format!("tg:{}:{}", message.chat.id, message.message_id);
+            if let Some(handler) = self.stop.as_ref() {
+                handler.admit(message.chat.id);
+            }
             let admission = self.session.submit_telegram(
                 &conversation.id,
                 &request_id,
