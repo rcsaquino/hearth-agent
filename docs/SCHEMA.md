@@ -127,7 +127,7 @@ keys.
   below.
 
 The exact DDL is the versioned set under `crates/hearth-storage/migrations/`
-(`0001.sql` through `0009.sql`), applied by the matching migrations. The
+(`0001.sql` through `0010.sql`), applied by the matching migrations. The
 migrations are the executable schema authority; if this document and a migration
 disagree, the migration wins. `effects` has a `UNIQUE (kind, key)` constraint.
 Migration 0002 rebuilds the old memory index with the porter stemmer. Migration
@@ -136,7 +136,8 @@ Migration 0002 rebuilds the old memory index with the porter stemmer. Migration
 both earlier memory designs with `memories`, `memories_fts`, and
 `memory_vectors`, and drops `memory_items`, `memory_events`, and the old
 `memory_fts`. Migration 0009 clears the pin on rows an older build retired
-without clearing it.
+without clearing it. Migration 0010 indexes the subject list in its longest-first
+read order, so the recall bound does not sort the store on every turn.
 
 ## Indexes
 
@@ -168,8 +169,10 @@ second database file and no markdown store.
 | `created_at`, `updated_at`, `revision` | Bookkeeping |
 
 Indexes: `memories(subject, valid_to)` for the entity channel,
-`memories(kind, valid_to)`, `memories(fingerprint)`, and a partial
-`memories(pinned) WHERE pinned = 1` for the rules block.
+`memories(kind, valid_to)`, `memories(fingerprint)`, a partial
+`memories(pinned) WHERE pinned = 1` for the rules block, and a partial
+`memories(LENGTH(subject) DESC, subject) WHERE subject <> ''` for the bounded,
+longest-first subject list.
 
 `memories_fts`: FTS5 over `content`, `subject`, and `terms`, content-linked to
 `memories`, with Porter stemming, diacritic removal, and two- and three-character

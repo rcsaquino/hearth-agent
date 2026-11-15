@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
 /// The schema version this build understands.
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 pub use backup::{snapshot, verify};
 pub use storage::{Reader, Storage, Writer};
@@ -85,7 +85,7 @@ fn configure(connection: &Connection) -> Result<(), StorageError> {
 }
 
 /// Every migration, as the version it upgrades and the version it produces.
-const MIGRATIONS: [(i64, &str, i64); 9] = [
+const MIGRATIONS: [(i64, &str, i64); 10] = [
     (0, schema::MIGRATION_0001, 1),
     (1, schema::MIGRATION_0002, 2),
     (2, schema::MIGRATION_0003, 3),
@@ -95,6 +95,7 @@ const MIGRATIONS: [(i64, &str, i64); 9] = [
     (6, schema::MIGRATION_0007, 7),
     (7, schema::MIGRATION_0008, 8),
     (8, schema::MIGRATION_0009, 9),
+    (9, schema::MIGRATION_0010, 10),
 ];
 
 /// Apply every migration the database is missing.
@@ -162,12 +163,12 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp directory");
         let mut connection =
             Connection::open(directory.path().join("hearth.db")).expect("open database");
-        // The schema as the build that retired the row left it.
-        for &(_, sql, _) in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+        // The schema as the build that retired the row left it, before 0009.
+        for &(_, sql, _) in MIGRATIONS.iter().filter(|(_, _, to)| *to <= 8) {
             connection.execute_batch(sql).expect("apply migration");
         }
         connection
-            .pragma_update(None, "user_version", SCHEMA_VERSION - 1)
+            .pragma_update(None, "user_version", 8)
             .expect("stamp the older version");
         connection
             .execute_batch(

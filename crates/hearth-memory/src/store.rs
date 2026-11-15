@@ -450,15 +450,27 @@ pub fn recent(session: &Session, at: Option<i64>, limit: i64) -> Result<Vec<Memo
         .map_err(Into::into)
 }
 
-/// Every subject the store holds, longest first.
+/// The most distinct subjects the recall path will consider.
+///
+/// The subject list is a supplement to the lexical channel: it lets a lowercase
+/// mention match a known name. A store with more names than this keeps its
+/// longest, most specific ones; a statement about a dropped name is still found
+/// by its words. The bound keeps the per-turn scan flat as the store grows.
+pub const MAX_KNOWN_SUBJECTS: i64 = 4_096;
+
+/// Every subject the store holds, longest first, up to the recall bound.
 pub fn subjects(session: &Session) -> Result<Vec<String>> {
+    subjects_limited(session, MAX_KNOWN_SUBJECTS)
+}
+
+fn subjects_limited(session: &Session, limit: i64) -> Result<Vec<String>> {
     session
         .storage()
         .read(|reader| {
             reader.query(
                 "SELECT DISTINCT subject FROM memories WHERE subject <> '' \
-                 ORDER BY LENGTH(subject) DESC",
-                [],
+                 ORDER BY LENGTH(subject) DESC, subject LIMIT ?",
+                [limit.max(1)],
                 |row| row.get::<_, String>(0),
             )
         })
@@ -819,6 +831,27 @@ mod tests {
         let harness = Harness::open(directory.path()).expect("harness");
         let session = harness.session().clone();
         (directory, session)
+    }
+
+    #[test]
+    fn the_subject_list_stops_at_its_limit_longest_first() {
+        let (_directory, session) = home();
+        let items: Vec<Pending> = (0..20)
+            .map(|index| Pending {
+                item: NewMemory::new(format!("note {index}"))
+                    .subject(format!("subject{}", "x".repeat(index))),
+                vector: None,
+            })
+            .collect();
+        insert_many(&session, items, MemoryConfig::default().rules_max_tokens)
+            .expect("seed subjects");
+
+        let subjects = subjects_limited(&session, 10).expect("subjects");
+        assert_eq!(subjects.len(), 10, "the list must stop at its limit");
+        let lengths: Vec<usize> = subjects.iter().map(|subject| subject.len()).collect();
+        let mut sorted = lengths.clone();
+        sorted.sort_unstable_by(|left, right| right.cmp(left));
+        assert_eq!(lengths, sorted, "the longest subjects must be kept first");
     }
 
     #[test]

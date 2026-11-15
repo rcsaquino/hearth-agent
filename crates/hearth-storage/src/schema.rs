@@ -25,3 +25,6 @@ pub const MIGRATION_0008: &str = include_str!("../migrations/0008.sql");
 
 /// Migration 0009 unpins memories that were retired by an older build.
 pub const MIGRATION_0009: &str = include_str!("../migrations/0009.sql");
+
+/// Migration 0010 indexes the subject list in its longest-first read order.
+pub const MIGRATION_0010: &str = include_str!("../migrations/0010.sql");

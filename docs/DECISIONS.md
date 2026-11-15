@@ -2054,3 +2054,19 @@ force-pushing, which is the approval named above and not a step in this change.
   added a tool result and no user message.
 - A conversation with neither a user nor a tool message has nowhere to carry the
   note; it is dropped rather than put back in instruction position.
+
+## 2026-11-16: The recall subject list is bounded
+
+- Recall considers at most `MAX_KNOWN_SUBJECTS` (4,096) distinct subjects, longest
+  first. The list supplements the lexical channel: a statement about a dropped
+  short name is still found by its words. Keeping the longest names keeps the most
+  specific ones.
+- Migration 0010 indexes `(LENGTH(subject) DESC, subject) WHERE subject <> ''`.
+  Without it the query sorted every distinct subject on the first recall after a
+  write; at 100,000 subjects that was 124.5 ms at p95. With it the query is 5.1 ms
+  and the cold recall drops from 957 ms to 623 ms.
+- The remaining 617 ms at 100,000 is the FTS channel and the ranker, not the
+  subject list. The documented 100 ms gate remains measured on the 4,200-row
+  store.
+- `cargo test -p hearth-eval --test memory_scale -- --ignored --nocapture` is the
+  measurement. `HEARTH_SCALE_SIZES` selects the sizes.
