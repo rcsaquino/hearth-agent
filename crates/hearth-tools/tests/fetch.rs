@@ -557,3 +557,53 @@ fn keyed_providers_failing_together_return_the_first_error() {
     tiny.thread.join().expect("tinyfish thread");
     fire.thread.join().expect("firecrawl thread");
 }
+
+#[test]
+fn an_enormous_error_body_is_not_buffered() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
+    let base = format!("http://{}", listener.local_addr().expect("local addr"));
+    let done = Arc::new(AtomicBool::new(false));
+    let stopping = Arc::clone(&done);
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut reader =
+            std::io::BufReader::new(stream.try_clone().expect("clone stream"));
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("header line");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+        stream
+            .write_all(
+                b"HTTP/1.1 500 X\r\nContent-Length: 536870912\r\nConnection: close\r\n\r\n",
+            )
+            .expect("headers");
+        stream.write_all(&vec![b'x'; 16 * 1024]).expect("body start");
+        stream.flush().expect("flush");
+        while !stopping.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    let provider = Arc::new(
+        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(30))
+            .expect("direct"),
+    );
+    let tool = WebFetchTool::new(vec![provider], true);
+    let (done_tx, done_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let outcome = tool.call(&json!({"url": format!("{base}/error")}));
+        let _ = done_tx.send(outcome.map(|_| ()).map_err(|error| error.message));
+    });
+    let outcome = done_rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("a 500 body must not be read in full before the failure");
+    assert!(outcome.is_err(), "a 500 must be an error");
+    done.store(true, Ordering::Relaxed);
+    server.join().expect("server thread");
+}
