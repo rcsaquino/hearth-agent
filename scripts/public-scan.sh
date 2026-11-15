@@ -14,12 +14,7 @@ fi
 credential_pattern='(sk-[A-Za-z0-9_-]{16,}|sk-or-v1-[A-Za-z0-9_-]{16,}|sk-ant-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|[0-9]{8,10}:[A-Za-z0-9_-]{30,}|-----BEGIN (RSA|OPENSSH|EC|PRIVATE) KEY-----)'
 
 redact() {
-    local value="$1"
-    if [ "${#value}" -le 4 ]; then
-        printf '***'
-    else
-        printf '%s***' "${value:0:4}"
-    fi
+    printf '***'
 }
 
 is_excluded() {
