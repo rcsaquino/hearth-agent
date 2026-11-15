@@ -905,6 +905,26 @@ mod tests {
     }
 
     #[test]
+    fn a_pin_on_a_statement_written_already_retired_is_refused() {
+        let (_directory, session) = home();
+        let start = session.now_micros() - 1_000_000;
+        let error = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("never deploy twice")
+                    .kind(Kind::Rule)
+                    .pinned(true)
+                    .valid_from(start)
+                    .valid_to(Some(session.now_micros())),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect_err("a pin on a closed window");
+        assert_eq!(error.code, Code::InvalidInput);
+    }
+
+    #[test]
     fn a_pin_left_on_a_retired_row_is_not_a_rule() {
         let (_directory, session) = home();
         let rule = insert(
