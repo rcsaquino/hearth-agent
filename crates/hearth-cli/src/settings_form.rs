@@ -1951,6 +1951,46 @@ mod tests {
     }
 
     #[test]
+    fn every_memory_option_has_a_row() {
+        let form = SettingsForm::from_document(json!({
+            "identity": {"agent_name": "Hearth", "timezone": "UTC"}
+        }))
+        .expect("form");
+        for path in [
+            ["memory", "rules_max_tokens"],
+            ["memory", "recall_max_tokens"],
+            ["memory", "recall_max_items"],
+            ["memory", "embeddings"],
+            ["memory", "embedding_model_dir"],
+        ] {
+            row_index(&form, &path);
+        }
+    }
+
+    #[test]
+    fn an_environment_reference_does_not_block_a_change() {
+        let mut form = SettingsForm::from_document(json!({
+            "identity": {"agent_name": "Hearth", "timezone": "UTC"},
+            "models": {
+                "kind": "openai-compatible",
+                "base_url": "https://example.com/v1",
+                "api_key": "${HOME}",
+                "model": "fake-model"
+            },
+            "telegram": {"bot_token": "123:fake", "allowed_user_ids": [42]}
+        }))
+        .expect("form");
+        let index = row_index(&form, &["memory", "embeddings"]);
+        form.selected = index;
+        assert_eq!(
+            form.handle_key(key(KeyCode::Enter)),
+            FormAction::Changed,
+            "a set environment reference must not fail validation: {:?}",
+            form.error
+        );
+    }
+
+    #[test]
     fn identity_has_no_soul_file_row_and_no_turn_limit_row() {
         let form = form();
         assert!(
