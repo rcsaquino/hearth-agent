@@ -474,8 +474,16 @@ impl Tool for TranscriptTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hearth_core::Harness;
+    use hearth_core::{Clock, Harness, Save, UuidV7};
     use tempfile::TempDir;
+
+    struct FixedClock(i64);
+
+    impl Clock for FixedClock {
+        fn now_micros(&self) -> i64 {
+            self.0
+        }
+    }
 
     fn memory() -> (TempDir, MemoryService) {
         let directory = TempDir::new().expect("temp home");
@@ -601,6 +609,41 @@ mod tests {
             .expect("call")
             .expect_err("missing");
         assert!(error.message.contains("does not exist"), "{error:?}");
+    }
+
+    #[test]
+    fn a_transcript_citation_is_rendered_in_the_configured_zone() {
+        let directory = TempDir::new().expect("temp home");
+        let instant = 1_768_438_800_000_000; // 2026-01-15T01:00:00Z
+        let harness = Harness::open_with(
+            directory.path(),
+            Arc::new(FixedClock(instant)),
+            Arc::new(UuidV7),
+        )
+        .expect("harness");
+        let session = harness.session().clone();
+        let conversation = session
+            .create_conversation("Test", "local", "local:zone")
+            .expect("conversation");
+        session
+            .save(Save::new(&conversation.id).entry("user", json!("the OR board meets on Thursdays")))
+            .expect("entry");
+        let service = MemoryService::new(session);
+        let tools = hearth_tools::ToolRegistry::new(
+            service.tools_at(None, hearth_core::Zone::fixed(8 * 3600)),
+        );
+        let reply = tools
+            .call(
+                TRANSCRIPT,
+                &json!({"reference": format!("{}#1", conversation.id)}),
+            )
+            .expect("call")
+            .expect("result");
+        assert!(
+            reply.content.contains("2026-01-15T09:00:00+08:00"),
+            "{}",
+            reply.content
+        );
     }
 
     #[test]
