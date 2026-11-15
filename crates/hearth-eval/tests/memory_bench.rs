@@ -525,7 +525,7 @@ fn a_noisy_store_keeps_the_answer_in_reach() {
             NewMemory::new(format!(
                 "noise note {index} about a routine standup and a routine ticket"
             ))
-            .subject(format!("noise-{}", index % 40)),
+            .subject(format!("noise-{index}")),
         );
     }
     service.write_many(items).expect("noise");
@@ -550,6 +550,52 @@ fn a_noisy_store_keeps_the_answer_in_reach() {
         "retrieval took {:.2} ms at p95 with 4k distractors",
         report.latency_p95
     );
+}
+
+/// The fixture's retrieval path against a 200,000-row store.
+///
+/// Ignored by default because seeding it takes minutes. It records the number
+/// SPEC 14 quotes instead of extrapolating from 4,200 rows. It times recall only:
+/// the one-call reachability sweep is a separate gate measured on the committed
+/// store, and running it here multiplies the wall clock without changing the
+/// latency number. Run it with:
+///
+/// ```text
+/// cargo test -p hearth-eval --test memory_bench the_200k -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "seeds a 200k-row store"]
+fn the_200k_store_is_measured() {
+    let fixture = load();
+    let (_directory, service) = service();
+    let mut items = Vec::with_capacity(200_000);
+    for index in 0..200_000 {
+        items.push(
+            NewMemory::new(format!(
+                "noise note {index} about a routine standup and a routine ticket"
+            ))
+            .subject(format!("noise-{index}")),
+        );
+    }
+    service.write_many(items).expect("noise");
+    seed(&service, &fixture);
+
+    let mut latencies = Vec::with_capacity(fixture.questions.len());
+    for question in &fixture.questions {
+        let started = Instant::now();
+        service
+            .recall_at(&question.question, question.as_of_micros)
+            .expect("recall");
+        latencies.push(started.elapsed().as_secs_f64() * 1_000.0);
+    }
+    let stored_rows = service.count().expect("count");
+    println!(
+        "200k store {stored_rows} rows · retrieval p50 {:.2} ms · p95 {:.2} ms · p99 {:.2} ms",
+        percentile(&mut latencies.clone(), 0.50),
+        percentile(&mut latencies.clone(), 0.95),
+        percentile(&mut latencies, 0.99)
+    );
+    assert!(stored_rows >= 200_000, "the store did not hold 200k rows");
 }
 
 /// The same fixture with the local encoder installed.
