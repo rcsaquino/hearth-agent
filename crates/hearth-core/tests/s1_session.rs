@@ -149,6 +149,55 @@ fn a_duplicate_request_id_returns_the_original_and_creates_nothing() {
 }
 
 #[test]
+fn a_submission_with_no_message_is_refused() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+
+    session
+        .submit(
+            &conversation.id,
+            "req-kept",
+            "input",
+            json!({"text": "hello"}),
+        )
+        .expect("submit a message");
+
+    // The refusal comes after the dedupe read, so a repeated request id still
+    // returns the original and never starts a second run.
+    let repeated = session
+        .submit(&conversation.id, "req-kept", "input", json!({}))
+        .expect("repeat a request id");
+    assert!(!repeated.created);
+    assert_eq!(repeated.submission.content["text"], "hello");
+
+    // An unrecognised value parses to no blocks. Whitespace parses to a text
+    // block that asks nothing. Either one leaves the runtime note as the only
+    // content of the turn.
+    for (request_id, content) in [
+        ("req-empty", json!({})),
+        ("req-blank", json!([{"type": "text", "text": "   "}])),
+    ] {
+        let error = session
+            .submit(&conversation.id, request_id, "input", content)
+            .expect_err("a submission with no message was accepted");
+        assert!(
+            matches!(error, CoreError::Invalid(_)),
+            "{request_id} failed as {error:?}"
+        );
+        let stored = session
+            .submission_by_request_id(request_id)
+            .expect("submission lookup");
+        assert!(stored.is_none(), "{request_id} left a submission behind");
+    }
+
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(history.len(), 1, "history was {history:?}");
+}
+
+#[test]
 fn a_submission_settles_once_and_keeps_its_first_ending() {
     let (_home, harness) = harness();
     let session = harness.session();

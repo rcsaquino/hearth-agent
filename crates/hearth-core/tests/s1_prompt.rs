@@ -64,6 +64,52 @@ fn the_prompt_starts_with_identity_and_ends_with_runtime() {
 }
 
 #[test]
+fn a_stored_entry_with_no_request_is_left_out_of_the_prompt() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "hello"}))
+                .entry("user", json!({}))
+                .entry("user", json!([{"type": "text", "text": "   "}]))
+                .entry("assistant", json!({"text": "hi"})),
+        )
+        .expect("save entries");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL TEXT".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME NOTE".to_owned(),
+            rules: String::new(),
+            rules_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: String::new(),
+        })
+        .expect("build prompt");
+
+    let users: Vec<String> = prompt
+        .request
+        .messages
+        .iter()
+        .filter(|message| message.role == Role::User)
+        .map(text_of)
+        .collect();
+    assert_eq!(
+        users,
+        vec!["hello".to_owned()],
+        "user messages were {users:?}"
+    );
+}
+
+#[test]
 fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
     use hearth_model::{ContentBlock, ToolCall};
 

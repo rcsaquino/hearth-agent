@@ -1464,3 +1464,40 @@ fn project_guidance_reaches_the_prompt() {
     });
     assert!(found, "the project guidance did not reach the prompt");
 }
+
+#[test]
+fn a_submission_with_no_user_content_is_refused() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("hello".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let agent = agent(home.path(), &harness, Arc::clone(&provider));
+
+    // A real message reaches the provider, so the count below can see a call.
+    let real = submit_with(&harness, &conversation, "req-real");
+    agent.run_submission(&real.id).expect("run submission");
+    assert_eq!(provider.requests().len(), 1);
+
+    // An unrecognised value parses to no blocks. Whitespace parses to a text
+    // block that holds only spaces. Either one leaves the runtime note as the
+    // only content of the turn.
+    for (request_id, content) in [
+        ("req-empty-object", json!({})),
+        ("req-blank-text", json!([{"type": "text", "text": "  "}])),
+    ] {
+        harness
+            .session()
+            .submit(&conversation, request_id, "input", content)
+            .expect_err("a submission with no user content was accepted");
+    }
+
+    assert_eq!(
+        provider.requests().len(),
+        1,
+        "a turn with no user content reached the provider"
+    );
+}
