@@ -658,3 +658,31 @@ fn one_undecodable_update_does_not_stop_the_batch() {
     submission(&poller, "tg:10:1");
     assert_eq!(poller.session().telegram_offset().expect("offset"), 63);
 }
+
+#[test]
+fn a_quoted_span_arrives_as_reply_context() {
+    let bot = FakeBot::start(
+        vec![message(
+            71,
+            1,
+            json!({
+                "text": "what does this reply to?",
+                "external_reply": {
+                    "quote": {"text": "the highlighted span", "is_manual": true}
+                }
+            }),
+        )],
+        vec![],
+    );
+    let (_home, _harness, poller) = setup(&bot, None);
+    poller.poll_once().expect("poll");
+
+    let submission = submission(&poller, "tg:10:1");
+    let blocks = blocks(&submission);
+    assert!(
+        blocks.iter().any(|block| block["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("the highlighted span"))),
+        "the quoted span must reach the model: {blocks:?}"
+    );
+}
