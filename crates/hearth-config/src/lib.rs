@@ -30,6 +30,8 @@ pub enum ConfigError {
     Write(std::io::Error),
     #[error("settings.json is not valid JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("settings.json does not match its schema: check {0}")]
+    Schema(String),
     #[error("settings.json has mode {mode:o}; run chmod 600 {path}")]
     Mode { path: PathBuf, mode: u32 },
     #[error("{0}")]
@@ -63,9 +65,48 @@ pub fn load(home: &Path) -> Result<Settings, ConfigError> {
     let mut value: Value = serde_json::from_str(&text)?;
     expand_value(&mut value);
     strip_legacy(&mut value);
-    let settings: Settings = serde_json::from_value(value)?;
+    let settings = settings_from_value(value)?;
     settings.validate()?;
     Ok(settings)
+}
+
+/// Parse a settings document, naming the field that failed without quoting it.
+///
+/// A raw deserialisation error carries the unexpected value, which can be a
+/// credential pasted into the wrong field. The section and field are found by
+/// removing candidates and retrying, so the message still says where to look.
+pub fn settings_from_value(value: Value) -> Result<Settings, ConfigError> {
+    match serde_json::from_value(value.clone()) {
+        Ok(settings) => Ok(settings),
+        Err(_) => Err(ConfigError::Schema(failing_field(&value))),
+    }
+}
+
+fn failing_field(value: &Value) -> String {
+    let Some(object) = value.as_object() else {
+        return "the document".to_owned();
+    };
+    for (section, entry) in object {
+        let mut only = serde_json::Map::new();
+        only.insert(section.clone(), entry.clone());
+        if serde_json::from_value::<Settings>(Value::Object(only)).is_ok() {
+            continue;
+        }
+        let Some(fields) = entry.as_object() else {
+            return section.clone();
+        };
+        for field in fields.keys() {
+            let mut reduced = fields.clone();
+            reduced.remove(field);
+            let mut only = serde_json::Map::new();
+            only.insert(section.clone(), Value::Object(reduced));
+            if serde_json::from_value::<Settings>(Value::Object(only)).is_ok() {
+                return format!("{section}.{field}");
+            }
+        }
+        return section.clone();
+    }
+    "the document".to_owned()
 }
 
 /// The configured display time zone, falling back to UTC on any read problem.

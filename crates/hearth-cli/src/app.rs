@@ -1331,8 +1331,10 @@ fn compact_settings_text(text: &str) -> Result<String, String> {
 }
 
 fn validate_settings_text(text: &str) -> Result<(), String> {
-    let settings: Settings = serde_json::from_str(text)
+    let value: Value = serde_json::from_str(text)
         .map_err(|error| format!("settings.json is not valid: {error}"))?;
+    let settings =
+        hearth_config::settings_from_value(value).map_err(|error| error.to_string())?;
     settings.validate().map_err(|error| error.to_string())
 }
 
