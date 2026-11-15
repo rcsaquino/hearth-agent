@@ -50,12 +50,6 @@ pub struct StartModeReport {
     pub repaired: bool,
 }
 
-/// Write and enable the user unit for the current binary and home.
-pub fn install(home: &Path, force: bool) -> Result<ServiceReport, ServiceError> {
-    let directory = config_dir()?;
-    install_at(home, &directory, force, true)
-}
-
 /// Write the unit into a chosen systemd user directory.
 ///
 /// `enable` is false in tests so no host service is touched.
@@ -99,12 +93,6 @@ pub fn status_at(config_dir: &Path, home: &Path) -> Result<ServiceStatus, Servic
     let unit = config_dir.join("hearth.service");
     let installed = unit.is_file() && unit_home(&unit).is_some_and(|named| named == home);
     Ok(ServiceStatus { unit, installed })
-}
-
-/// Stop, disable, and remove the user unit.
-pub fn uninstall() -> Result<ServiceRemoval, ServiceError> {
-    let directory = config_dir()?;
-    uninstall_at(&directory, true)
 }
 
 /// Remove the unit from a chosen directory.
