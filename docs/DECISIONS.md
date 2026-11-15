@@ -338,8 +338,12 @@ Not allowed without a new recorded decision: `sqlx`, `teloxide`, `axum`, an ORM,
   path summary. The model reads the full output with `files read spill/...`.
 - Assistant tool calls and their results are paired by call id. Pending calls
   with no result are replayed before the next provider request.
-- The agent turn limit counts provider requests. Reaching it saves a notice,
-  settles the submission unanswered with reason `turn_limit`, and fails the task.
+- There is no turn limit. A loop ends when the model answers without a tool call,
+  when the context budget gate fails, or when the run is cancelled. `agent.max_turns`
+  is retired: `a_long_tool_loop_is_not_cut_short_by_a_turn_limit` runs 125 tool
+  rounds and requires all of them to complete, and `agent_has_no_turn_limit_setting`
+  keeps the setting out of the schema. An unbounded tool loop is the accepted
+  design, confirmed on 2026-11-16.
 - The shell timeout kills the shell process; a process group kill is deferred.
 - Web fetch and the message tool are deferred.
 
