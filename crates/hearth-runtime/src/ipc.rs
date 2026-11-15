@@ -9,11 +9,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use hearth_core::{CoreError, Session, UsageTotals};
+use hearth_core::{CoreError, Session, UsageTotals, Zone};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
-use time::{Duration as TimeDuration, OffsetDateTime};
+use time::Duration as TimeDuration;
 
 use crate::events::EventBus;
 
@@ -66,14 +66,16 @@ pub fn serve(
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     listener.set_nonblocking(true)?;
+    let home = home.to_path_buf();
     let handle = thread::spawn(move || {
         while !shutdown.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((stream, _)) => {
                     let context = context.clone();
                     let bus = Arc::clone(&bus);
+                    let home = home.clone();
                     thread::spawn(move || {
-                        let _ = handle_connection(stream, context, bus);
+                        let _ = handle_connection(stream, &home, context, bus);
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -97,6 +99,7 @@ pub fn socket_path(home: &Path) -> PathBuf {
 
 fn handle_connection(
     mut stream: UnixStream,
+    home: &Path,
     context: StatusContext,
     bus: Arc<EventBus>,
 ) -> Result<(), IpcError> {
@@ -114,7 +117,7 @@ fn handle_connection(
     }
     match request.cmd.as_str() {
         "status" => {
-            let status = match status_value(&context) {
+            let status = match status_value(home, &context) {
                 Ok(status) => status,
                 Err(error) => return write_error(&mut stream, &error.to_string()),
             };
@@ -148,18 +151,16 @@ fn handle_connection(
     }
 }
 
-fn status_value(context: &StatusContext) -> Result<Value, IpcError> {
-    let now = OffsetDateTime::now_utc();
-    let midnight = now.date().midnight().assume_utc();
-    let today = context
-        .session
-        .usage_totals_since(timestamp_micros(midnight))?;
+fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError> {
+    let now = context.session.now_micros();
+    let zone = Zone::resolve(&hearth_config::identity_timezone(home));
+    let today = context.session.usage_totals_since(zone.start_of_day(now))?;
     let week = context
         .session
-        .usage_totals_since(timestamp_micros(now - TimeDuration::days(7)))?;
+        .usage_totals_since(now - TimeDuration::days(7).whole_microseconds() as i64)?;
     let month = context
         .session
-        .usage_totals_since(timestamp_micros(now - TimeDuration::days(30)))?;
+        .usage_totals_since(now - TimeDuration::days(30).whole_microseconds() as i64)?;
     let total = context.session.usage_totals_since(0)?;
     let counts = context.session.task_counts()?;
     let memory = context.memory.count().unwrap_or(0);
@@ -211,10 +212,6 @@ fn usage_value(totals: UsageTotals) -> Value {
         "output_tokens": totals.output_tokens,
         "cache_read_tokens": totals.cache_read_tokens,
     })
-}
-
-fn timestamp_micros(value: OffsetDateTime) -> i64 {
-    value.unix_timestamp_nanos().div_euclid(1_000) as i64
 }
 
 fn write_line(stream: &mut UnixStream, value: &Value) -> Result<(), IpcError> {

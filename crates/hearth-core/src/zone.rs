@@ -82,6 +82,19 @@ impl Zone {
         self.local(micros).iso()
     }
 
+    /// The instant of local midnight on the day containing `micros`.
+    pub fn start_of_day(&self, micros: i64) -> i64 {
+        let timestamp = Timestamp::from_microsecond(micros).unwrap_or(Timestamp::UNIX_EPOCH);
+        let date = timestamp.to_zoned(self.zone.clone()).datetime().date();
+        match self
+            .zone
+            .to_zoned(date.to_datetime(civil::Time::midnight()))
+        {
+            Ok(zoned) => zoned.timestamp().as_microsecond(),
+            Err(_) => micros,
+        }
+    }
+
     /// The next instant at this zone's local wall-clock time, strictly after now.
     pub fn next_at(&self, now_micros: i64, hour: u8, minute: u8) -> i64 {
         let Ok(time) = civil::Time::new(hour as i8, minute as i8, 0, 0) else {
@@ -151,6 +164,29 @@ mod tests {
         assert_eq!(local.clock(), "19:00:00");
         assert_eq!(local.date(), "1969-12-31");
         assert_eq!(Zone::utc().iso(0), "1970-01-01T00:00:00+00:00");
+    }
+
+    #[test]
+    fn start_of_day_is_local_midnight() {
+        let instant = 1_768_519_800_000_000; // 2026-01-15T23:30:00Z
+        assert_eq!(Zone::utc().start_of_day(instant), 1_768_435_200_000_000);
+        assert_eq!(
+            Zone::fixed(8 * 3600).start_of_day(instant),
+            1_768_492_800_000_000
+        );
+    }
+
+    #[test]
+    fn a_missing_local_midnight_moves_forward() {
+        let zone = Zone::resolve("America/Sao_Paulo");
+        let noon = 1_541_332_800_000_000; // 2018-11-04T12:00:00Z
+        let expected = if zone.name() == "America/Sao_Paulo" {
+            // DST began at midnight, so the local day starts at 01:00.
+            1_541_300_400_000_000
+        } else {
+            1_541_289_600_000_000
+        };
+        assert_eq!(zone.start_of_day(noon), expected);
     }
 
     #[test]
