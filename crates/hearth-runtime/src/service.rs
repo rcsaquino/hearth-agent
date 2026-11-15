@@ -228,7 +228,10 @@ pub fn repair(home: &Path) -> Result<Option<StartModeReport>, ServiceError> {
 
 /// Restore the unit and its enable link in a chosen directory.
 ///
-/// `run` is false in tests so systemctl and loginctl never touch the host.
+/// The files are the whole state: systemd loads a unit on demand and reads the
+/// enable link when `default.target` comes up, so a repair must not depend on a
+/// reachable user manager. `run` is false in tests so loginctl never touches the
+/// host.
 pub fn repair_at(
     home: &Path,
     config_dir: &Path,
@@ -248,7 +251,7 @@ pub fn repair_at(
                     return Ok(None);
                 }
             } else {
-                install_at(home, config_dir, false, run)?.created
+                install_at(home, config_dir, false, false)?.created
             };
             if start == "startup" && run && !linger_present()? {
                 enable_linger()?;
