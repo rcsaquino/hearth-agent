@@ -7,6 +7,17 @@ trap 'rm -rf "$work"' EXIT
 
 "$root/scripts/check-docs.sh"
 
+while IFS= read -r invocation; do
+    package="${invocation#*cargo test -p }"
+    package="${package%% *}"
+    target="${invocation##*--test }"
+    target="${target%% *}"
+    if [ ! -f "$root/crates/$package/tests/$target.rs" ]; then
+        echo "script names a missing test target: $package $target" >&2
+        exit 1
+    fi
+done < <(grep -hoE 'cargo test -p [a-z-]+ --test [a-z0-9_]+' "$root"/scripts/*.sh | sort -u)
+
 mkdir -p "$work/repo"
 cd "$work/repo"
 git init -q
