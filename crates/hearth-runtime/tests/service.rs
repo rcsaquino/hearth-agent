@@ -177,6 +177,24 @@ fn write_start_settings(home: &std::path::Path, start: &str) {
 }
 
 #[test]
+fn applying_the_tui_mode_removes_a_dangling_enable_link() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    let link = enable_link(config.path());
+    fs::create_dir_all(link.parent().expect("wants directory")).expect("wants directory");
+    // The reported case: the unit is gone and the link is left pointing at it.
+    std::os::unix::fs::symlink(config.path().join("hearth.service"), &link).expect("stale link");
+    assert!(fs::symlink_metadata(&link).is_ok(), "the link must exist");
+
+    let report = apply_start_mode_at(home.path(), config.path(), "tui", false).expect("tui");
+    assert!(!report.installed);
+    assert!(
+        fs::symlink_metadata(&link).is_err(),
+        "a dangling enable link survived the tui mode"
+    );
+}
+
+#[test]
 fn repairing_creates_a_missing_unit_and_link() {
     let home = TempDir::new().expect("temp home");
     let config = TempDir::new().expect("systemd config");
