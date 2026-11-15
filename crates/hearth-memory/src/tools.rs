@@ -546,6 +546,48 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_as_of_date_means_the_local_day() {
+        let (_directory, service) = memory();
+        service
+            .write(
+                NewMemory::new("the release gate needs two approvals")
+                    .subject("release")
+                    .valid_from(1_768_454_800_000_000),
+            )
+            .expect("first");
+        service
+            .write(
+                NewMemory::new("the release gate moved to the deploy bot")
+                    .subject("release")
+                    .valid_from(1_768_512_400_000_000),
+            )
+            .expect("second");
+        let tools =
+            hearth_tools::ToolRegistry::new(service.tools_at(None, Zone::fixed(8 * 3600)));
+        let reply = tools
+            .call(
+                RECALL,
+                &json!({"subject": "release", "as_of": "2026-01-15"}),
+            )
+            .expect("call")
+            .expect("result");
+        assert!(
+            reply
+                .content
+                .contains("the release gate needs two approvals"),
+            "{}",
+            reply.content
+        );
+        assert!(
+            !reply
+                .content
+                .contains("the release gate moved to the deploy bot"),
+            "{}",
+            reply.content
+        );
+    }
+
+    #[test]
     fn a_replaced_statement_is_kept_as_history() {
         let (_directory, service) = memory();
         let tools = registry(&service);
