@@ -76,6 +76,9 @@ cargo test -p hearth-eval --test memory_bench -- --nocapture
 cargo test -p hearth-eval --test memory_reachability
 HEARTH_EMBEDDING_MODEL_DIR=~/.hearth/models/bekko-embedding-v1-a8m \
   cargo test -p hearth-eval --test memory_bench the_hybrid -- --ignored --nocapture
+cargo test -p hearth-eval --test memory_bench the_200k -- --ignored --nocapture
+HEARTH_SCALE_SIZES=1000,10000,100000 \
+  cargo test -p hearth-eval --test memory_scale -- --ignored --nocapture
 ```
 
 The memory benchmark must keep one-call recovery at or above 0.98, automatic
