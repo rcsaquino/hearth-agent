@@ -893,10 +893,16 @@ impl TelegramWorker {
                 tracing::warn!(chat_id, %message, "telegram delivery is uncertain");
             }
             Err(error) => {
-                if let Err(save_error) = self
-                    .session
-                    .mark_effect_failed(&effect_id, json!({"error": error.to_string()}))
-                {
+                // A rate limit or a server-side failure is a deferral, so the
+                // effect stays recoverable instead of becoming a permanent loss.
+                let saved = if error.retryable() {
+                    self.session
+                        .mark_effect_unknown(&effect_id, json!({"error": error.to_string()}))
+                } else {
+                    self.session
+                        .mark_effect_failed(&effect_id, json!({"error": error.to_string()}))
+                };
+                if let Err(save_error) = saved {
                     tracing::warn!(chat_id, %save_error, "failed delivery could not be saved");
                 }
                 tracing::warn!(chat_id, %error, "telegram reply failed");
@@ -969,10 +975,14 @@ impl TelegramWorker {
                 tracing::warn!(chat_id, %message, "recovered delivery is uncertain");
             }
             Err(error) => {
-                if let Err(save_error) = self
-                    .session
-                    .mark_effect_failed(&effect.id, json!({"error": error.to_string()}))
-                {
+                let saved = if error.retryable() {
+                    self.session
+                        .mark_effect_unknown(&effect.id, json!({"error": error.to_string()}))
+                } else {
+                    self.session
+                        .mark_effect_failed(&effect.id, json!({"error": error.to_string()}))
+                };
+                if let Err(save_error) = saved {
                     tracing::warn!(%save_error, "failed recovered delivery could not be saved");
                 }
                 tracing::warn!(chat_id, %error, "recovered delivery failed");

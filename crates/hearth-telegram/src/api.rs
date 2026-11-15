@@ -29,6 +29,22 @@ pub enum TelegramError {
     TooLarge { limit: usize },
 }
 
+impl TelegramError {
+    /// Whether a later attempt can succeed.
+    ///
+    /// A rate limit and a server-side failure are deferrals; a bad request or an
+    /// undecodable body is not.
+    pub fn retryable(&self) -> bool {
+        match self {
+            Self::Api { code, .. } => {
+                code.is_some_and(|code| code == 429 || (500..=599).contains(&code))
+            }
+            Self::Transport(_) => true,
+            Self::Protocol { .. } | Self::TooLarge { .. } => false,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct Envelope {
     ok: bool,
