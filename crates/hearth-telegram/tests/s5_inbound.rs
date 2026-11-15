@@ -638,3 +638,23 @@ fn a_reply_to_a_media_only_message_is_described_and_still_admitted() {
     assert_eq!(blocks[1]["type"], "image");
     bot.stop();
 }
+
+#[test]
+fn one_undecodable_update_does_not_stop_the_batch() {
+    let bot = FakeBot::start(
+        vec![
+            message(61, 1, json!({"text": "the first message"})),
+            json!({"update_id": 62, "message": {"message_id": 2}}),
+        ],
+        vec![],
+    );
+    let (_home, _harness, poller) = setup(&bot, None);
+    let report = poller.poll_once().expect("poll");
+
+    assert_eq!(
+        report.admitted, 1,
+        "the decodable update in the batch must still be admitted"
+    );
+    submission(&poller, "tg:10:1");
+    assert_eq!(poller.session().telegram_offset().expect("offset"), 63);
+}
