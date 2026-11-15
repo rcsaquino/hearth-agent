@@ -454,3 +454,80 @@ fn killing_a_running_helper_sends_no_notice_and_saves_no_parent_report() {
         "killed helper should not write a parent report: {history:?}"
     );
 }
+
+#[test]
+fn the_task_tool_offers_no_token_budget() {
+    let home = TempDir::new().expect("home");
+    let harness = Harness::open(home.path()).expect("harness");
+    let controls = Arc::new(HelperControls::new());
+    let tool = TaskTool::new(
+        harness.session().clone(),
+        "parent",
+        42,
+        None,
+        0,
+        controls,
+        2,
+        4,
+    );
+    let spec = tool.spec();
+    let properties = spec.parameters["properties"]
+        .as_object()
+        .expect("properties");
+    assert!(
+        !properties.contains_key("token_budget"),
+        "a helper runs on the configured budget"
+    );
+    assert!(properties.contains_key("wall_seconds"));
+}
+
+#[test]
+fn a_helper_survives_a_token_budget_below_the_reply_reserve() {
+    let home = TempDir::new().expect("home");
+    let harness = Harness::open(home.path()).expect("harness");
+    let session = harness.session();
+    let parent = session
+        .create_conversation("Parent", "telegram", "42:0")
+        .expect("parent");
+    let controls = Arc::new(HelperControls::new());
+    let tool = TaskTool::new(
+        session.clone(),
+        &parent.id,
+        42,
+        None,
+        0,
+        Arc::clone(&controls),
+        2,
+        4,
+    );
+    let spawn = tool
+        .call(&json!({
+            "action": "spawn",
+            "brief": "Return a short report.",
+            "token_budget": 20000
+        }))
+        .expect("spawn");
+    let spawn: Value = serde_json::from_str(&spawn.content).expect("spawn json");
+    let task_id = spawn["task_id"].as_str().expect("task id").to_owned();
+
+    let (base, _sent, telegram) = fake_telegram();
+    let provider = Arc::new(ScriptedProvider::new("Helper report: done."));
+    let memory = Arc::new(MemoryService::new(session.clone()));
+    let config = helper_config(
+        &home,
+        &session,
+        Arc::clone(&provider) as Arc<dyn Provider>,
+        sender_for(&base),
+        memory,
+    );
+    let pool = HelperPool::new(config, controls);
+    assert!(pool.run_once().expect("run"));
+
+    let task = session.task(&task_id).expect("task").expect("exists");
+    assert_eq!(
+        task.status,
+        hearth_core::TaskStatus::Done,
+        "a below-reserve token budget must not fail the helper"
+    );
+    telegram.join().expect("telegram");
+}
