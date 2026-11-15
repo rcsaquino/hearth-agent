@@ -98,17 +98,27 @@ pub fn init(home: &Path, options: InitOptions) -> Result<InitReport, InitError> 
     let value = hearth_config::compact_settings(&value);
     let text = serde_json::to_string_pretty(&value).expect("settings are JSON values");
 
-    let mut file = open_settings(&settings_path)?;
-    file.write_all(text.as_bytes())?;
-    file.write_all(b"\n")?;
-    file.flush()?;
+    // The settings file is the marker that onboarding is done, so it is written
+    // last in effect: a failure after it exists removes it and the wizard's retry
+    // can start again. A home with settings and no database is not recoverable
+    // from the product's own surface.
+    let created = (|| -> Result<(), InitError> {
+        let mut file = open_settings(&settings_path)?;
+        file.write_all(text.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.flush()?;
 
-    let settings = hearth_config::load(home)?;
-    settings.validate_for_run()?;
+        let settings = hearth_config::load(home)?;
+        settings.validate_for_run()?;
+        hearth_storage::open(&home.join("hearth.db"))?;
+        Ok(())
+    })();
+    if let Err(error) = created {
+        let _ = std::fs::remove_file(&settings_path);
+        return Err(error);
+    }
 
     let database = home.join("hearth.db");
-    hearth_storage::open(&database)?;
-
     Ok(InitReport {
         home: home.to_path_buf(),
         settings: settings_path,
