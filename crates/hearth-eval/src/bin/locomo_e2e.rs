@@ -505,7 +505,7 @@ fn parse_conversation(conversation: &Value) -> Result<(Vec<Turn>, Vec<Question>)
 /// The model is part of the key: a run with a different model must call the
 /// provider rather than relabel another model's answers.
 fn cache_key(model: &str, sample: &str, position: usize) -> String {
-    format!("{sample}:{position}")
+    format!("{model}:{sample}:{position}")
 }
 
 #[cfg(test)]
