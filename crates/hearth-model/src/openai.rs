@@ -367,6 +367,7 @@ struct OpenAiStream {
     finish_reason: Option<String>,
     tool_calls: BTreeMap<usize, PartialToolCall>,
     usage_sent: bool,
+    terminated: bool,
 }
 
 #[derive(Default)]
@@ -407,12 +408,14 @@ impl OpenAiStream {
             finish_reason: None,
             tool_calls: BTreeMap::new(),
             usage_sent: false,
+            terminated: false,
         }
     }
 
     fn handle_data(&mut self, data: &str) {
         if data == "[DONE]" {
             self.done = true;
+            self.terminated = true;
             let events = self.finish();
             self.pending.extend(events);
             return;
@@ -427,6 +430,23 @@ impl OpenAiStream {
                 return;
             }
         };
+        if let Some(error) = value.get("error") {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| error.to_string());
+            let kind = error
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| "provider_error".to_owned());
+            self.done = true;
+            self.pending.push_back(Err(ProviderError::Protocol(format!(
+                "the provider reported {kind}: {message}"
+            ))));
+            return;
+        }
         if !self.usage_sent && value.get("usage").is_some_and(|usage| !usage.is_null()) {
             self.pending
                 .push_back(Ok(StreamEvent::Usage(parse_usage(&value["usage"]))));
@@ -470,6 +490,16 @@ impl OpenAiStream {
 
     fn finish(&mut self) -> Vec<Result<StreamEvent, ProviderError>> {
         let mut events = Vec::new();
+        if let Some(reason) = self.finish_reason.as_deref()
+            && matches!(reason, "length" | "content_filter")
+        {
+            let events = vec![Err(ProviderError::Protocol(format!(
+                "the provider stopped the answer on {reason}"
+            )))];
+            self.finish_reason = None;
+            self.done = true;
+            return events;
+        }
         for (_, partial) in std::mem::take(&mut self.tool_calls) {
             match partial.into_tool_call() {
                 Ok(call) => events.push(Ok(StreamEvent::ToolCall(call))),
@@ -502,6 +532,12 @@ impl Iterator for OpenAiStream {
             match self.reader.read_line(&mut line) {
                 Ok(0) => {
                     self.done = true;
+                    if !self.terminated && self.finish_reason.is_none() {
+                        self.pending.push_back(Err(ProviderError::Protocol(
+                            "the provider stream ended before a terminal chunk".to_owned(),
+                        )));
+                        continue;
+                    }
                     let events = self.finish();
                     self.pending.extend(events);
                 }
