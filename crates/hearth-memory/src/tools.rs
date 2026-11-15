@@ -329,7 +329,7 @@ impl Tool for RecallTool {
                 .search(&query, at, count)
                 .map_err(failure)?
         } else {
-            self.memory.service.recent(count).map_err(failure)?
+            self.memory.service.recent(None, count).map_err(failure)?
         };
 
         let selected: Vec<&Memory> = found
@@ -747,6 +747,57 @@ mod timestamp_tests {
         assert!(
             since.len() == 25 && since.ends_with("+00:00"),
             "the stamp must be ISO 8601 with an offset: {since}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod as_of_tests {
+    use super::*;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
+
+    #[test]
+    fn a_bare_as_of_read_returns_what_was_true_then() {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        let session = harness.session();
+        let service = MemoryService::new(session.clone());
+        let now = session.now_micros();
+        let old = now - 365 * 86_400 * 1_000_000;
+        let earlier = service
+            .write(
+                NewMemory::new("the primary database is Postgres")
+                    .subject("primary database")
+                    .valid_from(old),
+            )
+            .expect("write")
+            .memory()
+            .clone();
+        service
+            .write(
+                NewMemory::new("the primary database is SQLite now")
+                    .subject("primary database")
+                    .valid_from(now)
+                    .supersedes(&earlier.id),
+            )
+            .expect("replace");
+
+        let tools = hearth_tools::ToolRegistry::new(service.tools());
+        let as_of = Zone::utc().iso(old + 5_000_000);
+        let recalled = tools
+            .call(RECALL, &json!({"as_of": as_of}))
+            .expect("call")
+            .expect("result");
+        assert!(
+            recalled.content.contains("Postgres"),
+            "the as-of read must return the old statement: {}",
+            recalled.content
+        );
+        assert!(
+            !recalled.content.contains("SQLite now"),
+            "the as-of read must not return today's statement: {}",
+            recalled.content
         );
     }
 }
