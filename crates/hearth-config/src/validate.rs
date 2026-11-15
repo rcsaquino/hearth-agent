@@ -49,6 +49,12 @@ impl Settings {
     pub fn validate(&self) -> Result<(), ConfigError> {
         require("identity.agent_name", &self.identity.agent_name)?;
         require("identity.timezone", &self.identity.timezone)?;
+        if jiff::tz::TimeZone::get(self.identity.timezone.trim()).is_err() {
+            return Err(invalid(format!(
+                "identity.timezone is not a known IANA zone: {}",
+                self.identity.timezone
+            )));
+        }
 
         if let Some(telegram) = &self.telegram {
             telegram.validate()?;
