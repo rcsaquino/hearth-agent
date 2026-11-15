@@ -678,6 +678,41 @@ mod tests {
     }
 
     #[test]
+    fn a_pinned_replacement_fits_at_capacity() {
+        use crate::errors::Code;
+
+        let (_directory, service) = service();
+        let mut ids = Vec::new();
+        for index in 0..200 {
+            match service.write(
+                NewMemory::new(format!("remember rule {index} daily"))
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            ) {
+                Ok(outcome) => ids.push(outcome.memory().id.clone()),
+                Err(error) if error.code == Code::RulesFull => break,
+                Err(error) => panic!("{error}"),
+            }
+        }
+        assert!(ids.len() > 1, "the store must fill before the replacement");
+
+        let replaced = ids[0].clone();
+        let outcome = service.write(
+            NewMemory::new("remember rule x daily")
+                .kind(Kind::Rule)
+                .pinned(true)
+                .supersedes(&replaced),
+        );
+        assert!(
+            outcome.is_ok(),
+            "a replacement frees its own space: {:?}",
+            outcome.err()
+        );
+        let old = service.get(&replaced).expect("get").expect("row");
+        assert!(!old.is_current(), "the replaced rule must retire");
+    }
+
+    #[test]
     fn every_live_rule_fits_in_the_rules_block() {
         use crate::errors::Code;
 
