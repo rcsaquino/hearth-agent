@@ -105,11 +105,11 @@ request. Neither prints the token or key.
 
 Running `hearth` opens the control plane:
 
-- **Overview** combines runtime, model, context, turn limit, usage and cache,
+- **Overview** combines runtime, model, context, usage and cache,
   tasks and memory, provider connections, and recent activity.
 - **Activity** streams live runs, including Telegram messages and tool calls.
 - **Memory** browses saved memories.
-- **Skills** browses the skill library read-only.
+- **Skills** browses learned skills and can create or edit your own.
 - **Prompt** is a live, scrollable export of the newest saved session: system
   prompts, tool declarations, the full conversation, the reply, and token counts.
   It refreshes after every reply. Use `[`/`]` for older snapshots and `f` to
@@ -119,7 +119,7 @@ Running `hearth` opens the control plane:
   selected row, `*` to spot changes, and the daemon controls to start, stop, or
   restart the daemon. It also edits `SOUL.md` and `HEARTH.md`.
 
-Use `Tab`/`Shift+Tab` or `1`..`8` to move, `?` for help, and `q` to quit.
+Use `Tab`/`Shift+Tab` or `1`..`7` to move, `?` for help, and `q` to quit.
 Conversations happen in Telegram; the TUI does not host a local chat. A
 TUI-started daemon runs detached, so closing the window does not stop it when
 keep-running is on. A service-managed daemon is never stopped by the TUI.

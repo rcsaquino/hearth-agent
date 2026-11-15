@@ -72,14 +72,14 @@ Hearth is a Rust workspace with narrow crate boundaries:
 | Crate | Responsibility |
 |---|---|
 | `hearth-config` | Strict settings parsing, validation, and environment references. |
-| `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, guidance, compaction, memory records. |
+| `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, guidance, compaction. |
 | `hearth-storage` | SQLite connections, migrations, snapshots, full-text search. |
 | `hearth-model` | OpenAI-compatible streaming, tool calls, usage, media clients. |
-| `hearth-memory` | Memory store, dedupe, standing memory, recall, extraction, consolidation, episodes. |
+| `hearth-memory` | Statements, rules, the retrieval cascade, the digest, and the memory tools. |
 | `hearth-tools` | Files, shell, web search, web fetch, documents, media, browser, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, the message tool. |
 | `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, maintenance, watch socket, CLI wiring. |
-| `hearth-cli` | The `hearth` binary and its subcommands. |
+| `hearth-cli` | The `hearth` binary and the terminal application. |
 | `hearth-eval` | Offline memory and token benchmarks and crash tooling. |
 
 There is one writer thread for SQLite and a small read pool. Every durable change
