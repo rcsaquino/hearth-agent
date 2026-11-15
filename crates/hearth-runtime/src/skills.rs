@@ -160,7 +160,10 @@ impl SkillLibrary {
         self.skills_root().join("learned")
     }
 
-    /// Parse every user and learned skill. Malformed frontmatter is an error.
+    /// Parse every user and learned skill.
+    ///
+    /// One malformed file is skipped with a warning. A typo in one skill must not
+    /// empty the index or make every other skill unloadable.
     pub fn load_all(&self) -> Result<Vec<Skill>, SkillError> {
         let mut skills = Vec::new();
         let user = self.skills_root();
@@ -182,7 +185,14 @@ impl SkillLibrary {
                 if !file.is_file() {
                     continue;
                 }
-                skills.push(parse_file(&file, SkillScope::User, false)?);
+                match parse_file(&file, SkillScope::User, false) {
+                    Ok(skill) => skills.push(skill),
+                    Err(error) => tracing::warn!(
+                        path = %file.display(),
+                        %error,
+                        "skipped a malformed skill"
+                    ),
+                }
             }
         }
         let learned = self.learned_root();
@@ -197,7 +207,14 @@ impl SkillLibrary {
                 if !path.is_file() {
                     continue;
                 }
-                skills.push(parse_file(&path, SkillScope::Learned, true)?);
+                match parse_file(&path, SkillScope::Learned, true) {
+                    Ok(skill) => skills.push(skill),
+                    Err(error) => tracing::warn!(
+                        path = %path.display(),
+                        %error,
+                        "skipped a malformed skill"
+                    ),
+                }
             }
         }
         skills.sort_by(|left, right| {
@@ -209,17 +226,12 @@ impl SkillLibrary {
     }
 
     /// The prompt skill index: active skills, capped at 300 tokens and 50 lines.
-    /// Learned skills that no longer fit are archived. User skills are read-only.
+    ///
+    /// Learned skills that no longer fit are archived, lowest success rate first
+    /// and then least recently used. User skills are read-only, so they are never
+    /// archived. This is the one index builder; a caller cannot get the text
+    /// without the overflow being retired.
     pub fn index(&self) -> Result<String, SkillError> {
-        self.build_index(true)
-    }
-
-    /// A read-only version of the index for auditing; never archives.
-    pub fn read_index(&self) -> Result<String, SkillError> {
-        self.build_index(false)
-    }
-
-    fn build_index(&self, archive: bool) -> Result<String, SkillError> {
         let skills = self.load_all()?;
         let mut users: Vec<Skill> = skills
             .iter()
@@ -238,7 +250,8 @@ impl SkillLibrary {
                 .success_rate()
                 .partial_cmp(&left.success_rate())
                 .unwrap_or(std::cmp::Ordering::Equal);
-            rate.then_with(|| left.name.cmp(&right.name))
+            rate.then_with(|| left.last_used.cmp(&right.last_used))
+                .then_with(|| left.name.cmp(&right.name))
         });
 
         let mut lines: Vec<String> = Vec::new();
@@ -258,18 +271,14 @@ impl SkillLibrary {
         }
         for mut skill in learned {
             if active >= INDEX_MAX_ACTIVE {
-                if archive {
-                    self.archive_for_index(&mut skill)?;
-                }
+                self.archive_for_index(&mut skill)?;
                 continue;
             }
             let line = skill.index_line();
             let mut candidate = lines.clone();
             candidate.push(line);
             if hearth_model::estimate_tokens(&candidate.join("\n")) > INDEX_MAX_TOKENS {
-                if archive {
-                    self.archive_for_index(&mut skill)?;
-                }
+                self.archive_for_index(&mut skill)?;
                 continue;
             }
             lines = candidate;

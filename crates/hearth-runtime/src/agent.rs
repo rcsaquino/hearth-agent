@@ -108,7 +108,7 @@ impl Agent {
     /// The active skill index, or an empty string on a library error.
     fn skills_index(&self) -> String {
         match &self.skills {
-            Some(skills) => match skills.read_index() {
+            Some(skills) => match skills.index() {
                 Ok(index) => index,
                 Err(error) => {
                     tracing::warn!(%error, "skill index could not be built");
