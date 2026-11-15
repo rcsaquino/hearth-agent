@@ -82,17 +82,23 @@ impl Zone {
         self.local(micros).iso()
     }
 
+    /// The instant of local midnight on a calendar date.
+    ///
+    /// `None` when the date does not resolve. A midnight skipped by a forward
+    /// transition moves to the first instant that exists.
+    pub fn day_start(&self, year: i16, month: u8, day: u8) -> Option<i64> {
+        let date = civil::Date::new(year, month as i8, day as i8).ok()?;
+        self.zone
+            .to_zoned(date.to_datetime(civil::Time::midnight()))
+            .ok()
+            .map(|zoned| zoned.timestamp().as_microsecond())
+    }
+
     /// The instant of local midnight on the day containing `micros`.
     pub fn start_of_day(&self, micros: i64) -> i64 {
-        let timestamp = Timestamp::from_microsecond(micros).unwrap_or(Timestamp::UNIX_EPOCH);
-        let date = timestamp.to_zoned(self.zone.clone()).datetime().date();
-        match self
-            .zone
-            .to_zoned(date.to_datetime(civil::Time::midnight()))
-        {
-            Ok(zoned) => zoned.timestamp().as_microsecond(),
-            Err(_) => micros,
-        }
+        let local = self.local(micros);
+        self.day_start(local.year, local.month, local.day)
+            .unwrap_or(micros)
     }
 
     /// The next instant at this zone's local wall-clock time, strictly after now.

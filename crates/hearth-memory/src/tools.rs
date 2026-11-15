@@ -249,7 +249,7 @@ impl Tool for RecallTool {
                     },
                     "as_of": {
                         "type": "string",
-                        "description": "RFC3339 or YYYY-MM-DD. Reads what was true then."
+                        "description": "RFC3339 or YYYY-MM-DD. Reads what was true then; a bare date means that whole local day."
                     },
                     "limit": {
                         "type": "integer",
@@ -262,7 +262,7 @@ impl Tool for RecallTool {
 
     fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
         let at = match optional(arguments, "as_of") {
-            Some(value) => Some(parse_instant(&value)?),
+            Some(value) => Some(parse_instant(&value, &self.memory.zone)?),
             None => None,
         };
         let count = limit(arguments, 20);
@@ -352,7 +352,7 @@ impl Tool for RecallTool {
 }
 
 /// Parse an RFC3339 instant or a date.
-fn parse_instant(value: &str) -> Result<i64, ToolError> {
+fn parse_instant(value: &str, zone: &Zone) -> Result<i64, ToolError> {
     if let Ok(instant) =
         time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
     {
@@ -368,11 +368,20 @@ fn parse_instant(value: &str) -> Result<i64, ToolError> {
             "as_of must be an RFC3339 instant or a YYYY-MM-DD date.",
         )
     })?;
-    Ok(date
+    let utc_midnight = date
         .midnight()
         .assume_utc()
         .unix_timestamp_nanos()
-        .div_euclid(1_000) as i64)
+        .div_euclid(1_000) as i64;
+    // The date names the whole local day, and the store predicate is
+    // start-inclusive and end-exclusive, so the boundary is the next day's start.
+    Ok(date
+        .next_day()
+        .and_then(|next| {
+            let year = i16::try_from(next.year()).ok()?;
+            zone.day_start(year, next.month().into(), next.day())
+        })
+        .unwrap_or(utc_midnight))
 }
 
 struct ForgetTool {
@@ -562,8 +571,7 @@ mod tests {
                     .valid_from(1_768_512_400_000_000),
             )
             .expect("second");
-        let tools =
-            hearth_tools::ToolRegistry::new(service.tools_at(None, Zone::fixed(8 * 3600)));
+        let tools = hearth_tools::ToolRegistry::new(service.tools_at(None, Zone::fixed(8 * 3600)));
         let reply = tools
             .call(
                 RECALL,
