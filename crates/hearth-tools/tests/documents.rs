@@ -276,3 +276,16 @@ fn overwrites_an_existing_document() {
     assert!(extracted.content.contains("Second version"));
     assert!(!extracted.content.contains("First version"));
 }
+
+#[test]
+fn an_expanding_archive_is_refused() {
+    let (_directory, workspace, spill, media) = roots();
+    let path = workspace.join("huge.docx");
+    let big = "A".repeat(17 * 1024 * 1024);
+    write_zip(&path, &[("word/document.xml", &big)]);
+    let tool = tool(&workspace, &spill, &media);
+    let error = tool
+        .call(&json!({"action": "extract", "path": "huge.docx"}))
+        .expect_err("an entry over the cap must be refused");
+    assert_eq!(error.code, "document_too_large", "{}", error.message);
+}

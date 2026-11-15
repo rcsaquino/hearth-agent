@@ -216,3 +216,17 @@ fn a_refused_write_creates_nothing_outside_the_workspace() {
         "a refused write must not create the tree outside the workspace"
     );
 }
+
+#[test]
+fn a_huge_text_file_is_refused() {
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let spill = home.path().join("spill");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    fs::write(workspace.join("big.txt"), "A".repeat(17 * 1024 * 1024)).expect("write big file");
+    let tool = FileTool::new(&workspace, &spill);
+    let error = tool
+        .call(&json!({"action": "read", "path": "big.txt"}))
+        .expect_err("a file over the cap must be refused");
+    assert_eq!(error.code, "file_too_large", "{}", error.message);
+}
