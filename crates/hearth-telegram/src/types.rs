@@ -37,6 +37,24 @@ pub struct Message {
     pub video: Option<Video>,
     #[serde(default)]
     pub reply_to_message: Option<Box<Message>>,
+    #[serde(default)]
+    pub external_reply: Option<ExternalReply>,
+}
+
+/// A reply to a message the bot cannot see, such as a post in a channel.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExternalReply {
+    #[serde(default)]
+    pub quote: Option<Quote>,
+}
+
+/// A highlighted span the person replied to.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Quote {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub is_manual: bool,
 }
 
 /// The chat a message belongs to.

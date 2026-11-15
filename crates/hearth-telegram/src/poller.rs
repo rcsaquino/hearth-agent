@@ -244,6 +244,8 @@ impl TelegramPoller {
         let mut blocks = Vec::new();
         if let Some(context) = message.reply_to_message.as_deref().and_then(reply_context) {
             blocks.push(json!({"type": "text", "text": context}));
+        } else if let Some(context) = message.external_reply.as_ref().and_then(quoted_span) {
+            blocks.push(json!({"type": "text", "text": context}));
         }
 
         if let Some(text) = message
@@ -444,6 +446,23 @@ fn reply_context(quoted: &Message) -> Option<String> {
         None => return None,
     };
     Some(format!("Replying to {author}: {body}"))
+}
+
+fn quoted_span(reply: &crate::types::ExternalReply) -> Option<String> {
+    let text = reply
+        .quote
+        .as_ref()
+        .and_then(|quote| quote.text.as_deref())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())?;
+    let mut characters = text.chars();
+    let head: String = characters.by_ref().take(REPLY_CONTEXT_CHARS).collect();
+    let body = if characters.next().is_some() {
+        format!("\"{head}…\"")
+    } else {
+        format!("\"{head}\"")
+    };
+    Some(format!("Replying to a quoted span: {body}"))
 }
 
 fn has_content(message: &Message) -> bool {
