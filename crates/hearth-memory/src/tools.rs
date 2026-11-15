@@ -303,7 +303,7 @@ impl Tool for RecallTool {
                 format_args!(
                     "source {} since {}",
                     memory.source.as_str(),
-                    memory.valid_from
+                    self.memory.zone.iso(memory.valid_from)
                 ),
                 history
             )));
