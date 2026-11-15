@@ -212,3 +212,74 @@ fn a_done_reminder_effect_is_not_sent_again() {
         .expect("row");
     assert_eq!(effect.status, EffectStatus::Done);
 }
+
+#[test]
+fn an_interrupted_reminder_leaves_a_notice() {
+    use hearth_core::{EffectIntent, EffectStatus, Save, TaskStatus};
+
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "telegram", "42:0")
+        .expect("conversation");
+    let now = session.now_micros();
+    let first_wake = now - 1;
+    let task = session
+        .create_sleeping_task(
+            NewTask::new(
+                "reminder",
+                1,
+                "remind",
+                json!({
+                    "chat_id": 42,
+                    "thread_id": null,
+                    "message": "Take the medication",
+                    "repeat_seconds": null,
+                    "first_wake": first_wake
+                }),
+            )
+            .conversation(&conversation.id),
+            first_wake,
+        )
+        .expect("task");
+    let key = format!("reminder:{}:{}", task.id, first_wake);
+    let commit = session
+        .save(Save::new(&conversation.id).effect(EffectIntent::new(
+            "telegram.send",
+            key.clone(),
+            json!({"reminder": true, "chat_id": 42, "markdown": "Take the medication"}),
+        )))
+        .expect("effect");
+    session
+        .begin_effect(&commit.effect_ids[0])
+        .expect("the send starts and is interrupted");
+
+    session.recover_tasks().expect("recovery");
+    let claimed = session
+        .claim_task_for_kind("scheduler", 60_000_000, "reminder")
+        .expect("claim")
+        .expect("due");
+    let client = TelegramClient::with_base_url("token", "http://127.0.0.1:9").expect("client");
+    let sender = TelegramSender::new(client, Arc::new(SystemSleeper));
+    let handler = hearth_runtime::ReminderHandler::new(session.clone(), sender);
+    let output = hearth_runtime::TaskHandler::step(&handler, &claimed).expect("step");
+    let task = session
+        .finish_task(&claimed.id, "scheduler", output)
+        .expect("finish task");
+    assert_eq!(task.status, TaskStatus::Done);
+
+    let effect = session
+        .effect_by_key("telegram.send", &key)
+        .expect("effect")
+        .expect("effect row");
+    assert_eq!(effect.status, EffectStatus::Unknown);
+
+    let history = session.history(&conversation.id).expect("history");
+    let last = history.last().expect("a notice entry");
+    assert_eq!(last.kind, "notice");
+    let text = last.content.to_string();
+    assert!(
+        text.contains("Take the medication") || text.contains("reminder"),
+        "the notice must name what was not sent: {text}"
+    );
+}
