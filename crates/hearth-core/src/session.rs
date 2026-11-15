@@ -2363,6 +2363,130 @@ impl Session {
         }
     }
 
+    /// Recover the record after an unclean stop.
+    ///
+    /// Only a new process calls this, so every `running` task belongs to a
+    /// process that is gone and its lease says nothing. A generation task whose
+    /// submission is still running sends that submission back to the queue once.
+    /// A second interruption settles the submission unanswered and tells the
+    /// person instead of retrying forever.
+    pub fn recover_interrupted(&self) -> Result<RecoveryReport, CoreError> {
+        let now = self.clock.now_micros();
+        let ids = Arc::clone(&self.ids);
+        self.storage
+            .write(move |writer| -> Result<RecoveryReport, CoreError> {
+                let mut report = RecoveryReport::default();
+                let running: Vec<(String, String, String, Option<String>)> = writer.query(
+                    "SELECT id, kind, input_json, conversation_id FROM tasks \
+                     WHERE status = 'running' ORDER BY created_at, id",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?;
+                for (id, kind, input_json, conversation_id) in running {
+                    let submission_id = serde_json::from_str::<Value>(&input_json)
+                        .ok()
+                        .and_then(|value| {
+                            value
+                                .get("submission_id")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned)
+                        });
+                    if kind == "generation"
+                        && let Some(submission_id) = submission_id.as_deref()
+                    {
+                        let status: Option<String> = writer.query_optional(
+                            "SELECT status FROM submissions WHERE id = ?",
+                            (submission_id,),
+                            |row| row.get(0),
+                        )?;
+                        if status.as_deref() == Some("running") {
+                            let prior: i64 = writer.query_row(
+                                "SELECT COUNT(*) FROM tasks WHERE kind = 'generation' \
+                                 AND status = 'failed' \
+                                 AND json_extract(input_json, '$.submission_id') = ?",
+                                (submission_id,),
+                                |row| row.get(0),
+                            )?;
+                            if prior >= 1 {
+                                writer.execute(
+                                    "UPDATE submissions SET status = 'unanswered', \
+                                     error_json = ?, settled_at = ? \
+                                     WHERE id = ? AND status = 'running'",
+                                    (
+                                        serde_json::json!({"error": "poisoned"}).to_string(),
+                                        now,
+                                        submission_id,
+                                    ),
+                                )?;
+                                if let Some(conversation_id) = conversation_id.as_deref() {
+                                    let seq = record_commit(
+                                        writer,
+                                        now,
+                                        Some(conversation_id),
+                                        Some(id.as_str()),
+                                        "submission.poison",
+                                    )?;
+                                    let entry_id = ids.new_id();
+                                    let content = redacted_json(&serde_json::json!({
+                                        "text": "A request stopped the process twice, so it was not answered. Please send it again."
+                                    }))?;
+                                    writer.execute(
+                                        "INSERT INTO entries (id, conversation_id, seq, kind, \
+                                         content_json, tokens_est, source, prompt_hash, created_at) \
+                                         VALUES (?, ?, ?, 'notice', ?, 0, NULL, NULL, ?)",
+                                        (entry_id, conversation_id, seq, content, now),
+                                    )?;
+                                }
+                                report.poisoned += 1;
+                            } else {
+                                writer.execute(
+                                    "UPDATE submissions SET status = 'queued', \
+                                     answer_entry_id = NULL, error_json = NULL, settled_at = NULL \
+                                     WHERE id = ? AND status = 'running'",
+                                    (submission_id,),
+                                )?;
+                                report.requeued += 1;
+                            }
+                            let result = if prior >= 1 {
+                                serde_json::json!({"error": "poisoned"})
+                            } else {
+                                serde_json::json!({"error": "interrupted"})
+                            };
+                            writer.execute(
+                                "UPDATE tasks SET status = 'failed', result_json = ?, \
+                                 terminal_at = ?, lease_owner = NULL, lease_until = NULL, \
+                                 updated_at = ? WHERE id = ? AND status = 'running'",
+                                (result.to_string(), now, now, id.as_str()),
+                            )?;
+                            record_commit(
+                                writer,
+                                now,
+                                conversation_id.as_deref(),
+                                Some(id.as_str()),
+                                "task.interrupt",
+                            )?;
+                            continue;
+                        }
+                    }
+                    writer.execute(
+                        "UPDATE tasks SET status = 'pending', lease_owner = NULL, \
+                         lease_until = NULL, updated_at = ? \
+                         WHERE id = ? AND status = 'running'",
+                        (now, id.as_str()),
+                    )?;
+                    record_commit(
+                        writer,
+                        now,
+                        conversation_id.as_deref(),
+                        Some(id.as_str()),
+                        "task.recover",
+                    )?;
+                    report.requeued += 1;
+                }
+                Ok(report)
+            })
+    }
+
     /// Requeue tasks whose leases or sleeps expired.
     pub fn recover_tasks(&self) -> Result<RecoveryReport, CoreError> {
         let now = self.clock.now_micros();

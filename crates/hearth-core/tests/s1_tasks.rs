@@ -1136,3 +1136,122 @@ fn an_active_generation_task_is_found_only_while_running() {
             .is_none()
     );
 }
+
+#[test]
+fn an_interrupted_submission_is_queued_again() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Crash", "telegram", "42:0")
+        .expect("conversation");
+    let submitted = session
+        .submit_telegram(
+            &conversation.id,
+            "tg:42:1",
+            json!({"text": "hello"}),
+            hearth_core::TelegramUpdate {
+                update_id: 1,
+                chat_id: 42,
+                message_id: 1,
+            },
+            2,
+        )
+        .expect("submit");
+    session
+        .begin_submission(&submitted.submission.id)
+        .expect("begin");
+    let task = session
+        .create_task(
+            hearth_core::NewTask::new(
+                "generation",
+                1,
+                "request",
+                json!({"submission_id": submitted.submission.id}),
+            )
+            .conversation(&conversation.id),
+        )
+        .expect("task");
+    session
+        .claim_task_by_id(&task.id, "daemon:1", 60_000_000)
+        .expect("claim")
+        .expect("claimed");
+
+    let report = session.recover_interrupted().expect("recovery");
+    assert_eq!(report.requeued, 1);
+    assert_eq!(
+        session
+            .submission_by_id(&submitted.submission.id)
+            .expect("submission")
+            .expect("row")
+            .status,
+        hearth_core::SubmissionStatus::Queued
+    );
+    assert!(
+        session
+            .next_queued_telegram_submission()
+            .expect("next queued")
+            .is_some(),
+        "the worker must find the submission again"
+    );
+}
+
+#[test]
+fn a_second_interruption_is_reported_to_the_person() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Crash twice", "telegram", "42:0")
+        .expect("conversation");
+    let submitted = session
+        .submit_telegram(
+            &conversation.id,
+            "tg:42:1",
+            json!({"text": "hello"}),
+            hearth_core::TelegramUpdate {
+                update_id: 1,
+                chat_id: 42,
+                message_id: 1,
+            },
+            2,
+        )
+        .expect("submit");
+    for attempt in 0..2 {
+        session
+            .begin_submission(&submitted.submission.id)
+            .expect("begin");
+        let task = session
+            .create_task(
+                hearth_core::NewTask::new(
+                    "generation",
+                    1,
+                    "request",
+                    json!({"submission_id": submitted.submission.id}),
+                )
+                .conversation(&conversation.id),
+            )
+            .expect("task");
+        session
+            .claim_task_by_id(&task.id, &format!("daemon:{attempt}"), 60_000_000)
+            .expect("claim")
+            .expect("claimed");
+        session.recover_interrupted().expect("recovery");
+    }
+
+    let submission = session
+        .submission_by_id(&submitted.submission.id)
+        .expect("submission")
+        .expect("row");
+    assert_eq!(
+        submission.status,
+        hearth_core::SubmissionStatus::Unanswered,
+        "a repeated crash must not retry forever"
+    );
+    let history = session.history(&conversation.id).expect("history");
+    let notice = history.last().expect("a notice entry");
+    assert_eq!(notice.kind, "notice");
+    assert!(
+        notice.content.to_string().contains("twice"),
+        "the notice must explain the stop: {}",
+        notice.content
+    );
+}

@@ -1336,3 +1336,63 @@ fn a_stop_in_the_message_batch_cancels_the_run() {
         submission.status
     );
 }
+
+#[test]
+fn an_unclean_restart_still_answers() {
+    use hearth_core::{Harness, NewTask, TelegramUpdate};
+
+    let (provider_base, provider_thread) = fake_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram();
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        let session = harness.session();
+        let conversation = session
+            .create_conversation("Old", "telegram", "42:0")
+            .expect("conversation");
+        let submitted = session
+            .submit_telegram(
+                &conversation.id,
+                "tg:42:9",
+                json!({"text": "the interrupted request"}),
+                TelegramUpdate {
+                    update_id: 9,
+                    chat_id: 42,
+                    message_id: 9,
+                },
+                10,
+            )
+            .expect("submit");
+        session
+            .begin_submission(&submitted.submission.id)
+            .expect("begin");
+        let task = session
+            .create_task(
+                NewTask::new(
+                    "generation",
+                    1,
+                    "request",
+                    json!({"submission_id": submitted.submission.id}),
+                )
+                .conversation(&conversation.id),
+            )
+            .expect("task");
+        session
+            .claim_task_by_id(&task.id, "daemon:999", 60_000_000)
+            .expect("claim")
+            .expect("claimed");
+    }
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let answer = wait_for_answer(&telegram_state);
+    assert!(
+        answer.contains("Telegram answer"),
+        "the daemon must recover the stranded run and answer: {answer:?}"
+    );
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+}
