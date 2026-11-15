@@ -122,3 +122,49 @@ fn a_unit_that_names_another_home_is_not_installed_for_this_one() {
         "a unit for another home must not manage this one"
     );
 }
+
+fn enable_link(config: &std::path::Path) -> std::path::PathBuf {
+    config.join("default.target.wants").join("hearth.service")
+}
+
+#[test]
+fn install_writes_the_enable_link() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    let report = install_at(home.path(), config.path(), false, false).expect("install");
+
+    let link = enable_link(config.path());
+    assert!(link.exists(), "the enable link is missing");
+    assert_eq!(fs::read_link(&link).expect("read link"), report.unit);
+    assert_eq!(report.unit, config.path().join("hearth.service"));
+}
+
+#[test]
+fn reapplying_a_start_mode_recreates_a_deleted_unit_and_link() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    apply_start_mode_at(home.path(), config.path(), "login", false).expect("login mode");
+
+    let unit = config.path().join("hearth.service");
+    let link = enable_link(config.path());
+    fs::remove_file(&unit).expect("remove unit");
+    fs::remove_file(&link).expect("remove link");
+
+    apply_start_mode_at(home.path(), config.path(), "login", false).expect("reapply");
+    assert!(unit.is_file(), "the unit was not recreated");
+    assert!(link.exists(), "the enable link was not recreated");
+    assert_eq!(fs::read_link(&link).expect("read link"), unit);
+}
+
+#[test]
+fn uninstall_removes_the_enable_link() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    install_at(home.path(), config.path(), false, false).expect("install");
+
+    let link = enable_link(config.path());
+    assert!(link.exists());
+    uninstall_at(config.path(), false).expect("uninstall");
+    assert!(!config.path().join("hearth.service").exists());
+    assert!(!link.exists(), "the enable link survived uninstall");
+}
