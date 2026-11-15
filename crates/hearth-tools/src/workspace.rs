@@ -220,6 +220,27 @@ impl Workspace {
         let parent = target
             .parent()
             .ok_or_else(|| ToolError::invalid("invalid_path", "path has no parent"))?;
+        // Check the deepest part that already exists before creating anything, so
+        // a symlinked directory cannot make a refused write create a tree outside
+        // the workspace.
+        let mut existing = Some(parent);
+        while let Some(candidate) = existing {
+            match fs::canonicalize(candidate) {
+                Ok(canonical) => {
+                    if !canonical.starts_with(&root) {
+                        return Err(escape(path));
+                    }
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    existing = candidate.parent();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => {
+                    existing = candidate.parent();
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
         fs::create_dir_all(parent)?;
         let canonical_parent = fs::canonicalize(parent)?;
         if !canonical_parent.starts_with(&root) {
