@@ -697,20 +697,26 @@ impl Agent {
                 SubmissionStatus::Done,
                 Some(&answer_entry_id),
             )?;
-            self.settle_absorbed(
+            // The answer is durable and the submission is settled, so a failure
+            // in the task bookkeeping must not skip the delivery that follows.
+            if let Err(error) = self.settle_absorbed(
                 &absorbed,
                 SubmissionStatus::Done,
                 Some(&answer_entry_id),
                 None,
-            )?;
-            self.session.finish_task(
+            ) {
+                tracing::warn!(%error, "an absorbed submission could not be settled");
+            }
+            if let Err(error) = self.session.finish_task(
                 &claimed.id,
                 &self.config.owner,
                 StepOutput::Terminal {
                     outcome: TerminalOutcome::Done,
                     result: json!({"answer_entry_id": answer_entry_id}),
                 },
-            )?;
+            ) {
+                tracing::warn!(%error, "the generation task could not be finished");
+            }
             emit(
                 events,
                 &claimed.id,
