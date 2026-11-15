@@ -53,3 +53,17 @@ fn a_missing_empty_or_malformed_key_falls_back_to_utc() {
         );
     }
 }
+
+#[test]
+fn an_unknown_zone_is_refused_by_validation() {
+    let home = TempDir::new().expect("home");
+    write(
+        home.path(),
+        r#"{"identity":{"agent_name":"Hearth","timezone":"Europe/Lundun"}}"#,
+    );
+    let error = hearth_config::load(home.path())
+        .expect_err("an unknown zone must not load")
+        .to_string();
+    assert!(error.contains("identity.timezone"), "{error}");
+    assert!(error.contains("Europe/Lundun"), "{error}");
+}
