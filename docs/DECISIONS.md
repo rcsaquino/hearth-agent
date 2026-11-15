@@ -1975,3 +1975,32 @@ force-pushing, which is the approval named above and not a step in this change.
 - One image entry is estimated at 12,000 characters, about 3,300 tokens, which is
   the worst case for the 1568-pixel long edge the adapter sends. The old estimate
   counted the path and let an image-heavy turn pass every local budget.
+
+## 2026-11-15: Recovery, replay, and delivery after an unclean stop
+
+- `Session::recover_interrupted` is the startup recovery. A new process owns no
+  `running` task, so lease expiry is irrelevant there; every such task is
+  recovered. The old lease-based `recover_tasks` remains for anything that needs
+  to requeue an expired lease during a live process.
+- A generation task whose submission is still `running` sends the submission back
+  to `queued` and is retired. The worker then answers the message again. A second
+  interruption settles the submission `unanswered`, writes a `notice` entry, and
+  stops retrying, which is the poison rule applied to a run.
+- A replayed pending tool call runs only if it is read-only. `shell`, `message`,
+  `schedule`, `browser`, and `media` act outside the database without an effect
+  row, so a replay answers them with `not_replayed` and the model decides whether
+  to re-issue. The alternative, an effect row per tool call, is the larger
+  design and is not needed while the deny-list is short and explicit.
+- A reminder whose send may have happened is not retried (at-most-once). The task
+  still finishes `done` and the person gets a notice to reschedule if it did not
+  arrive.
+- A Telegram send error that is a rate limit, a server failure, or a transport
+  failure leaves the effect `unknown`, which the recovery path can pick up. A
+  permanent request error still fails it.
+- After the answer entry is saved and the submission settled, a failure to
+  settle an absorbed submission or to finish the task is logged, not returned.
+  Delivery follows the answer, not the task row.
+- The log file rotates at 10 MiB into one `hearth.log.1`. A single previous copy
+  bounds the disk without an unbounded family of files.
+- `session.recover_interrupted` and `prune_prompt_blobs` write SQL directly, like
+  the other recovery paths, because they must run before any run exists.
