@@ -365,6 +365,10 @@ mod tests {
     }
 
     fn initialized_app() -> (TempDir, App) {
+        initialized_app_in("UTC")
+    }
+
+    fn initialized_app_in(timezone: &str) -> (TempDir, App) {
         let home = TempDir::new().expect("temp home");
         init(
             home.path(),
@@ -376,7 +380,7 @@ mod tests {
                 model: "fake-model".to_owned(),
                 thinking: "default".to_owned(),
                 agent_name: "Hearth".to_owned(),
-                timezone: Some("UTC".to_owned()),
+                timezone: Some(timezone.to_owned()),
                 media: None,
                 context_window: None,
                 daemon: Daemon::default(),
@@ -792,6 +796,48 @@ mod tests {
         let (_home, app) = initialized_app();
         let text = buffer_text(&app, 60, 20);
         assert!(text.contains("larger terminal"), "{text}");
+    }
+
+    #[test]
+    fn prompt_and_activity_stamps_follow_the_configured_zone() {
+        let (_home, mut app) = initialized_app_in("Asia/Manila");
+        let expected = if hearth_core::Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
+            "2023-11-15T06:13:20+08:00"
+        } else {
+            // This host has no Asia/Manila entry, so the zone falls back to UTC.
+            "2023-11-14T22:13:20+00:00"
+        };
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![json!({
+            "request": {
+                "identity": "SOUL TEXT",
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "please inspect"}]}
+                ]
+            },
+            "prompt_hash": "abc123def456",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": json!(null),
+            "usage": json!(null)
+        })];
+        let prompt_text = buffer_text(&app, 100, 100);
+
+        app.tab = Tab::Activity;
+        app.events.push_back(json!({
+            "ts": 1_700_000_000_000_000_i64,
+            "kind": "run_started",
+            "task_id": "t",
+            "data": {}
+        }));
+        let activity_text = buffer_text(&app, 100, 60);
+        assert!(
+            activity_text.contains(expected),
+            "the activity detail must show {expected}: {activity_text}"
+        );
+        assert!(
+            prompt_text.contains(expected),
+            "the prompt audit must show {expected}: {prompt_text}"
+        );
     }
 
     #[test]

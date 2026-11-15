@@ -136,3 +136,47 @@ fn latest_prompt_skips_plain_text_maintenance_prompts() {
         .expect("the JSON prompt is still visible");
     assert_eq!(document["identity"], "SOUL TEXT");
 }
+
+#[test]
+fn memory_stamps_follow_the_configured_zone() {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let home = TempDir::new().expect("temp home");
+    init(home.path(), options()).expect("init");
+    let settings = home.path().join("settings.json");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&settings)
+        .expect("open settings");
+    file.write_all(br#"{"identity":{"timezone":"Asia/Manila"}}"#)
+        .expect("write settings");
+    file.flush().expect("flush settings");
+
+    let harness = Harness::open(home.path()).expect("open harness");
+    let memory = MemoryService::new(harness.session().clone());
+    memory
+        .write(NewMemory::new("The release checklist lives in docs/."))
+        .expect("save memory");
+
+    let records = list_memories(home.path(), 100).expect("list memories");
+    assert_eq!(records.len(), 1);
+    let offset = if hearth_core::Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
+        "+08:00"
+    } else {
+        // This host has no Asia/Manila entry, so the zone falls back to UTC.
+        "+00:00"
+    };
+    for stamp in [&records[0].created_at, &records[0].updated_at] {
+        assert!(stamp.ends_with(offset), "{stamp} must end in {offset}");
+        let bytes = stamp.as_bytes();
+        assert_eq!(stamp.len(), 25, "not an ISO 8601 stamp: {stamp}");
+        assert_eq!(bytes[4], b'-', "{stamp}");
+        assert_eq!(bytes[7], b'-', "{stamp}");
+        assert_eq!(bytes[10], b'T', "{stamp}");
+        assert_eq!(bytes[13], b':', "{stamp}");
+        assert_eq!(bytes[16], b':', "{stamp}");
+    }
+}
