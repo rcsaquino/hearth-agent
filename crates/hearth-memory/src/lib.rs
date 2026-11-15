@@ -713,6 +713,16 @@ mod tests {
     }
 
     #[test]
+    fn the_memory_default_rules_budget_matches_the_prompt_segment() {
+        assert_eq!(MemoryConfig::default().rules_max_tokens, 800);
+        assert_eq!(
+            MemoryConfig::default().rules_max_tokens,
+            hearth_core::SEGMENT_RULES,
+            "the service default and the prompt segment must be one number"
+        );
+    }
+
+    #[test]
     fn every_live_rule_fits_in_the_rules_block() {
         use crate::errors::Code;
 

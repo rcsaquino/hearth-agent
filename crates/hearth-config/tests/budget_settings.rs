@@ -145,3 +145,13 @@ fn a_legacy_soul_file_setting_is_ignored() {
     let settings = hearth_config::load(home.path()).expect("load");
     assert_eq!(settings.identity.agent_name, "Hearth");
 }
+
+#[test]
+fn the_rules_budget_matches_the_prompt_segment() {
+    assert_eq!(hearth_config::Memory::default().rules_max_tokens, 800);
+    assert_eq!(
+        hearth_config::Memory::default().rules_max_tokens,
+        hearth_core::SEGMENT_RULES,
+        "the enforcing default and the prompt segment must be one number"
+    );
+}

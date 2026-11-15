@@ -1035,6 +1035,7 @@ dependencies = [
 name = "hearth-config"
 version = "0.1.0"
 dependencies = [
+ "hearth-core",
  "jiff",
  "serde",
  "serde_json",
