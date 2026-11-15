@@ -619,3 +619,62 @@ fn an_image_block_is_encoded_and_downscaled() {
     assert!(image.width() == 1568 || image.height() == 1568);
     server.finish();
 }
+
+#[test]
+fn a_stream_that_ends_without_a_terminal_chunk_is_an_error() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
+    );
+    let server = FakeServer::start(vec![TestResponse::raw(
+        200,
+        "OK",
+        "text/event-stream",
+        body,
+    )]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let outcome: Result<Vec<StreamEvent>, _> =
+        provider.stream(request()).expect("stream").collect();
+    let error = outcome.expect_err("a stream with no terminal chunk must fail");
+    assert!(
+        error.to_string().contains("ended"),
+        "the error must say the stream ended early: {error}"
+    );
+}
+
+#[test]
+fn a_length_finish_is_reported_as_truncation() {
+    let server = FakeServer::start(vec![TestResponse::sse(&[
+        r#"{"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}"#,
+        r#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#,
+    ])]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let outcome: Result<Vec<StreamEvent>, _> =
+        provider.stream(request()).expect("stream").collect();
+    let error = outcome.expect_err("a truncated answer must not look complete");
+    assert!(
+        error.to_string().contains("length"),
+        "the error must name the finish reason: {error}"
+    );
+}
+
+#[test]
+fn an_error_object_in_the_stream_is_reported() {
+    let body = concat!(
+        "data: {\"error\":{\"message\":\"upstream overloaded\",\"type\":\"server_error\"}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let server = FakeServer::start(vec![TestResponse::raw(
+        200,
+        "OK",
+        "text/event-stream",
+        body,
+    )]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let outcome: Result<Vec<StreamEvent>, _> =
+        provider.stream(request()).expect("stream").collect();
+    let error = outcome.expect_err("an SSE error object must fail the stream");
+    assert!(
+        error.to_string().contains("upstream overloaded"),
+        "the error must carry the provider message: {error}"
+    );
+}
