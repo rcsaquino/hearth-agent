@@ -509,6 +509,7 @@ impl HelperPool {
         };
         let built = match build_tools(
             &self.config.settings,
+            hearth_core::Zone::resolve(&hearth_config::identity_timezone(&self.config.home)),
             &self.config.workspace,
             &self.config.spill,
             Some(target),

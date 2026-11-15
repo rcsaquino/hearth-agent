@@ -69,6 +69,7 @@ pub enum ToolBuildError {
 #[allow(clippy::too_many_arguments)]
 pub fn build_tools(
     settings: &Settings,
+    zone: hearth_core::Zone,
     workspace: &Path,
     spill: &Path,
     message: Option<MessageTarget>,
@@ -94,7 +95,7 @@ pub fn build_tools(
         )));
     }
     if let Some(memory) = memory {
-        tools.extend(memory.tools_with_source(memory_source));
+        tools.extend(memory.tools_at(memory_source, zone));
     }
     if let Some(skills) = skills {
         tools.push(Arc::new(SkillTool::new(skills)));
@@ -444,6 +445,7 @@ mod core_budget_tests {
         };
         let built = build_tools(
             &settings(),
+            hearth_core::Zone::utc(),
             home.path(),
             &spill,
             Some(target),
@@ -520,7 +522,16 @@ mod core_budget_tests {
         .expect("settings");
         let media = ToolMediaRoots { inbound, outbound };
         let built = build_tools(
-            &settings, &workspace, &spill, None, None, None, None, None, &media,
+            &settings,
+            hearth_core::Zone::utc(),
+            &workspace,
+            &spill,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &media,
         )
         .expect("tools");
 

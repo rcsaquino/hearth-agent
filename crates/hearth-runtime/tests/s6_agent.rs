@@ -1094,7 +1094,7 @@ fn a_memory_tool_call_records_the_run_source() {
         .expect("entry");
     // The service stamps its provenance onto saves that do not name a source.
     let memory = Arc::new(MemoryService::new(harness.session().clone()));
-    let tools = ToolRegistry::new(memory.tools_with_source(Some(entry.clone())));
+    let tools = ToolRegistry::new(memory.tools_at(Some(entry.clone()), hearth_core::Zone::utc()));
     let provider = Arc::new(ScriptedProvider::new(vec![
         Ok(vec![
             Ok(StreamEvent::ToolCall(ToolCall {

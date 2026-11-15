@@ -39,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use hearth_core::Session;
+use hearth_core::{Session, Zone};
 
 pub use digest::Coverage;
 pub use embedding::{
@@ -537,16 +537,17 @@ impl MemoryService {
         Ok(removed)
     }
 
-    /// The model-facing tools.
+    /// The model-facing tools, rendered in UTC.
     pub fn tools(&self) -> Vec<Arc<dyn hearth_tools::Tool>> {
-        self.tools_with_source(None)
+        self.tools_at(None, Zone::utc())
     }
 
-    /// The tools, with the entry this run's writes came from.
-    pub fn tools_with_source(&self, source: Option<String>) -> Vec<Arc<dyn hearth_tools::Tool>> {
+    /// The tools, with the entry this run's writes came from and the configured zone.
+    pub fn tools_at(&self, source: Option<String>, zone: Zone) -> Vec<Arc<dyn hearth_tools::Tool>> {
         tools::build(&ToolMemory {
             service: self.clone(),
             source,
+            zone,
         })
     }
 

@@ -732,6 +732,7 @@ impl TelegramWorker {
             .flatten();
         let built = match build_tools(
             &self.settings,
+            hearth_core::Zone::resolve(&hearth_config::identity_timezone(&self.home)),
             &self.workspace,
             &self.spill,
             Some(target),
