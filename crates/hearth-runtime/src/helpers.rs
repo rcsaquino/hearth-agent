@@ -114,7 +114,6 @@ impl Tool for TaskTool {
                     "action": {"type": "string", "enum": ["spawn", "list", "result", "kill"]},
                     "brief": {"type": "string", "description": "Objective, paths, constraints, and completion criteria"},
                     "expected_minutes": {"type": "integer", "minimum": 1},
-                    "token_budget": {"type": "integer", "minimum": 1000},
                     "wall_seconds": {"type": "integer", "minimum": 1},
                     "tool_groups": {"type": "array", "items": {"type": "string"}},
                     "task_id": {"type": "string"}
@@ -172,7 +171,6 @@ impl TaskTool {
             .and_then(Value::as_u64)
             .unwrap_or(10)
             .max(1);
-        let token_budget = arguments.get("token_budget").and_then(Value::as_u64);
         let wall_seconds = arguments.get("wall_seconds").and_then(Value::as_i64);
         let tool_groups = arguments
             .get("tool_groups")
@@ -208,7 +206,6 @@ impl TaskTool {
                 "thread_id": self.thread_id,
                 "depth": child_depth,
                 "expected_seconds": expected_minutes.saturating_mul(60),
-                "token_budget": token_budget,
                 "wall_seconds": wall_seconds,
                 "tool_groups": tool_groups,
             }),
@@ -432,28 +429,12 @@ impl HelperPool {
             .get("expected_seconds")
             .and_then(Value::as_i64)
             .unwrap_or(600);
-        let token_budget = task
-            .input
-            .get("token_budget")
-            .and_then(Value::as_u64)
-            .unwrap_or(self.config.budget.context_window);
         let wall_seconds = task
             .input
             .get("wall_seconds")
             .and_then(Value::as_i64)
             .unwrap_or(3600)
             .max(1);
-        let helper_budget = if token_budget < self.config.budget.context_window {
-            ContextBudget::new(
-                token_budget,
-                self.config.budget.max_output_tokens,
-                0.65,
-                0.85,
-                self.config.budget.keep_recent,
-            )
-        } else {
-            self.config.budget
-        };
         let cancel = self.controls.register(&task_id);
 
         let submission = match self.config.session.submit(
@@ -559,7 +540,7 @@ impl HelperPool {
         )
         .with_memory(Arc::clone(&self.config.memory))
         .with_groups(built.groups, built.selection)
-        .with_budget(helper_budget);
+        .with_budget(self.config.budget);
 
         let (wall_tx, wall_rx) = mpsc::channel::<()>();
         let wall_cancel = Arc::clone(&cancel);

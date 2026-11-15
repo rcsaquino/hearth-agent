@@ -859,9 +859,10 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - Retention keeps helper runs newer than `retention_days` or within the newest
   `retention_runs` (30 days, 25 runs by default); older helper conversations are
   archived, not deleted, and the tasks remain readable.
-- `token_budget` is enforced as the helper's context-window cap (never above the
-  configured model window); `wall_seconds` (3600 default) cancels the run at the
-  next agent boundary. There is no separate hard total-token meter in v1.
+- A helper runs on the configured `ContextBudget`, the same one the daemon builds
+  for the main agent. `wall_seconds` (3600 default) cancels the run at the next
+  agent boundary. There is no per-helper token budget and no separate hard
+  total-token meter in v1.
 - Helper agents skip post-run memory extraction; their working clutter must not
   become long-term memory.
 
@@ -2019,3 +2020,15 @@ force-pushing, which is the approval named above and not a step in this change.
   are inside the budget.
 - `RULE_CHARS` stays 400 characters. It caps one rule's content and is not the
   token budget.
+
+## 2026-11-16: A helper runs on the configured budget
+
+- The task tool no longer takes `token_budget`. A value below the reply reserve
+  produced `usable = 0`, and the first turn then failed with the context-size
+  message even though the conversation was empty and compaction could not help.
+  The argument also capped almost nothing else: a helper starts a new
+  conversation and the fixed segments are paid in full on every turn.
+- A caller that still sends the argument is accepted and ignored, so an old model
+  transcript or a remembered tool shape does not fail the spawn.
+- `wall_seconds` stays. It bounds a run by time and fails as `Cancelled`, which
+  names the real cause.
