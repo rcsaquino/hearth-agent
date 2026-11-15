@@ -86,8 +86,8 @@ fn a_snapshot_replaces_an_existing_destination_atomically() {
 #[test]
 fn a_snapshot_is_private_while_it_is_copied() {
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let (directory, source) = database();
     {

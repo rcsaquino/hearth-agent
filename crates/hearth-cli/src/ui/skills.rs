@@ -25,11 +25,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 .collect();
             format!(
                 "history {version} of {} · {} · up/down to read, esc to leave",
-                app.skills
-                    .versions
-                    .last()
-                    .copied()
-                    .unwrap_or(version),
+                app.skills.versions.last().copied().unwrap_or(version),
                 all.join(" ")
             )
         }

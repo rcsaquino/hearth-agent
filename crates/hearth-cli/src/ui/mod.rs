@@ -470,22 +470,44 @@ mod tests {
         app.skills.reload();
         app.skills.selected = 0;
         app.skills.load_selected();
-        assert!(app.skills.body.as_deref().unwrap_or_default().contains("Revision 1"));
+        assert!(
+            app.skills
+                .body
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Revision 1")
+        );
 
         app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
         assert_eq!(app.skills.versions, vec![1, 2]);
-        assert!(app.skills.body.as_deref().unwrap_or_default().contains("Revision 1"));
+        assert!(
+            app.skills
+                .body
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Revision 1")
+        );
 
         app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         assert!(
-            app.skills.body.as_deref().unwrap_or_default().contains("Revision 0"),
+            app.skills
+                .body
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Revision 0"),
             "the preserved version must be readable: {:?}",
             app.skills.body
         );
 
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.skills.version.is_none());
-        assert!(app.skills.body.as_deref().unwrap_or_default().contains("Revision 1"));
+        assert!(
+            app.skills
+                .body
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Revision 1")
+        );
     }
 
     #[test]
@@ -501,10 +523,7 @@ mod tests {
             "the pane must clamp a scroll past the end: {text}"
         );
 
-        app.handle_key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::NONE,
-        ));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.doctor.scroll, 0, "a new check starts at the top");
     }
 

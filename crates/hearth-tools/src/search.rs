@@ -80,7 +80,10 @@ impl WebSearchTool {
 
     /// The configured provider names, in call order.
     pub fn provider_names(&self) -> Vec<&'static str> {
-        self.providers.iter().map(|provider| provider.name()).collect()
+        self.providers
+            .iter()
+            .map(|provider| provider.name())
+            .collect()
     }
 }
 

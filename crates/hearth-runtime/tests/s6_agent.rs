@@ -1502,7 +1502,6 @@ fn a_submission_with_no_user_content_is_refused() {
     );
 }
 
-
 #[test]
 fn a_replayed_shell_call_does_not_run_again() {
     use hearth_tools::ShellTool;

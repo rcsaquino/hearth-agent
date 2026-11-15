@@ -756,10 +756,8 @@ impl Session {
                  WHERE prompt_hash IN (SELECT hash FROM prompt_blobs WHERE created_at < ?)",
                 (before,),
             )?;
-            let removed = writer.execute(
-                "DELETE FROM prompt_blobs WHERE created_at < ?",
-                (before,),
-            )?;
+            let removed =
+                writer.execute("DELETE FROM prompt_blobs WHERE created_at < ?", (before,))?;
             Ok(removed)
         })
     }

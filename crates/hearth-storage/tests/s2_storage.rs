@@ -369,5 +369,8 @@ fn a_panicking_read_returns_its_connection() {
     let outcome = result
         .recv_timeout(Duration::from_secs(5))
         .expect("a read must complete after four panicking reads");
-    assert!(matches!(outcome, Ok(true)), "the read must succeed: {outcome:?}");
+    assert!(
+        matches!(outcome, Ok(true)),
+        "the read must succeed: {outcome:?}"
+    );
 }

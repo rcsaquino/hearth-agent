@@ -161,7 +161,10 @@ fn credential_value(word: &str) -> Option<&str> {
 /// The range of a bare credential token, without its surrounding punctuation.
 fn token_span(word: &str) -> Option<std::ops::Range<usize>> {
     let trimmed = word.trim_matches(|character: char| !is_token_char(character));
-    let start = word.len() - word.trim_start_matches(|character: char| !is_token_char(character)).len();
+    let start = word.len()
+        - word
+            .trim_start_matches(|character: char| !is_token_char(character))
+            .len();
     let end = start + trimmed.len();
     (trimmed.len() >= MIN_SECRET_LENGTH && !trimmed.starts_with('$')).then_some(start..end)
 }
@@ -179,15 +182,11 @@ fn key_value_secret(word: &str) -> Option<(&str, std::ops::Range<usize>)> {
     if !known {
         return None;
     }
-    let leading = right.len()
-        - right
-            .trim_start_matches(['"', '\'', ',', ';'])
-            .len();
+    let leading = right.len() - right.trim_start_matches(['"', '\'', ',', ';']).len();
     let value = &right[leading..];
     let length = value
         .find(|character: char| {
-            character.is_whitespace()
-                || matches!(character, '"' | '\'' | ',' | ';' | '}' | ']')
+            character.is_whitespace() || matches!(character, '"' | '\'' | ',' | ';' | '}' | ']')
         })
         .unwrap_or(value.len());
     let value = &value[..length];

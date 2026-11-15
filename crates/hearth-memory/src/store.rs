@@ -234,7 +234,10 @@ fn check_rules_budget(
         .iter()
         .filter(|rule| Some(rule.id.as_str()) != replaces)
         .collect();
-    let used: u64 = counted.iter().map(|rule| crate::digest::rule_cost(rule)).sum();
+    let used: u64 = counted
+        .iter()
+        .map(|rule| crate::digest::rule_cost(rule))
+        .sum();
     let adding = crate::digest::rule_cost_text(content);
     if used + adding <= budget {
         return Ok(());

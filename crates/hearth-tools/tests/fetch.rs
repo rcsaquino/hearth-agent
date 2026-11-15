@@ -569,8 +569,7 @@ fn an_enormous_error_body_is_not_buffered() {
     let stopping = Arc::clone(&done);
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept request");
-        let mut reader =
-            std::io::BufReader::new(stream.try_clone().expect("clone stream"));
+        let mut reader = std::io::BufReader::new(stream.try_clone().expect("clone stream"));
         loop {
             let mut line = String::new();
             reader.read_line(&mut line).expect("header line");
@@ -579,11 +578,11 @@ fn an_enormous_error_body_is_not_buffered() {
             }
         }
         stream
-            .write_all(
-                b"HTTP/1.1 500 X\r\nContent-Length: 536870912\r\nConnection: close\r\n\r\n",
-            )
+            .write_all(b"HTTP/1.1 500 X\r\nContent-Length: 536870912\r\nConnection: close\r\n\r\n")
             .expect("headers");
-        stream.write_all(&vec![b'x'; 16 * 1024]).expect("body start");
+        stream
+            .write_all(&vec![b'x'; 16 * 1024])
+            .expect("body start");
         stream.flush().expect("flush");
         while !stopping.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(10));
@@ -591,8 +590,7 @@ fn an_enormous_error_body_is_not_buffered() {
     });
 
     let provider = Arc::new(
-        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(30))
-            .expect("direct"),
+        HttpFetch::new("http", true, 2 * 1024 * 1024, 3, Duration::from_secs(30)).expect("direct"),
     );
     let tool = WebFetchTool::new(vec![provider], true);
     let (done_tx, done_rx) = mpsc::channel();

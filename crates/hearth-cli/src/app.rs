@@ -873,7 +873,8 @@ impl App {
                 KeyCode::Esc => self.skills.leave_history(),
                 KeyCode::PageUp => self.skills.scroll = self.skills.scroll.saturating_sub(15),
                 KeyCode::PageDown => {
-                    self.skills.scroll = (self.skills.scroll + 15).min(self.skills.max_scroll.get());
+                    self.skills.scroll =
+                        (self.skills.scroll + 15).min(self.skills.max_scroll.get());
                 }
                 KeyCode::Char('v') => self.skills.leave_history(),
                 _ => {}
@@ -1146,8 +1147,7 @@ impl App {
                 // A reader who is on the last row is following the feed, even when
                 // it is paused; an event must not move the window away from it.
                 let following = !self.activity_paused
-                    || self.activity_selected + 1
-                        >= crate::ui::activity::row_count(&self.events);
+                    || self.activity_selected + 1 >= crate::ui::activity::row_count(&self.events);
                 self.events.push_back(value);
                 while self.events.len() > MAX_EVENTS {
                     self.events.pop_front();
@@ -1348,7 +1348,9 @@ impl SkillsView {
 
     pub(crate) fn load_selected(&mut self) {
         let skill = self.skills.get(self.selected);
-        let version = self.version.and_then(|index| self.versions.get(index).copied());
+        let version = self
+            .version
+            .and_then(|index| self.versions.get(index).copied());
         self.body = match (skill, version) {
             (Some(skill), Some(version)) => self
                 .library
@@ -1417,8 +1419,7 @@ fn validate_settings_text(text: &str) -> Result<(), String> {
     let mut value: Value = serde_json::from_str(text)
         .map_err(|error| format!("settings.json is not valid: {error}"))?;
     hearth_config::expand_document(&mut value);
-    let settings =
-        hearth_config::settings_from_value(value).map_err(|error| error.to_string())?;
+    let settings = hearth_config::settings_from_value(value).map_err(|error| error.to_string())?;
     settings.validate().map_err(|error| error.to_string())
 }
 

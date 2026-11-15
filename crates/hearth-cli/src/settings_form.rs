@@ -1696,7 +1696,8 @@ fn validate(document: &Value) -> Result<(), String> {
     // that form for secrets, so the form has to expand it too.
     let mut expanded = document.clone();
     hearth_config::expand_document(&mut expanded);
-    let settings = hearth_config::settings_from_value(expanded).map_err(|error| error.to_string())?;
+    let settings =
+        hearth_config::settings_from_value(expanded).map_err(|error| error.to_string())?;
     settings.validate().map_err(|error| error.to_string())
 }
 

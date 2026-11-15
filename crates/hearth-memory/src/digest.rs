@@ -212,16 +212,8 @@ pub fn coverage_cost(coverage: &Coverage) -> u64 {
 
 /// Drop one coverage subject, longest name first. Returns false when empty.
 pub fn trim_coverage(coverage: &mut Coverage) -> bool {
-    let current = coverage
-        .current
-        .keys()
-        .max_by_key(|key| key.len())
-        .cloned();
-    let earlier = coverage
-        .earlier
-        .keys()
-        .max_by_key(|key| key.len())
-        .cloned();
+    let current = coverage.current.keys().max_by_key(|key| key.len()).cloned();
+    let earlier = coverage.earlier.keys().max_by_key(|key| key.len()).cloned();
     let drop_current = match (&current, &earlier) {
         (Some(current), Some(earlier)) => current.len() >= earlier.len(),
         (Some(_), None) => true,

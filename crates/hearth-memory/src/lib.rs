@@ -719,9 +719,11 @@ mod tests {
         let (_directory, service) = service();
         let mut written = 0;
         for index in 0..200 {
-            match service.write(NewMemory::new(format!("remember rule {index} daily"))
-                .kind(Kind::Rule)
-                .pinned(true)) {
+            match service.write(
+                NewMemory::new(format!("remember rule {index} daily"))
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            ) {
                 Ok(_) => written += 1,
                 Err(error) if error.code == Code::RulesFull => break,
                 Err(error) => panic!("{error}"),
@@ -730,10 +732,7 @@ mod tests {
         assert!(written > 1, "the store must admit more than one rule");
 
         let block = service.rules().expect("rules").text;
-        let shown = block
-            .lines()
-            .filter(|line| line.starts_with("m_"))
-            .count();
+        let shown = block.lines().filter(|line| line.starts_with("m_")).count();
         assert_eq!(
             shown, written,
             "the store admitted {written} rules but the block shows {shown}\n{block}"
