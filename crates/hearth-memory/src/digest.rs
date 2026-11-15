@@ -251,10 +251,7 @@ fn omitted_notice(omitted: usize) -> String {
 
 /// The token cost of a rendered block, from its character count.
 fn cost_of_chars(chars: u64) -> u64 {
-    if chars == 0 {
-        return 0;
-    }
-    ((chars as f64 / 4.0) * 1.10).ceil() as u64
+    hearth_model::estimate_tokens_chars(chars).max(0) as u64
 }
 
 /// What the coverage lines cost when no statement is shown.
