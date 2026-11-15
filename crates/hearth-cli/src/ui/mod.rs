@@ -428,6 +428,30 @@ mod tests {
     }
 
     #[test]
+    fn g_is_not_a_second_route_to_the_top_of_the_activity_feed() {
+        let (_home, mut app) = initialized_app();
+        app.tab = crate::app::Tab::Activity;
+        app.activity_selected = 1;
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(
+            app.activity_selected, 1,
+            "the Activity tab has one key for the top, home"
+        );
+    }
+
+    #[test]
+    fn the_activity_footer_names_one_key_for_the_top() {
+        let (_home, mut app) = initialized_app();
+        app.tab = crate::app::Tab::Activity;
+        let text = buffer_text(&app, 120, 40);
+        assert!(text.contains("home/end"), "{text}");
+        assert!(
+            !text.contains("g  top"),
+            "the footer advertises one route to the top: {text}"
+        );
+    }
+
+    #[test]
     fn a_paused_feed_keeps_its_last_row_selected() {
         let (_home, mut app) = initialized_app();
         app.tab = crate::app::Tab::Activity;
