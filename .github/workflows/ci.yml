@@ -20,6 +20,7 @@ jobs:
       - name: Secret scan
         env:
           PUBLIC_DENYLIST: ${{ secrets.HEARTH_PUBLIC_DENYLIST }}
+          HEARTH_FORK_PR: ${{ github.event.pull_request.head.repo.fork && '1' || '0' }}
         run: ./scripts/ci-secret-scan.sh
 
   msrv:

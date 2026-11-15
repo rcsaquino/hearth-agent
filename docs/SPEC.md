@@ -1956,7 +1956,11 @@ install contains nothing personal.
 - **Clean history.** The public repository starts from a history that has passed the
   scan; a private history is never published.
 - **CI deny-list.** A required check fails on any private string or file. The list
-  itself is kept outside the public tree, so it does not become the leak.
+  itself is kept outside the public tree, so it does not become the leak. GitHub
+  withholds repository secrets from a fork pull request, so that run fails instead
+  of reporting clean when the list is absent, and a fork run checks credential
+  shapes only with the omission printed in the job log. The maintainer scan before
+  merge covers the private strings.
 - **Neutral defaults.** The default agent name is `Hearth`, and the default `SOUL.md`
   is a short generic template with Identity, Voice, and Rules.
 - **License and docs.** MIT license, README, QUICKSTART with the BotFather steps and

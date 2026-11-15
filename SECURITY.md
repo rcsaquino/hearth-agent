@@ -39,6 +39,10 @@ are structured and exclude message bodies by default.
 - The token and API keys are not committed. The repository's local scan checks
   the tree and history for common credential patterns and for a private
   deny-list kept outside the tree.
+- CI runs the same scan. A fork pull request cannot read the deny-list secret, so
+  that job fails when the secret is missing and, for a fork run, says in the log
+  that only credential shapes were checked. The maintainer scan before merge
+  covers the private strings.
 
 ## The yolo trust model
 

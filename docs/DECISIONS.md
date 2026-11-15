@@ -1901,3 +1901,17 @@ force-pushing, which is the approval named above and not a step in this change.
   caller.
 - An expanded runtime note was rejected. The note stays one clock line, and a turn
   is not answered when it carries no request.
+
+## 2026-11-15: A fork pull request runs the scan it can run
+
+- `scripts/public-scan.sh` still refuses to run without a deny list. The CI wrapper
+  now refuses too, instead of writing an empty one, so a missing secret is a failed
+  job rather than a clean report.
+- GitHub does not expose repository secrets to `pull_request` runs from forks, so
+  the workflow passes `HEARTH_FORK_PR` from `github.event.pull_request.head.repo.fork`.
+  That one case writes an empty list, prints why to stderr, and runs the
+  credential-pattern half. A push or a same-repository pull request without the
+  secret fails.
+- The alternative, treating an empty list as clean everywhere, is what made the
+  check decorative. The alternative of failing every fork PR would block outside
+  contributors on a secret they cannot have.
