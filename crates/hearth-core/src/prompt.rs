@@ -366,11 +366,28 @@ pub fn message_for_entry(entry: &Entry) -> Option<ChatMessage> {
         "system" | "notice" => Role::System,
         _ => return None,
     };
-    let blocks = parse_blocks(&entry.content)
+    let blocks: Vec<ContentBlock> = parse_blocks(&entry.content)
         .into_iter()
         .filter(|block| !matches!(block, ContentBlock::Thinking(_)))
         .collect();
+    // A record written before this rule can hold such an entry, and rendering it
+    // sends the provider a message with no content.
+    if !carries_request(&blocks) {
+        return None;
+    }
     Some(ChatMessage { role, blocks })
+}
+
+/// Whether decoded blocks ask for something.
+///
+/// Whitespace and thinking alone ask nothing. A turn built from them carries
+/// only the runtime note, and the model answers the clock instead of a request.
+pub fn carries_request(blocks: &[ContentBlock]) -> bool {
+    blocks.iter().any(|block| match block {
+        ContentBlock::Text(text) => !text.trim().is_empty(),
+        ContentBlock::Thinking(_) => false,
+        _ => true,
+    })
 }
 
 /// Parse entry content into provider-neutral blocks.

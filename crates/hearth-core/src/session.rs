@@ -937,6 +937,17 @@ impl Session {
         })?)
     }
 
+    /// Refuse content that asks for nothing.
+    ///
+    /// A turn built from it carries only the runtime note, and the note is
+    /// answered as though it were the request.
+    fn require_request(content: &Value) -> Result<(), CoreError> {
+        if crate::prompt::carries_request(&crate::prompt::parse_blocks(content)) {
+            return Ok(());
+        }
+        Err(CoreError::Invalid("the message was empty".to_owned()))
+    }
+
     /// Hand in a message with a receipt.
     pub fn submit(
         &self,
@@ -951,6 +962,7 @@ impl Session {
                 created: false,
             });
         }
+        Self::require_request(&content)?;
 
         let id = self.ids.new_id();
         let save = Save::new(conversation_id)
@@ -994,6 +1006,8 @@ impl Session {
         update: TelegramUpdate,
         next_offset: i64,
     ) -> Result<TelegramAdmission, CoreError> {
+        Self::require_request(&content)?;
+
         let id = self.ids.new_id();
         let entry = NewEntry {
             kind: "user".to_owned(),

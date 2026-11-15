@@ -1882,3 +1882,22 @@ force-pushing, which is the approval named above and not a step in this change.
   close a pinned row it was not asked to replace.
 - The rules read still requires a live row, and retirement still clears the pin.
   Migration 0009 remains the repair for stores written before that rule.
+
+## 2026-11-15: A submission with no message is refused
+
+- The rule "a turn needs a request" lives at the submission seam. `Session::submit`
+  refuses content that carries no request, using `carries_request` next to `parse_blocks`, so the definition of what counts as content is not repeated in a
+  caller. The predicate is false for whitespace text and for thinking alone, which
+  is exactly what `message_for_entry` would drop from the wire.
+- The refusal comes after the `request_id` dedupe lookup, so a repeated request id
+  still returns the original submission and never starts a second run (SPEC 4.3).
+- The refusal is `CoreError::Invalid`, which is the existing vocabulary for input
+  the record will not accept. No caller branches on the variant: the helper pool
+  logs it and fails the task.
+- The Telegram poller still refuses an update with nothing to answer before it
+  reaches `submit_telegram`, because it owns the offset decision. That check makes
+  the record refusal unreachable from Telegram today, so no replay loop exists; the
+  refusal at the record seam is what keeps the invariant true for any later
+  caller.
+- An expanded runtime note was rejected. The note stays one clock line, and a turn
+  is not answered when it carries no request.

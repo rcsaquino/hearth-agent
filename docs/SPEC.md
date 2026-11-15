@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.26, plain-language edition
+**Status:** Draft 0.27, plain-language edition
 **Date:** 2026-11-15
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.27 refuses a submission that carries no request. A message with no
+non-blank text and no attachment is rejected before it is stored, so it never
+becomes a turn and the clock note is never answered as though it were the
+request. A stored entry with no request is also left out of the prompt, so an old
+home stops carrying an empty message. The refusal names the reason to the caller
+instead of leaving an empty turn in the record.
 
 Draft 0.26 keeps an unpinned write from retiring a pinned rule. A statement that
 repeats a live rule without naming it as `supersedes` returns the rule unchanged,
@@ -557,7 +564,8 @@ timezone. The exact columns are in `SCHEMA.md`; this section states what must ho
   mismatch aborts the save. Kinds: `agent`, `provider`, `live`, `usage`,
   `memory_state`, `transport`.
 - **Submission.** A message with a receipt. A duplicate `request_id` returns the
-  original and never starts a second run.
+  original and never starts a second run. A submission whose content carries no
+  request is refused, so every new turn has something to answer.
 - **Task.** Resumable work. It carries status, phase, attempt, immutable input,
   checkpoint, result, lease, and wake time.
 - **Effect.** One outside action with a stable key, payload, status, result, and
