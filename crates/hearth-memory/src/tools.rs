@@ -710,3 +710,43 @@ mod tests {
         assert_eq!(error.code, "invalid_input");
     }
 }
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::*;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
+
+    #[test]
+    fn a_recall_by_id_prints_a_zoned_instant() {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        let service = MemoryService::new(harness.session().clone());
+        let tools = hearth_tools::ToolRegistry::new(service.tools());
+        let saved = tools
+            .call(
+                SAVE,
+                &json!({"content": "the OR board meets on Tuesdays", "subject": "or board"}),
+            )
+            .expect("call")
+            .expect("result");
+        let id = saved.content.split_whitespace().nth(1).expect("id");
+
+        let recalled = tools
+            .call(RECALL, &json!({"id": id}))
+            .expect("call")
+            .expect("result");
+        let since = recalled
+            .content
+            .split("since ")
+            .nth(1)
+            .expect("a since stamp")
+            .split_whitespace()
+            .next()
+            .expect("the stamp");
+        assert!(
+            since.len() == 25 && since.ends_with("+00:00"),
+            "the stamp must be ISO 8601 with an offset: {since}"
+        );
+    }
+}
