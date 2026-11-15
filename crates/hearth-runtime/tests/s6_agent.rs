@@ -1567,3 +1567,94 @@ fn an_answer_is_returned_when_task_bookkeeping_fails() {
     assert_eq!(outcome.answer_text.as_deref(), Some("the answer"));
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
 }
+
+struct SabotageProvider {
+    session: hearth_core::Session,
+    scripts: Mutex<VecDeque<Vec<Result<StreamEvent, ProviderError>>>>,
+    calls: Mutex<usize>,
+}
+
+impl Provider for SabotageProvider {
+    fn stream(&self, _request: ChatRequest) -> Result<ProviderStream, ProviderError> {
+        let mut calls = self.calls.lock().expect("calls");
+        *calls += 1;
+        if *calls == 2 {
+            self.session
+                .storage()
+                .write(|writer| {
+                    writer.execute(
+                        "UPDATE tasks SET status = 'failed' WHERE kind = 'generation' AND status = 'running'",
+                        [],
+                    )?;
+                    Ok::<_, hearth_storage::StorageError>(())
+                })
+                .expect("sabotage");
+        }
+        let script = self
+            .scripts
+            .lock()
+            .expect("scripts")
+            .pop_front()
+            .expect("a script");
+        Ok(Box::new(script.into_iter()))
+    }
+}
+
+struct Noop;
+
+impl Tool for Noop {
+    fn spec(&self) -> hearth_model::ToolSpec {
+        hearth_model::ToolSpec {
+            name: "noop".to_owned(),
+            description: "Do nothing.".to_owned(),
+            parameters: json!({"type": "object", "properties": {}}),
+        }
+    }
+
+    fn call(
+        &self,
+        _arguments: &serde_json::Value,
+    ) -> Result<hearth_tools::ToolOutput, hearth_tools::ToolError> {
+        Ok(hearth_tools::ToolOutput {
+            content: "ok".to_owned(),
+            is_error: false,
+        })
+    }
+}
+
+#[test]
+fn an_answer_survives_a_task_that_vanishes_before_the_finish() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(SabotageProvider {
+        session: harness.session().clone(),
+        scripts: Mutex::new(VecDeque::from([
+            vec![
+                Ok(StreamEvent::ToolCall(ToolCall {
+                    id: "call-1".to_owned(),
+                    name: "noop".to_owned(),
+                    arguments: json!({}),
+                })),
+                Ok(StreamEvent::Done {
+                    finish_reason: Some("tool_calls".to_owned()),
+                }),
+            ],
+            vec![
+                Ok(StreamEvent::TextDelta("the answer".to_owned())),
+                Ok(StreamEvent::Done {
+                    finish_reason: Some("stop".to_owned()),
+                }),
+            ],
+        ])),
+        calls: Mutex::new(0),
+    });
+    let tools = ToolRegistry::new(vec![Arc::new(Noop)]);
+    let agent = agent_with(home.path(), &harness, provider, tools);
+    let outcome = agent
+        .run_submission(&submission.id)
+        .expect("the answer is durable even when the task row is gone");
+
+    assert_eq!(outcome.answer_text.as_deref(), Some("the answer"));
+    assert_eq!(outcome.submission.status, SubmissionStatus::Done);
+}
