@@ -687,7 +687,7 @@ fn daemon_fails_a_symlink_escape_effect() {
 }
 
 #[test]
-fn daemon_stops_retrying_a_retryable_effect_after_three_attempts() {
+fn daemon_does_not_retry_a_deterministic_effect_failure() {
     use hearth_core::{EffectStatus, Harness};
 
     let home = tempfile::TempDir::new().expect("temp home");
@@ -719,7 +719,10 @@ fn daemon_stops_retrying_a_retryable_effect_after_three_attempts() {
         .expect("read effect")
         .expect("effect exists");
     assert_eq!(effect.status, EffectStatus::Failed);
-    assert_eq!(effect.attempts, 3);
+    assert_eq!(
+        effect.attempts, 1,
+        "a workspace that is not a directory cannot improve by retrying"
+    );
     let result = effect.result.expect("effect result");
     assert_eq!(result["retryable"], false);
 }
