@@ -1472,7 +1472,7 @@ code.
     "model": "deepseek-v4.1-flash",
     "context_window": 128000,
     "max_output_tokens": 32000,
-    "session_header": "x-opencode-session",
+    "session_header": "x-opencode-session"
   },
   "media": {
     "image": {
