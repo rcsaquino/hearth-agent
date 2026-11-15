@@ -1,5 +1,6 @@
 //! Hearth tools: confined file and shell capabilities.
 
+mod body;
 mod browser;
 mod documents;
 mod fetch;

@@ -220,9 +220,7 @@ fn parse_rpc(text: &str) -> Option<Value> {
 
 fn response_text(response: Response, label: &str) -> Result<String, SearchError> {
     let status = response.status();
-    let text = response
-        .text()
-        .unwrap_or_else(|error| format!("<body unreadable: {error}>"));
+    let text = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
     if !status.is_success() {
         let retryable = status.as_u16() == 429 || status.is_server_error();
         return Err(SearchError {

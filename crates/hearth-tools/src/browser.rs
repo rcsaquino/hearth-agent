@@ -61,9 +61,7 @@ impl BrowserTool {
         let response = request.send().map_err(browser_error)?;
         if !response.status().is_success() {
             let status = response.status();
-            let text: String = response
-                .text()
-                .unwrap_or_default()
+            let text: String = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES)
                 .chars()
                 .take(300)
                 .collect();
@@ -293,9 +291,7 @@ fn browser_error(error: reqwest::Error) -> ToolError {
 
 fn status_error(response: Response) -> ToolError {
     let status = response.status();
-    let text: String = response
-        .text()
-        .unwrap_or_default()
+    let text: String = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES)
         .chars()
         .take(300)
         .collect();

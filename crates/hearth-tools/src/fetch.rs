@@ -216,9 +216,7 @@ impl FetchProvider for JinaFetch {
         let status = response.status();
         if !status.is_success() {
             let retryable = status.as_u16() == 429 || status.is_server_error();
-            let snippet: String = response
-                .text()
-                .unwrap_or_default()
+            let snippet: String = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES)
                 .chars()
                 .take(200)
                 .collect();
@@ -325,9 +323,7 @@ impl FetchProvider for HttpFetch {
             }
             if !status.is_success() {
                 let retryable = status.as_u16() == 429 || status.is_server_error();
-                let snippet: String = response
-                    .text()
-                    .unwrap_or_default()
+                let snippet: String = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES)
                     .chars()
                     .take(200)
                     .collect();
@@ -693,9 +689,7 @@ fn json_response(response: reqwest::blocking::Response, label: &str) -> Result<V
     let status = response.status();
     if !status.is_success() {
         let retryable = status.as_u16() == 429 || status.is_server_error();
-        let snippet: String = response
-            .text()
-            .unwrap_or_default()
+        let snippet: String = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES)
             .chars()
             .take(200)
             .collect();
