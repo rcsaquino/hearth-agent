@@ -629,6 +629,39 @@ mod tests {
     }
 
     #[test]
+    fn memory_tab_marks_a_replaced_rule_as_retired() {
+        use hearth_core::Harness;
+        use hearth_memory::{Kind, MemoryService, NewMemory};
+
+        let (home, mut app) = initialized_app();
+        {
+            let harness = Harness::open(home.path()).expect("harness");
+            let memory = MemoryService::new(harness.session().clone());
+            memory
+                .write(
+                    NewMemory::new("Never deploy on a Friday.")
+                        .kind(Kind::Rule)
+                        .pinned(true),
+                )
+                .expect("rule");
+            memory
+                .write(NewMemory::new("Never deploy on a Friday.").kind(Kind::Commitment))
+                .expect("copy");
+        }
+        app.tab = Tab::Memory;
+        app.memory.reload(home.path());
+        let text = buffer_text(&app, 110, 34);
+        assert!(
+            !text.contains('★'),
+            "a replaced rule must not look pinned: {text}"
+        );
+        assert!(
+            text.contains('○'),
+            "a replaced rule must look retired: {text}"
+        );
+    }
+
+    #[test]
     fn settings_tab_shows_the_form_without_a_shortcut() {
         let (_home, mut app) = initialized_app();
         app.handle_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));

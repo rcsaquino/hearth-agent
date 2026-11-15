@@ -905,6 +905,52 @@ mod tests {
     }
 
     #[test]
+    fn a_pin_left_on_a_retired_row_is_not_a_rule() {
+        let (_directory, session) = home();
+        let rule = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("never force push")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("rule")
+        .memory()
+        .clone();
+        // A store written before retirement cleared the pin.
+        let instant = session.now_micros();
+        let id = rule.id.clone();
+        session
+            .storage()
+            .write(move |writer| {
+                writer.execute(
+                    "UPDATE memories SET valid_to = ?, superseded_by = 'm_old' WHERE id = ?",
+                    rusqlite::params![instant, id],
+                )
+            })
+            .expect("retire");
+
+        assert!(
+            rules(&session).expect("rules").is_empty(),
+            "a closed window cannot be injected as a rule"
+        );
+        let budget = session.storage().write(|writer| {
+            check_rules_budget(
+                writer,
+                "a new rule",
+                crate::digest::rule_cost_text("a new rule"),
+            )
+        });
+        assert!(
+            budget.is_ok(),
+            "a retired row must not hold the rules budget"
+        );
+    }
+
+    #[test]
     fn a_credential_is_refused_before_it_is_stored() {
         let (_directory, session) = home();
         // A token-shaped string, assembled so the repository holds no literal.

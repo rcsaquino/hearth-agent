@@ -119,6 +119,32 @@ fn list_memories_reads_saved_items_without_a_writer() {
 }
 
 #[test]
+fn a_replaced_rule_is_not_listed_as_pinned() {
+    let home = TempDir::new().expect("temp home");
+    init(home.path(), options()).expect("init");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let memory = MemoryService::new(harness.session().clone());
+    memory
+        .write(
+            NewMemory::new("Never deploy on a Friday.")
+                .kind(Kind::Rule)
+                .pinned(true),
+        )
+        .expect("rule");
+    memory
+        .write(NewMemory::new("Never deploy on a Friday.").kind(Kind::Commitment))
+        .expect("copy");
+
+    let records = list_memories(home.path(), 100).expect("list memories");
+    assert_eq!(records.len(), 2);
+    let retired = records
+        .iter()
+        .find(|record| record.kind == "rule")
+        .expect("the rule row");
+    assert!(!retired.pinned, "a replaced rule must not show as pinned");
+}
+
+#[test]
 fn latest_prompt_skips_plain_text_maintenance_prompts() {
     let home = TempDir::new().expect("temp home");
     init(home.path(), options()).expect("init");

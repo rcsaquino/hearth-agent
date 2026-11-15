@@ -794,6 +794,71 @@ mod tests {
     }
 
     #[test]
+    fn a_rule_replaced_by_an_unpinned_copy_is_no_longer_injected() {
+        let (_directory, service) = service();
+        let rule = service
+            .write(
+                NewMemory::new("Never deploy on a Friday.")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect("rule")
+            .memory()
+            .clone();
+        assert_eq!(service.rules().expect("rules").count, 1);
+
+        service
+            .write(NewMemory::new("Never deploy on a Friday.").kind(Kind::Commitment))
+            .expect("copy");
+
+        let rules = service.rules().expect("rules");
+        assert_eq!(rules.count, 0, "a retired rule must not be injected");
+        assert!(!rules.text.contains("Friday"), "{}", rules.text);
+        let retired = service.get(&rule.id).expect("get").expect("the old row");
+        assert!(!retired.is_current(), "the copy replaces the rule");
+        assert!(!retired.pinned, "a retired row cannot stay pinned");
+    }
+
+    #[test]
+    fn a_retired_rule_stops_holding_the_rules_budget() {
+        let (_directory, service) = service();
+        let retired_text = "Always write the changelog entry before the release tag and cite every \
+                             merged change with its risk in plain words so the record reads clearly to \
+                             anyone who was not in the room.";
+        let live_text = "Never publish a release tag without the changelog entry that cites each \
+                         merged change and its risk in plain words so the record reads clearly to \
+                         anyone who was not in the room.";
+        assert_eq!(
+            retired_text.chars().count(),
+            live_text.chars().count(),
+            "the two rules must cost the same so the budget is exact"
+        );
+        let rule = service
+            .write(NewMemory::new(retired_text).kind(Kind::Rule).pinned(true))
+            .expect("rule")
+            .memory()
+            .clone();
+        service
+            .write(NewMemory::new(retired_text).kind(Kind::Commitment))
+            .expect("retire");
+        let service = service.with_config(MemoryConfig {
+            rules_max_tokens: crate::digest::rule_cost(&rule),
+            ..MemoryConfig::default()
+        });
+        service
+            .write(NewMemory::new(live_text).kind(Kind::Rule).pinned(true))
+            .expect("the retired rule must not hold the budget");
+        let error = service
+            .write(
+                NewMemory::new("Keep release notes short.")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect_err("the live rule holds the budget");
+        assert_eq!(error.code, Code::RulesFull);
+    }
+
+    #[test]
     fn a_rule_longer_than_one_line_is_refused() {
         let (_directory, service) = service();
         let error = service
