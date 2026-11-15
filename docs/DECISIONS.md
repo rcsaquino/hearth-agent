@@ -1931,3 +1931,22 @@ force-pushing, which is the approval named above and not a step in this change.
 - A provider key that still holds a `${NAME}` reference counts as unset.
   `hearth_config::is_resolved` is the one test, used by both the search and fetch
   chains, so a placeholder never becomes a credential.
+
+## 2026-11-15: The memory block honours its own budget
+
+- `recall_within` computes the coverage lines before the statement fill and
+  reserves their measured cost. The fill's per-line estimate is an estimate, so a
+  final loop drops the lowest-ranked statement, then the longest coverage subject,
+  until the rendered digest fits the configured budget. The alternative, a fixed
+  reserve, let a long subject spend several times the budget.
+- The rules check and the rules render measure the same line through `rule_line`,
+  and a row that does not exist yet is costed with `store::ID_SAMPLE`, a
+  placeholder with the shape of a real id. The old placeholder was twenty
+  characters shorter, so every accepted rule undercounted and the block dropped
+  rules the store had accepted.
+- A pinned rule that names the row it replaces is costed without that row, because
+  the replacement closes it in the same transaction. Refusing the replacement at
+  capacity made a full block write-only by deletion.
+- `memory_recall` with `as_of` and no topic now reads the store at that instant,
+  and a recall by id renders `since` with `Zone::iso`. Both are the one timestamp
+  rule in SPEC 6: every instant shown to the model is zoned ISO 8601.
