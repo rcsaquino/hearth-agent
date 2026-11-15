@@ -1745,7 +1745,7 @@ Reference host: 4 CPU cores, 8 GB RAM, SSD.
 | Idle memory use | 120 MB or less | The daemon is quiet when nothing is happening. |
 | Startup and recovery, 100k entries | 500 ms or less | Restarting does not feel like an outage. |
 | Save time, 95th percentile | 15 ms or less | Most saves finish before a person notices. |
-| Memory retrieval, 200k items | 80 ms or less | Recall is fast even after years. |
+| Memory retrieval, 4,200 items | 100 ms or less | The measured gate. Recall is fast on a personal store, and the vector scan is linear from about 10 ms at 4,000 rows. |
 | Time to first token, excluding provider | 300 ms or less | Hearth's own overhead is small. |
 | Fixed prompt overhead | 4.5k tokens or less | The token overhead per turn stays bounded. |
 | Prompt cache hit, consecutive turns | 80% or more of prefix tokens | The provider reuses most of the stable prefix. |

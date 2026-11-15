@@ -25,6 +25,11 @@ const FIXTURE: &str = include_str!("../fixtures/memory_bench.json");
 /// The digest is allowed to cost this much at the 95th percentile.
 const TARGET_TOKENS: u64 = 300;
 /// Retrieval may take this long at the 95th percentile on a personal store.
+///
+/// The measured store is the 200-statement fixture plus 4,000 distractors. The
+/// vector scan is linear from about 10 ms at 4,000 rows, and a 200,000-row store
+/// has not been measured since the retrieval rewrite. SPEC 7.9 and 14 quote this
+/// number, so it is the one gate.
 const TARGET_MS: f64 = 100.0;
 /// The digest should carry the answer for this share of questions.
 ///
