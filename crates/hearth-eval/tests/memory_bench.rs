@@ -456,6 +456,15 @@ fn the_memory_benchmark_meets_its_targets() {
         "twenty questions are the spot-check set"
     );
     assert_eq!(report.secret_leaks, 0, "a credential reached the store");
+    assert_eq!(
+        report.supersession_count, 15,
+        "the fixture must keep its fifteen contradiction questions, or the gate measures nothing"
+    );
+    assert_eq!(
+        report.duplicates_refused + report.duplicate_failures,
+        5,
+        "the fixture must keep its five duplicate statements"
+    );
     assert_eq!(report.duplicate_failures, 0, "a duplicate became a new row");
     assert_eq!(
         report.supersession_correct, report.supersession_count,
@@ -520,6 +529,11 @@ fn a_noisy_store_keeps_the_answer_in_reach() {
     assert!(
         report.stored_rows >= 4_000,
         "the noisy store did not hold the noise"
+    );
+    assert_eq!(
+        report.duplicates_refused + report.duplicate_failures,
+        5,
+        "noise must not hide the duplicate population"
     );
     assert!(
         report.reachable >= TARGET_REACHABLE,
