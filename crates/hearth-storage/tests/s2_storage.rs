@@ -334,3 +334,40 @@ fn a_fifth_concurrent_read_waits_for_a_free_connection() {
         handle.join().expect("reader thread");
     }
 }
+
+#[test]
+fn a_panicking_read_returns_its_connection() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
+
+    let (_directory, path) = database();
+    let storage = Arc::new(Storage::open(&path).expect("open storage"));
+
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    for _ in 0..4 {
+        let attempted = catch_unwind(AssertUnwindSafe(|| {
+            storage
+                .read(|_| -> Result<(), hearth_storage::StorageError> {
+                    panic!("a read closure failed")
+                })
+                .expect("the closure panics first")
+        }));
+        assert!(attempted.is_err(), "the panic must propagate");
+    }
+    std::panic::set_hook(hook);
+
+    let (done, result) = mpsc::channel();
+    let reader = Arc::clone(&storage);
+    std::thread::spawn(move || {
+        let outcome = reader
+            .read(|reader| reader.query_row("SELECT 1", [], |row| row.get::<_, i64>(0)))
+            .map(|value| value == 1);
+        let _ = done.send(outcome);
+    });
+    let outcome = result
+        .recv_timeout(Duration::from_secs(5))
+        .expect("a read must complete after four panicking reads");
+    assert!(matches!(outcome, Ok(true)), "the read must succeed: {outcome:?}");
+}
