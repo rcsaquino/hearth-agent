@@ -320,6 +320,35 @@ fn escape(value: &str) -> String {
         .replace('%', "%%")
 }
 
+/// Expand the specifiers a user unit may name in a path.
+///
+/// The packaged unit names `%h/.hearth`; systemd expands `%h` to the user's home.
+/// Without that expansion the packaged unit looks like it belongs to another home
+/// and the product reports it as not installed.
+fn expand_specifiers(value: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut expanded = String::with_capacity(value.len());
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '%' {
+            expanded.push(character);
+            continue;
+        }
+        match characters.peek().copied() {
+            Some('%') => {
+                characters.next();
+                expanded.push('%');
+            }
+            Some('h') => {
+                characters.next();
+                expanded.push_str(&home);
+            }
+            _ => expanded.push('%'),
+        }
+    }
+    expanded
+}
+
 /// The home a unit names, or `None` when it names none or cannot be read.
 fn unit_home(unit: &Path) -> Option<PathBuf> {
     let text = fs::read_to_string(unit).ok()?;
@@ -337,13 +366,13 @@ fn unit_home(unit: &Path) -> Option<PathBuf> {
         if let Some(home) = value.strip_prefix("HEARTH_HOME=")
             && !home.is_empty()
         {
-            return Some(PathBuf::from(home));
+            return Some(PathBuf::from(expand_specifiers(home)));
         }
         for assignment in value.split_whitespace() {
             if let Some(home) = assignment.strip_prefix("HEARTH_HOME=")
                 && !home.is_empty()
             {
-                return Some(PathBuf::from(home));
+                return Some(PathBuf::from(expand_specifiers(home)));
             }
         }
     }
