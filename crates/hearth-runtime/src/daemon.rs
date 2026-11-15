@@ -39,6 +39,7 @@ use crate::tools::{MessageTarget, TaskTarget, ToolMediaRoots, build_tools};
 use hearth_memory::{BekkoEmbedding, MemoryService, download_model, model_files_present};
 
 const TELEGRAM_POLL_TIMEOUT_SECS: u32 = 2;
+const SERVICE_REPAIR_SECS: u64 = 60;
 
 #[derive(Debug, Error)]
 pub enum DaemonError {
@@ -96,6 +97,15 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         }
         Ok(_) => {}
         Err(error) => tracing::warn!(%error, "home layout could not be restored"),
+    }
+    match crate::service::repair(home) {
+        Ok(Some(report)) if report.repaired => tracing::info!(
+            start = %report.start,
+            unit = %report.unit.display(),
+            "service unit repaired"
+        ),
+        Ok(_) => {}
+        Err(error) => tracing::warn!(%error, "service unit could not be repaired"),
     }
 
     let fresh_record = !home.join("hearth.db").exists();
@@ -269,6 +279,26 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         }
     });
     tracing::info!("effect worker started");
+
+    let repair_shutdown = Arc::clone(&shutdown);
+    let repair_home = home.to_path_buf();
+    thread::spawn(move || {
+        while !repair_shutdown.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_secs(SERVICE_REPAIR_SECS));
+            if repair_shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            match crate::service::repair(&repair_home) {
+                Ok(Some(report)) if report.repaired => tracing::info!(
+                    start = %report.start,
+                    unit = %report.unit.display(),
+                    "service unit repaired"
+                ),
+                Ok(_) => tracing::debug!("service unit needs no repair"),
+                Err(error) => tracing::warn!(%error, "service unit could not be repaired"),
+            }
+        }
+    });
 
     let mut telegram_handles = Vec::new();
     if settings

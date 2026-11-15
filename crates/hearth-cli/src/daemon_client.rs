@@ -48,6 +48,8 @@ pub fn ensure_with(
     start: &str,
     executable: &Path,
 ) -> Result<(Ownership, Value), String> {
+    // Heal the unit before probing so an already-running daemon also gets it back.
+    let _ = hearth_runtime::service::repair(home);
     if let Ok(status) = probe(home) {
         return Ok((Ownership::Attached, status));
     }

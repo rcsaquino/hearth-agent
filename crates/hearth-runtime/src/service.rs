@@ -215,6 +215,60 @@ pub fn apply_start_mode_at(
     }
 }
 
+/// Restore the unit and its enable link from the configured start mode.
+///
+/// The pass is additive: it creates what is missing and never rewrites an
+/// existing unit or removes anything.
+pub fn repair(home: &Path) -> Result<Option<StartModeReport>, ServiceError> {
+    repair_at(home, &config_dir()?, true)
+}
+
+/// Restore the unit and its enable link in a chosen directory.
+///
+/// `run` is false in tests so systemctl and loginctl never touch the host.
+pub fn repair_at(
+    home: &Path,
+    config_dir: &Path,
+    run: bool,
+) -> Result<Option<StartModeReport>, ServiceError> {
+    let settings =
+        hearth_config::load(home).map_err(|error| ServiceError::Config(error.to_string()))?;
+    let start = settings.daemon.start;
+    let unit = config_dir.join("hearth.service");
+    let repaired = match start.as_str() {
+        "tui" => return Ok(None),
+        "login" | "startup" => {
+            let mut repaired = if unit.is_file() {
+                if unit_home(&unit).is_some_and(|named| named == home) {
+                    link_unit(config_dir, &unit)?
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                install_at(home, config_dir, false, run)?.created
+            };
+            if start == "startup" && run && !linger_present()? {
+                enable_linger()?;
+                repaired = true;
+            }
+            repaired
+        }
+        other => {
+            return Err(ServiceError::Config(format!(
+                "unknown daemon start mode: {other}"
+            )));
+        }
+    };
+    let linger = start == "startup";
+    Ok(Some(StartModeReport {
+        start,
+        unit,
+        installed: true,
+        linger,
+        repaired,
+    }))
+}
+
 fn wants_link(config_dir: &Path) -> PathBuf {
     config_dir
         .join("default.target.wants")
