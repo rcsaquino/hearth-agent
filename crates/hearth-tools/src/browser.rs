@@ -83,6 +83,13 @@ impl BrowserTool {
     }
 
     fn open(&self, url: &str) -> Result<ToolOutput, ToolError> {
+        // The same guard the fetch tool enforces: a page the model names may not
+        // reach the host itself or a reserved address. The shell tool remains the
+        // deliberate way to reach them.
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|error| ToolError::invalid("invalid_url", error.to_string()))?;
+        crate::fetch::validate_target(&parsed, false)
+            .map_err(|error| ToolError::invalid("blocked_address", error.message))?;
         let body = json!({
             "userId": self.user_id,
             "sessionKey": self.user_id,
