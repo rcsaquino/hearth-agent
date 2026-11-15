@@ -118,6 +118,7 @@ struct TelegramState {
     rich: Mutex<Vec<String>>,
     rich_sends: AtomicUsize,
     stop: AtomicBool,
+    rate_limit: AtomicBool,
 }
 
 fn write_response_status(stream: &mut TcpStream, status: u16, body: &Value) {
@@ -190,6 +191,19 @@ fn fake_telegram_script_with_delays(
                         }
                         "sendRichMessage" => {
                             let send_index = thread_state.rich_sends.fetch_add(1, Ordering::SeqCst);
+                            if thread_state.rate_limit.load(Ordering::SeqCst) {
+                                write_response_status(
+                                    &mut stream,
+                                    429,
+                                    &json!({
+                                        "ok": false,
+                                        "error_code": 429,
+                                        "description": "Too Many Requests: retry later",
+                                        "parameters": {"retry_after": 0}
+                                    }),
+                                );
+                                continue;
+                            }
                             if fail_first_rich && send_index == 0 {
                                 write_response_status(
                                     &mut stream,
@@ -1230,5 +1244,38 @@ fn a_parent_spawns_a_helper_through_the_daemon() {
         history.iter().any(|entry| entry.kind == "assistant"
             && entry.content.to_string().contains("Parent final answer")),
         "parent final entry missing: {history:?}"
+    );
+}
+
+#[test]
+fn a_rate_limited_delivery_is_left_for_recovery() {
+    use hearth_core::Harness;
+
+    let (provider_base, provider_thread) = fake_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram();
+    telegram_state.rate_limit.store(true, Ordering::SeqCst);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while telegram_state.rich_sends.load(Ordering::SeqCst) < 3 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    thread::sleep(Duration::from_millis(300));
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let waiting = harness
+        .session()
+        .effects_awaiting_delivery("telegram.send")
+        .expect("awaiting delivery");
+    assert!(
+        !waiting.is_empty(),
+        "a rate-limited answer must stay recoverable, not fail permanently"
     );
 }
