@@ -174,12 +174,12 @@ fn opens_reads_clicks_and_types_through_the_fake_service() {
     let browser = tool(&server.base, home.path());
 
     let open = browser
-        .call(&json!({"action": "open", "url": "https://example.com"}))
+        .call(&json!({"action": "open", "url": "https://93.184.216.34/"}))
         .expect("open");
     assert!(open.content.contains("tab-1"), "{}", open.content);
     assert!(open.content.contains("Example"), "{}", open.content);
     let posted = server.request("POST", "/tabs");
-    assert!(posted.body.contains("example.com"), "{}", posted.body);
+    assert!(posted.body.contains("93.184.216.34"), "{}", posted.body);
 
     let read = browser
         .call(&json!({"action": "read", "tab_id": "tab-1"}))
@@ -233,7 +233,7 @@ fn reports_an_unavailable_service() {
     let home = TempDir::new().expect("temp");
     let browser = tool(&base, home.path());
     let error = browser
-        .call(&json!({"action": "open", "url": "https://example.com"}))
+        .call(&json!({"action": "open", "url": "https://93.184.216.34/"}))
         .expect_err("unavailable");
     assert_eq!(error.code, "browser_unavailable", "{}", error.message);
 }
@@ -248,7 +248,7 @@ fn times_out_a_slow_service() {
     let browser =
         BrowserTool::new(&server.base, home.path(), Duration::from_millis(80)).expect("tool");
     let error = browser
-        .call(&json!({"action": "open", "url": "https://example.com"}))
+        .call(&json!({"action": "open", "url": "https://93.184.216.34/"}))
         .expect_err("timeout");
     assert_eq!(error.code, "browser_timeout", "{}", error.message);
 }
@@ -268,4 +268,25 @@ fn caps_a_large_snapshot() {
         .expect("read");
     assert!(read.content.len() <= 100_100, "{}", read.content.len());
     assert!(read.content.contains("truncated"), "{}", read.content);
+}
+
+#[test]
+fn a_private_address_is_refused_before_camofox_sees_it() {
+    let server = Server::start(normal_reply);
+    let home = TempDir::new().expect("temp");
+    let browser = tool(&server.base, home.path());
+
+    let error = browser
+        .call(&json!({"action": "open", "url": "http://127.0.0.1:8080/admin"}))
+        .expect_err("a loopback target must be refused");
+    assert_eq!(error.code, "blocked_address", "{}", error.message);
+    assert!(
+        server
+            .requests
+            .lock()
+            .expect("requests")
+            .iter()
+            .all(|request| request.path != "/tabs"),
+        "the browser must not ask Camofox to open a private address"
+    );
 }
