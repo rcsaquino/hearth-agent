@@ -34,6 +34,13 @@ pub const RULE_LIMIT: usize = 400;
 /// check stays because injection must not trust a flag an older store left
 /// behind.
 const LIVE_RULES: &str = "pinned = 1 AND valid_to IS NULL";
+
+/// The shape of a generated id, for costing a row that does not exist yet.
+pub const ID_SAMPLE: &str = "m_00000000000000000000000000000000";
+
+fn new_id() -> String {
+    format!("m_{}", uuid::Uuid::new_v4().simple())
+}
 /// The longest subject a write may store.
 pub const SUBJECT_LIMIT: usize = 120;
 /// How similar two statements about one subject must be to count as the same.
@@ -515,7 +522,7 @@ fn insert_in(
     }
     item.content = item.content.trim().to_owned();
     item.subject = normalize(&item.subject);
-    let id = format!("m_{}", uuid::Uuid::new_v4().simple());
+    let id = new_id();
     let digest = fingerprint(&item.content);
     let terms = crate::query::expansions(&item.content, &item.subject).join(" ");
     let valid_from = item.valid_from.unwrap_or(now);

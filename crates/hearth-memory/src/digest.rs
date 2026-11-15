@@ -180,7 +180,7 @@ pub fn rules_body(rules: &[Memory], max_tokens: u64) -> String {
     let mut lines: Vec<String> = Vec::with_capacity(rules.len());
     let mut used = 0u64;
     for rule in rules {
-        let line = format!("{}: {}", rule.id, clip(&rule.content, RULE_CHARS));
+        let line = rule_line(&rule.id, &rule.content);
         let cost = hearth_model::estimate_tokens(&line).max(1) as u64;
         if used + cost > max_tokens {
             break;
@@ -237,13 +237,19 @@ pub fn trim_coverage(coverage: &mut Coverage) -> bool {
 
 /// The token cost of rendering a rule line.
 pub fn rule_cost(memory: &Memory) -> u64 {
-    rule_cost_text(&memory.content)
+    hearth_model::estimate_tokens(&rule_line(&memory.id, &memory.content)).max(1) as u64
 }
 
 /// The token cost of a rule line that does not exist yet.
+///
+/// The write-time check and the render must measure the same line, so the
+/// placeholder id has the shape of a real one.
 pub fn rule_cost_text(content: &str) -> u64 {
-    let line = format!("m_000000000000: {}\n", clip(content, RULE_CHARS));
-    hearth_model::estimate_tokens(&line).max(1) as u64
+    hearth_model::estimate_tokens(&rule_line(crate::store::ID_SAMPLE, content)).max(1) as u64
+}
+
+fn rule_line(id: &str, content: &str) -> String {
+    format!("{}: {}", id, clip(content, RULE_CHARS))
 }
 
 #[cfg(test)]
