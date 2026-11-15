@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 
 use hearth_runtime::service::{
     ServiceError, apply_start_mode_at, install_at, repair_at, status_at, uninstall_at,
@@ -302,4 +303,19 @@ fn repairing_leaves_a_unit_that_names_another_home_alone() {
     );
     assert_eq!(fs::read_to_string(&unit).expect("unit"), content);
     assert!(!enable_link(config.path()).exists());
+}
+
+#[test]
+fn the_packaged_unit_is_recognized_for_the_users_home() {
+    let config = TempDir::new().expect("systemd config");
+    let packaged = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/hearth.service");
+    fs::copy(&packaged, config.path().join("hearth.service")).expect("copy unit");
+
+    let home = std::env::var("HOME").expect("home");
+    let home = Path::new(&home).join(".hearth");
+    let status = status_at(config.path(), &home).expect("status");
+    assert!(
+        status.installed,
+        "the packaged unit names %h/.hearth, which is this home"
+    );
 }
