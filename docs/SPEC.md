@@ -937,7 +937,7 @@ project. Every conversation and background task reads and writes the same rows.
 
 | Store | What it holds | Where it lives | When it is loaded |
 |---|---|---|---|
-| Rules | Instructions that must be obeyed without a retrieval cue | `memories` rows with `pinned = 1` | Every request, in the cached prefix |
+| Rules | Instructions that must be obeyed without a retrieval cue | `memories` rows that are pinned and still current | Every request, in the cached prefix |
 | Knowledge | Facts, people, preferences, decisions, commitments, episodes | `memories` rows | A digest before the newest user message; detail on demand |
 | Evidence | Every saved conversation entry | `entries`, indexed by `entries_fts` | Only when the model asks |
 
@@ -962,7 +962,7 @@ One row is one statement the user would recognise as one thing they said.
 | `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, or `fact` |
 | `content` | One statement; a write is capped at 2,000 characters |
 | `subject` | The normalised person, project, or thing it is about |
-| `pinned` | Injects the statement as a rule; only valid with `kind = rule` |
+| `pinned` | Injects the statement as a rule; only valid with `kind = rule`, and only while the row is current |
 | `source_kind`, `source_entry` | Provenance, down to the entry the user typed |
 | `valid_from`, `valid_to` | The window the statement was true |
 | `superseded_by` | The statement that replaced this one |
@@ -1097,6 +1097,9 @@ text moves.
   prefix and the Prompt tab names `rules` as the changed layer.
 - A statement that is not a rule cannot be pinned. Pinning a fact would repeat it
   on every turn, which is the rule's job.
+- A pin belongs to the live statement. Retiring a rule clears its pin and closes
+  its window, so it leaves the block and stops spending the budget. A write that
+  arrives already retired cannot be pinned.
 
 ### 7.7 Forgetting and secrets
 

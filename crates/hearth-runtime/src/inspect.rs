@@ -131,6 +131,8 @@ pub struct MemoryRecord {
     pub revision: i64,
     /// True when this row is a rule injected into every request.
     pub pinned: bool,
+    /// True when a newer statement closed this row's window.
+    pub retired: bool,
 }
 
 /// Read saved memories from the main database without touching the writer.
@@ -145,8 +147,10 @@ pub fn list_memories(home: &Path, limit: usize) -> Result<Vec<MemoryRecord>, Ins
     let connection = hearth_storage::open_read_only(&database)?;
     let zone = Zone::resolve(&hearth_config::identity_timezone(home));
     let mut statement = connection.prepare(
-        "SELECT id, content, kind, subject, source_kind, created_at, updated_at, revision, pinned \
-         FROM memories ORDER BY pinned DESC, updated_at DESC, rowid DESC LIMIT ?",
+        "SELECT id, content, kind, subject, source_kind, created_at, updated_at, revision, \
+         (pinned = 1 AND valid_to IS NULL), (valid_to IS NOT NULL) \
+         FROM memories ORDER BY (pinned = 1 AND valid_to IS NULL) DESC, updated_at DESC, \
+         rowid DESC LIMIT ?",
     )?;
     let rows = statement.query_map((limit as i64,), |row| {
         Ok(MemoryRecord {
@@ -159,6 +163,7 @@ pub fn list_memories(home: &Path, limit: usize) -> Result<Vec<MemoryRecord>, Ins
             updated_at: zone.iso(row.get(6)?),
             revision: row.get(7)?,
             pinned: row.get::<_, i64>(8)? != 0,
+            retired: row.get::<_, i64>(9)? != 0,
         })
     })?;
     let mut records = Vec::new();

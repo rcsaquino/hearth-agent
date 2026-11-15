@@ -142,6 +142,7 @@ fn a_replaced_rule_is_not_listed_as_pinned() {
         .find(|record| record.kind == "rule")
         .expect("the rule row");
     assert!(!retired.pinned, "a replaced rule must not show as pinned");
+    assert!(retired.retired, "the old row must show as retired");
 }
 
 #[test]

@@ -202,9 +202,11 @@ pub struct MemoryView {
     pub error: Option<String>,
 }
 
-/// The kind of a memory row, marked when it is a pinned rule.
+/// The kind of a memory row, marked when it is pinned or retired.
 pub fn store_label(record: &MemoryRecord) -> String {
-    if record.pinned {
+    if record.retired {
+        format!("{} (retired)", record.kind)
+    } else if record.pinned {
         format!("{} (pinned)", record.kind)
     } else {
         record.kind.clone()

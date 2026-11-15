@@ -1847,3 +1847,22 @@ force-pushing, which is the approval named above and not a step in this change.
   which the zone cannot affect. This is the one place where a number, not just a
   rendering, depends on the zone, so changing the zone re-reads the current window
   under the new one. Stored usage rows keep their UTC instants.
+
+## 2026-11-15: A pin belongs to a live statement
+
+- A write that repeats a pinned rule, word for word, replaces the row and retires
+  the rule. Retirement clears the pin, so the statement leaves the rules block and
+  stops spending the rules budget. The same words in a different role are a
+  demotion, and the new statement's role decides the pin.
+- The rules read requires a live row even though retirement clears the pin. A store
+  written by an older build can still hold a pin on a closed window, and injection
+  must not trust that flag.
+- Migration 0009 clears the pin on those older rows. The migration is the one-time
+  repair; the read predicate is what stops a stale flag from injecting a rule
+  before a home migrates.
+- A write that arrives already retired cannot be pinned. The import path can set
+  `valid_to`, and a pin on a row whose window is closed from the start would be the
+  same illegal state by another route.
+- The Memory tab marks a retired row with a hollow circle and `(retired)` in the
+  detail pane, so the operator surface does not show a closed window as a live
+  rule. The row is still kept: `memory_recall(id)` and an `as_of` read reach it.

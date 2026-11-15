@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
 /// The schema version this build understands.
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 pub use backup::{snapshot, verify};
 pub use storage::{Reader, Storage, Writer};
@@ -84,6 +84,19 @@ fn configure(connection: &Connection) -> Result<(), StorageError> {
     Ok(())
 }
 
+/// Every migration, as the version it upgrades and the version it produces.
+const MIGRATIONS: [(i64, &str, i64); 9] = [
+    (0, schema::MIGRATION_0001, 1),
+    (1, schema::MIGRATION_0002, 2),
+    (2, schema::MIGRATION_0003, 3),
+    (3, schema::MIGRATION_0004, 4),
+    (4, schema::MIGRATION_0005, 5),
+    (5, schema::MIGRATION_0006, 6),
+    (6, schema::MIGRATION_0007, 7),
+    (7, schema::MIGRATION_0008, 8),
+    (8, schema::MIGRATION_0009, 9),
+];
+
 /// Apply every migration the database is missing.
 pub fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -94,16 +107,7 @@ pub fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
         });
     }
     let mut current = version;
-    for (from, sql, to) in [
-        (0, schema::MIGRATION_0001, 1),
-        (1, schema::MIGRATION_0002, 2),
-        (2, schema::MIGRATION_0003, 3),
-        (3, schema::MIGRATION_0004, 4),
-        (4, schema::MIGRATION_0005, 5),
-        (5, schema::MIGRATION_0006, 6),
-        (6, schema::MIGRATION_0007, 7),
-        (7, schema::MIGRATION_0008, 8),
-    ] {
+    for (from, sql, to) in MIGRATIONS {
         if current != from {
             continue;
         }
@@ -146,5 +150,51 @@ pub fn integrity_check(connection: &Connection) -> Result<(), StorageError> {
         Ok(())
     } else {
         Err(StorageError::Integrity(result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_nine_unpins_a_retired_rule() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let mut connection =
+            Connection::open(directory.path().join("hearth.db")).expect("open database");
+        // The schema as the build that retired the row left it.
+        for &(_, sql, _) in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+            connection.execute_batch(sql).expect("apply migration");
+        }
+        connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION - 1)
+            .expect("stamp the older version");
+        connection
+            .execute_batch(
+                "INSERT INTO memories (id, kind, content, fingerprint, pinned, source_kind, \
+                 valid_from, valid_to, created_at, updated_at) VALUES \
+                 ('m_retired', 'rule', 'never force push', 'f_retired', 1, 'user', 1, 2, 1, 1), \
+                 ('m_live', 'rule', 'never deploy late', 'f_live', 1, 'user', 1, NULL, 1, 1);",
+            )
+            .expect("seed rows");
+
+        migrate(&mut connection).expect("migrate");
+
+        let pinned: i64 = connection
+            .query_row(
+                "SELECT pinned FROM memories WHERE id = 'm_retired'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("retired row");
+        assert_eq!(pinned, 0, "a retired rule is not pinned");
+        let pinned: i64 = connection
+            .query_row(
+                "SELECT pinned FROM memories WHERE id = 'm_live'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("live row");
+        assert_eq!(pinned, 1, "a live rule keeps its pin");
     }
 }

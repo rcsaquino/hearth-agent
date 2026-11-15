@@ -127,7 +127,7 @@ keys.
   below.
 
 The exact DDL is the versioned set under `crates/hearth-storage/migrations/`
-(`0001.sql` through `0008.sql`), applied by the matching migrations. The
+(`0001.sql` through `0009.sql`), applied by the matching migrations. The
 migrations are the executable schema authority; if this document and a migration
 disagree, the migration wins. `effects` has a `UNIQUE (kind, key)` constraint.
 Migration 0002 rebuilds the old memory index with the porter stemmer. Migration
@@ -135,7 +135,8 @@ Migration 0002 rebuilds the old memory index with the porter stemmer. Migration
 `entries_fts` and rebuilds it for existing transcripts. Migration 0008 replaces
 both earlier memory designs with `memories`, `memories_fts`, and
 `memory_vectors`, and drops `memory_items`, `memory_events`, and the old
-`memory_fts`.
+`memory_fts`. Migration 0009 clears the pin on rows an older build retired
+without clearing it.
 
 ## Indexes
 
@@ -160,7 +161,7 @@ second database file and no markdown store.
 | `subject` | Normalised entity, empty when the statement names none |
 | `terms` | Index expansion: head words plus the relation groups they belong to |
 | `fingerprint` | Digest of the normalised content, for exact-duplicate refusal |
-| `pinned` | Injects the statement as a rule; only with `kind = rule` |
+| `pinned` | Injects the statement as a rule; only with `kind = rule`, and only while `valid_to` is null |
 | `source_kind`, `source_entry` | Provenance |
 | `valid_from`, `valid_to` | The window the statement was true; `valid_to` is null while it is current |
 | `superseded_by` | The statement that closed this window |

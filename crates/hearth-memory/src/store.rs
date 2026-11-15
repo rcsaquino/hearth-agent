@@ -28,6 +28,12 @@ use crate::query::normalize;
 pub const CONTENT_LIMIT: usize = 2_000;
 /// The longest pinned rule, which is also the longest rule line the prompt shows.
 pub const RULE_LIMIT: usize = 400;
+/// The rows the prompt injects as rules.
+///
+/// A pin belongs to a live statement, and retirement clears it. The validity
+/// check stays because injection must not trust a flag an older store left
+/// behind.
+const LIVE_RULES: &str = "pinned = 1 AND valid_to IS NULL";
 /// The longest subject a write may store.
 pub const SUBJECT_LIMIT: usize = 120;
 /// How similar two statements about one subject must be to count as the same.
@@ -184,6 +190,11 @@ pub fn validate(item: &NewMemory) -> Result<()> {
             "only a rule can be pinned, because only a rule is injected every turn.",
         ));
     }
+    if item.pinned && item.valid_to.is_some() {
+        return Err(MemoryError::invalid(
+            "a statement that is written already retired cannot be pinned.",
+        ));
+    }
     if item.pinned && content.chars().count() > RULE_LIMIT {
         return Err(MemoryError::invalid(format!(
             "a pinned rule must be at most {RULE_LIMIT} characters. Split it into separate rules."
@@ -205,7 +216,7 @@ fn check_rules_budget(
     budget: u64,
 ) -> Result<()> {
     let existing = writer.query(
-        &format!("SELECT {COLUMNS} FROM memories WHERE pinned = 1 ORDER BY created_at, id"),
+        &format!("SELECT {COLUMNS} FROM memories WHERE {LIVE_RULES} ORDER BY created_at, id"),
         [],
         map_memory,
     )?;
@@ -224,13 +235,15 @@ fn check_rules_budget(
     ))
 }
 
-/// Every pinned rule, oldest first.
+/// Every rule the prompt injects, oldest first.
 pub fn rules(session: &Session) -> Result<Vec<Memory>> {
     session
         .storage()
         .read(|reader| {
             reader.query(
-                &format!("SELECT {COLUMNS} FROM memories WHERE pinned = 1 ORDER BY created_at, id"),
+                &format!(
+                    "SELECT {COLUMNS} FROM memories WHERE {LIVE_RULES} ORDER BY created_at, id"
+                ),
                 [],
                 map_memory,
             )
@@ -565,7 +578,8 @@ fn insert_in(
     let supersedes = supersedes.or(earlier);
     if let Some(previous) = &supersedes {
         let closed = writer.execute(
-            "UPDATE memories SET valid_to = ?, superseded_by = ? WHERE id = ? AND valid_to IS NULL",
+            "UPDATE memories SET valid_to = ?, superseded_by = ?, pinned = 0 \
+             WHERE id = ? AND valid_to IS NULL",
             rusqlite::params![valid_from, id, previous],
         )?;
         if closed == 0 {

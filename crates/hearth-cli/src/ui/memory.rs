@@ -161,7 +161,9 @@ fn detail(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 fn status(record: &hearth_runtime::inspect::MemoryRecord) -> (&'static str, Style) {
-    if record.pinned {
+    if record.retired {
+        ("○", theme::faint())
+    } else if record.pinned {
         ("★", theme::warn())
     } else {
         ("●", theme::good())
