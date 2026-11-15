@@ -107,6 +107,21 @@ fn agent<P: Provider + 'static>(home: &Path, harness: &Harness, provider: Arc<P>
     agent_with(home, harness, provider, ToolRegistry::default())
 }
 
+fn runtime_note_text(request: &ChatRequest) -> String {
+    request
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .find_map(|block| match block {
+            ContentBlock::Text(text) if text.contains("Current time:") => Some(text.clone()),
+            ContentBlock::ToolResult { content, .. } if content.contains("Current time:") => {
+                Some(content.clone())
+            }
+            _ => None,
+        })
+        .expect("runtime note")
+}
+
 #[test]
 fn a_plain_answer_settles_the_submission_and_records_usage() {
     let (home, harness) = harness();
@@ -1346,16 +1361,7 @@ fn the_voice_tag_guidance_is_not_repeated_in_the_runtime_note() {
     let outcome = agent.run_submission(&submission.id).expect("run");
     assert_eq!(outcome.answer_text.as_deref(), Some("hello"));
     let requests = provider.requests();
-    let runtime = requests[0].messages.last().expect("runtime note");
-    let text = runtime
-        .blocks
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text(text) => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+    let text = runtime_note_text(&requests[0]);
     // The audio-tag guidance belongs to the message tool description. Repeating
     // it in the uncached runtime note cost fresh tokens on every single turn.
     assert!(!text.contains("Eleven"), "runtime note was {text:?}");
@@ -1387,16 +1393,10 @@ fn the_runtime_note_renders_the_configured_zone_and_only_the_time() {
     assert_eq!(outcome.answer_text.as_deref(), Some("hello"));
 
     let requests = provider.requests();
-    let runtime = requests[0].messages.last().expect("runtime note");
-    let text = runtime
-        .blocks
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text(text) => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+    let text = runtime_note_text(&requests[0]);
+    let text = text.trim();
+    let text = text.strip_prefix("<runtime>").unwrap_or(text);
+    let text = text.strip_suffix("</runtime>").unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 1, "runtime note was {text:?}");
     let stamp = lines[0]
@@ -1417,6 +1417,65 @@ fn the_runtime_note_renders_the_configured_zone_and_only_the_time() {
     assert_iso_shape(local);
     assert!(!text.contains("Conversation:"), "runtime note was {text:?}");
     assert!(!text.contains("Model:"), "runtime note was {text:?}");
+}
+
+#[test]
+fn a_continuation_turn_carries_the_clock_on_the_tool_result() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let workspace = home.path().join("workspace");
+    fs::create_dir_all(workspace.join("notes")).expect("create notes");
+    fs::write(workspace.join("notes/a.txt"), "alpha").expect("write file");
+    let tools = ToolRegistry::new(vec![Arc::new(FileTool::new(
+        workspace,
+        home.path().join("spill"),
+    ))]);
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        Ok(vec![
+            Ok(StreamEvent::ToolCall(ToolCall {
+                id: "call-1".to_owned(),
+                name: "files".to_owned(),
+                arguments: json!({"action": "read", "path": "notes/a.txt"}),
+            })),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("tool_calls".to_owned()),
+            }),
+        ]),
+        Ok(vec![
+            Ok(StreamEvent::TextDelta("done".to_owned())),
+            Ok(StreamEvent::Done {
+                finish_reason: Some("stop".to_owned()),
+            }),
+        ]),
+    ]));
+
+    let outcome = agent_with(home.path(), &harness, provider.clone(), tools)
+        .run_submission(&submission.id)
+        .expect("run submission");
+    assert_eq!(outcome.answer_text.as_deref(), Some("done"));
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    let second = &requests[1];
+    let last = second.messages.last().expect("last message");
+    assert_eq!(
+        last.role,
+        Role::Tool,
+        "a continuation must end with the new tool result, not a system note"
+    );
+    let carried = runtime_note_text(second);
+    assert!(carried.contains("Current time:"), "{carried}");
+    assert!(
+        second.messages.iter().all(|message| {
+            message.role != Role::System
+                || !message
+                    .blocks
+                    .iter()
+                    .all(|block| matches!(block, ContentBlock::Text(text) if text.contains("Current time:")))
+        }),
+        "the clock must not be a standalone system instruction"
+    );
 }
 
 fn assert_iso_shape(value: &str) {

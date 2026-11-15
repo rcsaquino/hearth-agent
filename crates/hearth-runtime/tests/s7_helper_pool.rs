@@ -515,7 +515,7 @@ fn a_helper_survives_a_token_budget_below_the_reply_reserve() {
     let memory = Arc::new(MemoryService::new(session.clone()));
     let config = helper_config(
         &home,
-        &session,
+        session,
         Arc::clone(&provider) as Arc<dyn Provider>,
         sender_for(&base),
         memory,

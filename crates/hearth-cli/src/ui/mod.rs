@@ -1050,7 +1050,7 @@ mod tests {
         for label in [
             "system · identity",
             "system · guidance",
-            "system · runtime note",
+            "runtime note · newest input",
             "user",
             "request · tools",
             "response",

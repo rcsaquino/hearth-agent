@@ -1,4 +1,4 @@
-use hearth_core::{Harness, PromptInput};
+use hearth_core::{Harness, PromptInput, Save};
 use tempfile::TempDir;
 
 fn input(conversation_id: &str, skills_index: &str) -> PromptInput {
@@ -36,6 +36,10 @@ fn the_skills_index_is_a_prompt_layer_after_rules() {
         .session()
         .create_conversation("Test", "local", "local:1")
         .expect("conversation");
+    harness
+        .session()
+        .save(Save::new(&conversation.id).entry("user", serde_json::json!({"text": "hello"})))
+        .expect("save user");
 
     let prompt = harness
         .session()

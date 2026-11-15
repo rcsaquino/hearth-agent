@@ -21,7 +21,7 @@ fn text_of(message: &hearth_model::ChatMessage) -> String {
 }
 
 #[test]
-fn the_prompt_starts_with_identity_and_ends_with_runtime() {
+fn the_prompt_starts_with_identity_and_carries_runtime_on_the_newest_input() {
     let (_home, harness) = harness();
     let session = harness.session();
     let conversation = session
@@ -51,16 +51,73 @@ fn the_prompt_starts_with_identity_and_ends_with_runtime() {
     assert_eq!(text_of(first), "SOUL TEXT");
 
     let last = prompt.request.messages.last().expect("last message");
-    assert_eq!(last.role, Role::System);
-    assert_eq!(text_of(last), "RUNTIME NOTE");
+    assert_eq!(last.role, Role::User);
+    assert_eq!(text_of(last), "hello\n\nRUNTIME NOTE");
+}
 
-    let user = prompt
-        .request
-        .messages
+#[test]
+fn the_runtime_note_rides_with_the_newest_tool_result() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "read it"}))
+                .entry(
+                    "assistant",
+                    json!([
+                        {"type": "text", "text": "calling"},
+                        {"type": "tool_call", "id": "call-1", "name": "read", "arguments": {"path": "a"}}
+                    ]),
+                )
+                .entry(
+                    "tool_result",
+                    json!([{"type": "tool_result", "call_id": "call-1", "content": "file body"}]),
+                ),
+        )
+        .expect("save entries");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME".to_owned(),
+            rules: String::new(),
+            rules_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: String::new(),
+        })
+        .expect("build prompt");
+
+    let messages = &prompt.request.messages;
+    let last = messages.last().expect("last message");
+    assert_eq!(
+        last.role,
+        Role::Tool,
+        "the continuation ends with its new tool result"
+    );
+    let carried: String = last
+        .blocks
         .iter()
-        .find(|message| message.role == Role::User)
-        .expect("user message");
-    assert_eq!(text_of(user), "hello");
+        .filter_map(|block| match block {
+            hearth_model::ContentBlock::Text(text) => Some(text.as_str()),
+            hearth_model::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(carried.contains("RUNTIME"), "{carried}");
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.role != Role::System || text_of(message) != "RUNTIME"),
+        "the clock must not be a standalone system instruction: {messages:?}"
+    );
 }
 
 #[test]
@@ -102,9 +159,9 @@ fn a_stored_entry_with_no_request_is_left_out_of_the_prompt() {
         .filter(|message| message.role == Role::User)
         .map(text_of)
         .collect();
-    assert_eq!(
-        users,
-        vec!["hello".to_owned()],
+    assert_eq!(users.len(), 1, "user messages were {users:?}");
+    assert!(
+        users[0].starts_with("hello"),
         "user messages were {users:?}"
     );
 }
@@ -185,13 +242,14 @@ fn assistant_tool_calls_and_tool_results_map_to_roles_and_blocks() {
         .iter()
         .find(|message| message.role == Role::Tool)
         .expect("tool message");
-    assert_eq!(
-        tool.blocks,
-        vec![ContentBlock::ToolResult {
-            call_id: "call-1".to_owned(),
-            content: "file body".to_owned(),
-        }]
-    );
+    let ContentBlock::ToolResult { call_id, content } =
+        tool.blocks.first().expect("tool result block")
+    else {
+        panic!("unexpected tool blocks: {:?}", tool.blocks);
+    };
+    assert_eq!(call_id, "call-1");
+    assert!(content.starts_with("file body"), "{content}");
+    assert!(content.contains("RUNTIME"), "{content}");
 }
 
 #[test]
@@ -255,7 +313,7 @@ fn a_steering_message_between_a_tool_call_and_its_result_is_reordered() {
         .request
         .messages
         .iter()
-        .position(|message| text_of(message) == "also check b")
+        .position(|message| text_of(message).starts_with("also check b"))
         .expect("steering message");
     assert_eq!(
         tool,
@@ -619,8 +677,8 @@ fn standing_and_recall_are_placed_in_their_layers() {
     assert!(recall_text.contains("R1"));
 
     let last = messages.last().expect("last");
-    assert_eq!(last.role, Role::System);
-    assert_eq!(text_of(last), "RUNTIME");
+    assert_eq!(last.role, Role::User);
+    assert_eq!(text_of(last), "newest\n\nRUNTIME");
     assert_eq!(prompt.document["rules"], "S1\nS2");
     assert_eq!(prompt.document["recall"], "R1");
 }

@@ -1102,7 +1102,7 @@ mod tests {
             "user",
             "assistant · thinking",
             "tool call · read_file",
-            "system · runtime note",
+            "runtime note · newest input",
             "response · thinking",
             "response",
             "response · tool · lookup",
@@ -1174,6 +1174,14 @@ mod tests {
             skills < tools && tools < user,
             "tools must follow the system layers and precede the transcript: {text}"
         );
+    }
+
+    #[test]
+    fn the_runtime_note_is_not_labelled_as_a_system_message() {
+        let exchange = sample("SOUL TEXT");
+        let text = render_audit(&exchange, None);
+        assert!(!text.contains("system · runtime note"), "{text}");
+        assert!(text.contains("runtime note · newest input"), "{text}");
     }
 
     #[test]

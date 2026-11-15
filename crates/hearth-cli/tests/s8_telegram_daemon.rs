@@ -1156,7 +1156,9 @@ fn fake_helper_provider() -> (String, Arc<AtomicBool>, thread::JoinHandle<()>) {
             let helper = !tool_result
                 && messages.iter().any(|message| {
                     message["role"].as_str() == Some("user")
-                        && message["content"].as_str() == Some("Produce a helper report.")
+                        && message["content"]
+                            .as_str()
+                            .is_some_and(|content| content.starts_with("Produce a helper report."))
                 });
             if helper {
                 send_text_stream(&mut stream, "Helper report from helper");
