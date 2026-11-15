@@ -794,7 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn a_rule_replaced_by_an_unpinned_copy_is_no_longer_injected() {
+    fn an_unpinned_copy_does_not_retire_a_pinned_rule() {
         let (_directory, service) = service();
         let rule = service
             .write(
@@ -807,15 +807,53 @@ mod tests {
             .clone();
         assert_eq!(service.rules().expect("rules").count, 1);
 
-        service
+        let copy = service
             .write(NewMemory::new("Never deploy on a Friday.").kind(Kind::Commitment))
             .expect("copy");
 
+        assert!(
+            !copy.created(),
+            "the pinned rule already carries the statement"
+        );
+        assert_eq!(copy.memory().id, rule.id);
+        assert!(copy.memory().pinned, "the stored statement is still a rule");
         let rules = service.rules().expect("rules");
-        assert_eq!(rules.count, 0, "a retired rule must not be injected");
-        assert!(!rules.text.contains("Friday"), "{}", rules.text);
+        assert_eq!(rules.count, 1, "the pinned rule must stay injected");
+        assert!(rules.text.contains("Friday"), "{}", rules.text);
+        let stored = service.get(&rule.id).expect("get").expect("the rule row");
+        assert!(stored.is_current(), "the copy must not retire the rule");
+        assert!(stored.pinned, "the live rule must stay pinned");
+        assert_eq!(service.count().expect("count"), 1, "the copy is not a row");
+    }
+
+    #[test]
+    fn an_explicit_replacement_still_retires_a_pinned_rule() {
+        let (_directory, service) = service();
+        let rule = service
+            .write(
+                NewMemory::new("Never deploy on a Friday.")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect("rule")
+            .memory()
+            .clone();
+
+        let replacement = service
+            .write(
+                NewMemory::new("Never deploy on a Friday.")
+                    .kind(Kind::Commitment)
+                    .supersedes(rule.id.clone()),
+            )
+            .expect("replacement");
+
+        assert!(replacement.created(), "the named replacement is a new row");
+        assert_eq!(service.rules().expect("rules").count, 0);
         let retired = service.get(&rule.id).expect("get").expect("the old row");
-        assert!(!retired.is_current(), "the copy replaces the rule");
+        assert!(
+            !retired.is_current(),
+            "an explicit replacement retires the rule"
+        );
         assert!(!retired.pinned, "a retired row cannot stay pinned");
     }
 
@@ -839,7 +877,11 @@ mod tests {
             .memory()
             .clone();
         service
-            .write(NewMemory::new(retired_text).kind(Kind::Commitment))
+            .write(
+                NewMemory::new(retired_text)
+                    .kind(Kind::Commitment)
+                    .supersedes(rule.id.clone()),
+            )
             .expect("retire");
         let service = service.with_config(MemoryConfig {
             rules_max_tokens: crate::digest::rule_cost(&rule),
