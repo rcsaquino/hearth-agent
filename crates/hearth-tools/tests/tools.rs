@@ -194,3 +194,25 @@ fn rejects_a_shell_cwd_escape() {
         .expect_err("a cwd escape must fail");
     assert_eq!(error.code, "invalid_path");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_refused_write_creates_nothing_outside_the_workspace() {
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let spill = home.path().join("spill");
+    let outside = home.path().join("elsewhere");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    fs::create_dir_all(&outside).expect("create outside");
+    std::os::unix::fs::symlink(&outside, workspace.join("out")).expect("symlink out");
+    let tool = FileTool::new(&workspace, &spill);
+
+    let error = tool
+        .call(&json!({"action": "write", "path": "out/deep/x.txt", "content": "bad"}))
+        .expect_err("a symlinked directory must not escape");
+    assert_eq!(error.code, "path_escape");
+    assert!(
+        !outside.join("deep").exists(),
+        "a refused write must not create the tree outside the workspace"
+    );
+}
