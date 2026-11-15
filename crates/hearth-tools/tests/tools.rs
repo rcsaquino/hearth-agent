@@ -230,3 +230,40 @@ fn a_huge_text_file_is_refused() {
         .expect_err("a file over the cap must be refused");
     assert_eq!(error.code, "file_too_large", "{}", error.message);
 }
+
+#[test]
+fn only_a_transient_io_error_is_retryable() {
+    use hearth_tools::ToolError;
+
+    for kind in [
+        std::io::ErrorKind::InvalidData,
+        std::io::ErrorKind::NotFound,
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::InvalidInput,
+    ] {
+        let error = ToolError::from(std::io::Error::from(kind));
+        assert!(!error.retryable(), "{kind:?} must not be retryable");
+    }
+    for kind in [
+        std::io::ErrorKind::TimedOut,
+        std::io::ErrorKind::WouldBlock,
+        std::io::ErrorKind::Interrupted,
+    ] {
+        let error = ToolError::from(std::io::Error::from(kind));
+        assert!(error.retryable(), "{kind:?} must be retryable");
+    }
+}
+
+#[test]
+fn reading_a_binary_file_is_not_retryable() {
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let spill = home.path().join("spill");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    fs::write(workspace.join("image.png"), [0xff, 0xfe, 0x00, 0x01]).expect("write binary");
+    let tool = FileTool::new(&workspace, &spill);
+    let error = tool
+        .call(&json!({"action": "read", "path": "image.png"}))
+        .expect_err("binary data is not text");
+    assert!(!error.retryable(), "{}", error.message);
+}
