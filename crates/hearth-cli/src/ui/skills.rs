@@ -14,12 +14,30 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(4)])
         .split(area);
-    let summary = match &app.skills.stats {
-        Some(stats) => format!(
+    let summary = match (&app.skills.stats, app.skills.version) {
+        (_, Some(index)) => {
+            let version = app.skills.versions.get(index).copied().unwrap_or(0);
+            let all: Vec<String> = app
+                .skills
+                .versions
+                .iter()
+                .map(|version| format!("v{version}"))
+                .collect();
+            format!(
+                "history {version} of {} · {} · up/down to read, esc to leave",
+                app.skills
+                    .versions
+                    .last()
+                    .copied()
+                    .unwrap_or(version),
+                all.join(" ")
+            )
+        }
+        (Some(stats), None) => format!(
             "{} skills · active {} · learned {}",
             stats.total, stats.active, stats.learned
         ),
-        None => "Skills".to_owned(),
+        (None, None) => "Skills".to_owned(),
     };
     frame.render_widget(
         Paragraph::new(Line::styled(summary, theme::muted())),

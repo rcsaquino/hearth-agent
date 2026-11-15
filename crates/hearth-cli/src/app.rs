@@ -100,6 +100,10 @@ pub struct SkillsView {
     pub max_scroll: Cell<usize>,
     pub stats: Option<SkillStats>,
     pub error: Option<String>,
+    /// Versions of the selected learned skill, oldest first.
+    pub versions: Vec<u64>,
+    /// The version being read, as an index into `versions`.
+    pub version: Option<usize>,
 }
 
 pub struct PromptView {
@@ -305,6 +309,8 @@ impl App {
             stats: None,
             error: None,
             new_name: None,
+            versions: Vec::new(),
+            version: None,
         };
         Self {
             home,
@@ -850,17 +856,44 @@ impl App {
             }
             return;
         }
+        if self.skills.version.is_some() {
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(version) = &mut self.skills.version {
+                        *version = version.saturating_sub(1);
+                    }
+                    self.skills.load_selected();
+                }
+                KeyCode::Down => {
+                    if let Some(version) = &mut self.skills.version {
+                        *version = (*version + 1).min(self.skills.versions.len() - 1);
+                    }
+                    self.skills.load_selected();
+                }
+                KeyCode::Esc => self.skills.leave_history(),
+                KeyCode::PageUp => self.skills.scroll = self.skills.scroll.saturating_sub(15),
+                KeyCode::PageDown => {
+                    self.skills.scroll = (self.skills.scroll + 15).min(self.skills.max_scroll.get());
+                }
+                KeyCode::Char('v') => self.skills.leave_history(),
+                _ => {}
+            }
+            return;
+        }
         match key.code {
             KeyCode::Up => {
                 self.skills.selected = self.skills.selected.saturating_sub(1);
+                self.skills.leave_history();
                 self.skills.load_selected();
             }
             KeyCode::Down => {
                 if self.skills.selected + 1 < self.skills.skills.len() {
                     self.skills.selected += 1;
                 }
+                self.skills.leave_history();
                 self.skills.load_selected();
             }
+            KeyCode::Char('v') => self.skills.show_history(),
             KeyCode::Enter => self.skills.load_selected(),
             KeyCode::PageUp => self.skills.scroll = self.skills.scroll.saturating_sub(15),
             KeyCode::PageDown => {
@@ -1314,11 +1347,44 @@ impl SkillsView {
     }
 
     pub(crate) fn load_selected(&mut self) {
-        self.body = self
-            .skills
-            .get(self.selected)
-            .and_then(|skill| self.library.load_body(&skill.name).ok().flatten());
+        let skill = self.skills.get(self.selected);
+        let version = self.version.and_then(|index| self.versions.get(index).copied());
+        self.body = match (skill, version) {
+            (Some(skill), Some(version)) => self
+                .library
+                .version_body(&skill.name, version)
+                .ok()
+                .flatten(),
+            (Some(skill), None) => self.library.load_body(&skill.name).ok().flatten(),
+            _ => None,
+        };
         self.scroll = 0;
+    }
+
+    /// Show the preserved versions of the selected learned skill.
+    pub(crate) fn show_history(&mut self) {
+        self.version = None;
+        self.versions.clear();
+        let Some(skill) = self.skills.get(self.selected) else {
+            return;
+        };
+        if skill.scope != SkillScope::Learned {
+            return;
+        }
+        if let Ok(versions) = self.library.history(&skill.name)
+            && !versions.is_empty()
+        {
+            self.version = Some(versions.len() - 1);
+            self.versions = versions;
+            self.load_selected();
+        }
+    }
+
+    pub(crate) fn leave_history(&mut self) {
+        if self.version.take().is_some() {
+            self.versions.clear();
+            self.load_selected();
+        }
     }
 }
 

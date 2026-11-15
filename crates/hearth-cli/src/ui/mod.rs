@@ -169,6 +169,7 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
         ]),
         Tab::Skills => theme::hints(&[
             ("↑↓", "select"),
+            ("v", "history"),
             ("pgup/pgdn", "scroll"),
             ("e", "edit user skill"),
             ("n", "new skill"),
@@ -447,6 +448,44 @@ mod tests {
             app.activity_selected, 2,
             "a paused feed whose selection is the last row follows the newest row"
         );
+    }
+
+    #[test]
+    fn the_skills_tab_reads_a_preserved_version() {
+        let (home, mut app) = initialized_app();
+        let library = hearth_runtime::skills::SkillLibrary::new(home.path());
+        for revision in 0..2 {
+            library
+                .save_learned(hearth_runtime::skills::SkillSave {
+                    name: "triage".to_owned(),
+                    description: "Triage a request".to_owned(),
+                    body: format!(
+                        "## When to use\n\nWhen triage is needed.\n\n## Steps\n\nRevision {revision}.\n\n## Pitfalls\n\nNone."
+                    ),
+                    evidence: Vec::new(),
+                })
+                .expect("learned skill");
+        }
+        app.tab = crate::app::Tab::Skills;
+        app.skills.reload();
+        app.skills.selected = 0;
+        app.skills.load_selected();
+        assert!(app.skills.body.as_deref().unwrap_or_default().contains("Revision 1"));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+        assert_eq!(app.skills.versions, vec![1, 2]);
+        assert!(app.skills.body.as_deref().unwrap_or_default().contains("Revision 1"));
+
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert!(
+            app.skills.body.as_deref().unwrap_or_default().contains("Revision 0"),
+            "the preserved version must be readable: {:?}",
+            app.skills.body
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.skills.version.is_none());
+        assert!(app.skills.body.as_deref().unwrap_or_default().contains("Revision 1"));
     }
 
     #[test]
