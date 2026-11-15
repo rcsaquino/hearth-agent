@@ -24,7 +24,8 @@ use crate::editor::{self, EditorKind, OpenEditor, TextEditor};
 use crate::onboarding::{Action, Onboarding, TextInput};
 use crate::settings_form::{FormAction, SettingsForm};
 use crate::ui;
-use crate::workers::{AppEvent, DaemonAction, OnboardResult, Workers};
+pub(crate) use crate::workers::AppEvent;
+use crate::workers::{DaemonAction, OnboardResult, Workers};
 
 pub const MAX_EVENTS: usize = 500;
 
@@ -792,9 +793,18 @@ impl App {
                 self.activity_paused = true;
             }
             KeyCode::Char('p') => self.activity_paused = !self.activity_paused,
+            KeyCode::Home => {
+                self.activity_selected = 0;
+                self.activity_paused = true;
+            }
             KeyCode::Char('g') => {
                 self.activity_selected = 0;
                 self.activity_paused = true;
+            }
+            KeyCode::End => {
+                self.activity_selected =
+                    crate::ui::activity::row_count(&self.events).saturating_sub(1);
+                self.activity_paused = false;
             }
             _ => {}
         }
@@ -1076,7 +1086,7 @@ impl App {
         }
     }
 
-    fn apply_event(&mut self, event: AppEvent) {
+    pub(crate) fn apply_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::Status(result) => match result {
                 Ok(status) => {
@@ -1100,11 +1110,16 @@ impl App {
                     value["kind"].as_str().unwrap_or_default(),
                     "assistant_reply" | "run_settled"
                 );
+                // A reader who is on the last row is following the feed, even when
+                // it is paused; an event must not move the window away from it.
+                let following = !self.activity_paused
+                    || self.activity_selected + 1
+                        >= crate::ui::activity::row_count(&self.events);
                 self.events.push_back(value);
                 while self.events.len() > MAX_EVENTS {
                     self.events.pop_front();
                 }
-                if !self.activity_paused {
+                if following {
                     self.activity_selected =
                         crate::ui::activity::row_count(&self.events).saturating_sub(1);
                 }

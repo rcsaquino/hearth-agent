@@ -158,6 +158,7 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
             ("↑↓", "select"),
             ("p", "pause"),
             ("g", "top"),
+            ("home/end", "ends"),
             ("q", "quit"),
         ]),
         Tab::Doctor => theme::hints(&[
@@ -404,6 +405,48 @@ mod tests {
             text.push('\n');
         }
         text
+    }
+
+    #[test]
+    fn home_and_end_select_the_ends_of_the_activity_feed() {
+        let (_home, mut app) = initialized_app();
+        app.tab = crate::app::Tab::Activity;
+        for index in 0..3 {
+            app.apply_event(crate::app::AppEvent::Live(json!({
+                "kind": "user_message",
+                "data": {"text": format!("event {index}")}
+            })));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.activity_selected, 0);
+        assert!(app.activity_paused);
+
+        app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        assert_eq!(app.activity_selected, 2);
+        assert!(!app.activity_paused);
+    }
+
+    #[test]
+    fn a_paused_feed_keeps_its_last_row_selected() {
+        let (_home, mut app) = initialized_app();
+        app.tab = crate::app::Tab::Activity;
+        for index in 0..2 {
+            app.apply_event(crate::app::AppEvent::Live(json!({
+                "kind": "user_message",
+                "data": {"text": format!("event {index}")}
+            })));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+        assert!(app.activity_paused);
+
+        app.apply_event(crate::app::AppEvent::Live(json!({
+            "kind": "assistant_reply",
+            "data": {"text": "the answer"}
+        })));
+        assert_eq!(
+            app.activity_selected, 2,
+            "a paused feed whose selection is the last row follows the newest row"
+        );
     }
 
     #[test]
