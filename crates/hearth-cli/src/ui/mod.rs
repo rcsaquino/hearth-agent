@@ -637,16 +637,22 @@ mod tests {
         {
             let harness = Harness::open(home.path()).expect("harness");
             let memory = MemoryService::new(harness.session().clone());
-            memory
+            let rule = memory
                 .write(
                     NewMemory::new("Never deploy on a Friday.")
                         .kind(Kind::Rule)
                         .pinned(true),
                 )
-                .expect("rule");
+                .expect("rule")
+                .memory()
+                .clone();
             memory
-                .write(NewMemory::new("Never deploy on a Friday.").kind(Kind::Commitment))
-                .expect("copy");
+                .write(
+                    NewMemory::new("Never deploy on a Friday.")
+                        .kind(Kind::Commitment)
+                        .supersedes(rule.id),
+                )
+                .expect("replacement");
         }
         app.tab = Tab::Memory;
         app.memory.reload(home.path());

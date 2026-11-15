@@ -124,16 +124,22 @@ fn a_replaced_rule_is_not_listed_as_pinned() {
     init(home.path(), options()).expect("init");
     let harness = Harness::open(home.path()).expect("open harness");
     let memory = MemoryService::new(harness.session().clone());
-    memory
+    let rule = memory
         .write(
             NewMemory::new("Never deploy on a Friday.")
                 .kind(Kind::Rule)
                 .pinned(true),
         )
-        .expect("rule");
+        .expect("rule")
+        .memory()
+        .clone();
     memory
-        .write(NewMemory::new("Never deploy on a Friday.").kind(Kind::Commitment))
-        .expect("copy");
+        .write(
+            NewMemory::new("Never deploy on a Friday.")
+                .kind(Kind::Commitment)
+                .supersedes(rule.id),
+        )
+        .expect("replacement");
 
     let records = list_memories(home.path(), 100).expect("list memories");
     assert_eq!(records.len(), 2);
