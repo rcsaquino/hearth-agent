@@ -26,7 +26,23 @@ fn ensure_creates_the_backup_and_consolidation_tasks() {
 #[test]
 fn the_backup_handler_writes_a_snapshot_and_sleeps() {
     let home = TempDir::new().expect("temp home");
-    open(&home.path().join("hearth.db")).expect("open database");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session().clone();
+    let hash = session
+        .save_prompt_blob(r#"{"identity":"SOUL TEXT"}"#)
+        .expect("prompt blob");
+    let old = session.now_micros() - hearth_core::PROMPT_BLOB_RETENTION_MICROS - 1;
+    let write_hash = hash.clone();
+    session
+        .storage()
+        .write(move |writer| {
+            writer.execute(
+                "UPDATE prompt_blobs SET created_at = ? WHERE hash = ?",
+                (old, write_hash.as_str()),
+            )?;
+            Ok::<_, hearth_storage::StorageError>(())
+        })
+        .expect("age the blob");
     let task = ClaimedTask {
         id: "backup-task".to_owned(),
         kind: BACKUP_KIND.to_owned(),
@@ -36,7 +52,7 @@ fn the_backup_handler_writes_a_snapshot_and_sleeps() {
         input: json!({}),
         checkpoint: None,
     };
-    let output = BackupHandler::new(home.path())
+    let output = BackupHandler::new(home.path().to_path_buf(), session.clone())
         .step(&task)
         .expect("run backup handler");
     assert!(matches!(output, StepOutput::Sleep { .. }));
@@ -48,4 +64,8 @@ fn the_backup_handler_writes_a_snapshot_and_sleeps() {
         .filter(|name| name.starts_with("hearth-") && name.ends_with(".db"))
         .collect();
     assert_eq!(backups.len(), 1, "backups: {backups:?}");
+    assert!(
+        session.latest_prompt().expect("latest prompt").is_none(),
+        "the nightly pass must prune a blob past its retention window"
+    );
 }

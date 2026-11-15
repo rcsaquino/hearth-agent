@@ -452,7 +452,7 @@ impl TelegramRuntime {
                 )
                 .register(
                     BACKUP_KIND,
-                    Arc::new(BackupHandler::new(home.to_path_buf())),
+                    Arc::new(BackupHandler::new(home.to_path_buf(), session.clone())),
                 ),
         );
         let scheduler = Scheduler::new(

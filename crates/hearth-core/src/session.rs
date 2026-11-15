@@ -17,6 +17,9 @@ use crate::model::{
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
 
+/// How long a saved prompt blob is kept before the nightly pass removes it.
+pub const PROMPT_BLOB_RETENTION_MICROS: i64 = 30 * 24 * 60 * 60 * 1_000_000;
+
 const CONVERSATION_SELECT: &str = "SELECT id, parent_id, parent_entry_id, title, transport, \
      transport_key, created_at, updated_at, archived FROM conversations";
 const ENTRY_SELECT: &str = "SELECT id, conversation_id, seq, kind, content_json, tokens_est, \
@@ -739,6 +742,26 @@ impl Session {
             Ok(())
         })?;
         Ok(hash)
+    }
+
+    /// Remove prompt blobs older than `before` and clear the entries that point
+    /// at them.
+    ///
+    /// The foreign key from `entries.prompt_hash` has no cascade, so the links
+    /// are cleared first; the entry itself stays and keeps its transcript.
+    pub fn prune_prompt_blobs(&self, before: i64) -> Result<usize, CoreError> {
+        self.storage.write(move |writer| {
+            writer.execute(
+                "UPDATE entries SET prompt_hash = NULL \
+                 WHERE prompt_hash IN (SELECT hash FROM prompt_blobs WHERE created_at < ?)",
+                (before,),
+            )?;
+            let removed = writer.execute(
+                "DELETE FROM prompt_blobs WHERE created_at < ?",
+                (before,),
+            )?;
+            Ok(removed)
+        })
     }
 
     /// Read the newest saved prompt.

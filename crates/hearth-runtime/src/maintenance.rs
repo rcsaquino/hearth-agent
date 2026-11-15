@@ -52,11 +52,16 @@ pub(crate) fn rfc3339(now_micros: i64) -> String {
 /// Runs the nightly database backup and sleeps until the next night.
 pub struct BackupHandler {
     home: PathBuf,
+    session: Session,
 }
 
 impl BackupHandler {
-    pub fn new(home: impl Into<PathBuf>) -> Self {
-        Self { home: home.into() }
+    /// Build the handler for one home and its record.
+    pub fn new(home: impl Into<PathBuf>, session: Session) -> Self {
+        Self {
+            home: home.into(),
+            session,
+        }
     }
 }
 
@@ -67,6 +72,14 @@ impl TaskHandler for BackupHandler {
             .div_euclid(1_000) as i64;
         let zone = Zone::resolve(&hearth_config::identity_timezone(&self.home));
         let next = zone.next_at(now, BACKUP_HOUR, BACKUP_MINUTE);
+        // The nightly pass also drops prompt blobs past their retention window,
+        // before the snapshot, so backups stop carrying every past prompt.
+        let cutoff = now - hearth_core::PROMPT_BLOB_RETENTION_MICROS;
+        match self.session.prune_prompt_blobs(cutoff) {
+            Ok(0) => {}
+            Ok(removed) => tracing::info!(removed, "pruned old prompt blobs"),
+            Err(error) => tracing::warn!(%error, "prompt blobs could not be pruned"),
+        }
         let report = backup(&self.home).map_err(backup_handler_error)?;
         Ok(StepOutput::Sleep {
             until_micros: next,

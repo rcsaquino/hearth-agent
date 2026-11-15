@@ -33,7 +33,7 @@ pub use model::{
     UsageTotals, cache_hit_rate,
 };
 pub use prompt::{Prompt, PromptInput, build as build_prompt, parse_blocks, prefix_cause};
-pub use session::{Harness, Session};
+pub use session::{Harness, PROMPT_BLOB_RETENTION_MICROS, Session};
 pub use soul::default_soul;
 pub use task::{
     ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus, TerminalOutcome,

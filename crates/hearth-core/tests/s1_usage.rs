@@ -89,3 +89,54 @@ fn the_cache_hit_rate_is_cache_reads_over_prompt_tokens() {
     assert_eq!(hearth_core::cache_hit_rate(100, 0), 0.0);
     assert_eq!(hearth_core::cache_hit_rate(100, 140), 1.0);
 }
+
+#[test]
+fn an_old_prompt_blob_is_pruned_and_its_entry_survives() {
+    use hearth_core::{Harness, NewEntry, PROMPT_BLOB_RETENTION_MICROS, Save};
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Prune", "local", "local:prune")
+        .expect("conversation");
+    let hash = session
+        .save_prompt_blob(r#"{"identity":"SOUL TEXT"}"#)
+        .expect("prompt blob");
+    session
+        .save(Save::new(&conversation.id).entry_with(NewEntry {
+            kind: "assistant".to_owned(),
+            content: json!({"text": "the answer"}),
+            source: None,
+            prompt_hash: Some(hash.clone()),
+        }))
+        .expect("entry");
+
+    let old = session.now_micros() - PROMPT_BLOB_RETENTION_MICROS - 1;
+    let write_hash = hash.clone();
+    session
+        .storage()
+        .write(move |writer| {
+            writer.execute(
+                "UPDATE prompt_blobs SET created_at = ? WHERE hash = ?",
+                (old, write_hash.as_str()),
+            )?;
+            Ok::<_, hearth_storage::StorageError>(())
+        })
+        .expect("age the blob");
+
+    let removed = session
+        .prune_prompt_blobs(session.now_micros() - PROMPT_BLOB_RETENTION_MICROS)
+        .expect("prune");
+    assert_eq!(removed, 1, "the aged blob must be removed");
+    assert!(
+        session.latest_prompt().expect("latest").is_none(),
+        "the pruned blob must be gone"
+    );
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(history.len(), 1);
+    assert!(history[0].prompt_hash.is_none());
+    assert_eq!(history[0].content["text"], "the answer");
+}
