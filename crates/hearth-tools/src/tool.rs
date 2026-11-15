@@ -73,8 +73,31 @@ impl ToolError {
 
 impl From<std::io::Error> for ToolError {
     fn from(error: std::io::Error) -> Self {
-        Self::temporary("io", error.to_string())
+        // A deterministic failure such as invalid UTF-8 or permission denied
+        // cannot improve by asking again, so it must not invite a retry.
+        if is_transient(&error) {
+            Self::temporary("io", error.to_string())
+        } else {
+            Self::invalid("io", error.to_string())
+        }
     }
+}
+
+fn is_transient(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        error.kind(),
+        ErrorKind::Interrupted
+            | ErrorKind::WouldBlock
+            | ErrorKind::TimedOut
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::BrokenPipe
+            | ErrorKind::UnexpectedEof
+            | ErrorKind::StorageFull
+            | ErrorKind::ResourceBusy
+    )
 }
 
 /// Something the model can call.
