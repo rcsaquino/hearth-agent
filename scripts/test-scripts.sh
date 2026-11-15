@@ -116,8 +116,16 @@ mkdir -p "$work/ci-repo"
     printf 'ordinary notes\n' > notes.txt
     git add notes.txt
     git commit -qm initial
-    if ! PUBLIC_DENYLIST="" "$root/scripts/ci-secret-scan.sh" >/dev/null 2>&1; then
-        echo "CI secret scan failed without a deny-list secret" >&2
+    if ! PUBLIC_DENYLIST="" HEARTH_FORK_PR=1 "$root/scripts/ci-secret-scan.sh" >/dev/null 2>"$work/fork-notice"; then
+        echo "CI secret scan failed on a fork pull request" >&2
+        exit 1
+    fi
+    if ! grep -q 'fork' "$work/fork-notice"; then
+        echo "CI secret scan did not report the missing deny list" >&2
+        exit 1
+    fi
+    if PUBLIC_DENYLIST="" "$root/scripts/ci-secret-scan.sh" >/dev/null 2>&1; then
+        echo "CI secret scan passed without a deny list" >&2
         exit 1
     fi
 )
