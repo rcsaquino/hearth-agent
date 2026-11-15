@@ -224,8 +224,10 @@ second identity.
   paraphrases with no shared vocabulary. Six of the thirteen automatic misses are
   topics the fixture gives two live answers to.
 - Retrieval p95 is 6.4 ms lexical and 11.3 ms hybrid on a 200-statement store, and
-  24 ms with 4k distractors. A 200k store was not re-measured after the rewrite;
-  the vector scan is linear from about 10 ms at 4k.
+  24 ms with 4k distractors. At 200,000 rows with 200,000 distinct subjects it is
+  9.1 ms at p50 and 221.3 ms at p95 on the reference host, measured by the ignored
+  `the_200k_store_is_measured`. The p95 is driven by fixture questions that share
+  a word with the noise; the hybrid vector scan at that size is still unmeasured.
 - `deepseek-v4.1-flash` is unpriced in this home; cost is recorded as unpriced
   rather than invented.
 - The seven-day soak remains open; the first public release is 0.1.0 alpha. The bounded

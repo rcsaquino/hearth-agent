@@ -2070,3 +2070,17 @@ force-pushing, which is the approval named above and not a step in this change.
   store.
 - `cargo test -p hearth-eval --test memory_scale -- --ignored --nocapture` is the
   measurement. `HEARTH_SCALE_SIZES` selects the sizes.
+
+## 2026-11-16: The 200,000-row retrieval number
+
+- `the_200k_store_is_measured` seeds 200,000 noise rows with distinct subjects and
+  the committed fixture, then times the 195 fixture recalls. It is ignored by
+  default and run with
+  `cargo test -p hearth-eval --test memory_bench the_200k -- --ignored --nocapture`.
+- On the reference host (Intel i3-7100T, two cores and four threads, 7.6 GB,
+  Linux) the lexical path is 9.1 ms at p50, 221.3 ms at p95, and 937.3 ms at p99
+  on 200,170 rows. The 4,200-row gate is unchanged at 100 ms.
+- The p95 is not the vector scan. It is the lexical channel when a question shares
+  a word with the noise, which the synthetic noise makes common. The hybrid vector
+  scan at 200,000 rows is still unmeasured because backfilling 200,000 vectors is
+  not a routine check.
