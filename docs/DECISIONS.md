@@ -1826,12 +1826,24 @@ force-pushing, which is the approval named above and not a step in this change.
   slots.
 - What stays UTC: every stored instant, including the `created_at`-style columns,
   task checkpoints, `last_skill_review`, and the skill frontmatter. The record must
-  not shift when a display preference changes. The transcript tool's citation stamp
-  renders UTC ISO for the same reason, and the recall digest keeps its relative age
-  because the digest is paid on every turn.
+  not shift when a display preference changes. The recall digest keeps its relative
+  age because the digest is paid on every turn, and the runtime note in the same
+  prompt is its absolute anchor.
 - The runtime note is `Current time: <ISO>.` and nothing else. It is the one
   uncached line in every request, so the conversation id and the model name, both
   already implied by the request, no longer ride there.
-- Usage bucketing (`usage.today` and the cache hit rate) still cuts at UTC midnight.
-  Moving that boundary is an accounting decision, not a timestamp rendering, and it
-  is not part of this change.
+- The transcript tool's citation stamp and a bare `as_of` date follow the zone too.
+  The tools are rebuilt for every message, so the zone is resolved per run and a
+  settings change applies on the next message with no new state. A bare `as_of`
+  date names that whole local day, so its boundary is the start of the next local
+  day. The store predicate is start-inclusive and end-exclusive, so that boundary
+  means "the state at the end of that day". A start-of-day boundary would hide
+  everything said on the day the model asked about, and today's date is exactly
+  what the model already has from the runtime note. The tool description grew by one
+  clause to say so, which moved the four schemas from 767 to 776 tokens.
+- `usage.today` and the cache hit rate start at local midnight. The card says "today"
+  and the zone is one settings read away, so a `+08:00` user no longer sees the
+  counter reset at 08:00. The week and month rows stay rolling windows from now,
+  which the zone cannot affect. This is the one place where a number, not just a
+  rendering, depends on the zone, so changing the zone re-reads the current window
+  under the new one. Stored usage rows keep their UTC instants.

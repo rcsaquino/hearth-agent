@@ -18,7 +18,8 @@ daemon restart. Repair only adds: it never rewrites an existing unit and never
 deletes. Timestamps shown to the person or the model are now ISO 8601 with the
 offset in force at that instant, following `identity.timezone`: the runtime note,
 memory `created` and `updated`, the activity and prompt views, the nightly backup
-date, and the backup and skill-review wall-clock slots. Stored instants stay UTC.
+date, the backup and skill-review wall-clock slots, and the day boundary that the
+usage totals and a bare `as_of` date use. Stored instants stay UTC.
 
 Draft 0.24 rebuilds memory. Two parallel stores, a hand-edited `standing.md`, five
 tools with an id-prefix convention, and a per-turn extraction model call are
@@ -1119,8 +1120,11 @@ Four verbs, and each one does one thing.
 | `memory_transcript` | Search the saved conversation record, or read one citation |
 
 There is no store selector, no id-prefix convention, and no tag array. The four
-schemas measure 767 tokens against 1,410 for the five they replace, and the
+schemas measure 776 tokens against 1,410 for the five they replace, and the
 saving is paid on every request.
+
+A bare `as_of` date means that whole local day in `identity.timezone`, so its
+boundary is the start of the next local day. An instant is read exactly as given.
 
 ### 7.9 How we know it works
 
@@ -1698,8 +1702,9 @@ output, cache, and latency totals.
   latency for every model request. Media calls (image, transcription, speech) are
   recorded in the same ledger.
 - The Overview tab combines runtime (daemon, model, thinking, provider, context,
-  turn limit, workspace), usage and cache hit rate for today, the last week, the
-  last month, and all time, work and memory (tasks, helpers, statements, rules
+  turn limit, workspace), usage and cache hit rate for today, counted from local
+  midnight in `identity.timezone`, the last week, the last month, and all time,
+  work and memory (tasks, helpers, statements, rules
   bullets, budgets, maintenance, skill review), provider connections, and recent
   activity. Each usage period shows input tokens, output tokens, and cache reads.
 - The Activity tab follows a live run or task; logs and the usage ledger keep the
