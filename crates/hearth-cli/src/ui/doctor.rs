@@ -31,7 +31,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     }
     match &app.doctor.output {
         Some(output) => {
-            let lines: Vec<&str> = output.lines().skip(app.doctor.scroll).collect();
+            // A scroll past the end must not render a blank pane, and the same
+            // text stays visible while a new check runs.
+            let total = output.lines().count();
+            let offset = app.doctor.scroll.min(total.saturating_sub(1));
+            let lines: Vec<&str> = output.lines().skip(offset).collect();
             frame.render_widget(
                 Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }),
                 inner,

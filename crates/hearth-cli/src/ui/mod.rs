@@ -413,7 +413,7 @@ mod tests {
         app.doctor.output = Some("first line\nsecond line\nthird line".to_owned());
         app.doctor.scroll = 50;
 
-        let text = buffer_text(&app, 100, 20);
+        let text = buffer_text(&app, 100, 32);
         assert!(
             text.contains("third line"),
             "the pane must clamp a scroll past the end: {text}"

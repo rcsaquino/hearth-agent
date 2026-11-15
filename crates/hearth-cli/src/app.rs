@@ -805,12 +805,14 @@ impl App {
             KeyCode::Enter if !self.doctor.running => {
                 self.doctor.running = true;
                 self.doctor.live = false;
+                self.doctor.scroll = 0;
                 self.doctor.output = None;
                 self.workers.spawn_doctor(self.home.clone(), false);
             }
             KeyCode::Char('l') if !self.doctor.running => {
                 self.doctor.running = true;
                 self.doctor.live = true;
+                self.doctor.scroll = 0;
                 self.doctor.output = None;
                 self.workers.spawn_doctor(self.home.clone(), true);
             }
