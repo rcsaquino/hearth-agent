@@ -82,3 +82,52 @@ fn a_snapshot_replaces_an_existing_destination_atomically() {
         SCHEMA_VERSION
     );
 }
+
+#[test]
+fn a_snapshot_is_private_while_it_is_copied() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let (directory, source) = database();
+    {
+        let connection = open(&source).expect("open database");
+        for index in 0..20_000 {
+            connection
+                .execute(
+                    "INSERT INTO meta (key, value) VALUES (?, ?)",
+                    rusqlite::params![format!("row-{index}"), "x".repeat(200)],
+                )
+                .expect("insert");
+        }
+    }
+    let destination = directory.path().join("snapshot.db");
+    let done = Arc::new(AtomicBool::new(false));
+    let watching = Arc::clone(&done);
+    let folder = directory.path().to_path_buf();
+    let watcher = std::thread::spawn(move || {
+        let mut exposed = None;
+        while !watching.load(Ordering::Relaxed) {
+            let Ok(entries) = fs::read_dir(&folder) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let Ok(metadata) = entry.metadata() else {
+                    continue;
+                };
+                let mode = metadata.permissions().mode() & 0o077;
+                if mode != 0 && metadata.is_file() {
+                    exposed = Some((entry.file_name(), mode));
+                }
+            }
+        }
+        exposed
+    });
+    snapshot(&source, &destination).expect("snapshot");
+    done.store(true, Ordering::Relaxed);
+    let exposed = watcher.join().expect("watcher");
+    assert_eq!(
+        exposed, None,
+        "a snapshot file was readable by group or other while it was copied"
+    );
+}
