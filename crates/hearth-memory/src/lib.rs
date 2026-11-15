@@ -678,6 +678,34 @@ mod tests {
     }
 
     #[test]
+    fn every_live_rule_fits_in_the_rules_block() {
+        use crate::errors::Code;
+
+        let (_directory, service) = service();
+        let mut written = 0;
+        for index in 0..200 {
+            match service.write(NewMemory::new(format!("remember rule {index} daily"))
+                .kind(Kind::Rule)
+                .pinned(true)) {
+                Ok(_) => written += 1,
+                Err(error) if error.code == Code::RulesFull => break,
+                Err(error) => panic!("{error}"),
+            }
+        }
+        assert!(written > 1, "the store must admit more than one rule");
+
+        let block = service.rules().expect("rules").text;
+        let shown = block
+            .lines()
+            .filter(|line| line.starts_with("m_"))
+            .count();
+        assert_eq!(
+            shown, written,
+            "the store admitted {written} rules but the block shows {shown}\n{block}"
+        );
+    }
+
+    #[test]
     fn the_digest_never_exceeds_its_budget() {
         let (_directory, service) = service();
         let service = service.with_config(MemoryConfig {
