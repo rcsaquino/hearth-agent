@@ -98,15 +98,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         Ok(_) => {}
         Err(error) => tracing::warn!(%error, "home layout could not be restored"),
     }
-    match crate::service::repair(home) {
-        Ok(Some(report)) if report.repaired => tracing::info!(
-            start = %report.start,
-            unit = %report.unit.display(),
-            "service unit repaired"
-        ),
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "service unit could not be repaired"),
-    }
+    repair_service_unit(home);
 
     let fresh_record = !home.join("hearth.db").exists();
     let harness = Harness::open(home)?;
@@ -288,15 +280,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             if repair_shutdown.load(Ordering::Relaxed) {
                 break;
             }
-            match crate::service::repair(&repair_home) {
-                Ok(Some(report)) if report.repaired => tracing::info!(
-                    start = %report.start,
-                    unit = %report.unit.display(),
-                    "service unit repaired"
-                ),
-                Ok(_) => tracing::debug!("service unit needs no repair"),
-                Err(error) => tracing::warn!(%error, "service unit could not be repaired"),
-            }
+            repair_service_unit(&repair_home);
         }
     });
 
@@ -353,6 +337,19 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     }
     drop(harness);
     Ok(())
+}
+
+/// Put the user unit and its enable link back when the start mode wants them.
+fn repair_service_unit(home: &Path) {
+    match crate::service::repair(home) {
+        Ok(Some(report)) if report.repaired => tracing::info!(
+            start = %report.start,
+            unit = %report.unit.display(),
+            "service unit repaired"
+        ),
+        Ok(_) => tracing::debug!("service unit needs no repair"),
+        Err(error) => tracing::warn!(%error, "service unit could not be repaired"),
+    }
 }
 
 struct TelegramRuntime {
