@@ -126,6 +126,7 @@ fn the_agent_indexes_skills_and_can_load_one() {
             provider_name: "scripted".to_owned(),
             owner: "owner".to_owned(),
             tools,
+            home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
             guidance: String::new(),
         },

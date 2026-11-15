@@ -334,7 +334,7 @@ fn the_review_handler_records_the_night_and_sleeps() {
     let harness = Harness::open(home.path()).expect("harness");
     let session = harness.session();
     let (_scripted, reviewer) = reviewer(session, home.path(), r#"{"changes":[]}"#);
-    let handler = SkillReviewHandler::new(session.clone(), Arc::new(reviewer));
+    let handler = SkillReviewHandler::new(session.clone(), Arc::new(reviewer), home.path());
     let task = ClaimedTask {
         id: "task-skill-review".to_owned(),
         conversation_id: None,

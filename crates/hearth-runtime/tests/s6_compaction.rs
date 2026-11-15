@@ -139,6 +139,7 @@ fn agent(
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
             tools: ToolRegistry::default(),
+            home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
             guidance: String::new(),
         },

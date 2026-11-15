@@ -152,6 +152,7 @@ fn agent(home: &std::path::Path, harness: &Harness, provider: Arc<dyn Provider>)
             provider_name: "scripted".to_owned(),
             owner: "owner".to_owned(),
             tools: ToolRegistry::new(vec![Arc::new(Echo)]),
+            home: home.to_path_buf(),
             spill_dir: home.join("spill"),
             guidance: String::new(),
         },

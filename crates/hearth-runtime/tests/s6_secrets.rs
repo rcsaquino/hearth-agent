@@ -95,6 +95,7 @@ fn config(home: &std::path::Path, tools: ToolRegistry) -> AgentConfig {
         provider_name: "scripted".to_owned(),
         owner: "test-owner".to_owned(),
         tools,
+        home: home.to_path_buf(),
         spill_dir: home.join("spill"),
         guidance: String::new(),
     }

@@ -157,6 +157,7 @@ fn tool_search_loads_a_group_for_the_next_request() {
             provider_name: "scripted".to_owned(),
             owner: "owner".to_owned(),
             tools: core,
+            home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
             guidance: String::new(),
         },

@@ -550,6 +550,7 @@ impl HelperPool {
                 provider_name: self.config.provider_name.clone(),
                 owner: format!("{}:{}", self.config.owner, task_id),
                 tools: built.core,
+                home: self.config.home.clone(),
                 spill_dir: self.config.spill.clone(),
                 guidance: hearth_core::load_guidance(&self.config.home, &self.config.workspace)
                     .text,

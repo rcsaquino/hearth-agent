@@ -1,6 +1,6 @@
 use std::fs;
 
-use hearth_core::{ClaimedTask, Harness, StepOutput};
+use hearth_core::{ClaimedTask, Harness, StepOutput, Zone};
 use hearth_runtime::TaskHandler;
 use hearth_runtime::maintenance::{
     BACKUP_KIND, BackupHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks,
@@ -14,7 +14,7 @@ fn ensure_creates_the_backup_and_consolidation_tasks() {
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("open harness");
     let session = harness.session();
-    ensure_maintenance_tasks(session).expect("ensure maintenance");
+    ensure_maintenance_tasks(session, &Zone::utc()).expect("ensure maintenance");
     assert!(session.has_open_task(BACKUP_KIND).expect("backup task"));
     assert!(
         session

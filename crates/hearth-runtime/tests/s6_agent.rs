@@ -96,6 +96,7 @@ fn agent_with(
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
             tools,
+            home: home.to_path_buf(),
             spill_dir: home.join("spill"),
             guidance: String::new(),
         },
@@ -1337,6 +1338,7 @@ fn the_voice_tag_guidance_is_not_repeated_in_the_runtime_note() {
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
             tools: ToolRegistry::default(),
+            home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
             guidance: String::new(),
         },
@@ -1361,6 +1363,74 @@ fn the_voice_tag_guidance_is_not_repeated_in_the_runtime_note() {
 }
 
 #[test]
+fn the_runtime_note_renders_the_configured_zone_and_only_the_time() {
+    let (home, harness) = harness();
+    let settings = home.path().join("settings.json");
+    fs::write(&settings, r#"{"identity":{"timezone":"Asia/Manila"}}"#).expect("write settings");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&settings, fs::Permissions::from_mode(0o600)).expect("settings mode");
+    }
+
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("hello".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let outcome = agent(home.path(), &harness, Arc::clone(&provider))
+        .run_submission(&submission.id)
+        .expect("run submission");
+    assert_eq!(outcome.answer_text.as_deref(), Some("hello"));
+
+    let requests = provider.requests();
+    let runtime = requests[0].messages.last().expect("runtime note");
+    let text = runtime
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 1, "runtime note was {text:?}");
+    let stamp = lines[0]
+        .strip_prefix("Current time: ")
+        .unwrap_or_else(|| panic!("runtime note was {text:?}"));
+    let stamp = stamp
+        .strip_suffix('.')
+        .unwrap_or_else(|| panic!("runtime note was {text:?}"));
+    let offset = if hearth_core::Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
+        "+08:00"
+    } else {
+        // The host has no Asia/Manila entry, so the zone correctly falls back to UTC.
+        "+00:00"
+    };
+    let local = stamp
+        .strip_suffix(offset)
+        .unwrap_or_else(|| panic!("runtime note was {text:?}"));
+    assert_iso_shape(local);
+    assert!(!text.contains("Conversation:"), "runtime note was {text:?}");
+    assert!(!text.contains("Model:"), "runtime note was {text:?}");
+}
+
+fn assert_iso_shape(value: &str) {
+    let bytes = value.as_bytes();
+    assert_eq!(bytes.len(), 19, "timestamp was {value:?}");
+    for (index, expected) in [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':')] {
+        assert_eq!(bytes[index], expected, "timestamp was {value:?}");
+    }
+    for index in [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18] {
+        assert!(bytes[index].is_ascii_digit(), "timestamp was {value:?}");
+    }
+}
+
+#[test]
 fn project_guidance_reaches_the_prompt() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
@@ -1380,6 +1450,7 @@ fn project_guidance_reaches_the_prompt() {
             provider_name: "scripted".to_owned(),
             owner: "test-owner".to_owned(),
             tools: ToolRegistry::default(),
+            home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
             guidance: "PROJECT RULES".to_owned(),
         },

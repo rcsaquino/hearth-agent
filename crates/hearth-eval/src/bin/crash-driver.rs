@@ -72,6 +72,7 @@ fn agent(args: &[String]) -> Result<()> {
         provider_name: "scripted".to_owned(),
         owner: "crash-driver".to_owned(),
         tools: ToolRegistry::new(vec![]),
+        home: home.clone(),
         spill_dir: home.join("spill"),
         guidance: String::new(),
     };

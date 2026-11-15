@@ -756,6 +756,7 @@ impl TelegramWorker {
                 provider_name: self.provider_name.clone(),
                 owner: format!("daemon:{}:{}", self.pid, submission.id),
                 tools: built.core,
+                home: self.home.clone(),
                 spill_dir: self.spill.clone(),
                 guidance: hearth_core::load_guidance(&self.home, &self.workspace).text,
             },
