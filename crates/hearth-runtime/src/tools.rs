@@ -392,6 +392,31 @@ mod tests {
         let names: Vec<&str> = chain.iter().map(|provider| provider.name()).collect();
         assert_eq!(names, vec!["http"]);
     }
+
+    #[test]
+    fn an_unresolved_environment_key_does_not_join_a_chain() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "web": {
+                "search": {
+                    "order": ["exa", "brave"],
+                    "providers": {"brave": {"api_key": "${HEARTH_TEST_UNRESOLVED_KEY}"}}
+                },
+                "fetch": {
+                    "order": ["tinyfish", "http"],
+                    "providers": {"tinyfish": {"api_key": "${HEARTH_TEST_UNRESOLVED_KEY}"}}
+                }
+            }
+        }))
+        .expect("settings");
+
+        let search = build_web_search(&settings).expect("search chain");
+        assert_eq!(search.provider_names(), vec!["exa"]);
+
+        let fetch = &settings.web.as_ref().expect("web block").fetch;
+        let chain = build_fetch_providers(fetch).expect("fetch chain");
+        let names: Vec<&str> = chain.iter().map(|provider| provider.name()).collect();
+        assert_eq!(names, vec!["http"]);
+    }
 }
 
 /// The ceiling for the always-loaded tool schemas.

@@ -77,6 +77,11 @@ impl WebSearchTool {
             max_results: max_results.clamp(1, 50),
         }
     }
+
+    /// The configured provider names, in call order.
+    pub fn provider_names(&self) -> Vec<&'static str> {
+        self.providers.iter().map(|provider| provider.name()).collect()
+    }
 }
 
 impl Tool for WebSearchTool {
