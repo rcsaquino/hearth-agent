@@ -346,7 +346,7 @@ impl SkillReviewer {
             }
             "promote" => {
                 let skill = self.learned(name)?;
-                if skill.successes == 0 && skill.status != SkillStatus::Draft {
+                if skill.successes == 0 {
                     return Err("promote needs a successful use".to_owned());
                 }
                 self.skills
