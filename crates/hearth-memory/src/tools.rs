@@ -329,7 +329,10 @@ impl Tool for RecallTool {
                 .search(&query, at, count)
                 .map_err(failure)?
         } else {
-            self.memory.service.recent(None, count).map_err(failure)?
+            self.memory
+                .service
+                .recent(at, count)
+                .map_err(failure)?
         };
 
         let selected: Vec<&Memory> = found

@@ -120,7 +120,7 @@ fn every_stored_statement_is_reachable_by_four_paths() {
     let mut pages = 0;
     loop {
         pages += 1;
-        let page = service.recent(limit).expect("browse");
+        let page = service.recent(None, limit).expect("browse");
         let before = seen.len();
         for memory in &page {
             seen.insert(memory.id.clone());

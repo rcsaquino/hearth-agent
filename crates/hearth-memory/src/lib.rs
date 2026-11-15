@@ -435,8 +435,8 @@ impl MemoryService {
     }
 
     /// Recent statements when a caller asks for memory without a topic.
-    pub fn recent(&self, limit: i64) -> Result<Vec<Memory>> {
-        store::recent(&self.inner.session, None, limit)
+    pub fn recent(&self, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
+        store::recent(&self.inner.session, at, limit)
     }
 
     /// A keyword, subject, or entity search, for the tool.
