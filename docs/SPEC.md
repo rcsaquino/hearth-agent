@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.27, plain-language edition
-**Date:** 2026-11-15
+**Status:** Draft 0.28, plain-language edition
+**Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -9,6 +9,17 @@
 ---
 
 ## A note on language
+
+Draft 0.28 moves the clock out of instruction position and bounds the two reads
+that grew with the store. The runtime note is a `<runtime>` line carried by the
+newest input message instead of a final system message, so a continuation turn
+cannot answer the clock as though it were the request. The rules budget is 800
+tokens, and the rules block counts its notice and joining newlines before it spends
+the budget. The task tool no longer takes a per-helper token budget; a helper runs
+on the configured context budget, and `wall_seconds` remains the time bound. The
+Activity tab keeps one pair of keys for the ends of the feed. The recall subject
+list is capped at 4,096 longest names behind a new index, and a 200,000-row lexical
+retrieval measurement is recorded in section 14.
 
 Draft 0.27 refuses a submission that carries no request. A message with no
 non-blank text and no attachment is rejected before it is stored, so it never
