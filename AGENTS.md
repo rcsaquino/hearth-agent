@@ -89,6 +89,7 @@ Useful focused runs:
 cargo test -p hearth-core --test s1_prompt
 cargo test -p hearth-telegram --test s5_telegram
 cargo test -p hearth-runtime --test s6_secrets
+cargo test -p hearth-runtime --test service
 cargo test -p hearth-cli --test s8_telegram_daemon
 cargo test -p hearth-cli --lib
 cargo test -p hearth-cli --test daemon_lifecycle
@@ -174,6 +175,12 @@ Key invariants:
   No memory operation calls a model. The digest reports what it left out.
 - Optional tool groups are lazy. Their schemas enter a request only after
   `tool_search` selects them; the core prompt budget must not grow.
+- Every timestamp shown to the model or the person is ISO 8601 in
+  `identity.timezone`, resolved when it renders so a settings change applies
+  without a restart. Every stored instant stays UTC. See `Zone` in `hearth-core`.
+- A `login` or `startup` install owns the unit and its `default.target.wants`
+  link. `service::repair` recreates either one when it is missing, and repair
+  only ever adds: it never rewrites an existing unit and never deletes.
 - A message is acknowledged by the typing indicator, not a reaction.
 - ElevenLabs speech text is passed verbatim. The model is taught to use sparse
   Eleven v4 tags such as `[warm, composed voice]` and `[softly]`; no SSML.

@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.24, plain-language edition
-**Date:** 2026-11-14
+**Status:** Draft 0.25, plain-language edition
+**Date:** 2026-11-15
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -9,6 +9,16 @@
 ---
 
 ## A note on language
+
+Draft 0.25 makes the systemd user unit self-healing and puts every timestamp in the
+user's zone. A `login` or `startup` install owns both the unit file and its
+`default.target.wants` link, and the daemon plus the TUI start path recreate
+whichever is missing, so a hand-deleted unit comes back within a minute without a
+daemon restart. Repair only adds: it never rewrites an existing unit and never
+deletes. Timestamps shown to the person or the model are now ISO 8601 with the
+offset in force at that instant, following `identity.timezone`: the runtime note,
+memory `created` and `updated`, the activity and prompt views, the nightly backup
+date, and the backup and skill-review wall-clock slots. Stored instants stay UTC.
 
 Draft 0.24 rebuilds memory. Two parallel stores, a hand-edited `standing.md`, five
 tools with an id-prefix convention, and a per-turn extraction model call are
@@ -459,7 +469,12 @@ be mode `0600`; the daemon refuses to start otherwise.
 - The Doctor tab repeats the checks and explains every failure in one sentence.
 - Settings changes are written atomically with mode `0600`; a start-mode change
   restarts the daemon.
-- Every value remains editable in `settings.json`, including `identity.timezone`.
+- A `login` or `startup` install is two files, the unit and its
+  `default.target.wants` link. The daemon and the TUI start path recreate either
+  one when it is missing, so a hand-deleted unit heals without a restart.
+- Every value remains editable in `settings.json`, including `identity.timezone`,
+  which decides how every visible timestamp is rendered and when the nightly jobs
+  run.
 
 ### 3.5 Recovery
 
@@ -792,12 +807,13 @@ Every request is assembled in the same order:
 | L4 skills index | Skill names and one-line descriptions | Rare | 300 |
 | L5 transcript | Entries, summaries, tool results | Append-only | Remaining |
 | L6 recall | Memory retrieved for this input | Every turn | 900 |
-| L7 runtime | Time, chat, budget, model | Every turn | 150 |
+| L7 runtime | Current time in `identity.timezone`, ISO 8601 | Every turn | 150 |
 
 L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
 guidance files, tools, rules, or skills change. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
-message; it never rewrites the prefix. L7 is the last system note.
+message; it never rewrites the prefix. L7 is the last system note and carries only
+the time: the conversation id and the model already travel with the request.
 
 Each section after identity is wrapped in an XML tag: `<project_instructions>`,
 `<rules>`, `<skills>`, `<memory>`, and
@@ -1377,7 +1393,7 @@ Lifecycle:
 - **Archive.** Skills unused for 90 days, or with a failure rate above half after four
   uses, are archived. Nothing is hard-deleted.
 
-A nightly `skill.review` task at 04:30 does the revision and archiving. It creates
+A nightly `skill.review` task at 04:30 in `identity.timezone` does the revision and archiving. It creates
 zero skills when nothing qualifies, and up to three in one night when each one
 independently passes the evidence threshold. Candidates beyond three are
 reconsidered at the next review, so a productive day is not lost and the library
@@ -1565,6 +1581,11 @@ Optional overrides, only when needed:
   values are positive. `tasks.eta_reminder_seconds` is a non-negative delay after the
   expected finish; the default is 1 and the old `eta_reminder_minutes` key is accepted
   but ignored.
+- `identity.timezone` is an IANA zone name. Every timestamp Hearth shows the person
+  or the model is ISO 8601 with the offset in force at that instant, such as
+  `2026-02-14T09:41:05+08:00`, and the nightly backup and skill-review slots are
+  wall-clock times in that zone. A change applies without a restart. Stored
+  instants stay UTC, so the record does not shift when the preference changes.
 - `models.session_header` is optional and names a header sent with the conversation
   id, for gateways that route by session.
 - `models.thinking` is optional and is one of `default`, `off`, `low`, `medium`,
@@ -1574,7 +1595,9 @@ Optional overrides, only when needed:
   URLs, which use the `thinking` toggle instead.
 - `daemon.start` is `tui` (start when Hearth opens), `login` (systemd user unit at
   login), or `startup` (user unit plus linger at boot). `daemon.keep_running`
-  controls whether a TUI-started daemon survives the window closing.
+  controls whether a TUI-started daemon survives the window closing. `login` and
+  `startup` own the unit file and its enable link, and a deleted pair is recreated
+  on the next daemon pass or TUI start.
 - Missing sections take defaults, versioned with the binary. An empty file parses but
   cannot run a conversation until `models` is defined.
 - Inline secrets are permitted, but environment references are recommended.
@@ -1610,7 +1633,7 @@ The exact schema is in `SCHEMA.md`. The tables are `meta`, `commits`,
 
 ### 11.3 Backups and retention
 
-- Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly. Memory lives in that database, so the snapshot is the whole store.
+- Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly. Memory lives in that database, so the snapshot is the whole store. The date, and the 03:00 slot that takes it, are local to `identity.timezone`.
 - Media can be pruned by age, with missing references reported.
 - The Doctor tab verifies integrity, schema version, lock state, settings, and
   provider credentials without printing secrets.
@@ -1623,6 +1646,15 @@ no arguments, and restarts on failure. The TUI Settings tab installs or removes
 the unit and applies the login or startup mode; startup uses
 `loginctl enable-linger`. Release binaries cover Linux x86_64 and aarch64 with
 published SHA-256 checksums, so no Rust toolchain is needed.
+
+An installed unit is two files under `~/.config/systemd/user`: the unit and the
+`default.target.wants/hearth.service` link that makes it start at login. While
+`daemon.start` is `login` or `startup`, the daemon checks both at start and every
+60 seconds, and the TUI start path checks them before it starts anything. Repair
+is additive: it creates a missing unit or link and never rewrites an existing unit
+or deletes anything. It writes files only and does not call `systemctl`, because
+systemd loads a unit on demand and reads the enable link when `default.target`
+comes up.
 
 ---
 
@@ -1939,7 +1971,7 @@ install contains nothing personal.
 | ETA reminder | 1 second after expectation | 5.4 |
 | Tool schema budget | 1,200 tokens | 6.1, 9.1 |
 | Skills index | 300 tokens, 50 active | 6.1, 9.6 |
-| Skill review | 04:30 local time, 0 to 3 new skills | 9.6 |
+| Skill review | 04:30 in `identity.timezone`, 0 to 3 new skills | 9.6 |
 | Learned skills | `skills/learned/` | 9.6 |
 | Skill archive | 90 days unused | 9.6 |
 | Search concurrency | 3 queries at a time | 9.5 |
@@ -1949,7 +1981,7 @@ install contains nothing personal.
 | Fetch order | Jina, then direct HTTP/HTTPS | 9.5 |
 | Memory decay | 5% per 90 days, floor 15 | 7.6 |
 | Archive threshold | 3 years unused and importance below 20 | 7.6 |
-| No scheduled memory pass | 03:30 local time | 7.3 |
+| No scheduled memory pass | 03:30 in `identity.timezone` | 7.3 |
 | Backups | 7 daily, 4 weekly | 11.3 |
 | Idle compaction timer | 60 minutes | 5.5 |
 | Idle compaction threshold | 100k tokens or 65% of usable | 5.5 |

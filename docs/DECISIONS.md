@@ -1770,3 +1770,68 @@ history, where it is still reachable and still public. It is a directory prefix
 rather than a name, an id, or a credential, and the credential-pattern scan is
 clean over the published history. Removing it means rewriting history and
 force-pushing, which is the approval named above and not a step in this change.
+
+## 2026-11-15: The unit and its enable link repair themselves
+
+- `daemon.start` of `login` or `startup` now means both files exist: the unit and
+  `default.target.wants/hearth.service`. The old behavior left the link to
+  `systemctl --user enable`, so a test install, or an operator who deleted the
+  files, had no path back except cycling the daemon controls.
+- `install_at` writes the link itself, so the filesystem holds the whole state of
+  "installed and enabled" and an install with `enable=false` still produces what
+  systemd reads at boot.
+- Three callers converge on the same pass: one synchronous pass at daemon start, a
+  repeat every 60 seconds, and `daemon_client::ensure_with` before it decides how
+  to start. `service::repair` re-reads `daemon.start` from `settings.json` on every
+  pass, so a mode change is picked up without a restart.
+- Repair is additive. It creates a missing unit and a missing or dangling link, and
+  it never rewrites an existing unit or deletes anything. Deletion stays a user
+  action through the Settings tab or `apply_start_mode`, which also drops a
+  dangling link now that one can outlive its unit. A hand-edited unit therefore
+  survives. Two shapes are left alone on purpose: a unit whose `ExecStart` points
+  at a binary a later install moved, and a unit file that names no `HEARTH_HOME`,
+  which may belong to another home. Either one takes a start-mode change from
+  Settings, which rewrites the unit, or deleting it so the next pass recreates it.
+- Repair writes files only. systemd loads a unit on demand and reads the enable link
+  when `default.target` comes up, so the pass must not depend on a reachable user
+  manager. The first shape called `systemctl --user enable` after writing the files
+  and reported a failure with the files already correct, which the end-to-end run
+  caught.
+- Linger for `startup` is checked against `/var/lib/systemd/linger/<user>` before
+  `loginctl enable-linger` runs, so a healthy host does not spawn a process every
+  minute.
+- `StartModeReport.repaired` says whether a pass changed anything, which is what the
+  daemon logs, and `ServiceReport.created` says whether the unit content changed.
+
+## 2026-11-15: Timestamps render in identity.timezone
+
+- `identity.timezone` was stored and shown but never used. Every stamp came from the
+  host offset through `UtcOffset::current_local_offset`, so setting it changed
+  nothing. One `Zone` type in `hearth-core` resolves an IANA name and formats the
+  instant as ISO 8601 with the offset in force at that instant,
+  `2026-02-14T09:41:05+08:00`.
+- Dependency: `jiff` 0.2 with default features off and `std`, `tz-system`, and
+  `tzdb-zoneinfo`. It resolves DST per instant from the system tz database. A
+  hand-written TZif reader would have to reproduce that, including the POSIX footer
+  that governs dates past the last transition. It pulls `jiff-core` and nothing
+  else, and the bundled tz database stays out of the build.
+- The zone is resolved where the stamp is rendered, from `settings.json` through a
+  tolerant `hearth_config::identity_timezone`, instead of being captured at startup.
+  The terminal keeps one `Zone` in `App` and refreshes it whenever it reloads
+  settings, and the prompt view's cache key includes the zone name so a save cannot
+  leave the old offset on screen.
+- What follows the zone: the runtime note, memory `created` and `updated` in the
+  Memory tab, the activity list and detail lines, the Overview activity, the Prompt
+  audit stamps, the nightly backup date, and the backup and skill-review wall-clock
+  slots.
+- What stays UTC: every stored instant, including the `created_at`-style columns,
+  task checkpoints, `last_skill_review`, and the skill frontmatter. The record must
+  not shift when a display preference changes. The transcript tool's citation stamp
+  renders UTC ISO for the same reason, and the recall digest keeps its relative age
+  because the digest is paid on every turn.
+- The runtime note is `Current time: <ISO>.` and nothing else. It is the one
+  uncached line in every request, so the conversation id and the model name, both
+  already implied by the request, no longer ride there.
+- Usage bucketing (`usage.today` and the cache hit rate) still cuts at UTC midnight.
+  Moving that boundary is an accounting decision, not a timestamp rendering, and it
+  is not part of this change.
