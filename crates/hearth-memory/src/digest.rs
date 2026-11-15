@@ -288,6 +288,7 @@ pub fn trim_coverage(coverage: &mut Coverage) -> bool {
 }
 
 /// The token cost of rendering a rule line.
+#[cfg(test)]
 pub fn rule_cost(memory: &Memory) -> u64 {
     hearth_model::estimate_tokens(&rule_line(&memory.id, &memory.content)).max(1) as u64
 }
@@ -296,6 +297,7 @@ pub fn rule_cost(memory: &Memory) -> u64 {
 ///
 /// The write-time check and the render must measure the same line, so the
 /// placeholder id has the shape of a real one.
+#[cfg(test)]
 pub fn rule_cost_text(content: &str) -> u64 {
     hearth_model::estimate_tokens(&rule_line(crate::store::ID_SAMPLE, content)).max(1) as u64
 }
