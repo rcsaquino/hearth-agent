@@ -622,9 +622,8 @@ fn an_image_block_is_encoded_and_downscaled() {
 
 #[test]
 fn a_stream_that_ends_without_a_terminal_chunk_is_an_error() {
-    let body = concat!(
-        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
-    );
+    let body =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n";
     let server = FakeServer::start(vec![TestResponse::raw(
         200,
         "OK",

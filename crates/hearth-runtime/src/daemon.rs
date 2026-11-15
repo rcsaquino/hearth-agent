@@ -108,6 +108,9 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     let session = harness.session().clone();
     let started = Instant::now();
     let recovery = session.recover_interrupted()?;
+    // The lease pass also wakes tasks whose sleep ended while the process was
+    // down, which is how a due reminder becomes claimable again.
+    let woken = session.recover_tasks()?;
     if let Ok(pruned) = session.prune_helpers(
         settings.tasks.retention_days,
         settings.tasks.retention_runs,
@@ -116,8 +119,9 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         tracing::info!(pruned, "helper retention complete");
     }
     tracing::info!(
-        requeued = recovery.requeued,
-        poisoned = recovery.poisoned,
+        requeued = recovery.requeued + woken.requeued,
+        woken = woken.woken,
+        poisoned = recovery.poisoned + woken.poisoned,
         woken = recovery.woken,
         "task recovery complete"
     );

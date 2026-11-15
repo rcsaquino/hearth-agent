@@ -439,6 +439,8 @@ impl hearth_telegram::StopHandler for RecordingStop {
         self.calls.lock().expect("stop calls").push(chat_id);
         true
     }
+
+    fn admit(&self, _chat_id: i64) {}
 }
 
 #[test]

@@ -312,7 +312,7 @@ fn main() -> Result<()> {
         let mut seeded: Vec<String> = vec![String::new(); jobs.len()];
         let mut pending = 0usize;
         for (slot, (position, _, _, _, _)) in jobs.iter().enumerate() {
-            let key = cache_key(&model, &sample, *position);
+            let key = cache_key(&model, sample, *position);
             if let Some(text) = cache.get(&key) {
                 seeded[slot] = text.clone();
             } else {
@@ -371,10 +371,7 @@ fn main() -> Result<()> {
         let failed = failures.load(Ordering::Relaxed);
         for (slot, (position, _, _, _, _)) in jobs.iter().enumerate() {
             if !answers[slot].is_empty() {
-                cache.insert(
-                    cache_key(&model, &sample, *position),
-                    answers[slot].clone(),
-                );
+                cache.insert(cache_key(&model, sample, *position), answers[slot].clone());
             }
         }
         if let Ok(text) = serde_json::to_string_pretty(&cache) {

@@ -5,7 +5,6 @@ use hearth_runtime::TaskHandler;
 use hearth_runtime::maintenance::{
     BACKUP_KIND, BackupHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks,
 };
-use hearth_storage::open;
 use serde_json::json;
 use tempfile::TempDir;
 
