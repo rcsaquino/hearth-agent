@@ -1,7 +1,7 @@
 use std::fs;
 
 use hearth_runtime::service::{
-    ServiceError, apply_start_mode_at, install_at, status_at, uninstall_at,
+    ServiceError, apply_start_mode_at, install_at, repair_at, status_at, uninstall_at,
 };
 use tempfile::TempDir;
 
@@ -167,4 +167,121 @@ fn uninstall_removes_the_enable_link() {
     uninstall_at(config.path(), false).expect("uninstall");
     assert!(!config.path().join("hearth.service").exists());
     assert!(!link.exists(), "the enable link survived uninstall");
+}
+
+fn write_start_settings(home: &std::path::Path, start: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = home.join("settings.json");
+    fs::write(&path, format!("{{\"daemon\":{{\"start\":\"{start}\"}}}}")).expect("settings");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("settings mode");
+}
+
+#[test]
+fn repairing_creates_a_missing_unit_and_link() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    write_start_settings(home.path(), "login");
+
+    let report = repair_at(home.path(), config.path(), false)
+        .expect("repair")
+        .expect("login report");
+    assert!(
+        report.repaired,
+        "a missing unit must be reported as repaired"
+    );
+    assert_eq!(report.start, "login");
+
+    let unit = config.path().join("hearth.service");
+    let link = enable_link(config.path());
+    assert_eq!(report.unit, unit);
+    assert!(unit.is_file(), "the unit was not created");
+    assert!(link.exists(), "the enable link was not created");
+    assert_eq!(fs::read_link(&link).expect("read link"), unit);
+}
+
+#[test]
+fn repairing_restores_a_deleted_link_without_rewriting_the_unit() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    write_start_settings(home.path(), "login");
+    let installed = install_at(home.path(), config.path(), false, false).expect("install");
+    let unit = installed.unit;
+    let bytes = fs::read(&unit).expect("unit bytes");
+    let modified = fs::metadata(&unit)
+        .expect("unit metadata")
+        .modified()
+        .expect("mtime");
+
+    let link = enable_link(config.path());
+    fs::remove_file(&link).expect("remove link");
+    let report = repair_at(home.path(), config.path(), false)
+        .expect("repair")
+        .expect("login report");
+    assert!(
+        report.repaired,
+        "a missing link must be reported as repaired"
+    );
+    assert_eq!(fs::read_link(&link).expect("read link"), unit);
+    assert_eq!(fs::read(&unit).expect("unit bytes"), bytes);
+    assert_eq!(
+        fs::metadata(&unit)
+            .expect("unit metadata")
+            .modified()
+            .expect("mtime"),
+        modified,
+        "repair rewrote an existing unit"
+    );
+}
+
+#[test]
+fn repairing_does_nothing_for_the_tui_mode() {
+    let home = TempDir::new().expect("temp home");
+    let config = TempDir::new().expect("systemd config");
+    write_start_settings(home.path(), "tui");
+    let installed = install_at(home.path(), config.path(), false, false).expect("install");
+    let unit = installed.unit;
+    let link = enable_link(config.path());
+    let bytes = fs::read(&unit).expect("unit bytes");
+    let modified = fs::metadata(&unit)
+        .expect("unit metadata")
+        .modified()
+        .expect("mtime");
+    let target = fs::read_link(&link).expect("read link");
+
+    let report = repair_at(home.path(), config.path(), false).expect("repair");
+    assert!(
+        report.is_none(),
+        "tui mode must not report a service change"
+    );
+    assert_eq!(fs::read(&unit).expect("unit bytes"), bytes);
+    assert_eq!(
+        fs::metadata(&unit)
+            .expect("unit metadata")
+            .modified()
+            .expect("mtime"),
+        modified
+    );
+    assert_eq!(fs::read_link(&link).expect("read link"), target);
+}
+
+#[test]
+fn repairing_leaves_a_unit_that_names_another_home_alone() {
+    let home = TempDir::new().expect("temp home");
+    let other = TempDir::new().expect("other home");
+    let config = TempDir::new().expect("systemd config");
+    write_start_settings(home.path(), "login");
+
+    let unit = config.path().join("hearth.service");
+    let content = format!(
+        "[Service]\nEnvironment=\"HEARTH_HOME={}\"\n",
+        other.path().display()
+    );
+    fs::write(&unit, &content).expect("other unit");
+    let report = repair_at(home.path(), config.path(), false).expect("repair");
+    assert!(
+        report.is_none(),
+        "a unit for another home must be left alone"
+    );
+    assert_eq!(fs::read_to_string(&unit).expect("unit"), content);
+    assert!(!enable_link(config.path()).exists());
 }
