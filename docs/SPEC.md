@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.25, plain-language edition
+**Status:** Draft 0.26, plain-language edition
 **Date:** 2026-11-15
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,11 @@
 ---
 
 ## A note on language
+
+Draft 0.26 keeps an unpinned write from retiring a pinned rule. A statement that
+repeats a live rule without naming it as `supersedes` returns the rule unchanged,
+so the automatic extraction path cannot silently demote a rule the user pinned.
+Only an explicit replacement closes the rule's window and clears its pin.
 
 Draft 0.25 makes the systemd user unit self-healing and puts every timestamp in the
 user's zone. A `login` or `startup` install owns both the unit file and its
@@ -1010,7 +1015,9 @@ in one JSON object. This replaces a second request over the same text.
 
 Write rules:
 
-- Identical content is refused and the existing row is returned.
+- Identical content is refused and the existing row is returned. A live pinned
+  rule wins over an unpinned copy of the same words, so the copy is refused and
+  the rule stays current.
 - A near duplicate about the same subject is refused the same way, which is what
   stops eight weeks of "ordered pad thai" from becoming eight rows. A duplicate
   is judged by token containment, and a statement that swaps its own subject is
@@ -1097,9 +1104,10 @@ text moves.
   prefix and the Prompt tab names `rules` as the changed layer.
 - A statement that is not a rule cannot be pinned. Pinning a fact would repeat it
   on every turn, which is the rule's job.
-- A pin belongs to the live statement. Retiring a rule clears its pin and closes
-  its window, so it leaves the block and stops spending the budget. A write that
-  arrives already retired cannot be pinned.
+- A pin belongs to the live statement. A write that names a rule as `supersedes`
+  retires it: the window closes and the pin clears, so it leaves the block and
+  stops spending the budget. An unpinned copy that does not name the row returns
+  the rule unchanged. A write that arrives already retired cannot be pinned.
 
 ### 7.7 Forgetting and secrets
 

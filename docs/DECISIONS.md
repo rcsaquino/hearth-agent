@@ -1866,3 +1866,19 @@ force-pushing, which is the approval named above and not a step in this change.
 - The Memory tab marks a retired row with a hollow circle and `(retired)` in the
   detail pane, so the operator surface does not show a closed window as a live
   rule. The row is still kept: `memory_recall(id)` and an `as_of` read reach it.
+
+## 2026-11-15: An unpinned write cannot retire a pinned rule
+
+- This replaces the demotion sentence in "A pin belongs to a live statement." A
+  write that repeats a live pinned rule without naming it as `supersedes`
+  returns that rule unchanged. It does not close the row, clear the pin, or
+  insert a second current copy.
+- Only an explicit `supersedes` retires a pinned rule. The caller that names the
+  row has decided to replace it. An automatic extractor, a summary pass, or a
+  repeated statement has not.
+- The cause was the fingerprint lookup after the exact-duplicate check. The
+  exact check includes kind and pin, so an unpinned copy fell through to a
+  fingerprint-only lookup that closed the pinned row. The write now refuses to
+  close a pinned row it was not asked to replace.
+- The rules read still requires a live row, and retirement still clears the pin.
+  Migration 0009 remains the repair for stores written before that rule.
