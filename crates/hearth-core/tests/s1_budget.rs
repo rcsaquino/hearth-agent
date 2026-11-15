@@ -61,3 +61,31 @@ fn an_over_budget_segment_is_named() {
     let counts = TokenCounts::new(900, 30, 40, 0, 0, 50, 60, 70);
     assert_eq!(counts.over_budget(), vec!["identity"]);
 }
+
+#[test]
+fn an_image_carries_its_provider_cost() {
+    use hearth_core::{Harness, Save};
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Photo", "local", "local:photo")
+        .expect("conversation");
+    session
+        .save(Save::new(&conversation.id).entry(
+            "user",
+            json!({"type": "image", "path": "/home/u/media/x.jpg", "mime": "image/jpeg"}),
+        ))
+        .expect("save image entry");
+
+    let history = session.history(&conversation.id).expect("history");
+    let entry = history.first().expect("the image entry");
+    assert!(
+        entry.tokens_est >= 3_000,
+        "an image must be counted at its provider cost, got {}",
+        entry.tokens_est
+    );
+}
