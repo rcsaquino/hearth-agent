@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.41, plain-language edition
+**Status:** Draft 0.42, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,12 @@
 ---
 
 ## A note on language
+
+Draft 0.42 gives every memory one 150-character content limit, pinned rules
+included. A longer write is refused and names its length and the limit; nothing
+is truncated. Recall now defaults to 700 tokens and at most 10 items, and a new
+memory fits its recall line whole. The 400-character rule cap is gone, while a
+400-character read-side guard still protects a row written before this limit.
 
 Draft 0.41 removes the prompt segment warnings. The per-layer token counts stay
 in the saved prompt document and in the Prompt tab, but no count is compared with
@@ -107,8 +113,8 @@ prefix hash, and cache peers. System layers show once and collapse with `s`,
 relevant memory is shown per request, a new session starts a fresh transcript,
 and a spinner says when a turn is in flight. The saved prompt document marks the
 message that carried the runtime note instead of storing the note as a peer
-segment. The skills index no longer has a token cap: the 300-token budget is a
-warning, and only the 50-active count archives a learned skill. The Overview
+segment. The skills index no longer has a token cap: the 300-token warning budget was
+removed in Draft 0.41, and only the 50-active count archives a learned skill. The Overview
 skills row reports the active count and the index cost instead of the review
 stamp.
 
@@ -162,7 +168,7 @@ prompt export and the daemon status where it is useful.
 
 Draft 0.22 makes `settings.json` the only bootstrap file. When the home loses its folders, `SOUL.md`, or an empty `HEARTH.md`, the daemon recreates them from the settings on the next start, so a home holding only a valid `settings.json` comes back as if onboarding had just finished. Existing files are never overwritten, and the repair runs only after the daemon holds its lock, so a systemd unit and a TUI-spawned daemon cannot both write.
 
-Draft 0.21 adds local hybrid memory: the configured item and token budgets now bound automatic recall, snippets replace full rows, and tags stay out of the injected text. Long-term memory gains INT8 vectors from the local `bekko-embedding-v1-a8m` model, fused with FTS5 by reciprocal rank. A missing model falls back to lexical recall. New writes are limited to 2,000 characters and 8 tags, credential-shaped content is refused, durable cues trigger a background extraction pass, and Overview reports whether recall is lexical or hybrid. Nightly backups now include the memory stores.
+Draft 0.21 adds local hybrid memory: the configured item and token budgets now bound automatic recall, snippets replace full rows, and tags stay out of the injected text. Long-term memory gains INT8 vectors from the local `bekko-embedding-v1-a8m` model, fused with FTS5 by reciprocal rank. A missing model falls back to lexical recall. New writes were limited to 2,000 characters and 8 tags (the content limit is now 150; see Draft 0.42), credential-shaped content is refused, durable cues trigger a background extraction pass, and Overview reports whether recall is lexical or hybrid. Nightly backups now include the memory stores.
 
 Draft 0.20 replaces the two-card Prompt audit with one live, scrollable session export that shows every prompt layer, tool declaration, message, reply, and usage line in full. A reply or settled run refreshes the open view, and a coalesced follow-up read keeps the final saved answer from being missed. `[` and `]` walk older snapshots, and `f` toggles the live tail.
 
@@ -1145,7 +1151,7 @@ One row is one statement the user would recognise as one thing they said.
 |---|---|
 | `id` | Stable `m_` id |
 | `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, or `fact` |
-| `content` | One statement; a write is capped at 2,000 characters |
+| `content` | One statement; a write is capped at 150 characters |
 | `subject` | The normalised person, project, or thing it is about |
 | `pinned` | Injects the statement as a rule; only valid with `kind = rule`, and only while the row is current |
 | `source_kind`, `source_entry` | Provenance, down to the entry the user typed |
@@ -1205,8 +1211,10 @@ Write rules:
 - A pinned rule must fit the rules budget; a write that would overflow it is
   refused with the current rules listed, so the model can replace one.
 - Credential-shaped content is refused before it reaches the table.
-- A rule is capped at 400 characters, which is also the longest rule line the
-  prompt shows, so the budget check and the render measure the same text.
+- Every statement, a pinned rule included, is capped at 150 characters after
+  trimming. A longer write is refused, names its length and the limit, and saves
+  nothing. A new memory fits its recall line whole; only a row written before
+  the limit is clipped for display.
 
 ### 7.4 How memories come back
 
@@ -1266,7 +1274,7 @@ that silently shows six of fourteen facts teaches the model that six is all
 there is. Naming the remainder, and the call that fetches it, is the difference
 between a bounded digest and a bounded memory.
 
-Default budgets are 800 tokens for rules and 300 for the digest, with at most 12
+Default budgets are 800 tokens for rules and 700 for the digest, with at most 10
 statements. The digest is measured at 139 tokens at the 95th percentile on the
 benchmark.
 
@@ -1278,6 +1286,8 @@ text moves.
 
 - The block is capped at 800 tokens. A write that would exceed the cap is
   refused, not silently evicted.
+- Every rule uses the one 150-character content limit. A row written before
+  that limit is clipped at 400 characters for display, with an ellipsis.
 - Any rule that does not fit the render is named as `N more rules were not
   shown`, so a hand-edited store cannot hide content silently.
 - The content hash is the rules version, so a change invalidates the cached
@@ -1740,8 +1750,8 @@ Optional overrides, only when needed:
 | `models.max_output_tokens` | `32000` | Local reply reserve; not sent |
 | `tasks.eta_reminder_seconds` | `1` | Delay after a task’s expected finish before its reminder |
 | `memory.rules_max_tokens` | `800` | Rules budget, in the cached prefix |
-| `memory.recall_max_tokens` | `300` | Per-turn digest token budget |
-| `memory.recall_max_items` | `12` | Per-turn digest item cap |
+| `memory.recall_max_tokens` | `700` | Per-turn digest token budget |
+| `memory.recall_max_items` | `10` | Per-turn digest item cap |
 | `memory.embeddings` | `true` | Request the local hybrid recall path; lexical fallback remains active |
 | `memory.embedding_model_dir` | `models/bekko-embedding-v1-a8m` | Local embedding model directory |
 | `media.image.model` | `openai/gpt-image-2.6-sunburst` | Image model |
@@ -2156,7 +2166,7 @@ install contains nothing personal.
 | Database mode | `0600` | 11.1 |
 | Save durability | `synchronous=FULL` | 4.4 |
 | Read connections | 4 | 11.1 |
-| Recall budget | 300 tokens, 12 items | 7.4 |
+| Recall budget | 700 tokens, 10 items | 7.4 |
 | Context window | 128,000 tokens | 6.2 |
 | Reserved reply | 32,000 tokens local reserve | 6.2 |
 | Soft compaction | 65% of usable context | 5.5 |

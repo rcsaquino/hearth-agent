@@ -1514,7 +1514,8 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 - New and edited long-term memories are limited to 2,000 characters and 8 tags
   through the tools. The 20,000-character storage cap remains for archived or
   imported rows. Standing bullets are also limited to 2,000 characters through
-  the tool path.
+  the tool path. (Superseded on 2026-11-16: every memory has one 150-character
+  limit, and recall defaults to 700 tokens and 10 items. See that entry.)
 - Credential-shaped content is rejected before it reaches the long-term or
   standing store, using the shared `hearth_core::secrets` matcher.
 - The daemon status exposes `memory_recall` with the mode, configured and active
@@ -1693,7 +1694,9 @@ statement and its neighbours lands on a tie.
 message is the most expensive place in the prompt, so the digest is terse and
 defaults to 300 tokens. A terse digest that hides what it left out teaches the
 model that the subset is the whole store, so it names the hidden counts per
-subject and the call that fetches them. Measured at 116 tokens at p95.
+subject and the call that fetches them. Measured at 116 tokens at p95. (The
+default is 700 tokens and 10 items since 2026-11-16; see that entry. The current
+benchmark measures 139 tokens at p95.)
 
 **An as-of read skips the vector channel.** The vector index holds current
 statements only, so mixing today's meaning into a question about March answers the
@@ -2022,7 +2025,9 @@ force-pushing, which is the approval named above and not a step in this change.
 - The write check and the render share `digest::rules_fit`, so a rule admitted by
   the write is a rule the block shows. The notice line and the joining newlines
   are inside the budget.
-- `RULE_CHARS` stays 400 characters as the rule line's read-side guard.
+- `RULE_CHARS` stays 400 characters as the rule line's read-side guard. The
+  400-character rule cap is gone; the guard only protects an older row, and every
+  new rule uses the 150-character content limit.
 - The prompt rules warning copy, `SEGMENT_RULES`, was removed on 2026-11-16; see
   that entry.
 
@@ -2466,3 +2471,31 @@ just after.
 - This supersedes the warning surface in "Every segment budget is reported to the
   person" and the prompt copies of the budgets in "M5a context budgets", "The
   rules budget is 800 tokens", and "The skills index has no token cap".
+
+## 2026-11-16: Every memory is capped at 150 characters
+
+- `store::CONTENT_LIMIT` is the one new-write limit: 150 characters counted after
+  trimming. It applies to a fact, a preference, and a pinned rule alike.
+  `RULE_LIMIT` is gone, so a rule no longer has a second size. The error names the
+  actual length and the limit and says to split the statement.
+- The store is the final gate. The extractor, the tool path, the legacy import,
+  and any direct service write all reach `store::validate`. A refused write saves
+  nothing, and the tool returns `invalid_input`. The `memory_save` schema names
+  the same 150-character limit.
+- `digest::LINE_CHARS` is 150, so a newly written memory is shown whole. Only a
+  row written before the limit is clipped, with an ellipsis.
+- `MemoryConfig` defaults to 700 recall tokens and at most 10 items, and the
+  settings defaults match. Ten 150-character rows fit in the ordinary case. The
+  700 is a maximum, not a reservation: a long subject or coverage line can still
+  reduce the count.
+- `extract::MAX_CHARS` is 150 and `MESSAGE_CHARS` is a separate 1,600, so a long
+  user message is still scanned for a shorter statement.
+- `legacy::read_bullets` no longer pre-filters by length. An over-limit bullet
+  reaches the store, is refused, and counts as skipped; the old files are kept so
+  the import can retry.
+- Existing rows above 150 are not rewritten or deleted. The strict check applies
+  to new writes, and the rules render keeps `RULE_CHARS` at 400 as its read-side
+  guard.
+- The 800-token rules block stays a separate aggregate budget. A 150-character
+  rule consumes its share of that block, and `check_rules_budget` still refuses a
+  write that would overflow it.
