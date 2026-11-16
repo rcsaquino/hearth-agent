@@ -1237,6 +1237,23 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
   validation, optional media setup, friendly setting values, memory inspection and
   rendering, file editing, user-skill creation, and the new tab routing.
 
+## 2026-11-16: The Memory tab groups by pin state
+
+- `inspect::list_memories` orders by one `CASE` group key: current pinned rows
+  first, current unpinned rows second, and rows with a closed window last. Within
+  a group the keys stay `updated_at` descending and `rowid` descending. The old
+  order had two groups because every unpinned row and every retired row shared
+  the recency key, so a recently updated retired row could lead a current fact.
+- The group key lives in the query, not in `MemoryView::filtered`. The query
+  applies the 1,000-row limit, so sorting only the returned vector could not
+  bring back a current row the limit had dropped. Filtering preserves the query
+  order and never moves an active row below an inactive one.
+- The status flags, glyphs, `(retired)` label, and detail pane are unchanged. A
+  row that was pinned before its window closed is inactive, not pinned, because
+  the query already clears the displayed pin for it.
+- Sorting by content, kind, subject, or status text was rejected: the only keys
+  are the group and the existing recency order.
+
 ## 2026-11-11: Doctor live checks send a session id
 
 - The Doctor live provider check now sends a generated session id. Providers that

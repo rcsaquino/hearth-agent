@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.42, plain-language edition
+**Status:** Draft 0.43, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,10 @@
 ---
 
 ## A note on language
+
+Draft 0.43 groups the Memory tab: pinned rows first, then current rows, then
+closed windows, each group newest first. A retired row with a newer update time
+can no longer sit above a current statement.
 
 Draft 0.42 gives every memory one 150-character content limit, pinned rules
 included. A longer write is refused and names its length and the limit; nothing
@@ -461,7 +465,7 @@ terminal application. There are no subcommands or flags.
 | Onboarding | First run replaces `hearth init`: bot token, user id, provider, API key, model picker, thinking, agent name, optional media, start mode, keep-running. |
 | Overview | Runtime, model, thinking, context, usage and cache, tasks, memory, Telegram, providers, media, workspace, and recent activity. |
 | Activity | The live event stream from the daemon, one row per whole event, with a readable event detail. |
-| Memory | Browse and search saved memory records. |
+| Memory | Browse and search saved memory records, pinned first, then current, then closed windows, each newest first. |
 | Skills | Browse skills with automatic, scrollable body preview; create and edit user skills; learned skills stay read-only. |
 | Prompt | A live conversation: the saved requests merged into one transcript, every prompt layer and message in its role bar, one key that folds the chat to five-line previews, memory per request, and the turn being written at the tail. |
 | Doctor | Offline and live checks. |
