@@ -113,8 +113,8 @@ fn runtime_note_text(request: &ChatRequest) -> String {
         .iter()
         .flat_map(|message| message.blocks.iter())
         .find_map(|block| match block {
-            ContentBlock::Text(text) if text.contains("Current time:") => Some(text.clone()),
-            ContentBlock::ToolResult { content, .. } if content.contains("Current time:") => {
+            ContentBlock::Text(text) if text.contains("<current_time>") => Some(text.clone()),
+            ContentBlock::ToolResult { content, .. } if content.contains("<current_time>") => {
                 Some(content.clone())
             }
             _ => None,
@@ -1476,16 +1476,13 @@ fn the_runtime_note_renders_the_configured_zone_and_only_the_time() {
     let requests = provider.requests();
     let text = runtime_note_text(&requests[0]);
     let text = text.trim();
-    let text = text.strip_prefix("<runtime>").unwrap_or(text);
-    let text = text.strip_suffix("</runtime>").unwrap_or(text);
+    let text = text.strip_prefix("<current_time>").unwrap_or(text);
+    let text = text.strip_suffix("</current_time>").unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 1, "runtime note was {text:?}");
-    let stamp = lines[0]
-        .strip_prefix("Current time: ")
-        .unwrap_or_else(|| panic!("runtime note was {text:?}"));
-    let stamp = stamp
-        .strip_suffix('.')
-        .unwrap_or_else(|| panic!("runtime note was {text:?}"));
+    let stamp = lines[0];
+    assert!(!stamp.ends_with('.'), "runtime note was {text:?}");
+    assert!(!text.contains("Current time:"), "runtime note was {text:?}");
     let offset = if hearth_core::Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
         "+08:00"
     } else {
@@ -1546,14 +1543,14 @@ fn a_continuation_turn_carries_the_clock_on_the_tool_result() {
         "a continuation must end with the new tool result, not a system note"
     );
     let carried = runtime_note_text(second);
-    assert!(carried.contains("Current time:"), "{carried}");
+    assert!(carried.contains("<current_time>"), "{carried}");
     assert!(
         second.messages.iter().all(|message| {
             message.role != Role::System
                 || !message
                     .blocks
                     .iter()
-                    .all(|block| matches!(block, ContentBlock::Text(text) if text.contains("Current time:")))
+                    .all(|block| matches!(block, ContentBlock::Text(text) if text.contains("<current_time>")))
         }),
         "the clock must not be a standalone system instruction"
     );
