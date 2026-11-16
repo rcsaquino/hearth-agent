@@ -951,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unused_skill_shows_no_success_rate() {
+    fn an_unused_skill_shows_unused() {
         let (home, mut app) = initialized_app();
         std::fs::create_dir_all(home.path().join("skills")).expect("skills dir");
         std::fs::write(
@@ -973,12 +973,20 @@ mod tests {
         app.tab = Tab::Skills;
         app.skills.reload();
         let text = buffer_text(&app, 100, 40);
+        let row = |needle: &str| -> String {
+            text.lines()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle} in {text}"))
+                .to_owned()
+        };
+        let user = row("simple [user]");
+        let learned = row("triage [learned]");
         assert!(
-            text.contains("simple [user]    —"),
-            "a user skill has no measured rate: {text}"
+            user.contains("(unused)"),
+            "a user skill has no rate: {text}"
         );
         assert!(
-            text.contains("triage [learned]    —"),
+            learned.contains("(unused)"),
             "a skill that has never run has no rate: {text}"
         );
         assert!(!text.contains("0%"), "a zero is not a rate here: {text}");
@@ -987,13 +995,29 @@ mod tests {
         library.record_outcome("triage", true).expect("success");
         app.skills.reload();
         let text = buffer_text(&app, 100, 40);
+        let row = |needle: &str| -> String {
+            text.lines()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle} in {text}"))
+                .to_owned()
+        };
+        let user = row("simple [user]");
+        let learned = row("triage [learned]");
         assert!(
-            text.contains("triage [learned] 100%"),
+            learned.contains("100%"),
             "a successful run has a rate: {text}"
         );
         assert!(
-            text.contains("simple [user]    —"),
+            user.contains("(unused)"),
             "a user skill never gains a rate: {text}"
+        );
+        let unused_at = user.find("(unused)").expect("unused");
+        let percent_at = learned.find("100%").expect("percent");
+        let unused_end = user[..unused_at].chars().count() + "(unused)".chars().count();
+        let percent_end = learned[..percent_at].chars().count() + "100%".chars().count();
+        assert_eq!(
+            unused_end, percent_end,
+            "the percentage and (unused) must share a column: {user:?} {learned:?}"
         );
     }
 
