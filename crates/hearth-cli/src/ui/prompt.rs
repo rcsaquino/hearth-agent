@@ -1094,6 +1094,123 @@ mod tests {
         vec![newest, oldest]
     }
 
+    /// A body of `lines` distinct lines, named so tests can find one.
+    fn block_body(name: &str, lines: usize) -> String {
+        (0..lines)
+            .map(|index| format!("{name} line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn a_long_block_collapses_to_a_stub_and_opens_with_enter() {
+        let body = block_body("BODY", 40);
+        let identity = block_body("IDENTITY", 40);
+        let mut exchanges = vec![json!({
+            "request": request(
+                json!([{"role": "user", "blocks": [{"type": "text", "text": body}]}]),
+                500
+            ),
+            "prompt_hash": "hash-collapse",
+            "requested_at": 1,
+            "response": Value::Null,
+            "usage": Value::Null
+        })];
+        exchanges[0]["request"]["identity"] = json!(identity);
+        let (_home, mut app) = prompt_app(exchanges);
+        let _ = rendered(&app, 100, 40);
+        let lines = cache_lines(&app);
+        assert!(
+            lines.iter().any(|line| line.contains("BODY line 0")),
+            "a collapsed block keeps its first line as a preview: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("BODY line 39")),
+            "the long body is collapsed: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("hidden") && line.contains("enter")),
+            "the stub names the hidden lines and the key: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("IDENTITY line 39")),
+            "a system layer is not a message block: {lines:?}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let _ = rendered(&app, 100, 80);
+        let lines = cache_lines(&app);
+        assert!(
+            lines.iter().any(|line| line.contains("BODY line 39")),
+            "enter opens the selected block: {lines:?}"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let _ = rendered(&app, 100, 40);
+        let lines = cache_lines(&app);
+        assert!(
+            !lines.iter().any(|line| line.contains("BODY line 39")),
+            "enter closes it again: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn tab_moves_the_block_cursor_and_shift_tab_moves_it_back() {
+        let alpha = block_body("ALPHA", 30);
+        let beta = block_body("BETA", 30);
+        let exchanges = vec![json!({
+            "request": request(
+                json!([
+                    {"role": "user", "blocks": [{"type": "text", "text": alpha}]},
+                    {"role": "user", "blocks": [{"type": "text", "text": beta}]}
+                ]),
+                500
+            ),
+            "prompt_hash": "hash-cursor",
+            "requested_at": 1,
+            "response": Value::Null,
+            "usage": Value::Null
+        })];
+        let (_home, mut app) = prompt_app(exchanges);
+        let _ = rendered(&app, 100, 40);
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let _ = rendered(&app, 100, 40);
+        let lines = cache_lines(&app);
+        assert!(
+            lines.iter().any(|line| line.contains("ALPHA line 29")),
+            "the first long block opens: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("BETA line 29")),
+            "the second block stays closed: {lines:?}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let _ = rendered(&app, 100, 40);
+        let lines = cache_lines(&app);
+        assert!(
+            lines.iter().any(|line| line.contains("BETA line 29")),
+            "tab reaches the next long block: {lines:?}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let _ = rendered(&app, 100, 40);
+        let lines = cache_lines(&app);
+        assert!(
+            !lines.iter().any(|line| line.contains("ALPHA line 29")),
+            "shift-tab returns to the first block and enter closes it: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("BETA line 29")),
+            "the second block stays open: {lines:?}"
+        );
+    }
+
     fn cache_lines(app: &App) -> Vec<String> {
         let cache = app.prompt.cache.borrow();
         let cache = cache.as_ref().expect("the render must build a cache");

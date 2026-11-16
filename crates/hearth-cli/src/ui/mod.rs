@@ -1155,7 +1155,7 @@ mod tests {
             .lines()
             .find(|line| line.contains("follow") && line.contains("quit"))
             .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
-        for key in ["scroll", "follow", "system"] {
+        for key in ["scroll", "block", "toggle", "follow", "system"] {
             assert!(
                 footer.contains(key),
                 "the footer is missing {key}: {footer}"
