@@ -13,8 +13,6 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-/// The prompt index token cap from section 9.6.
-pub const INDEX_MAX_TOKENS: i64 = 300;
 /// The prompt index active-skill cap from section 9.6.
 pub const INDEX_MAX_ACTIVE: usize = 50;
 
@@ -225,12 +223,12 @@ impl SkillLibrary {
         Ok(skills)
     }
 
-    /// The prompt skill index: active skills, capped at 300 tokens and 50 lines.
+    /// The prompt skill index: active skills, capped at 50 lines.
     ///
-    /// Learned skills that no longer fit are archived, lowest success rate first
-    /// and then least recently used. User skills are read-only, so they are never
-    /// archived. This is the one index builder; a caller cannot get the text
-    /// without the overflow being retired.
+    /// Only the line count retires a learned skill, lowest success rate first and
+    /// then least recently used. A description was costing the skill its place,
+    /// which made the index a mutator of the library instead of a view of it.
+    /// User skills are read-only, so they are never archived.
     pub fn index(&self) -> Result<String, SkillError> {
         let skills = self.load_all()?;
         let mut users: Vec<Skill> = skills
@@ -260,13 +258,7 @@ impl SkillLibrary {
             if active >= INDEX_MAX_ACTIVE {
                 break;
             }
-            let line = skill.index_line();
-            let mut candidate = lines.clone();
-            candidate.push(line);
-            if hearth_model::estimate_tokens(&candidate.join("\n")) > INDEX_MAX_TOKENS {
-                break;
-            }
-            lines = candidate;
+            lines.push(skill.index_line());
             active += 1;
         }
         for mut skill in learned {
@@ -274,14 +266,7 @@ impl SkillLibrary {
                 self.archive_for_index(&mut skill)?;
                 continue;
             }
-            let line = skill.index_line();
-            let mut candidate = lines.clone();
-            candidate.push(line);
-            if hearth_model::estimate_tokens(&candidate.join("\n")) > INDEX_MAX_TOKENS {
-                self.archive_for_index(&mut skill)?;
-                continue;
-            }
-            lines = candidate;
+            lines.push(skill.index_line());
             active += 1;
         }
         Ok(lines.join("\n"))
@@ -502,7 +487,7 @@ impl SkillLibrary {
         Ok(stats)
     }
 
-    /// Re-read the user-owned skills for an index cap check.
+    /// Find one learned skill by name.
     fn find_learned(&self, name: &str) -> Result<Option<Skill>, SkillError> {
         Ok(self
             .load_all()?
