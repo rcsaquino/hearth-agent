@@ -1184,6 +1184,10 @@ mod tests {
             text.contains("▸── 2 · "),
             "the selected snapshot is marked: {text}"
         );
+        assert!(
+            text.contains("no reply saved"),
+            "a snapshot with no answer says so: {text}"
+        );
     }
 
     #[test]

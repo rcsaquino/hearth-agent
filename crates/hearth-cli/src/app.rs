@@ -1,7 +1,7 @@
 //! The Hearth TUI application.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -111,12 +111,11 @@ pub struct PromptView {
     pub exchanges: Vec<Value>,
     /// Snapshot being shown; zero is the newest exchange.
     pub cursor: usize,
-    /// Section nearest the top of the document.
+    /// Snapshot marker nearest the top of the viewport, oldest first.
     pub selected: usize,
-    /// Kept for compatibility with the old expandable audit; the session export
-    /// always shows every section in full.
-    pub expanded: BTreeSet<usize>,
     pub raw: bool,
+    /// Show the system layers in the transcript.
+    pub show_system: bool,
     pub scroll: usize,
     pub max_scroll: Cell<usize>,
     pub loading: bool,
@@ -133,8 +132,8 @@ impl Default for PromptView {
             exchanges: Vec::new(),
             cursor: 0,
             selected: 0,
-            expanded: BTreeSet::new(),
             raw: false,
+            show_system: true,
             scroll: 0,
             max_scroll: Cell::new(0),
             loading: false,
@@ -150,16 +149,6 @@ impl PromptView {
         self.exchanges
             .get(self.cursor)
             .or_else(|| self.exchanges.first())
-    }
-
-    pub fn older(&self) -> Option<&Value> {
-        self.exchanges.get(self.cursor + 1)
-    }
-
-    pub fn newer(&self) -> Option<&Value> {
-        self.cursor
-            .checked_sub(1)
-            .and_then(|index| self.exchanges.get(index))
     }
 }
 
@@ -965,6 +954,7 @@ impl App {
                 self.prompt.scroll = 0;
             }
             KeyCode::Char('f') => ui::prompt::toggle_follow(&mut self.prompt),
+            KeyCode::Char('s') => self.prompt.show_system = !self.prompt.show_system,
             KeyCode::Char('[') | KeyCode::Char('<') => {
                 let _ = ui::prompt::older(&mut self.prompt);
             }

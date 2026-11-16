@@ -1,13 +1,18 @@
-//! Live session export: everything sent to the model and everything back.
+//! The Prompt tab as one conversation.
 //!
-//! One scrollable document. Every request segment, tool declaration, transcript
-//! item, and response block is shown in full. The newest saved exchange is shown
-//! by default; `[` and `]` walk older snapshots and `f` resumes the live tail.
+//! The harness saves a full prompt for every request, so consecutive requests
+//! differ only in their tail. This view merges the saved requests into a single
+//! transcript and prints each request's delta under a snapshot marker. `[` and
+//! `]` walk the markers, `s` hides the system layers, `r` shows the documents
+//! as they were saved, and a spinner says when a turn is in flight.
+
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use hearth_runtime::Zone;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use serde_json::Value;
@@ -17,10 +22,27 @@ use crate::app::{App, PromptView};
 use crate::theme;
 use crate::ui::{count, short};
 
-/// Body lines move by this many rows for PageUp and PageDown.
+/// Body lines moved by PageUp and PageDown.
 const PAGE_LINES: usize = 15;
-/// Body lines shown under a section heading.
-const BODY_INDENT: &str = "   ";
+/// Message and layer bodies sit this far under their label.
+const BODY_INDENT: usize = 2;
+/// One frame per 100 ms, which is the event loop's budget.
+const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+/// The keys this tab answers, kept inside the card.
+const HINT_KEYS: [(&str, &str); 4] = [
+    ("f", "follow"),
+    ("s", "system"),
+    ("r", "raw"),
+    ("o", "refresh"),
+];
+/// The stable prefix layers, with the names a reader knows them by.
+const PREFIX_LAYERS: [(&str, &str); 5] = [
+    ("identity", "SOUL.md"),
+    ("guidance", "AGENTS.md"),
+    ("rules", "rules"),
+    ("skills", "skills index"),
+    ("tools", "tools"),
+];
 
 /// Scroll up by `lines`, pausing the live tail.
 pub(crate) fn scroll_up(prompt: &mut PromptView, lines: usize) {
@@ -60,7 +82,7 @@ pub(crate) fn scroll_top(prompt: &mut PromptView) {
 pub(crate) fn scroll_bottom(prompt: &mut PromptView) {
     prompt.follow = true;
     prompt.scroll = prompt.max_scroll.get();
-    prompt.selected = section_count(prompt).saturating_sub(1);
+    prompt.selected = marker_count(prompt).saturating_sub(1);
 }
 
 pub(crate) fn toggle_follow(prompt: &mut PromptView) {
@@ -70,34 +92,65 @@ pub(crate) fn toggle_follow(prompt: &mut PromptView) {
     }
 }
 
-/// Show the next-older saved snapshot.
+/// Show the next-older saved snapshot with its marker at the top.
 pub(crate) fn older(prompt: &mut PromptView) -> bool {
     if prompt.cursor + 1 >= prompt.exchanges.len() {
         return false;
     }
     prompt.cursor += 1;
     prompt.follow = false;
-    prompt.scroll = 0;
-    prompt.selected = 0;
+    jump_to_cursor(prompt);
     true
 }
 
-/// Show the next-newer saved snapshot. The newest snapshot resumes live tail.
+/// Show the next-newer saved snapshot. The newest snapshot resumes the tail.
 pub(crate) fn newer(prompt: &mut PromptView) -> bool {
     if prompt.cursor == 0 {
         return false;
     }
     prompt.cursor -= 1;
     prompt.follow = prompt.cursor == 0;
-    prompt.scroll = if prompt.follow {
-        prompt.max_scroll.get()
-    } else {
-        0
-    };
-    prompt.selected = 0;
+    jump_to_cursor(prompt);
     true
 }
 
+/// Put the selected snapshot's marker at the top of the viewport.
+fn jump_to_cursor(prompt: &mut PromptView) {
+    if prompt.follow {
+        prompt.scroll = prompt.max_scroll.get();
+    } else if let Some(line) = prompt
+        .cache
+        .borrow()
+        .as_ref()
+        .and_then(|cache| cache.marker_line(prompt.cursor))
+    {
+        prompt.scroll = line;
+    } else {
+        prompt.scroll = 0;
+    }
+    prompt.selected = marker_index(prompt);
+}
+
+/// The selected snapshot as an index into the chronological markers.
+fn marker_index(prompt: &PromptView) -> usize {
+    prompt
+        .cache
+        .borrow()
+        .as_ref()
+        .map(|cache| cache.markers.len().saturating_sub(prompt.cursor + 1))
+        .unwrap_or(0)
+}
+
+fn marker_count(prompt: &PromptView) -> usize {
+    prompt
+        .cache
+        .borrow()
+        .as_ref()
+        .map(|cache| cache.markers.len())
+        .unwrap_or(0)
+}
+
+/// Point `selected` at the marker nearest the top of the viewport.
 fn sync_selected(prompt: &mut PromptView) {
     let index = prompt
         .cache
@@ -105,63 +158,68 @@ fn sync_selected(prompt: &mut PromptView) {
         .as_ref()
         .map(|cache| {
             cache
-                .sections
+                .markers
                 .iter()
-                .rposition(|section| section.start <= prompt.scroll)
+                .rposition(|marker| marker.line <= prompt.scroll)
                 .unwrap_or(0)
         })
         .unwrap_or(0);
     prompt.selected = index;
 }
 
-fn section_count(prompt: &PromptView) -> usize {
-    prompt
-        .cache
-        .borrow()
-        .as_ref()
-        .map(|cache| cache.sections.len())
-        .unwrap_or(0)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
-    prompt_hash: String,
-    requested_at: i64,
-    response_id: String,
+    /// The loaded requests, named by hash and answering entry.
+    signature: String,
     raw: bool,
+    show_system: bool,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(exchange: &Value, width: u16, raw: bool, zone: &Zone) -> Self {
+    fn new(exchanges: &[Value], width: u16, raw: bool, show_system: bool, zone: &Zone) -> Self {
+        let mut signature = String::new();
+        for exchange in exchanges {
+            signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
+            signature.push(':');
+            signature.push_str(exchange["response"]["entry_id"].as_str().unwrap_or("-"));
+            signature.push('|');
+        }
         Self {
-            prompt_hash: exchange["prompt_hash"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned(),
-            requested_at: exchange["requested_at"].as_i64().unwrap_or(0),
-            response_id: exchange["response"]["entry_id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned(),
+            signature,
             raw,
+            show_system,
             width,
             zone: zone.name().to_owned(),
         }
     }
 }
 
-/// One section inside the session document.
-pub(crate) struct Section {
-    /// First rendered line of this section.
-    pub(crate) start: usize,
+/// A snapshot marker inside the built document.
+struct Marker {
+    /// Line of the marker in the document.
+    line: usize,
+    /// The same marker in the selection emphasis.
+    selected: Line<'static>,
 }
 
+/// One built document, kept until the loaded set or the view flags change.
 pub(crate) struct PromptCache {
     key: CacheKey,
-    pub(crate) sections: Vec<Section>,
+    /// Markers in chronological order, oldest first.
+    markers: Vec<Marker>,
     lines: Vec<Line<'static>>,
+}
+
+impl PromptCache {
+    /// The marker line of the exchange at `cursor`, counted from the newest.
+    fn marker_line(&self, cursor: usize) -> Option<usize> {
+        self.markers
+            .len()
+            .checked_sub(cursor + 1)
+            .map(|index| self.markers[index].line)
+    }
 }
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
@@ -170,9 +228,9 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     } else if app.prompt.raw {
         " Prompt · raw "
     } else if app.prompt.follow {
-        " Prompt · live "
+        " Prompt · conversation · live "
     } else {
-        " Prompt · paused "
+        " Prompt · conversation · paused "
     };
     let card = Block::default()
         .borders(Borders::ALL)
@@ -181,36 +239,78 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let inner = card.inner(area);
     frame.render_widget(card, area);
 
-    if app.prompt.loading && app.prompt.exchanges.is_empty() {
-        frame.render_widget(
-            Paragraph::new(Line::styled("Loading saved prompts...", theme::warn())),
-            inner,
-        );
-        return;
-    }
-    let Some(exchange) = app.prompt.current() else {
-        frame.render_widget(
-            Paragraph::new(vec![
+    let busy = app.prompt.loading || running_tasks(app) > 0;
+    let height = usize::from(inner.height);
+    let hint_rows = usize::from(height >= 1);
+    let busy_rows = usize::from(busy && height > hint_rows);
+    let body_rows = height.saturating_sub(hint_rows + busy_rows);
+    let body = Rect {
+        height: body_rows as u16,
+        ..inner
+    };
+    let busy_area = Rect {
+        y: inner.y + body_rows as u16,
+        height: busy_rows as u16,
+        ..inner
+    };
+    let hint_area = Rect {
+        y: inner.y + (body_rows + busy_rows) as u16,
+        height: hint_rows as u16,
+        ..inner
+    };
+
+    if app.prompt.exchanges.is_empty() {
+        let message = if app.prompt.loading {
+            vec![Line::styled("Loading saved prompts...", theme::warn())]
+        } else {
+            vec![
                 Line::styled("No session yet.", theme::muted()),
                 Line::from(""),
                 Line::styled(
-                    "Send Hearth a Telegram message. This view refreshes after every reply.",
+                    "Send Hearth a message. This view refreshes after every reply.",
                     theme::faint(),
                 ),
-            ]),
-            inner,
-        );
-        return;
-    };
+            ]
+        };
+        frame.render_widget(Paragraph::new(message), body);
+    } else if body_rows > 0 {
+        draw_transcript(app, frame, body);
+    }
 
-    let key = CacheKey::new(exchange, inner.width, app.prompt.raw, &app.zone);
+    if busy_rows > 0 {
+        frame.render_widget(Paragraph::new(working_line()), busy_area);
+    }
+    if hint_rows > 0 {
+        frame.render_widget(
+            Paragraph::new(hint_line(usize::from(inner.width))),
+            hint_area,
+        );
+    }
+}
+
+fn running_tasks(app: &App) -> u64 {
+    app.status
+        .as_ref()
+        .and_then(|status| status["tasks_running"].as_u64())
+        .unwrap_or(0)
+}
+
+fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
+    let width = usize::from(area.width);
+    let height = usize::from(area.height);
+    let key = CacheKey::new(
+        &app.prompt.exchanges,
+        area.width,
+        app.prompt.raw,
+        app.prompt.show_system,
+        &app.zone,
+    );
     let mut slot = app.prompt.cache.borrow_mut();
     if slot.as_ref().is_none_or(|cache| cache.key != key) {
-        *slot = Some(build_cache(app, exchange, &key, usize::from(inner.width)));
+        *slot = Some(build_cache(&app.prompt.exchanges, &key, &app.zone, width));
     }
     let cache = slot.as_mut().expect("prompt cache");
 
-    let height = inner.height.max(1) as usize;
     let total = cache.lines.len();
     let max_scroll = total.saturating_sub(height);
     app.prompt.max_scroll.set(max_scroll);
@@ -220,544 +320,243 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         app.prompt.scroll.min(max_scroll)
     };
     let end = (scroll + height).min(total);
-    frame.render_widget(Paragraph::new(cache.lines[scroll..end].to_vec()), inner);
-}
-
-fn build_cache(app: &App, exchange: &Value, key: &CacheKey, width: usize) -> PromptCache {
-    let own = exchange["request"]["prefix_hash"].as_str();
-    let peers = app
-        .prompt
-        .exchanges
-        .iter()
-        .filter(|other| other["request"]["prefix_hash"].as_str() == own)
-        .count();
-    let view = View {
-        exchange,
-        older: app.prompt.older(),
-        total: app.prompt.exchanges.len(),
-        snapshot: app.prompt.cursor,
-        peers: if own.is_some() { peers } else { 0 },
-        follow: app.prompt.follow,
-        zone: &app.zone,
-        width,
-    };
-
-    let mut lines = Vec::new();
-    push_header(&mut lines, &view);
-
-    let rows = if app.prompt.raw {
-        raw_rows(exchange)
-    } else {
-        build_rows(&view)
-    };
-
-    let body_width = width.saturating_sub(BODY_INDENT.width()).max(8);
-    let mut sections = Vec::with_capacity(rows.len());
-    for (index, row) in rows.iter().enumerate() {
-        if index > 0 {
-            lines.push(Line::from(""));
-        }
-        let start = lines.len();
-        lines.push(heading_line(row, width));
-        let body = if row.content.is_empty() {
-            vec![("(empty)".to_owned(), theme::faint())]
-        } else {
-            row.content.clone()
-        };
-        for (text, style) in &body {
-            for line in wrap_text(text, body_width) {
-                if line.is_empty() {
-                    lines.push(Line::from(""));
-                } else {
-                    lines.push(Line::styled(format!("{BODY_INDENT}{line}"), *style));
-                }
+    let selected = cache.markers.len().checked_sub(app.prompt.cursor + 1);
+    let lines: Vec<Line<'static>> = (scroll..end)
+        .map(|index| match selected {
+            Some(marker) if cache.markers[marker].line == index => {
+                cache.markers[marker].selected.clone()
             }
-        }
-        sections.push(Section { start });
-    }
-
-    PromptCache {
-        key: key.clone(),
-        sections,
-        lines,
-    }
+            _ => cache.lines[index].clone(),
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn heading_line(row: &PromptRow, width: usize) -> Line<'static> {
-    let mut heading = Row::new();
-    heading.push(" ▌ ", row.label_style);
-    heading.push(
-        row.label.clone(),
-        row.label_style.add_modifier(Modifier::BOLD),
-    );
-    if let Some(meta) = &row.meta {
-        let column = width.saturating_sub(meta.width() + 1);
-        heading.pad_to(column);
-        heading.push(format!("{meta} "), theme::faint());
-    }
-    heading.line()
+fn working_line() -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!(" {} ", FRAMES[spinner_frame()]),
+            theme::accent_style(),
+        ),
+        Span::styled("working", theme::muted()),
+    ])
 }
 
-fn raw_rows(exchange: &Value) -> Vec<PromptRow> {
-    let text = serde_json::to_string_pretty(exchange).unwrap_or_else(|_| exchange.to_string());
-    vec![PromptRow {
-        label: "exchange · raw JSON".to_owned(),
-        label_style: theme::text(),
-        content: text
-            .lines()
-            .map(|line| (line.to_owned(), theme::text()))
-            .collect(),
-        meta: None,
-    }]
+fn spinner_frame() -> usize {
+    static START: OnceLock<Instant> = OnceLock::new();
+    let elapsed = START.get_or_init(Instant::now).elapsed().as_millis();
+    (elapsed / 100) as usize % FRAMES.len()
 }
 
-/// Everything the renderer needs about the exchange on screen.
-struct View<'a> {
-    exchange: &'a Value,
-    /// The next-older exchange, used for change markers.
-    older: Option<&'a Value>,
-    total: usize,
-    /// Zero-based snapshot position; zero is the newest exchange.
-    snapshot: usize,
-    /// Loaded exchanges sharing this request's prefix hash.
-    peers: usize,
-    follow: bool,
-    zone: &'a Zone,
-    width: usize,
+fn hint_line(width: usize) -> Line<'static> {
+    let mut spans = vec![
+        Span::styled("[ ]", theme::text()),
+        Span::styled(" snapshots", theme::muted()),
+    ];
+    for (key, label) in HINT_KEYS {
+        spans.push(Span::styled(format!(" · {key}"), theme::text()));
+        spans.push(Span::styled(format!(" {label}"), theme::muted()));
+    }
+    Row::from_spans(spans).fit(width)
 }
 
-impl View<'_> {
-    fn request(&self) -> &Value {
-        &self.exchange["request"]
-    }
-
-    /// True when this prefix part differs from the older exchange.
-    fn changed(&self, part: Option<&str>) -> bool {
-        let Some(part) = part else {
-            return false;
-        };
-        let Some(older) = self.older else {
-            return false;
-        };
-        let current = self.request()["prefix_parts"]
-            .get(part)
-            .and_then(Value::as_str);
-        let previous = older["request"]["prefix_parts"]
-            .get(part)
-            .and_then(Value::as_str);
-        current != previous
-    }
+/// One block of a conversation, derived from the saved requests.
+enum Entry {
+    /// A saved request, printed before its delta.
+    Snapshot {
+        number: usize,
+        at: i64,
+        hash: String,
+        tokens: Option<u64>,
+        changed: Vec<String>,
+    },
+    /// The stable layers, printed once and again only when they change.
+    System { parts: Vec<SystemPart>, tokens: u64 },
+    /// A message that reached the model.
+    Message { role: Role, blocks: Vec<Value> },
+    /// The clock note that rode on the message before it.
+    Runtime { note: String },
+    /// Compaction dropped messages this view has already shown.
+    Rewritten { dropped: usize },
+    /// What the model answered.
+    Response { blocks: Option<Vec<Value>> },
 }
 
-fn push_header(lines: &mut Vec<Line<'static>>, view: &View<'_>) {
-    let request = view.request();
-    let model = request["model"].as_str().unwrap_or("unknown model");
-    let mut row = Row::new();
-    row.push(" SESSION", theme::accent_style());
-    row.push(format!("  {model}"), theme::text());
-    let position = format!(" snapshot {} of {} ", view.snapshot + 1, view.total);
-    row.pad_to(view.width.saturating_sub(position.width()));
-    row.push(position, theme::muted());
-    lines.push(row.line());
-
-    let requested = view.exchange["requested_at"].as_i64().unwrap_or(0);
-    let session = request["session_id"].as_str().unwrap_or("-");
-    let mut row = Row::new();
-    row.push(" ", theme::faint());
-    row.push(
-        if view.follow {
-            "● live"
-        } else {
-            "● paused"
-        },
-        if view.follow {
-            theme::good()
-        } else {
-            theme::warn()
-        },
-    );
-    row.push("  ·  asked ", theme::faint());
-    row.push(view.zone.iso(requested), theme::muted());
-    row.push("  ·  session ", theme::faint());
-    row.push(short(session, 8), theme::text());
-    let previous_count = view.total.saturating_sub(view.snapshot + 1);
-    if previous_count > 0 {
-        row.push(
-            format!("  ·  {previous_count} previous with ["),
-            theme::faint(),
-        );
-    }
-    if view.snapshot > 0 {
-        row.push(
-            format!("  ·  {} newer with ]", view.snapshot),
-            theme::faint(),
-        );
-    }
-    lines.push(row.line());
-
-    let hash = view.exchange["prompt_hash"].as_str().unwrap_or("-");
-    let prefix = request["prefix_hash"].as_str().unwrap_or("-");
-    let total = token(request, "total");
-    let fixed = token(request, "fixed");
-    let transcript = token(request, "transcript");
-    let mut row = Row::new();
-    row.push(" prompt   ", theme::muted());
-    row.push(short(hash, 12), theme::text());
-    row.push("  ·  prefix ", theme::faint());
-    row.push(short(prefix, 12), theme::text());
-    row.push("  ·  tokens ", theme::faint());
-    row.push(
-        total.map(count).unwrap_or_else(|| "-".to_owned()),
-        theme::text(),
-    );
-    row.push(" total · ", theme::faint());
-    row.push(
-        fixed.map(count).unwrap_or_else(|| "-".to_owned()),
-        theme::text(),
-    );
-    row.push(" fixed · ", theme::faint());
-    row.push(
-        transcript.map(count).unwrap_or_else(|| "-".to_owned()),
-        theme::text(),
-    );
-    row.push(" transcript", theme::faint());
-    lines.push(row.line());
-
-    let mut row = Row::new();
-    row.push(" cache    ", theme::muted());
-    if view.peers > 1 {
-        row.push(
-            format!(
-                "{} of {} loaded exchanges share this prefix",
-                view.peers, view.total
-            ),
-            theme::good(),
-        );
-    } else {
-        row.push(
-            "no other loaded exchange shares this prefix".to_owned(),
-            theme::faint(),
-        );
-    }
-    if let (Some(fixed), Some(total)) = (fixed, total)
-        && total > 0
-    {
-        row.push("  ·  ", theme::faint());
-        row.push(
-            format!("{:.1}% fixed", fixed as f64 / total as f64 * 100.0),
-            theme::faint(),
-        );
-    }
-    lines.push(row.line());
-
-    if has_markers(view) {
-        let mut row = Row::new();
-        row.push(" legend   ", theme::muted());
-        row.push("▲ ", theme::warn());
-        row.push(
-            "prefix part changed versus the previous loaded prompt".to_owned(),
-            theme::faint(),
-        );
-        lines.push(row.line());
-    }
-    lines.push(Line::from(""));
+struct SystemPart {
+    label: &'static str,
+    text: String,
+    tokens: u64,
 }
 
-fn has_markers(view: &View<'_>) -> bool {
-    ["identity", "guidance", "standing", "skills", "tools"]
-        .iter()
-        .any(|part| view.changed(Some(part)))
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Role {
+    User,
+    Assistant,
+    Tool,
+    System,
 }
 
-struct PromptRow {
-    label: String,
-    label_style: Style,
-    content: Vec<(String, Style)>,
-    meta: Option<String>,
-}
-
-impl PromptRow {
-    fn text(label: &str, style: Style, text: &str) -> Self {
-        let empty = text.trim().is_empty();
-        let content = if empty {
-            vec![("(empty)".to_owned(), theme::faint())]
-        } else {
-            text.lines()
-                .map(|line| (line.to_owned(), style))
-                .collect::<Vec<_>>()
-        };
-        Self {
-            label: label.to_owned(),
-            label_style: style,
-            content,
-            meta: None,
+impl Role {
+    fn parse(value: &str) -> Self {
+        match value {
+            "user" => Self::User,
+            "assistant" => Self::Assistant,
+            "tool" => Self::Tool,
+            _ => Self::System,
         }
     }
 
-    fn with_meta(mut self, meta: impl Into<String>) -> Self {
-        let meta = meta.into();
-        self.meta = (!meta.is_empty()).then_some(meta);
-        self
+    fn label(self) -> &'static str {
+        match self {
+            Self::User => "you",
+            Self::Assistant => "hearth",
+            Self::Tool => "tool",
+            Self::System => "system",
+        }
     }
 
-    fn tool_call(prefix: &str, call: &Value) -> Self {
-        let name = call["name"].as_str().unwrap_or("tool");
-        let content = call
-            .get("arguments")
-            .map(arguments_text)
+    fn style(self) -> Style {
+        match self {
+            Self::User => theme::accent_style(),
+            Self::Assistant => theme::text(),
+            Self::Tool => theme::good(),
+            Self::System => theme::muted(),
+        }
+    }
+}
+
+/// Build the document once, with every system layer where it changed, the
+/// delta of every snapshot, and the answer that followed it.
+fn derive(exchanges: &[Value]) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    let mut previous_sent: Vec<(String, String)> = Vec::new();
+    let mut previous_parts: Option<Value> = None;
+    let mut previous_recall = String::new();
+    for (position, exchange) in exchanges.iter().rev().enumerate() {
+        let request = &exchange["request"];
+        let recall = request["recall"].as_str().unwrap_or_default().to_owned();
+        let changed = previous_parts
+            .as_ref()
+            .map(|previous| changed_parts(previous, request))
             .unwrap_or_default();
-        let label = if prefix == "assistant" {
-            format!("tool call · {name}")
-        } else {
-            format!("{prefix} · tool · {name}")
-        };
-        Self {
-            label,
-            label_style: theme::warn(),
-            content: vec![(content, theme::muted())],
-            meta: None,
+        if position == 0 || !changed.is_empty() || recall != previous_recall {
+            let parts = system_parts(request);
+            let tokens = parts.iter().map(|part| part.tokens).sum();
+            entries.push(Entry::System { parts, tokens });
         }
-    }
-
-    fn tool_result(prefix: &str, result: &Value) -> Self {
-        let failed = result["is_error"].as_bool().unwrap_or(false);
-        let content = result["content"].as_str().unwrap_or_default().to_owned();
-        let style = if failed { theme::bad() } else { theme::good() };
-        let label = if prefix == "tool" {
-            "tool · result".to_owned()
-        } else {
-            format!("{prefix} · result")
-        };
-        Self {
-            label,
-            label_style: style,
-            content: content
-                .lines()
-                .map(|line| (line.to_owned(), style))
-                .collect(),
-            meta: None,
-        }
-    }
-}
-
-/// Every request segment and response block, with the stable layers first.
-fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
-    let mut rows = Vec::new();
-    for (label, part, key, style) in [
-        (
-            "system · identity",
-            "identity",
-            "identity",
-            theme::accent_style(),
-        ),
-        (
-            "system · guidance",
-            "guidance",
-            "guidance",
-            theme::accent_style(),
-        ),
-        ("system · rules", "rules", "rules", theme::accent_style()),
-        (
-            "system · skills index",
-            "skills",
-            "skills_index",
-            theme::accent_style(),
-        ),
-    ] {
-        let text = view.request()[key].as_str().unwrap_or_default();
-        rows.push(
-            PromptRow::text(&row_label(view, label, Some(part)), style, text)
-                .with_meta(token_meta(view.request(), key)),
-        );
-    }
-
-    rows.push(tool_row(view));
-
-    let messages = view.request()["transcript"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let newest_user = messages
-        .iter()
-        .rposition(|message| message["role"].as_str() == Some("user"));
-    for (index, message) in messages.iter().enumerate() {
-        if Some(index) == newest_user {
-            let recall = view.request()["recall"].as_str().unwrap_or_default();
-            if !recall.trim().is_empty() {
-                rows.push(
-                    PromptRow::text("system · relevant memory", theme::good(), recall)
-                        .with_meta(token_meta(view.request(), "recall")),
-                );
-            }
-        }
-        match message["role"].as_str().unwrap_or_default() {
-            "user" => {
-                let text = message_text(message);
-                rows.push(PromptRow::text("user", theme::accent_style(), &text));
-            }
-            "assistant" => {
-                if let Some(blocks) = message["blocks"].as_array() {
-                    for block in blocks {
-                        match block["type"].as_str().unwrap_or_default() {
-                            "thinking" => rows.push(PromptRow::text(
-                                "assistant · thinking",
-                                theme::think(),
-                                block["text"].as_str().unwrap_or_default(),
-                            )),
-                            "text" => rows.push(PromptRow::text(
-                                "assistant",
-                                theme::text(),
-                                block["text"].as_str().unwrap_or_default(),
-                            )),
-                            "tool_call" => rows.push(PromptRow::tool_call("assistant", block)),
-                            "file" => rows.push(PromptRow::text(
-                                "assistant · file",
-                                theme::faint(),
-                                &format!(
-                                    "{} · {}",
-                                    block["name"].as_str().unwrap_or("file"),
-                                    block["path"].as_str().unwrap_or("-")
-                                ),
-                            )),
-                            "image" => rows.push(PromptRow::text(
-                                "assistant · image",
-                                theme::faint(),
-                                block["path"].as_str().unwrap_or("-"),
-                            )),
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            "tool" => {
-                if let Some(blocks) = message["blocks"].as_array() {
-                    for block in blocks {
-                        if block["type"].as_str() == Some("tool_result") {
-                            rows.push(PromptRow::tool_result("tool", block));
-                        }
-                    }
-                }
-            }
-            "system" => rows.push(PromptRow::text(
-                "system",
-                theme::faint(),
-                &message_text(message),
-            )),
-            _ => {}
-        }
-        if let Some(note) = message["runtime_note"].as_str() {
-            rows.push(
-                PromptRow::text("runtime note", theme::muted(), note)
-                    .with_meta(token_meta(view.request(), "runtime")),
-            );
-        }
-    }
-
-    let response = &view.exchange["response"];
-    if response.is_null() {
-        rows.push(PromptRow::text(
-            "response",
-            theme::faint(),
-            "no saved assistant entry for this prompt",
-        ));
-    } else if let Some(blocks) = response["blocks"].as_array() {
-        for block in blocks {
-            match block["type"].as_str().unwrap_or_default() {
-                "thinking" => rows.push(PromptRow::text(
-                    "response · thinking",
-                    theme::think(),
-                    block["text"].as_str().unwrap_or_default(),
-                )),
-                "text" => rows.push(PromptRow::text(
-                    "response",
-                    theme::text(),
-                    block["text"].as_str().unwrap_or_default(),
-                )),
-                "tool_call" => rows.push(PromptRow::tool_call("response", block)),
-                "tool_result" => rows.push(PromptRow::tool_result("response", block)),
-                "file" => rows.push(PromptRow::text(
-                    "response · file",
-                    theme::faint(),
-                    &format!(
-                        "{} · {}",
-                        block["name"].as_str().unwrap_or("file"),
-                        block["path"].as_str().unwrap_or("-")
-                    ),
-                )),
-                "image" => rows.push(PromptRow::text(
-                    "response · image",
-                    theme::faint(),
-                    block["path"].as_str().unwrap_or("-"),
-                )),
-                _ => {}
-            }
-        }
-    }
-    let usage = &view.exchange["usage"];
-    if !usage.is_null() {
-        rows.push(PromptRow {
-            label: "response · usage".to_owned(),
-            label_style: theme::faint(),
-            content: vec![(usage_line(usage), theme::faint())],
-            meta: view.exchange["response"]["tokens_est"]
-                .as_u64()
-                .filter(|tokens| *tokens > 0)
-                .map(|tokens| format!("{} tok", count(tokens))),
+        entries.push(Entry::Snapshot {
+            number: position + 1,
+            at: exchange["requested_at"].as_i64().unwrap_or(0),
+            hash: exchange["prompt_hash"].as_str().unwrap_or("-").to_owned(),
+            tokens: token(request, "total"),
+            changed,
         });
-    }
 
-    rows
+        let messages = request["transcript"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let transcript: Vec<(String, String)> = messages.iter().map(normalized).collect();
+        let kept = transcript
+            .iter()
+            .zip(&previous_sent)
+            .take_while(|(current, previous)| current == previous)
+            .count();
+        if kept < previous_sent.len() {
+            entries.push(Entry::Rewritten {
+                dropped: previous_sent.len() - kept,
+            });
+        }
+        for message in &messages[kept..] {
+            entries.push(Entry::Message {
+                role: Role::parse(message["role"].as_str().unwrap_or_default()),
+                blocks: message["blocks"].as_array().cloned().unwrap_or_default(),
+            });
+            if let Some(note) = message["runtime_note"].as_str()
+                && !note.trim().is_empty()
+            {
+                entries.push(Entry::Runtime {
+                    note: note.to_owned(),
+                });
+            }
+        }
+        entries.push(Entry::Response {
+            blocks: response_blocks(&exchange["response"]),
+        });
+        previous_sent = sent_messages(&transcript, &exchange["response"]);
+        previous_parts = Some(request["prefix_parts"].clone());
+        previous_recall = recall;
+    }
+    entries
 }
 
-fn tool_row(view: &View<'_>) -> PromptRow {
-    let tools = view.request()["tools"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let mut tool_content = Vec::new();
-    for (index, tool) in tools.iter().enumerate() {
-        let name = tool["name"].as_str().unwrap_or("tool");
-        tool_content.push((name.to_owned(), theme::accent_style()));
-        let description = tool["description"].as_str().unwrap_or_default();
-        for line in description.lines() {
-            tool_content.push((line.to_owned(), theme::muted()));
+/// The prefix layers that differ from the previous saved request.
+fn changed_parts(previous: &Value, request: &Value) -> Vec<String> {
+    let current = &request["prefix_parts"];
+    let mut changed = Vec::new();
+    for (part, label) in PREFIX_LAYERS {
+        if current[part] != previous[part] {
+            changed.push(label.to_owned());
+        }
+    }
+    changed
+}
+
+fn system_parts(request: &Value) -> Vec<SystemPart> {
+    let mut parts = vec![
+        layer(request, "identity"),
+        layer(request, "guidance"),
+        layer(request, "rules"),
+        // The saved key and the token key differ for the skills index.
+        SystemPart {
+            label: "skills index",
+            text: text_of(request, "skills_index"),
+            tokens: token(request, "skills").unwrap_or(0),
+        },
+        SystemPart {
+            label: "tools",
+            text: tools_text(request),
+            tokens: token(request, "tools").unwrap_or(0),
+        },
+        layer(request, "recall"),
+    ];
+    parts.retain(|part| !part.text.trim().is_empty());
+    parts
+}
+
+/// A layer whose saved key and token key agree.
+fn layer(request: &Value, name: &'static str) -> SystemPart {
+    SystemPart {
+        label: name,
+        text: text_of(request, name),
+        tokens: token(request, name).unwrap_or(0),
+    }
+}
+
+fn text_of(request: &Value, key: &str) -> String {
+    request[key].as_str().unwrap_or_default().to_owned()
+}
+
+/// The tool declarations as one readable block.
+fn tools_text(request: &Value) -> String {
+    let tools = request["tools"].as_array().cloned().unwrap_or_default();
+    let mut lines = Vec::new();
+    for tool in &tools {
+        lines.push(tool["name"].as_str().unwrap_or("tool").to_owned());
+        if let Some(description) = tool["description"].as_str()
+            && !description.trim().is_empty()
+        {
+            lines.push(description.to_owned());
         }
         if let Some(parameters) = tool.get("parameters").filter(|value| !value.is_null()) {
             let fields = schema_fields(parameters);
             if !fields.is_empty() {
-                tool_content.push(("args".to_owned(), theme::muted()));
-                for field in fields {
-                    tool_content.push((format!("  {field}"), theme::faint()));
-                }
+                lines.push("args".to_owned());
+                lines.extend(fields.into_iter().map(|field| format!("  {field}")));
             }
         }
-        if index + 1 < tools.len() {
-            tool_content.push((String::new(), theme::faint()));
-        }
     }
-    if tool_content.is_empty() {
-        tool_content.push(("(no tools)".to_owned(), theme::faint()));
-    }
-    PromptRow {
-        label: row_label(view, "request · tools", Some("tools")),
-        label_style: theme::accent_style(),
-        content: tool_content,
-        meta: Some(token_meta(view.request(), "tools")),
-    }
-}
-
-fn row_label(view: &View<'_>, label: &str, part: Option<&str>) -> String {
-    if view.changed(part) {
-        format!("▲ {label}")
-    } else {
-        label.to_owned()
-    }
-}
-
-fn token_meta(request: &Value, key: &str) -> String {
-    token(request, key)
-        .map(|tokens| format!("{} tok", count(tokens)))
-        .unwrap_or_default()
+    lines.join("\n")
 }
 
 fn schema_fields(parameters: &Value) -> Vec<String> {
@@ -786,7 +585,7 @@ fn schema_fields(parameters: &Value) -> Vec<String> {
         if let Some(description) = schema["description"].as_str() {
             let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
             if !description.is_empty() {
-                field.push_str(&format!(" — {description}"));
+                field.push_str(&format!(" · {description}"));
             }
         }
         fields.push(field);
@@ -810,47 +609,294 @@ fn schema_type(schema: &Value) -> String {
         .unwrap_or_else(|| "any".to_owned())
 }
 
-fn usage_line(usage: &Value) -> String {
-    if usage.is_null() {
-        return "usage · not linked to this prompt".to_owned();
-    }
-    let input = usage["input_tokens"].as_u64().unwrap_or(0);
-    let output = usage["output_tokens"].as_u64().unwrap_or(0);
-    let reasoning = usage["reasoning_tokens"].as_u64().unwrap_or(0);
-    let cache = usage["cache_read_tokens"].as_u64().unwrap_or(0);
-    let latency = usage["latency_ms"].as_u64().unwrap_or(0);
-    format!(
-        "usage · in {} · out {} · cache read {} · thinking {} · {}ms",
-        count(input),
-        count(output),
-        count(cache),
-        count(reasoning),
-        count(latency)
-    )
+/// One message as it was compared, as a role and its blocks, without the
+/// audit note.
+fn normalized(message: &Value) -> (String, String) {
+    let role = message["role"].as_str().unwrap_or_default().to_owned();
+    let blocks = message
+        .get("blocks")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    (role, blocks.to_string())
 }
 
-fn arguments_text(arguments: &Value) -> String {
-    serde_json::to_string_pretty(arguments).unwrap_or_else(|_| arguments.to_string())
+/// The transcript the request carried, plus the answer that came back.
+fn sent_messages(transcript: &[(String, String)], response: &Value) -> Vec<(String, String)> {
+    let mut sent = transcript.to_vec();
+    if let Some(blocks) = response["blocks"].as_array() {
+        sent.push((
+            "assistant".to_owned(),
+            Value::Array(blocks.clone()).to_string(),
+        ));
+    }
+    sent
 }
 
-fn message_text(message: &Value) -> String {
-    let mut parts = Vec::new();
-    if let Some(text) = message["text"].as_str()
-        && !text.is_empty()
-    {
-        parts.push(text.to_owned());
+fn response_blocks(response: &Value) -> Option<Vec<Value>> {
+    if response.is_null() {
+        return None;
     }
-    if let Some(blocks) = message["blocks"].as_array() {
-        for block in blocks {
-            if block["type"].as_str() == Some("text")
-                && let Some(text) = block["text"].as_str()
-                && !text.is_empty()
-            {
-                parts.push(text.to_owned());
+    response["blocks"].as_array().cloned()
+}
+
+fn token(document: &Value, name: &str) -> Option<u64> {
+    document["tokens"][name].as_u64()
+}
+
+fn build_cache(exchanges: &[Value], key: &CacheKey, zone: &Zone, width: usize) -> PromptCache {
+    let mut painter = Painter::new(width);
+    if key.raw {
+        for (position, exchange) in exchanges.iter().rev().enumerate() {
+            painter.marker(
+                position + 1,
+                exchange["requested_at"].as_i64().unwrap_or(0),
+                exchange["prompt_hash"].as_str().unwrap_or("-"),
+                token(&exchange["request"], "total"),
+                &[],
+                zone,
+            );
+            let text =
+                serde_json::to_string_pretty(exchange).unwrap_or_else(|_| exchange.to_string());
+            for line in text.lines() {
+                painter.body(line, theme::text());
+            }
+        }
+    } else {
+        for entry in derive(exchanges) {
+            push_entry(&mut painter, &entry, key.show_system, zone);
+        }
+    }
+    PromptCache {
+        key: key.clone(),
+        markers: painter.markers,
+        lines: painter.lines,
+    }
+}
+
+fn push_entry(painter: &mut Painter, entry: &Entry, show_system: bool, zone: &Zone) {
+    match entry {
+        Entry::Snapshot {
+            number,
+            at,
+            hash,
+            tokens,
+            changed,
+        } => painter.marker(*number, *at, hash, *tokens, changed, zone),
+        Entry::System { parts, tokens } => push_system(painter, parts, *tokens, show_system),
+        Entry::Message { role, blocks } => push_blocks(painter, *role, blocks),
+        Entry::Runtime { note } => painter.note(note),
+        Entry::Rewritten { dropped } => painter.rewritten(*dropped),
+        Entry::Response { blocks } => match blocks {
+            Some(blocks) => push_blocks(painter, Role::Assistant, blocks),
+            None => painter.faint("no reply saved"),
+        },
+    }
+}
+
+fn push_system(painter: &mut Painter, parts: &[SystemPart], tokens: u64, show: bool) {
+    if !show {
+        let names = parts
+            .iter()
+            .map(|part| part.label)
+            .collect::<Vec<_>>()
+            .join(", ");
+        painter.summary(
+            &format!("system · {names}"),
+            theme::muted(),
+            &format!(" · {} tok", count(tokens)),
+        );
+        return;
+    }
+    for part in parts {
+        painter.label(
+            &format!("system · {}", part.label),
+            theme::muted(),
+            &format!("{} tok", count(part.tokens)),
+        );
+        painter.body(&part.text, theme::muted());
+    }
+}
+
+fn push_blocks(painter: &mut Painter, role: Role, blocks: &[Value]) {
+    if blocks.is_empty() {
+        painter.label(role.label(), role.style(), "");
+        painter.body("(empty)", theme::faint());
+        return;
+    }
+    for block in blocks {
+        match block["type"].as_str().unwrap_or_default() {
+            "thinking" => {
+                painter.label("thinking", theme::think(), "");
+                painter.body(block["text"].as_str().unwrap_or_default(), theme::think());
+            }
+            "text" => {
+                painter.label(role.label(), role.style(), "");
+                painter.body(block["text"].as_str().unwrap_or_default(), role.style());
+            }
+            "tool_call" => {
+                let name = block["name"].as_str().unwrap_or("tool");
+                painter.label(&format!("tool call · {name}"), theme::warn(), "");
+                let arguments = block
+                    .get("arguments")
+                    .map(|arguments| arguments.to_string())
+                    .unwrap_or_default();
+                painter.body(&arguments, theme::muted());
+            }
+            "tool_result" => {
+                let failed = block["is_error"].as_bool().unwrap_or(false);
+                let style = if failed { theme::bad() } else { theme::good() };
+                painter.label("tool result", style, "");
+                painter.body(block["content"].as_str().unwrap_or_default(), style);
+            }
+            "file" => {
+                painter.label(
+                    &format!("file · {}", block["name"].as_str().unwrap_or("file")),
+                    theme::faint(),
+                    "",
+                );
+                painter.body(block["path"].as_str().unwrap_or("-"), theme::muted());
+            }
+            "image" => {
+                painter.label("image", theme::faint(), "");
+                painter.body(block["path"].as_str().unwrap_or("-"), theme::muted());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The typed document, drawn as lines with a fixed width.
+struct Painter {
+    width: usize,
+    lines: Vec<Line<'static>>,
+    markers: Vec<Marker>,
+}
+
+impl Painter {
+    fn new(width: usize) -> Self {
+        Self {
+            width: width.max(1),
+            lines: Vec::new(),
+            markers: Vec::new(),
+        }
+    }
+
+    fn gap(&mut self) {
+        if !self.lines.is_empty() {
+            self.lines.push(Line::from(""));
+        }
+    }
+
+    /// A role or layer label, with its cost against the right edge.
+    fn label(&mut self, text: &str, style: Style, meta: &str) {
+        self.gap();
+        let mut row = Row::new();
+        row.push(text.to_owned(), style);
+        if !meta.is_empty() && row.width + meta.width() + BODY_INDENT <= self.width {
+            row.pad_to(self.width.saturating_sub(meta.width()));
+            row.push(meta.to_owned(), theme::faint());
+        }
+        let line = row.fit(self.width);
+        self.lines.push(line);
+    }
+
+    /// One line that names what it leaves out, with its cost inline.
+    fn summary(&mut self, text: &str, style: Style, cost: &str) {
+        self.gap();
+        let mut row = Row::new();
+        row.push(text.to_owned(), style);
+        row.push(cost.to_owned(), theme::faint());
+        let line = row.fit(self.width);
+        self.lines.push(line);
+    }
+
+    /// A wrapped body under its label, with a hanging indent.
+    fn body(&mut self, text: &str, style: Style) {
+        let indent = " ".repeat(BODY_INDENT);
+        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
+        for line in wrap_text(text, inner) {
+            if line.is_empty() {
+                self.lines.push(Line::from(""));
+            } else {
+                self.lines.push(Line::styled(
+                    clip(&format!("{indent}{line}"), self.width),
+                    style,
+                ));
             }
         }
     }
-    parts.join("\n")
+
+    /// The clock note that rode on the message above it.
+    fn note(&mut self, note: &str) {
+        let indent = " ".repeat(BODY_INDENT);
+        let inner = self.width.saturating_sub(BODY_INDENT + 2).max(1);
+        for (index, line) in wrap_text(note, inner).iter().enumerate() {
+            let lead = if index == 0 {
+                format!("{indent}◷ ")
+            } else {
+                format!("{indent}  ")
+            };
+            self.lines.push(Line::styled(
+                clip(&format!("{lead}{line}"), self.width),
+                theme::faint(),
+            ));
+        }
+    }
+
+    /// A short faint line, used when there is nothing to show.
+    fn faint(&mut self, text: &str) {
+        self.gap();
+        let indent = " ".repeat(BODY_INDENT);
+        self.lines.push(Line::styled(
+            clip(&format!("{indent}{text}"), self.width),
+            theme::faint(),
+        ));
+    }
+
+    fn rewritten(&mut self, dropped: usize) {
+        self.gap();
+        let mut row = Row::new();
+        row.push("history rewritten", theme::warn());
+        row.push(
+            format!(" · {dropped} earlier messages dropped"),
+            theme::faint(),
+        );
+        let line = row.fit(self.width);
+        self.lines.push(line);
+    }
+
+    /// One separator line naming the request, with the selection emphasis kept
+    /// for the snapshot the reader is on.
+    fn marker(
+        &mut self,
+        number: usize,
+        at: i64,
+        hash: &str,
+        tokens: Option<u64>,
+        changed: &[String],
+        zone: &Zone,
+    ) {
+        self.gap();
+        let mut body = vec![number.to_string(), zone.iso(at), short(hash, 8)];
+        if let Some(tokens) = tokens {
+            body.push(format!("{} tok", count(tokens)));
+        }
+        if !changed.is_empty() {
+            body.push(format!("changed {}", changed.join(", ")));
+        }
+        let body = body.join(" · ");
+        let line = self.lines.len();
+        self.lines
+            .push(separator("── ", &body, self.width, theme::faint()));
+        let selected = separator("▸── ", &body, self.width, theme::accent_style());
+        self.markers.push(Marker { line, selected });
+    }
+}
+
+fn separator(lead: &str, body: &str, width: usize, style: Style) -> Line<'static> {
+    let text = format!("{lead}{body} ");
+    let pad = width.saturating_sub(text.width());
+    Line::styled(clip(&format!("{text}{}", "─".repeat(pad)), width), style)
 }
 
 struct Row {
@@ -864,6 +910,11 @@ impl Row {
             spans: Vec::new(),
             width: 0,
         }
+    }
+
+    fn from_spans(spans: Vec<Span<'static>>) -> Self {
+        let width = spans.iter().map(|span| span.content.as_ref().width()).sum();
+        Self { spans, width }
     }
 
     fn push(&mut self, text: impl Into<String>, style: Style) {
@@ -880,13 +931,35 @@ impl Row {
         }
     }
 
-    fn line(self) -> Line<'static> {
-        Line::from(self.spans)
+    /// A line that never draws past `width`, whatever the terminal size.
+    fn fit(self, width: usize) -> Line<'static> {
+        if self.width <= width {
+            Line::from(self.spans)
+        } else {
+            let style = self.spans.last().map(|span| span.style).unwrap_or_default();
+            let text = self
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            Line::styled(clip(&text, width), style)
+        }
     }
 }
 
-fn token(document: &Value, name: &str) -> Option<u64> {
-    document["tokens"][name].as_u64()
+/// Cut a line at `width` display columns.
+fn clip(text: &str, width: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0;
+    for character in text.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > width {
+            break;
+        }
+        used += character_width;
+        out.push(character);
+    }
+    out
 }
 
 /// Wrap text without losing leading indentation. Long words are hard-split.
@@ -997,7 +1070,8 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let mut text = String::new();
         for row in 0..height {
-            for column in 0..width {
+            // The card border is not part of what the reader sees inside it.
+            for column in 1..width.saturating_sub(1) {
                 text.push_str(buffer[(column, row)].symbol());
             }
             text.push('\n');
@@ -1303,9 +1377,9 @@ mod tests {
     #[test]
     fn the_s_key_collapses_the_system_layers_and_shows_them_again() {
         let (_home, mut app) = prompt_app(conversation());
-        assert!(rendered(&app, 100, 60).contains(SOUL));
+        assert!(rendered(&app, 80, 60).contains(SOUL));
         app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-        let hidden = rendered(&app, 100, 60);
+        let hidden = rendered(&app, 80, 60);
         assert!(
             !hidden.contains(SOUL),
             "the system bodies are hidden: {hidden}"
@@ -1314,8 +1388,12 @@ mod tests {
             hidden.contains("identity, guidance, rules, skills index, tools, recall"),
             "the summary line names the layers: {hidden}"
         );
+        let summary = hidden
+            .lines()
+            .find(|line| line.contains("identity, guidance, rules, skills index, tools, recall"))
+            .expect("the summary line");
         assert!(
-            hidden.contains("tok"),
+            summary.contains("tok"),
             "the summary names the cost: {hidden}"
         );
         assert!(
@@ -1324,7 +1402,7 @@ mod tests {
         );
         app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
         assert!(
-            rendered(&app, 100, 60).contains(SOUL),
+            rendered(&app, 80, 60).contains(SOUL),
             "the second press shows the layers again"
         );
     }
@@ -1389,7 +1467,7 @@ mod tests {
     fn a_realistic_transcript_fits_eighty_and_one_hundred_and_twenty_columns() {
         for width in [80u16, 120] {
             let (_home, app) = prompt_app(conversation());
-            let text = rendered(&app, width, 40);
+            let text = rendered(&app, width, 80);
             for line in cache_lines(&app) {
                 assert!(
                     line.width() <= usize::from(width) - 2,
