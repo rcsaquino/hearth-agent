@@ -2522,6 +2522,8 @@ just after.
 - The 800-token rules block stays a separate aggregate budget. A 150-character
   rule consumes its share of that block, and `check_rules_budget` still refuses a
   write that would overflow it.
+- Superseded on 2026-11-17 by the 200-character limit and count-only recall; see
+  that entry. The store, extractor, digest, schema, and settings moved together.
 
 ## 2026-11-16: The Prompt tab starts folded under one key
 
@@ -2580,3 +2582,30 @@ just after.
 - The home-table row and the recovery list in SPEC 3.1 and 3.5 are removed, and
   SPEC 9.4 names the temp root. This supersedes the `spill/` home row in the
   2026-11-08 "M2b-3 tools, spill, and the tool loop" entry.
+
+## 2026-11-17: The content limit is 200 and recall is bounded by count
+
+- `store::CONTENT_LIMIT`, `digest::LINE_CHARS`, and `extract::MAX_CHARS` are 200.
+  The store is the final gate, and the tool schema, the extractor, the import, and
+  every direct write name the same limit. `digest::RULE_CHARS` stays 400 as a
+  read-side guard and `extract::MESSAGE_CHARS` stays 1,600.
+- `MemoryConfig` no longer has `recall_max_tokens`, and
+  `memory.recall_max_tokens` is removed from settings, validation, the settings
+  form, the status report, and the Overview card. A settings file that still sets
+  it is refused as an unknown field, and `settings_from_value`'s `failing_field`
+  names `memory.recall_max_tokens` so an installed home can delete the line.
+- `MemoryService::recall_within`, `digest::line_cost`, `digest::coverage_cost`,
+  `digest::trim_coverage`, and the agent's recall shrink loop and `digest_floor`
+  are gone. `recall` and `recall_at` take no budget.
+- `rank::fill` orders by score and keeps `recall_max_items`. It no longer divides
+  the score by a line cost, so a long statement keeps its slot at equal evidence.
+- The bound is a count: ten items of 200 characters, plus at most two coverage
+  lines of three subjects. The worst case measured 1,143 estimated tokens and ten
+  ordinary full rows measured 682. Raising `recall_max_items` raises the ceiling,
+  and its clamp stays 1 to 64.
+- The benchmark still reports automatic recall 0.928 lexical and 0.954 hybrid,
+  one-call reachability 0.990, and digest p95 139 tokens after the ordering
+  change. The run is the acceptance record; no new gate is added.
+- This supersedes the recall reserve and render trim in the 2026-11-15 "The memory
+  block honours its own budget" entry and the 700-token part of the 2026-11-16
+  "Every memory is capped at 150 characters" entry.

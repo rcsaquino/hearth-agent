@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.46, plain-language edition
+**Status:** Draft 0.47, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,14 @@
 ---
 
 ## A note on language
+
+Draft 0.47 raises the memory content limit to 200 characters and bounds recall by
+count alone. `memory.recall_max_tokens` is gone, `recall_max_items` stays 10, and
+the fill keeps the highest scores instead of the best score per token. The worst
+case is ten 200-character rows plus two coverage lines of three 120-character
+subjects, measured at 1,143 estimated tokens; ten ordinary full rows measure 682.
+A settings file that still sets `memory.recall_max_tokens` is refused, and the
+error names that line.
 
 Draft 0.46 moves spill to the temp folder. Oversized tool output is written under
 `$TMPDIR/hearth/spill`, or `/tmp/hearth/spill` when `TMPDIR` is unset or empty.
@@ -36,7 +44,8 @@ can no longer sit above a current statement.
 Draft 0.42 gives every memory one 150-character content limit, pinned rules
 included. A longer write is refused and names its length and the limit; nothing
 is truncated. Recall now defaults to 700 tokens and at most 10 items, and a new
-memory fits its recall line whole. The 400-character rule cap is gone, while a
+memory fits its recall line whole. (The limit is 200 characters and recall is
+bounded by count alone since Draft 0.47.) The 400-character rule cap is gone, while a
 400-character read-side guard still protects a row written before this limit.
 
 Draft 0.41 removes the prompt segment warnings. The per-layer token counts stay
@@ -192,7 +201,7 @@ prompt export and the daemon status where it is useful.
 
 Draft 0.22 makes `settings.json` the only bootstrap file. When the home loses its folders, `SOUL.md`, or an empty `HEARTH.md`, the daemon recreates them from the settings on the next start, so a home holding only a valid `settings.json` comes back as if onboarding had just finished. Existing files are never overwritten, and the repair runs only after the daemon holds its lock, so a systemd unit and a TUI-spawned daemon cannot both write.
 
-Draft 0.21 adds local hybrid memory: the configured item and token budgets now bound automatic recall, snippets replace full rows, and tags stay out of the injected text. Long-term memory gains INT8 vectors from the local `bekko-embedding-v1-a8m` model, fused with FTS5 by reciprocal rank. A missing model falls back to lexical recall. New writes were limited to 2,000 characters and 8 tags (the content limit is now 150; see Draft 0.42), credential-shaped content is refused, durable cues trigger a background extraction pass, and Overview reports whether recall is lexical or hybrid. Nightly backups now include the memory stores.
+Draft 0.21 adds local hybrid memory: the configured item and token budgets now bound automatic recall, snippets replace full rows, and tags stay out of the injected text. Long-term memory gains INT8 vectors from the local `bekko-embedding-v1-a8m` model, fused with FTS5 by reciprocal rank. A missing model falls back to lexical recall. New writes were limited to 2,000 characters and 8 tags (the content limit is now 200; see Draft 0.47), credential-shaped content is refused, durable cues trigger a background extraction pass, and Overview reports whether recall is lexical or hybrid. Nightly backups now include the memory stores.
 
 Draft 0.20 replaces the two-card Prompt audit with one live, scrollable session export that shows every prompt layer, tool declaration, message, reply, and usage line in full. A reply or settled run refreshes the open view, and a coalesced follow-up read keeps the final saved answer from being missed. `[` and `]` walk older snapshots, and `f` toggles the live tail.
 
@@ -994,7 +1003,7 @@ Each section after identity is wrapped in an XML tag: `<project_instructions>`,
 ### 6.2 The budget
 
 **In plain terms.** Hearth calculates how much room it has before sending anything.
-If the request would be too large, it shrinks recall and tool output first, then
+If the request would be too large, it shrinks tool output first, then
 summarizes, then reports a clear budget error rather than silently truncating.
 
 For a model with context window `W`:
@@ -1008,8 +1017,8 @@ keep      = min(keep_recent_tokens, 0.35 * usable)
 ```
 
 Every request is estimated before sending. If the estimate exceeds `usable`, the
-runtime first shrinks recall and tool output, then compacts, then fails with a clear
-budget error. Estimates use a real tokenizer where available and a characters/4
+runtime first shrinks tool output, then compacts, then fails with a clear budget
+error. Estimates use a real tokenizer where available and a characters/4
 heuristic with a 10% margin otherwise.
 
 `configured_output` comes from `models.max_output_tokens` and is a local reserve
@@ -1173,7 +1182,7 @@ One row is one statement the user would recognise as one thing they said.
 |---|---|
 | `id` | Stable `m_` id |
 | `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, or `fact` |
-| `content` | One statement; a write is capped at 150 characters |
+| `content` | One standalone statement; a write is capped at 200 characters |
 | `subject` | The normalised person, project, or thing it is about |
 | `pinned` | Injects the statement as a rule; only valid with `kind = rule`, and only while the row is current |
 | `source_kind`, `source_entry` | Provenance, down to the entry the user typed |
@@ -1233,7 +1242,7 @@ Write rules:
 - A pinned rule must fit the rules budget; a write that would overflow it is
   refused with the current rules listed, so the model can replace one.
 - Credential-shaped content is refused before it reaches the table.
-- Every statement, a pinned rule included, is capped at 150 characters after
+- Every statement, a pinned rule included, is capped at 200 characters after
   trimming. A longer write is refused, names its length and the limit, and saves
   nothing. A new memory fits its recall line whole; only a row written before
   the limit is clipped for display.
@@ -1251,7 +1260,7 @@ message
        semantic  local INT8 vectors, cosine floor 0.40
   -> fuse by reciprocal rank, k = 60
   -> rank by a linear score over cheap features
-  -> diversify, then fill the token budget greedily by value per token
+  -> diversify, then keep the best scores up to the item cap
 ```
 
 The ranking features are the evidence a personal message actually provides.
@@ -1266,9 +1275,9 @@ The ranking features are the evidence a personal message actually provides.
 | Recency | 0.10 | A tie-break, never a filter |
 
 Term coverage compares with a prefix in either direction, which is the cheap
-stand-in for a stemmer and is what lets "queued" find "queue". The fill sorts by
-score per token, so a short decisive fact is not displaced by a long lukewarm
-one, and it spends the whole budget instead of cutting at a fixed count.
+stand-in for a stemmer and is what lets "queued" find "queue". The fill orders by
+score and keeps the best 10, so a long decisive statement is not displaced by a
+shorter one at a lower score.
 
 An as-of read skips the semantic channel. The vector index holds only current
 statements, and mixing today's meaning into a question about March would answer
@@ -1296,9 +1305,10 @@ that silently shows six of fourteen facts teaches the model that six is all
 there is. Naming the remainder, and the call that fetches it, is the difference
 between a bounded digest and a bounded memory.
 
-Default budgets are 800 tokens for rules and 700 for the digest, with at most 10
-statements. The digest is measured at 139 tokens at the 95th percentile on the
-benchmark.
+The rules block is capped at 800 tokens. Recall is bounded by count: at most 10
+statements of 200 characters each, plus at most two coverage lines of three
+subjects. The worst case measures 1,143 estimated tokens and ten ordinary full
+rows measure 682; the benchmark digest is 139 tokens at the 95th percentile.
 
 ### 7.6 Rules
 
@@ -1308,7 +1318,7 @@ text moves.
 
 - The block is capped at 800 tokens. A write that would exceed the cap is
   refused, not silently evicted.
-- Every rule uses the one 150-character content limit. A row written before
+- Every rule uses the one 200-character content limit. A row written before
   that limit is clipped at 400 characters for display, with an ellipsis.
 - Any rule that does not fit the render is named as `N more rules were not
   shown`, so a hand-edited store cannot hide content silently.
@@ -1369,11 +1379,11 @@ digest will always miss something. Measured on the committed fixture:
 |---|---|---|
 | Recoverable in one call, lexical | 0.98 | 0.99 |
 | Recoverable in one call, hybrid | 0.98 | 0.99 |
-| Automatic recall, lexical | 0.92 | 0.933 |
+| Automatic recall, lexical | 0.92 | 0.928 |
 | Automatic recall, hybrid | 0.92 | 0.954 |
-| Paraphrase, automatic, hybrid | 0.85 | 0.850 |
+| Paraphrase, automatic, hybrid | 0.85 | 0.900 |
 | Digest tokens, p95 | 300 | 139 |
-| Retrieval latency, p95 | 100 ms | 6.4 ms lexical, 11.3 ms hybrid |
+| Retrieval latency, p95 | 100 ms | 6.5 ms lexical, 14.1 ms hybrid |
 | Contradiction answered by the current statement | all | 15 of 15 |
 | Duplicate writes that became new rows | 0 | 0 |
 | Secrets stored | 0 | 0 |
@@ -1777,7 +1787,6 @@ Optional overrides, only when needed:
 | `models.max_output_tokens` | `32000` | Local reply reserve; not sent |
 | `tasks.eta_reminder_seconds` | `1` | Delay after a task’s expected finish before its reminder |
 | `memory.rules_max_tokens` | `800` | Rules budget, in the cached prefix |
-| `memory.recall_max_tokens` | `700` | Per-turn digest token budget |
 | `memory.recall_max_items` | `10` | Per-turn digest item cap |
 | `memory.embeddings` | `true` | Request the local hybrid recall path; lexical fallback remains active |
 | `memory.embedding_model_dir` | `models/bekko-embedding-v1-a8m` | Local embedding model directory |
@@ -1790,7 +1799,8 @@ Optional overrides, only when needed:
 ### 10.2 What is checked
 
 - Unknown fields are rejected, to catch typos. `identity` has no `user_name`; an old
-  settings file that still contains it is rejected.
+  settings file that still contains it is rejected. A settings file that still sets
+  the retired `memory.recall_max_tokens` is refused, and the error names that line.
 - Telegram is enabled when `telegram.bot_token` is present. Then
   `allowed_user_ids` must be non-empty. `telegram.base_url`, when present, must be
   an http or https URL.
@@ -2193,7 +2203,7 @@ install contains nothing personal.
 | Database mode | `0600` | 11.1 |
 | Save durability | `synchronous=FULL` | 4.4 |
 | Read connections | 4 | 11.1 |
-| Recall budget | 700 tokens, 10 items | 7.4 |
+| Recall bound | 10 items of 200 characters | 7.4 |
 | Context window | 128,000 tokens | 6.2 |
 | Reserved reply | 32,000 tokens local reserve | 6.2 |
 | Soft compaction | 65% of usable context | 5.5 |

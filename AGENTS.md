@@ -222,14 +222,14 @@ second identity.
 
 ## Known residuals
 
-- Memory recall is 0.933 automatic and 0.99 recoverable in one call on the lexical
+- Memory recall is 0.928 automatic and 0.99 recoverable in one call on the lexical
   path, and 0.954 and 0.99 with the local encoder installed. Paraphrase is the
-  weak category at 0.85 hybrid and 0.65 lexical.
+  weak category at 0.90 hybrid and 0.65 lexical.
 - Two of the 195 benchmark questions need more than one tool call. Both are
   paraphrases with no shared vocabulary. Six of the thirteen automatic misses are
   topics the fixture gives two live answers to.
-- Retrieval p95 is 6.4 ms lexical and 11.3 ms hybrid on a 200-statement store, and
-  24 ms with 4k distractors. At 200,000 rows with 200,000 distinct subjects it is
+- Retrieval p95 is 6.5 ms lexical and 14.1 ms hybrid on a 200-statement store, and
+  19.5 ms with 4k distractors. At 200,000 rows with 200,000 distinct subjects it is
   9.1 ms at p50 and 221.3 ms at p95 on the reference host, measured by the ignored
   `the_200k_store_is_measured`. The p95 is driven by fixture questions that share
   a word with the noise; the hybrid vector scan at that size is still unmeasured.
