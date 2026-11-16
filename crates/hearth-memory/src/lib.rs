@@ -68,8 +68,8 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             rules_max_tokens: 800,
-            recall_max_tokens: 300,
-            recall_max_items: 12,
+            recall_max_tokens: 700,
+            recall_max_items: 10,
         }
     }
 }

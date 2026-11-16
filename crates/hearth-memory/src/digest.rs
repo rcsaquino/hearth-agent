@@ -17,12 +17,14 @@ use std::collections::BTreeMap;
 use crate::model::Memory;
 
 /// Longest statement shown in one recall line.
-const LINE_CHARS: usize = 140;
-/// Longest statement shown in one rule line.
 ///
-/// A rule is capped at this length when it is written, so the render and the
-/// budget check measure the same text. The clip only protects a store that was
-/// edited outside the tool path.
+/// A new memory is capped at this length, so it is shown whole. The clip only
+/// protects a row written before that limit.
+const LINE_CHARS: usize = 150;
+/// The read-side guard for a rule line.
+///
+/// A rule written before the 150-character limit used to be capped at this
+/// length. The clip only protects an older store.
 const RULE_CHARS: usize = 400;
 
 /// How many subjects the coverage line names before it says "and more".

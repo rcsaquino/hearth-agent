@@ -141,8 +141,7 @@ fn read_bullets(text: &str) -> Vec<String> {
                 Some(end) => rest[end + 1..].trim(),
                 None => rest,
             };
-            (!content.is_empty() && content.len() <= crate::store::RULE_LIMIT)
-                .then(|| content.to_owned())
+            (!content.is_empty()).then(|| content.to_owned())
         })
         .collect()
 }

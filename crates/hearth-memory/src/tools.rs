@@ -130,7 +130,7 @@ impl Tool for SaveTool {
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "One statement, in the user's terms."
+                        "description": "One statement, at most 150 characters, in the user's terms."
                     },
                     "kind": {
                         "type": "string",

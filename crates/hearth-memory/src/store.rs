@@ -25,9 +25,7 @@ use crate::model::{Kind, Memory, NewMemory, Source, WriteOutcome};
 use crate::query::normalize;
 
 /// The longest statement a write may store.
-pub const CONTENT_LIMIT: usize = 2_000;
-/// The longest pinned rule, which is also the longest rule line the prompt shows.
-pub const RULE_LIMIT: usize = 400;
+pub const CONTENT_LIMIT: usize = 150;
 /// The rows the prompt injects as rules.
 ///
 /// A pin belongs to a live statement, and retirement clears it. The validity
@@ -179,9 +177,11 @@ pub fn validate(item: &NewMemory) -> Result<()> {
     if content.is_empty() {
         return Err(MemoryError::invalid("memory content cannot be empty."));
     }
-    if content.chars().count() > CONTENT_LIMIT {
+    let length = content.chars().count();
+    if length > CONTENT_LIMIT {
         return Err(MemoryError::invalid(format!(
-            "memory content must be at most {CONTENT_LIMIT} characters."
+            "memory content is {length} characters; the limit is {CONTENT_LIMIT}. \
+             Split it into separate memories."
         )));
     }
     if content.contains('\0') {
@@ -201,11 +201,6 @@ pub fn validate(item: &NewMemory) -> Result<()> {
         return Err(MemoryError::invalid(
             "a statement that is written already retired cannot be pinned.",
         ));
-    }
-    if item.pinned && content.chars().count() > RULE_LIMIT {
-        return Err(MemoryError::invalid(format!(
-            "a pinned rule must be at most {RULE_LIMIT} characters. Split it into separate rules."
-        )));
     }
     if hearth_core::secrets::contains_secret(content) {
         return Err(MemoryError::new(

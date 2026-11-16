@@ -422,11 +422,11 @@ fn default_rules_max_tokens() -> u64 {
 }
 
 fn default_recall_max_tokens() -> u64 {
-    300
+    700
 }
 
 fn default_recall_max_items() -> u64 {
-    12
+    10
 }
 
 fn default_embeddings() -> bool {

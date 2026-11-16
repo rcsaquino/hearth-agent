@@ -35,8 +35,14 @@ impl Candidate {
 
 /// The shortest statement worth keeping.
 const MIN_CHARS: usize = 8;
-/// The longest. A long message is a request, not a durable statement.
-const MAX_CHARS: usize = 400;
+/// The longest statement worth keeping.
+const MAX_CHARS: usize = 150;
+/// The longest message that may contain a statement worth keeping.
+///
+/// A long message is a request, not a durable statement, but a short promise can
+/// still sit inside one. This guard is separate from the candidate limit so a
+/// long message is scanned rather than skipped.
+const MESSAGE_CHARS: usize = 1_600;
 /// The most candidates one message may produce.
 const MAX_CANDIDATES: usize = 3;
 
@@ -97,7 +103,7 @@ const RELATIONS: &[&str] = &[
 /// Statements worth keeping from one user message.
 pub fn candidates(text: &str) -> Vec<Candidate> {
     let message = normalize_spacing(text);
-    if message.chars().count() < MIN_CHARS || message.chars().count() > MAX_CHARS * 4 {
+    if message.chars().count() < MIN_CHARS || message.chars().count() > MESSAGE_CHARS {
         return Vec::new();
     }
     let mut found: Vec<Candidate> = Vec::new();
