@@ -62,9 +62,18 @@ conversation, the host, the logs, or the person who noticed the problem. If a
 claim cannot be re-derived from code in the repository, it does not belong in
 the file.
 
-For a `bug`, state the observed behaviour and the mechanism. Point at files and
-functions. Do not propose a fix; the file describes the fault, the fixer decides
-the approach.
+For a `bug`, state the observed behaviour and the mechanism. Point at the file
+and the function, type, or constant that carries it. Do not propose a fix; the
+file describes the fault, the fixer decides the approach.
+
+Cite by name, never by position. The fixer may read a different revision, so a
+line number is wrong as soon as anything above it moves, and a pasted function
+is a copy of one revision rather than a fact about the fault. Name the file and
+the symbol: `ContextBudget::new` in `crates/hearth-core/src/budget.rs` locates
+the mechanism in every revision that has it; `budget.rs:44` locates one
+snapshot. Quote a short fragment inline when the exact text is the evidence,
+but do not paste blocks of repository source. An input, an output, or a command
+may go in a block, because there is no name to cite instead.
 
 For a `feature` or `change`, state what should happen and why it is worth doing.
 Describe the desired behaviour, not the implementation. Leave the design to the
@@ -115,6 +124,9 @@ decision, and the next reader needs to know it was deliberate.
   new issue and reference the old one.
 - One issue per file. Two unrelated things in one file means one of them gets
   lost.
+- Cite symbols, not coordinates. No line numbers and no pasted source, in an
+  issue or in a Resolution. A file and a symbol outlive a revision;
+  `file.rs:100` does not.
 - Update the file, not a chat message. Anything a worker needs must be in the
   file.
 - Ordering inside a directory does not matter. Nothing is by priority unless a
