@@ -152,6 +152,57 @@ fn a_replaced_rule_is_not_listed_as_pinned() {
 }
 
 #[test]
+fn list_memories_groups_pinned_active_then_inactive() {
+    let home = TempDir::new().expect("temp home");
+    init(home.path(), options()).expect("init");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let memory = MemoryService::new(harness.session().clone());
+    let pinned = memory
+        .write(NewMemory::new("Pinned rule.").kind(Kind::Rule).pinned(true))
+        .expect("rule")
+        .memory()
+        .clone();
+    let active = memory
+        .write(NewMemory::new("Active fact.").subject("active"))
+        .expect("active")
+        .memory()
+        .clone();
+    let retired = memory
+        .write(NewMemory::new("Retired fact.").subject("retired"))
+        .expect("retired")
+        .memory()
+        .clone();
+    memory
+        .write(
+            NewMemory::new("Replacement fact.")
+                .subject("retired")
+                .supersedes(retired.id.clone()),
+        )
+        .expect("replacement");
+
+    let records = list_memories(home.path(), 100).expect("list memories");
+    let at = |id: &str| {
+        records
+            .iter()
+            .position(|record| record.id == id)
+            .unwrap_or_else(|| panic!("missing {id}"))
+    };
+    assert!(
+        at(&pinned.id) < at(&active.id),
+        "a pinned row leads the list"
+    );
+    assert!(
+        at(&active.id) < at(&retired.id),
+        "an active row must not sit below a retired one"
+    );
+    assert_eq!(
+        records.last().expect("last row").id,
+        retired.id,
+        "a retired row is history and sits last"
+    );
+}
+
+#[test]
 fn latest_prompt_skips_plain_text_maintenance_prompts() {
     let home = TempDir::new().expect("temp home");
     init(home.path(), options()).expect("init");

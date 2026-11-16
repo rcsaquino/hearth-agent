@@ -766,6 +766,61 @@ mod tests {
     }
 
     #[test]
+    fn memory_tab_groups_pinned_then_active_then_retired() {
+        use hearth_core::Harness;
+        use hearth_memory::{Kind, MemoryService, NewMemory};
+
+        let (home, mut app) = initialized_app();
+        {
+            let harness = Harness::open(home.path()).expect("harness");
+            let memory = MemoryService::new(harness.session().clone());
+            memory
+                .write(NewMemory::new("Pinned rule.").kind(Kind::Rule).pinned(true))
+                .expect("rule");
+            memory
+                .write(NewMemory::new("Active fact.").subject("active"))
+                .expect("active");
+            let retired = memory
+                .write(NewMemory::new("Retired fact.").subject("retired"))
+                .expect("retired")
+                .memory()
+                .clone();
+            memory
+                .write(
+                    NewMemory::new("Replacement fact.")
+                        .subject("retired")
+                        .supersedes(retired.id.clone()),
+                )
+                .expect("replacement");
+        }
+        app.tab = Tab::Memory;
+        app.memory.reload(home.path());
+
+        let order: Vec<&str> = app
+            .memory
+            .filtered()
+            .iter()
+            .map(|record| record.content.as_str())
+            .collect();
+        let at = |content: &str| {
+            order
+                .iter()
+                .position(|row| *row == content)
+                .unwrap_or_else(|| panic!("missing {content} in {order:?}"))
+        };
+        assert!(at("Pinned rule.") < at("Active fact."));
+        assert!(at("Active fact.") < at("Retired fact."));
+        assert_eq!(order.last(), Some(&"Retired fact."));
+
+        let text = buffer_text(&app, 110, 34);
+        let pinned_at = text.find("Pinned rule.").expect("pinned row");
+        let active_at = text.find("Active fact.").expect("active row");
+        let retired_at = text.find("Retired fact.").expect("retired row");
+        assert!(pinned_at < active_at, "{text}");
+        assert!(active_at < retired_at, "{text}");
+    }
+
+    #[test]
     fn settings_tab_shows_the_form_without_a_shortcut() {
         let (_home, mut app) = initialized_app();
         app.handle_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));
