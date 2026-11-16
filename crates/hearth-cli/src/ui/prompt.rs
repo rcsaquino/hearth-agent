@@ -1385,12 +1385,20 @@ mod tests {
             "the system bodies are hidden: {hidden}"
         );
         assert!(
-            hidden.contains("identity, guidance, rules, skills index, tools, recall"),
-            "the summary line names the layers: {hidden}"
+            hidden.contains("identity, guidance, rules, skills index, tools"),
+            "the summary line names the stable layers: {hidden}"
+        );
+        assert!(
+            !hidden.contains("MEMORY HIT"),
+            "the recall body is hidden with the system layers: {hidden}"
+        );
+        assert!(
+            hidden.contains("system · memory") && hidden.contains("70 tok"),
+            "the recall keeps its one-line cost: {hidden}"
         );
         let summary = hidden
             .lines()
-            .find(|line| line.contains("identity, guidance, rules, skills index, tools, recall"))
+            .find(|line| line.contains("identity, guidance, rules, skills index, tools"))
             .expect("the summary line");
         assert!(
             summary.contains("tok"),
@@ -1414,21 +1422,55 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
         let text = rendered(&app, 100, 24);
         assert!(
-            text.lines().nth(1).unwrap_or_default().contains("▸── 2 · "),
+            text.lines().nth(2).unwrap_or_default().contains("▸── 2 · "),
             "the older marker moves to the top of the viewport: {text}"
         );
         app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
         let text = rendered(&app, 100, 24);
         assert!(
-            text.lines().nth(1).unwrap_or_default().contains("▸── 1 · "),
+            text.lines().nth(2).unwrap_or_default().contains("▸── 1 · "),
             "the oldest marker moves to the top of the viewport: {text}"
         );
         app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
         let text = rendered(&app, 100, 24);
         assert!(
-            text.lines().nth(1).unwrap_or_default().contains("▸── 2 · "),
+            text.lines().nth(2).unwrap_or_default().contains("▸── 2 · "),
             "the newer marker moves to the top of the viewport: {text}"
         );
+    }
+
+    #[test]
+    fn the_header_names_the_snapshot_and_the_numbers_at_a_glance() {
+        let (_home, mut app) = prompt_app(conversation());
+        let text = rendered(&app, 100, 30);
+        assert!(text.contains("test-model"), "{text}");
+        assert!(text.contains("session session-"), "{text}");
+        assert!(text.contains("snapshot 2 of 2"), "{text}");
+        assert!(text.contains("620 tok"), "{text}");
+        assert!(text.contains("prefix prefix-o"), "{text}");
+        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
+        let text = rendered(&app, 100, 30);
+        assert!(text.contains("snapshot 1 of 2"), "{text}");
+    }
+
+    #[test]
+    fn a_new_conversation_starts_a_fresh_transcript() {
+        let mut exchanges = conversation();
+        let mut newest = exchanges[0].clone();
+        newest["request"]["session_id"] = json!("session-two");
+        newest["request"]["transcript"] = json!([
+            {"role": "user", "blocks": [{"type": "text", "text": "a different conversation"}]}
+        ]);
+        exchanges.insert(0, newest);
+        let (_home, app) = prompt_app(exchanges);
+        let text = rendered(&app, 100, 60);
+        assert!(text.contains("conversation · session-"), "{text}");
+        assert!(text.contains("a different conversation"), "{text}");
+        assert!(
+            !text.contains("history rewritten"),
+            "a new conversation is not a rewritten one: {text}"
+        );
+        assert_eq!(text.matches(QUESTION).count(), 1, "{text}");
     }
 
     #[test]

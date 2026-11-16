@@ -1077,8 +1077,8 @@ mod tests {
         assert!(text.contains("CLOCK NOTE"), "{text}");
         assert!(text.contains("the answer"), "{text}");
         assert!(
-            !text.contains("SESSION"),
-            "the flat export header is gone: {text}"
+            text.contains("snapshot 1 of 1"),
+            "the header names the snapshot: {text}"
         );
     }
 
