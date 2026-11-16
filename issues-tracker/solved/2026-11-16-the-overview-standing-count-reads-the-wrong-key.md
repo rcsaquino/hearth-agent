@@ -33,7 +33,7 @@ produce.
 daemon publishes. The render assertion is unchanged, so it fails against the old
 `standing_bullets` read.
 
-Commit: `c892e75` (test), `fix: read the standing count from the status payload`.
+Commits: `c892e75` (test), `181b8e8` (fix).
 
 Verified by `cargo test -p hearth-cli`, and the fixture now matches the key
 asserted in `crates/hearth-cli/tests/s8_telegram_daemon.rs`.

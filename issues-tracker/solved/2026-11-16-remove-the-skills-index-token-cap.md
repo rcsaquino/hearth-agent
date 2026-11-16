@@ -71,3 +71,22 @@ Observable requirements:
   `archived > 0`.
 - `crates/hearth-core/tests/s1_budget.rs:46` pins `SEGMENT_SKILLS == 300` and
   stays correct if only the index cap is lifted.
+
+## Resolution
+
+`INDEX_MAX_TOKENS` and the token branch in `SkillLibrary::index` are gone. Every
+active skill is indexed up to `INDEX_MAX_ACTIVE` (50). Only the count cap retires
+a learned skill, keeping the lowest success rate first and then the least
+recently used; user skills stay read-only. `SEGMENT_SKILLS` stays 300 as a prompt
+warning, and `TokenCounts::over_budget` still names `skills`.
+
+The two tests that required archiving over the token cap are replaced. The new
+tests build 15 and 40 skills with long descriptions, assert the rendered index is
+over 300 tokens, assert every skill is listed, and assert none is archived. A
+third test keeps 60 short skills and asserts the count cap still archives ten,
+with the zero-success skills first.
+
+Commits: `eb30e01` (test), `5166724` (change).
+
+Verified by `cargo test -p hearth-runtime --test skills --test s6_skills` and
+`./scripts/ci.sh`.

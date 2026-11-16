@@ -98,3 +98,20 @@ The render is a string, so the check is a text assertion, as at
 `crates/hearth-cli/src/ui/mod.rs:632`, which asserts the card title. The
 requirement: the rendered card contains the active count and does not contain the
 review stamp.
+
+## Resolution
+
+The daemon status now carries `skills.active` and `skills.index_tokens`. Both are
+computed from the same `SkillLibrary::index` call the agent makes, and the count
+comes from `SkillStats` after that call. The Work & memory card renders `N active · M tokens`, for example
+`4 active · 246 tokens`, because the token cap has already landed, so there is
+no ceiling to divide by. The
+`last_skill_review` and `last_skill_review_changes` fields leave the card. The
+daemon keeps publishing them for other readers.
+
+Commits: `aeee873` (test), `277f86c` (change).
+
+Verified by `cargo test -p hearth-runtime --test ipc_status`, which asserts the
+status figure equals `estimate_tokens` of the library's own index, and by
+`cargo test -p hearth-cli --lib`, which asserts the rendered card contains the
+active count and no review stamp. `./scripts/ci.sh` is green.

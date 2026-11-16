@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.28, plain-language edition
+**Status:** Draft 0.29, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,19 @@
 ---
 
 ## A note on language
+
+Draft 0.29 rebuilds the Prompt tab as one conversation. The saved requests are
+merged into a single transcript and each request is marked as a snapshot with
+its delta, so nineteen snapshots of one conversation no longer read as nineteen
+copies. The header names the selected snapshot, model, session, token total,
+prefix hash, and cache peers. System layers show once and collapse with `s`,
+relevant memory is shown per request, a new session starts a fresh transcript,
+and a spinner says when a turn is in flight. The saved prompt document marks the
+message that carried the runtime note instead of storing the note as a peer
+segment. The skills index no longer has a token cap: the 300-token budget is a
+warning, and only the 50-active count archives a learned skill. The Overview
+skills row reports the active count and the index cost instead of the review
+stamp.
 
 Draft 0.28 moves the clock out of instruction position and bounds the two reads
 that grew with the store. The runtime note is a `<runtime>` line carried by the
@@ -829,13 +842,15 @@ Every request is assembled in the same order:
 | L1 project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | 32 KB text |
 | L2 tools | Core tool schemas | Stable | 1200 |
 | L3 rules | Pinned instructions, versioned | Rare | 800 |
-| L4 skills index | Skill names and one-line descriptions | Rare | 300 |
+| L4 skills index | Skill names and one-line descriptions | Rare | 300, warning |
 | L5 transcript | Entries, summaries, tool results | Append-only | Remaining |
 | L6 recall | Memory retrieved for this input | Every turn | 300 |
 | L7 runtime | Current time in `identity.timezone`, ISO 8601 | Every turn | 150 |
 
 L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
-guidance files, tools, rules, or skills change. L5 is append-only, so the provider's prefix cache
+guidance files, tools, rules, or skills change. The L4 budget is a warning: every
+active skill is indexed, up to the 50-active count cap, and a long description
+never retires one. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
 message; it never rewrites the prefix. L7 is a `<runtime>` line paid fresh on every
 turn and carried by the newest input message, not by a separate system message: it
@@ -922,26 +937,32 @@ preambles and no server-side additions.
 
 - The exact prompt text is saved in `prompt_blobs` before the request and linked from
   the generation checkpoint.
-- The Prompt tab is one live, scrollable session export. The newest saved exchange
-  is shown in full with the stable layers first: system identity (`SOUL.md`),
-  guidance, rules, skills, and the request `tools` field, followed by
-  relevant memory immediately before the newest user, every transcript item, the
-  runtime note, and the saved response. A usage row appears only when the exchange
-  has a linked usage record; an unlinked one is omitted rather than shown empty.
-  Tools are a top-level request field,
-  not a system message, but they render with the fixed layers so the stable prefix
-  is visible at the top. Nothing is collapsed and tool results are not clipped.
-- Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or `g`/`G`)
-  jump to the top or tail. `[` and `]` walk older loaded snapshots, and `f` toggles
-  live follow. Scrolling away from the tail pauses follow; End or reaching the
-  bottom resumes it. The header names the snapshot, live state, prompt and prefix
-  hashes, token counts, and cache peers.
+- The Prompt tab is one conversation assembled from the loaded saved requests.
+  Consecutive requests are merged by their common message prefix, so each
+  snapshot prints only the messages it added under a marker that names the
+  request, its time, its prompt hash, and its token total. A rewritten history,
+  such as a compaction, prints a note instead of hiding the change. A change of
+  session prints a conversation boundary and starts a fresh transcript.
+- The stable layers show once at the start and again only when a prefix part
+  changes: system identity (`SOUL.md`), guidance, rules, the skills index, and
+  the request `tools` field. Relevant memory is per request and prints under its
+  snapshot marker. The runtime note prints under the message that carried it.
+  The saved response follows each request's delta. Tool results are not clipped.
+- Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or
+  `g`/`G`) jump to the first or last snapshot. `[` and `]` move the cursor
+  between snapshots and put the marker at the top. `f` toggles live follow, `s`
+  collapses the system layers to their names and token costs, and `r` shows the
+  loaded exchanges as raw JSON. Scrolling away from the tail pauses follow; End
+  or reaching the bottom resumes it. A spinner in the last row says when a turn
+  is in flight, even while paused.
+- The header names the model, session, selected snapshot, token total, prefix
+  hash, and the number of loaded requests that share the prefix.
 - Tool definitions show argument names, types, enums, required or optional
   markers, and argument descriptions instead of pretty-printed schema JSON.
-  Wrapping preserves leading indentation for code and JSON. `r` shows the raw
-  exchange JSON. Rendered sections are cached by saved prompt hash, request time,
-  response entry, raw mode, and width, so redraws while paused do not rebuild the
-  document.
+  Wrapping preserves leading indentation for code and JSON. The rendered
+  conversation is cached by the loaded set, width, raw mode, system visibility,
+  and zone, so moving between snapshots and redrawing while paused do not rebuild
+  the document.
 - The open view refreshes when an `assistant_reply` or `run_settled` event arrives.
   A refresh that arrives while one is already running is coalesced into one
   follow-up read, so the final saved response is shown even when replies and the
@@ -1450,8 +1471,9 @@ Rules:
   inside web pages or forwarded messages are not evidence.
 - The `skill` tool can read any skill but rejects a save or archive outside
   `skills/learned/`. A user-made skill is read-only to Hearth.
-- The index is capped at 300 tokens and 50 active skills across both directories.
-  When over, archive the lowest success rate, then the least recently used.
+- The index lists every active skill, up to 50 across both directories. The
+  300-token budget is a warning only. When the count is over 50, archive the
+  lowest success rate, then the least recently used.
 - Every version is kept under `skills/learned/.history/`, and every change is
   appended to `skills/learned/CHANGELOG.md`.
 - The TUI Skills tab exposes the library read-only: bodies, history, and counts.
@@ -1741,8 +1763,8 @@ output, cache, and latency totals.
   workspace), usage and cache hit rate for today, counted from local
   midnight in `identity.timezone`, the last week, the last month, and all time,
   work and memory (tasks, helpers, statements, rules
-  bullets, budgets, maintenance, skill review), provider connections, and recent
-  activity. Each usage period shows input tokens, output tokens, and cache reads.
+  bullets, budgets, maintenance, active skills and the index cost), provider
+  connections, and recent activity. Each usage period shows input tokens, output tokens, and cache reads.
 - The Activity tab follows a live run or task; logs and the usage ledger keep the
   durable record.
 - The usage ledger aggregates by day, model, and task kind. It does not carry a
@@ -2014,7 +2036,7 @@ install contains nothing personal.
 | Helper retention | 30 days or newest 25 runs | 5.4 |
 | ETA reminder | 1 second after expectation | 5.4 |
 | Tool schema budget | 1,200 tokens | 6.1, 9.1 |
-| Skills index | 300 tokens, 50 active | 6.1, 9.6 |
+| Skills index | 50 active, 300-token warning budget | 6.1, 9.6 |
 | Skill review | 04:30 in `identity.timezone`, 0 to 3 new skills | 9.6 |
 | Learned skills | `skills/learned/` | 9.6 |
 | Skill archive | 90 days unused | 9.6 |

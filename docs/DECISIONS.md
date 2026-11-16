@@ -875,7 +875,7 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 
 - User-made skills live in `$HEARTH_HOME/skills/` as `SKILL.md` inside a named directory or as a flat `<name>.md`. They are read-only to Hearth. Learned skills live in `skills/learned/<name>.md` with frontmatter, versions in `skills/learned/.history/<name>/vN.md`, and a `CHANGELOG.md`.
 - Frontmatter is parsed conservatively without a YAML dependency. Missing closing fences, unknown statuses, and non-numeric counters are errors. User skills may omit frontmatter; the file name and first body line provide the name and description.
-- The prompt skills index contains active skills only, capped at 300 estimated tokens and 50 active skills across user and learned. Learned skills over the cap are archived by lowest success rate, then least recently used; user skills are never archived. The index is the L4 prompt layer, the M5a `skills` segment, and the M5c `skills` prefix part.
+- The prompt skills index contains active skills only, capped at 300 estimated tokens and 50 active skills across user and learned. Learned skills over the cap are archived by lowest success rate, then least recently used; user skills are never archived. The index is the L4 prompt layer, the M5a `skills` segment, and the M5c `skills` prefix part. (The token cap was removed on 2026-11-16; see that entry.)
 - The `skill` tool loads, saves, and archives. Load records uses and last_used for learned skills. Save and archive only apply to `skills/learned/`; a user skill rejects both. Save increments the version, copies the old version into history, and appends the changelog. New learned skills are drafts; the review in M7c-2 promotes, revises, quarantines, and archives them.
 - `hearth skills list|show|history|diff|stats` is read-only. The diff is a line comparison of two preserved versions.
 - The tool is registered in local chat, the Telegram daemon worker, and the prompt-audit tool set. Helper subagents keep their restricted tool subset and do not get the skill tool.
@@ -2049,9 +2049,9 @@ force-pushing, which is the approval named above and not a step in this change.
   message on the first turn and after steering, the last tool result on a
   continuation. It stays one tag-wrapped line, paid fresh every turn, with no
   conversation or model identifier.
-- The Prompt tab labels it `runtime note · newest input`, and the audit transcript
-  still shows the stored conversation, so an operator can see that a continuation
-  added a tool result and no user message.
+- The audit document marks the message that carried the note with a
+  `runtime_note` string. The Prompt tab prints the note under that message, so an
+  operator can see that a continuation added a tool result and no user message.
 - A conversation with neither a user nor a tool message has nowhere to carry the
   note; it is dropped rather than put back in instruction position.
 
@@ -2086,3 +2086,65 @@ force-pushing, which is the approval named above and not a step in this change.
   not a routine check. Linear extrapolation from about 10 ms at 4,000 rows gives
   about 500 ms at 200,000, so the 100 ms gate is not claimed for the hybrid path
   at that size.
+
+## 2026-11-16: The saved prompt marks the runtime note's carrier
+
+- `build_prompt` attaches the note to the newest user or tool message. The audit
+  document now records that placement instead of storing the note as a peer of
+  the segment keys. The carrier message gains a `runtime_note` string, and the
+  top-level `runtime` key is gone.
+- The document transcript stays the stored conversation without the note, so
+  `tokens.transcript` still measures the history and `tokens.runtime` measures
+  the note once. A reader adds the marker to the message it belongs to.
+- The Prompt tab reads the marker. The conversation view prints it under the
+  carrying message.
+
+## 2026-11-16: The skills index has no token cap
+
+- `INDEX_MAX_TOKENS` is gone. `SkillLibrary::index` lists every active skill up
+  to the 50-active count. Only the count archives a learned skill, by lowest
+  success rate and then least recently used; user skills stay read-only.
+- `SEGMENT_SKILLS` stays 300 as a prompt warning. `TokenCounts::over_budget`
+  still names `skills`, and the agent still logs a segment over budget, but the
+  index is never truncated and no skill is retired for a long description.
+- The replacement tests assert that 15 and 40 long-description skills are all
+  indexed with zero archived, and that 60 skills still archive ten under the
+  count cap.
+
+## 2026-11-16: The Overview skills row reports the index cost
+
+- The daemon status carries `skills.active` and `skills.index_tokens`, computed
+  from the same `SkillLibrary::index` call the agent makes. The active count
+  comes from `SkillStats` after that call.
+- The Work & memory card shows `N active · M tokens` and no longer shows
+  `last_skill_review` or `last_skill_review_changes`. The daemon keeps
+  publishing those fields; the card is the only thing that stopped reading them.
+- The card's standing count now reads `rules_bullets`, the key the daemon already
+  published. The old `standing_bullets` read always fell back to zero.
+
+## 2026-11-16: The Prompt tab reads as one conversation
+
+- A turn is one conversation, not one saved request. The view reverses the
+  newest-first exchange list, compares each request's transcript with the
+  conversation after the previous request, and prints only the new suffix under a
+  snapshot marker. The marker names the request number, time, prompt hash, and
+  token total. The selected snapshot is emphasised, and `[`/`]` put its marker at
+  the top of the viewport.
+- The stable layers print once and again only when a prefix part changes.
+  Relevant memory is per request under its marker. The runtime note prints under
+  the message that carried it. A response follows its request's delta. A shorter
+  common prefix prints a `history rewritten` note instead of hiding the change.
+- A different `session_id` prints a conversation boundary, resets the merge, and
+  reprints the system layers, so two conversations loaded in the same list do not
+  read as one rewritten history.
+- `s` collapses the system layers to their names and token costs. A spinner line
+  above the key hints shows `working` while `PromptView::loading` is true or the
+  status reports a running task. It is drawn outside the scrolled body, so it
+  stays visible while paused.
+- The render cache is keyed by the loaded exchange hashes and response entry ids,
+  width, raw mode, system visibility, and zone, not by the cursor. Moving between
+  snapshots does not rebuild or rewrap the document. The raw view prints every
+  loaded exchange under its marker.
+- The header is drawn outside the cache and names the model, session, selected
+  snapshot, token total, prefix hash, and prefix peers. The card's key hint owns
+  the view keys; the footer keeps scrolling and help.

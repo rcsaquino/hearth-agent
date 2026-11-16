@@ -133,3 +133,41 @@ assertion: a user message is distinguishable from a system layer, tool calls and
 results appear in order, the in-flight indicator appears while `loading` is true
 and stops when it is false, and consecutive snapshots of one conversation do not
 render as duplicates.
+
+## Resolution
+
+Built the reading where **a turn is one conversation**, not one request. The tab
+reverses the newest-first exchange list and folds the saved requests into one
+transcript. Each request is compared with the conversation after the previous
+request by role and blocks, and only the new suffix is printed under a snapshot
+marker. The marker names the request number, time, prompt hash, and token total.
+A shorter common prefix prints a `history rewritten` note. A different
+`session_id` prints a conversation boundary, resets the merge, and reprints the
+system layers, so two sessions in the loaded list do not read as one rewritten
+history.
+
+The stable layers print once and again only when a prefix part changes. Relevant
+memory is per request under its marker, and the runtime note prints under the
+message that carried it. `s` collapses the system layers to their names and token
+costs. `[`/`]` move the cursor and put the selected marker at the top; `f`, `r`,
+and `o` keep their meaning. A spinner row above the key hints shows `working`
+while `PromptView::loading` is true or the status reports a running task, and it
+is drawn outside the scrolled body so it stays visible while paused. The header
+names the model, session, selected snapshot, token total, prefix hash, and prefix
+peers.
+
+The flat `PromptRow` document, the old export header, the compatibility
+`expanded` field, and the dead `PromptView::older`/`newer` accessors are gone.
+The cache is keyed by the loaded exchange hashes and response entry ids, width,
+raw mode, system visibility, and zone, not by the cursor, so moving between
+snapshots does not rebuild or rewrap the document. Raw mode prints every loaded
+exchange under its marker.
+
+Commits: `758ecb7` (test), `c9356fb` (change), `9ff1945` (test for the header,
+per-request memory, and session boundary), `cd76241` (fix).
+
+Verified by `cargo test -p hearth-cli` (114 lib tests and the integration
+suites), `cargo clippy -p hearth-cli --all-targets -- -D warnings`, and
+`./scripts/ci.sh`. The test commit `758ecb7` fails 14 of 112 lib tests on the old
+view, and `9ff1945` fails 5 on `c9356fb`; both were run in a separate worktree
+and are recorded in the decision log.

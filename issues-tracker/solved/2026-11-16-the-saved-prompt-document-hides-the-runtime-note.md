@@ -107,3 +107,21 @@ references to `runtime_note`. The requirement to pin: after `build_prompt`, the
 saved document and `prompt.request.messages` agree about the note — the same
 message carries it, and the document has no separate note field that suggests
 otherwise.
+
+## Resolution
+
+`build_prompt` attaches the note before it builds both the request and the audit
+document, and the document records the placement on the message itself. The
+carrier now has a `runtime_note` string; the top-level `runtime` key is gone.
+The transcript blocks stay the stored conversation, so `tokens.transcript` still
+measures the history and `tokens.runtime` measures the note once.
+
+The Prompt tab reads the marker and prints the note under the message that
+carried it. The old trailing `runtime note · newest input` row is gone.
+
+Commits: `9df66a1` (test), `3851cc4` (fix).
+
+Verified by `cargo test -p hearth-core --test s1_prompt` and
+`cargo test -p hearth-cli`, including the two tests that require the request and
+the document to mark the same message for a user carrier and a tool carrier.
+`./scripts/ci.sh` is green.
