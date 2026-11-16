@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.39, plain-language edition
+**Status:** Draft 0.40, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.40 gives thinking its own block. A saved or streaming reasoning block is
+drawn with a `▌ THINKING` header, its own gutter, its own turn and time, and its
+own five-line fold on `t`; the chat fold no longer hides it, and folding it never
+touches the reply. A `HEARTH` block can no longer open with thinking, and a
+`TOOL CALL` block can no longer contain it, because thinking is split out before
+the block chooses its label.
 
 Draft 0.39 lets the Skills tab filter by scope. `[` and `]` cycle both, user, and
 learned, the header names the mode (`showing both`), and the empty state says which
@@ -1045,30 +1052,32 @@ preambles and no server-side additions.
   user message `YOU`, an assistant message `HEARTH`, a tool call
   `TOOL CALL · name`, a tool result `TOOL RESULT · name`, and recalled memory
   `MEMORY`. A message with several parts keeps one header. Thinking is shown
-  before the answer, both saved and streaming. The next request never sends it
-  back.
+  before the answer, both saved and streaming, and it is its own block: a
+  `▌ THINKING` header, its own gutter, its own turn and request time, and its own
+  fold. The next request never sends it back.
 - Enter folds the whole chat and Enter again opens it. A fold applies to each
   body section: context layers, memory, user messages, tool calls, tool results,
   and system transcripts. A folded section keeps its label, its first five
   wrapped lines, and a stub naming the hidden line count. A section with five
   lines or fewer shows in full and gets no stub. A block with several parts
   previews each part. The agent's answer never folds with the chat, and thinking
-  folds with the chat. Enter is the only fold key. The chat starts unfolded, so
-  follow puts the conversation on the first screen. A folded block still shows
-  its runtime note.
+  folds on its own key instead: `t` folds or opens every thinking block, and the
+  chat fold never hides one. The chat starts unfolded, so follow puts the
+  conversation on the first screen. A folded block still shows its runtime note.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or
-  `g`/`G`) jump to the top or tail. `f` toggles live follow. Enter changes the
-  fold without moving the scroll position. The footer is the only key legend.
+  `g`/`G`) jump to the top or tail. `f` toggles live follow. Enter and `t` change
+  a fold without moving the scroll position. The footer is the only key legend.
   Scrolling away from the tail pauses follow; End or reaching the bottom resumes
   it.
-- Assistant deltas are drawn as a live block after the cached document: thinking
-  first, then text, then a `WORKING` row with a spinner in place of `▌` and
-  `streaming` on the right. The working row is the last row of the block, so the
-  spinner holds the tail of the card while the text grows above it. The block
-  keeps a blank row above the working row and one below it. The eight-frame
-  clockwise flux spinner steps one frame every 100 ms and its phase starts when
-  the turn starts. The live answer never folds, and Enter also folds its thinking
-  to the same five-line preview. The live block is never cached. It clears when
+- Assistant deltas are drawn as a live block after the cached document: a
+  `THINKING` block first with `streaming` on the right, then text, then a
+  `WORKING` row with a spinner in place of `▌` and `streaming` on the right. The
+  working row is the last row of the block, so the spinner holds the tail of the
+  card while the text grows above it. The block keeps a blank row above the
+  working row and one below it. The eight-frame clockwise flux spinner steps one
+  frame every 100 ms and its phase starts when the turn starts. The live answer
+  never folds, and `t` folds live thinking to the same five-line preview. The
+  live block is never cached. It clears when
   the run settles. A saved request or a settled run reloads the document; a reload
   alone does not animate. The status row names the model, the loaded turns, the
   message count, the token total, the session, and the prefix hash of the newest

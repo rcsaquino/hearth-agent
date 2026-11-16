@@ -2424,3 +2424,21 @@ just after.
   filtered list, and name-matching adds state for no clear gain.
 - The header appends `showing <mode>` and the empty state comes from the filter, so
   a filtered empty list cannot be read as an empty library.
+
+## 2026-11-16: Thinking owns a block and a fold key
+
+- `derive` splits each message into thinking and spoken blocks. Thinking becomes a
+  `THINKING` block with its own header, gutter, turn, and request time; the spoken
+  blocks carry the `HEARTH`, `TOOL CALL`, `YOU`, or `TOOL RESULT` label without it.
+  `response_block` and `message_block` no longer receive thinking, so a `HEARTH`
+  block cannot open with it and a `TOOL CALL` block cannot contain it. The live
+  turn builds the same block and paints it through the same `Painter`, so saved and
+  streaming thinking look alike.
+- `t` folds every thinking block and Enter folds the chat. This reverses the
+  2026-11-16 decision that removed `t`: thinking is now a block of its own, so a
+  fold that moves it independently is the point, and the chat fold no longer
+  touches it. A per-block cursor was rejected because the Prompt tab has no cursor
+  by design, and reusing Enter was rejected because it cannot fold thinking
+  without folding the reply.
+- `PromptView.thinking_collapsed` is a second fold flag, and the cache key carries
+  it so a thinking fold rebuilds the cached lines.
