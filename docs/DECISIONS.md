@@ -2148,3 +2148,61 @@ force-pushing, which is the approval named above and not a step in this change.
 - The header is drawn outside the cache and names the model, session, selected
   snapshot, token total, prefix hash, and prefix peers. The card's key hint owns
   the view keys; the footer keeps scrolling and help.
+
+## 2026-11-16: The Prompt tab reads as a conversation, with live text
+
+- The snapshot controls are gone. The tab keeps no cursor over saved requests,
+  no numbered or timestamped separator, no highlighted selection, no raw JSON
+  mode, and no manual refresh key. A bare rule marks where one saved request ends
+  and the next begins, and the header names only the newest request's model,
+  session, token total, and prefix hash. This supersedes the marker, raw, and
+  header bullets of the earlier "The Prompt tab reads as one conversation"
+  decision.
+- A message is enclosed by a role bar: `▌` opens its label row and `▏` runs down
+  its body, in the role's style, with a blank line between messages. The bar
+  continues across the parts of one message, so thinking, text, and a tool call
+  read as one message. System layers, memory, and the runtime note are not
+  messages and keep the flush-left label and two-space body. The bar costs the
+  two columns the body indent already spent, so wrapping width is unchanged.
+- A message block whose wrapped body exceeds 12 lines starts folded to its first
+  line plus a stub naming the hidden count. `n` and `p` move a block cursor over
+  the long blocks and Enter opens or closes the selected one. Tab is not used
+  because it already switches sections. System layers keep the `s` group fold
+  and are never selected one block at a time.
+- Block keys are the request's prompt hash plus the message index and the block
+  index, so an older block keeps its key when a refresh appends a newer request.
+  The set of open keys is part of the render cache key; the selected key is not,
+  because the draw swaps in a prebuilt emphasized label row. Moving the cursor
+  therefore rewraps nothing.
+- Assistant deltas are published by the runtime, coalesced at 100 ms or 512
+  bytes with a flush at stream end, so the model's hot path does not pay a socket
+  write per token. The CLI appends them to a live turn and filters them out of
+  the Activity feed; the feed keeps whole events.
+- The live turn is painted after the cached document, never inside it, so
+  streaming does not invalidate the cache. It shows thinking first and then
+  text under the same role bars. The spinner replaces the `▌` on the part being
+  written and its phase starts when the turn starts, not when the process did.
+  `prompt.loading` and the status task count no longer animate anything: a reload
+  is not a turn and a scheduled task is not this conversation.
+- The saved document reloads on a `task_step` request event, which is emitted
+  after the prompt blob is written, and on `run_settled`. It no longer reloads on
+  `assistant_reply`, which fires before the response entry exists. A refresh
+  already in flight still coalesces into one follow-up read.
+- The footer is the only key legend. The card's hint row is gone and the
+  transcript gets the row back. PageUp/PageDown stay bound but are not
+  advertised, so the Prompt footer fits 80 columns.
+
+Alternatives considered. Per-message bordered `Block` widgets would draw nicer
+frames but cannot be stored as cached lines, so scrolling and the cache would
+need a second layout model; the character gutter keeps one document. Plain
+indentation with no bar lost the message boundary the issue reported. A delta per
+token was rejected by the issue's own hot-path constraint. Keeping the snapshot
+selection and adding a second cursor would give two ways to move through the
+same document; the subtraction leaves one.
+
+Tradeoffs accepted. The tab no longer shows a saved request's time or hash, or its
+raw JSON; the prompt blobs remain in the database for audit. A folded block hides
+its body until opened. Selecting a block pauses the live tail. A tool turn can
+briefly drop the previous turn's live text while the next request is being
+prepared, because the live turn resets at `turn_started` and the saved blob lands
+just after.

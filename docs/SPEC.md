@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.29, plain-language edition
+**Status:** Draft 0.30, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,14 @@
 ---
 
 ## A note on language
+
+Draft 0.30 finishes the Prompt tab as a conversation. Each message is enclosed
+by a role bar, long blocks fold under an `n`/`p` cursor and open with Enter, the
+snapshot vocabulary and its keys are gone, and one bare rule keeps the boundary
+between saved requests. The footer is the only key legend. Assistant text and
+thinking stream into a live turn drawn at the tail, with the spinner on the
+message label and its phase starting with the turn; a saved request, not a
+finished reply, reloads the document.
 
 Draft 0.29 rebuilds the Prompt tab as one conversation. The saved requests are
 merged into a single transcript and each request is marked as a snapshot with
@@ -365,10 +373,10 @@ terminal application. There are no subcommands or flags.
 |---|---|
 | Onboarding | First run replaces `hearth init`: bot token, user id, provider, API key, model picker, thinking, agent name, optional media, start mode, keep-running. |
 | Overview | Runtime, model, thinking, context, usage and cache, tasks, memory, Telegram, providers, media, workspace, and recent activity. |
-| Activity | The live event stream from the daemon, with coalesced stream deltas and a readable event detail. |
+| Activity | The live event stream from the daemon, one row per whole event, with a readable event detail. |
 | Memory | Browse and search saved memory records. |
 | Skills | Browse skills with automatic, scrollable body preview; create and edit user skills; learned skills stay read-only. |
-| Prompt | A live, scrollable session export: every prompt layer, tool declaration, transcript item, reply, and usage line in full, with token counts, older-snapshot navigation, a raw JSON view, and automatic refresh after each reply. |
+| Prompt | A live conversation: the saved requests merged into one transcript, every prompt layer and message in its role bar, long blocks folded, memory per request, and the turn being written at the tail. |
 | Doctor | Offline and live checks. |
 | Settings | The last tab. Every option is shown inline, with SOUL.md and HEARTH.md actions, daemon controls, a raw JSON editor, changed-row markers, and reset to default. |
 
@@ -399,6 +407,9 @@ follows it.
   inline.
 - Events: run started, turn started, thinking delta when the provider exposes it,
   text delta, tool call start, tool result, task step, usage update, and run settled.
+- Assistant deltas are coalesced before they are published and fill the Prompt
+  tab's live turn. The Activity feed keeps whole events, so partial text never
+  becomes a row.
 - Tool arguments and results are truncated and secrets are redacted. Thinking is
   shown live only; it is never replayed from storage.
 - The stream is read-only. Closing the TUI does not cancel work. Attaching late
@@ -939,34 +950,46 @@ preambles and no server-side additions.
   the generation checkpoint.
 - The Prompt tab is one conversation assembled from the loaded saved requests.
   Consecutive requests are merged by their common message prefix, so each
-  snapshot prints only the messages it added under a marker that names the
-  request, its time, its prompt hash, and its token total. A rewritten history,
-  such as a compaction, prints a note instead of hiding the change. A change of
-  session prints a conversation boundary and starts a fresh transcript.
+  request prints only the messages it added. A bare rule marks where one saved
+  request ends and the next begins; a request number, hash, time, or token total
+  is not printed. A rewritten history, such as a compaction, prints a note
+  instead of hiding the change. A change of session prints a conversation
+  boundary and starts a fresh transcript.
+- Every message is enclosed by a role bar: its label row opens with `▌` and its
+  body lines with `▏`, coloured by the role, and a blank line closes the
+  message. System layers, memory, and the runtime note are not messages and keep
+  their flush-left label and two-space body. A message with several parts keeps
+  the bar across them, so thinking, text, and a tool call read as one message.
 - The stable layers show once at the start and again only when a prefix part
   changes: system identity (`SOUL.md`), guidance, rules, the skills index, and
-  the request `tools` field. Relevant memory is per request and prints under its
-  snapshot marker. The runtime note prints under the message that carried it.
-  The saved response follows each request's delta. Tool results are not clipped.
+  the request `tools` field. Relevant memory is per request and prints after the
+  rule. The runtime note prints under the message that carried it. The saved
+  response follows each request's delta. A message block longer than 12 lines
+  starts folded to its first line and a stub that names the hidden count; `n`
+  and `p` move a block cursor and Enter opens or closes the block under it.
+  System layers fold as a group with `s`, not one block at a time.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or
-  `g`/`G`) jump to the first or last snapshot. `[` and `]` move the cursor
-  between snapshots and put the marker at the top. `f` toggles live follow, `s`
-  collapses the system layers to their names and token costs, and `r` shows the
-  loaded exchanges as raw JSON. Scrolling away from the tail pauses follow; End
-  or reaching the bottom resumes it. A spinner in the last row says when a turn
-  is in flight, even while paused.
-- The header names the model, session, selected snapshot, token total, prefix
-  hash, and the number of loaded requests that share the prefix.
+  `g`/`G`) jump to the top or tail. `f` toggles live follow and `s` collapses
+  the system layers to their names and token costs. The footer is the only key
+  legend. Scrolling away from the tail pauses follow; End or reaching the bottom
+  resumes it.
+- Assistant deltas are drawn as a live turn after the cached document: thinking
+  first, then text, under the same role bars, with a spinner in place of the
+  label bar on the part being written. The spinner's phase starts when the turn
+  starts. The live turn is not part of the cache, so it never invalidates the
+  document, and it is cleared when the run settles. A saved request or a settled
+  run reloads the document; a reload alone does not animate. The header names
+  the model, session, token total, and prefix hash of the newest saved request.
 - Tool definitions show argument names, types, enums, required or optional
   markers, and argument descriptions instead of pretty-printed schema JSON.
   Wrapping preserves leading indentation for code and JSON. The rendered
-  conversation is cached by the loaded set, width, raw mode, system visibility,
-  and zone, so moving between snapshots and redrawing while paused do not rebuild
-  the document.
-- The open view refreshes when an `assistant_reply` or `run_settled` event arrives.
-  A refresh that arrives while one is already running is coalesced into one
-  follow-up read, so the final saved response is shown even when replies and the
-  settled event arrive close together.
+  conversation is cached by the loaded set, width, system visibility, the open
+  block set, and zone, so scrolling, moving the block cursor, and streaming do
+  not rebuild the document.
+- The open view refreshes when a `task_step` request event or a `run_settled`
+  event arrives. A refresh that arrives while one is already running is
+  coalesced into one follow-up read, so the final saved response is shown even
+  when the settled event follows closely.
 - The view is read-only. Saved prompt content is redacted by the save path.
 - Prompt blobs are pruned after 30 days by default.
 
