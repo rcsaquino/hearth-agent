@@ -689,20 +689,40 @@ mod tests {
         assert!(saved.content.contains("pinned"), "{}", saved.content);
     }
 
-    #[test]
-    fn the_save_schema_requires_a_standalone_statement() {
-        let (_directory, service) = memory();
+    fn content_description(service: &MemoryService) -> String {
         let spec = service
             .tools()
             .iter()
             .find(|tool| tool.spec().name == SAVE)
             .expect("save tool")
             .spec();
-        let description = spec.parameters["properties"]["content"]["description"]
+        spec.parameters["properties"]["content"]["description"]
             .as_str()
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn the_save_schema_asks_for_a_statement_that_stands_alone() {
+        let (_directory, service) = memory();
+        let description = content_description(&service);
         assert!(description.contains("standalone"), "{description}");
-        assert!(description.contains("pronoun"), "{description}");
+        assert!(
+            description.contains("without prior context"),
+            "the schema must say a statement is read with no context: {description}"
+        );
+        assert!(
+            description.contains("ambiguity"),
+            "the schema must ask for references to be clarified: {description}"
+        );
+        assert!(
+            description.contains("unnecessary details"),
+            "the schema must forbid padding: {description}"
+        );
+        assert!(
+            description.contains("pronoun"),
+            "the store refuses a pronoun, so the schema must warn: {description}"
+        );
     }
 
     #[test]
@@ -889,15 +909,7 @@ mod tests {
     #[test]
     fn the_save_schema_names_the_content_limit() {
         let (_directory, service) = memory();
-        let spec = service
-            .tools()
-            .iter()
-            .find(|tool| tool.spec().name == SAVE)
-            .expect("save tool")
-            .spec();
-        let description = spec.parameters["properties"]["content"]["description"]
-            .as_str()
-            .unwrap_or_default();
+        let description = content_description(&service);
         assert!(
             description.contains(&crate::store::CONTENT_LIMIT.to_string()),
             "{description}"
