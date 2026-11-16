@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.31, plain-language edition
+**Status:** Draft 0.32, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.32 gives the Prompt tab one fold key. Enter folds or opens the chat and
+keeps the first five wrapped lines of a folded section; `t` folds thinking on
+its own. The agent's answer never folds with the chat, and saved thinking is
+shown before the answer. `n`/`p`, `e`/`c`, the per-block fold overrides, and
+the selection band are gone, so the view has no cursor and the footer stays the
+only key legend.
 
 Draft 0.31 rebuilds the Prompt tab as a chat window. Every saved message is a
 role-labelled block: user and tool blocks are full-width panels, assistant text
@@ -385,7 +392,7 @@ terminal application. There are no subcommands or flags.
 | Activity | The live event stream from the daemon, one row per whole event, with a readable event detail. |
 | Memory | Browse and search saved memory records. |
 | Skills | Browse skills with automatic, scrollable body preview; create and edit user skills; learned skills stay read-only. |
-| Prompt | A live conversation: the saved requests merged into one transcript, every prompt layer and message in its role bar, long blocks folded, memory per request, and the turn being written at the tail. |
+| Prompt | A live conversation: the saved requests merged into one transcript, every prompt layer and message in its role bar, one key that folds the chat to five-line previews, memory per request, and the turn being written at the tail. |
 | Doctor | Offline and live checks. |
 | Settings | The last tab. Every option is shown inline, with SOUL.md and HEARTH.md actions, daemon controls, a raw JSON editor, changed-row markers, and reset to default. |
 
@@ -970,26 +977,30 @@ preambles and no server-side additions.
   `identity.timezone` on the right. A context layer reads `SYSTEM · SOUL.md`, a
   user message `YOU`, an assistant message `HEARTH`, a tool call
   `TOOL CALL · name`, a tool result `TOOL RESULT · name`, and recalled memory
-  `MEMORY`. A message with several parts keeps one header. Thinking is streamed
-  live and is not replayed from storage.
-- A block folds as a unit. `n` and `p` move a cursor over every block, including
-  short messages and context, and Enter folds or opens the selected one. `e`
-  expands every block and `c` collapses every block. A folded block shows its
-  header, its runtime note, and a stub naming the hidden line count; a folded
-  tool result or system transcript also keeps one preview line. Context layers
-  start folded. Memory opens up to 6 wrapped lines, a user message up to 12, a
-  tool result and a system transcript up to 8, and assistant text is open.
+  `MEMORY`. A message with several parts keeps one header. Thinking is shown
+  before the answer, both saved and streaming. The next request never sends it
+  back.
+- Enter folds the whole chat and Enter again opens it. A fold applies to each
+  body section: context layers, memory, user messages, tool calls, tool results,
+  and system transcripts. A folded section keeps its label, its first five
+  wrapped lines, and a stub naming the hidden line count. A section with five
+  lines or fewer shows in full and gets no stub. A block with several parts
+  previews each part. The agent's answer never folds with the chat, and thinking
+  folds only with `t`. The chat starts unfolded, so follow puts the conversation
+  on the first screen. A folded block still shows its runtime note.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or
-  `g`/`G`) jump to the top or tail. `f` toggles live follow. The footer is the
-  only key legend. Scrolling away from the tail pauses follow; End or reaching
-  the bottom resumes it.
+  `g`/`G`) jump to the top or tail. `f` toggles live follow. Enter and `t`
+  change the fold without moving the scroll position. The footer is the only key
+  legend. Scrolling away from the tail pauses follow; End or reaching the bottom
+  resumes it.
 - Assistant deltas are drawn as a live block after the cached document: thinking
   first, then text, under one `HEARTH` header with a spinner in place of `▌` and
   `streaming` on the right. The spinner's phase starts when the turn starts. The
-  live block is never folded, never cached, and cleared when the run settles. A
-  saved request or a settled run reloads the document; a reload alone does not
-  animate. The header names the model, the loaded turns, the message count, the
-  token total, the session, and the prefix hash of the newest saved request.
+  live block never folds with the chat and is never cached; `t` also folds its
+  thinking. It clears when the run settles. A saved request or a settled run
+  reloads the document; a reload alone does not animate. The header names the
+  model, the loaded turns, the message count, the token total, the session, and
+  the prefix hash of the newest saved request.
 - A saved response contributes to the merge baseline in the form it is sent
   back: its thinking blocks are dropped and a message that carries no request is
   omitted. A response with thinking therefore neither makes the next request
@@ -997,8 +1008,8 @@ preambles and no server-side additions.
 - Tool definitions show argument names, types, enums, required or optional
   markers, and argument descriptions instead of pretty-printed schema JSON.
   Wrapping preserves leading indentation for code and JSON. The rendered
-  conversation is cached by the loaded set, width, fold state, and zone, so
-  scrolling, moving the cursor, and streaming do not rebuild the document.
+  conversation is cached by the loaded set, width, both fold states, and zone, so
+  scrolling and streaming do not rebuild the document.
 - The open view refreshes when a `task_step` request event or a `run_settled`
   event arrives. A refresh that arrives while one is already running is
   coalesced into one follow-up read, so the final saved response is shown even

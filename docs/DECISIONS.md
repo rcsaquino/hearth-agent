@@ -2254,3 +2254,40 @@ just after.
   recovery. Saved thinking is not in the audit view. Context bodies start
   folded, so the first screen is the conversation, not the prompt. Markdown is
   rendered as plain text.
+
+## 2026-11-16: The Prompt tab folds as a whole
+
+- Two view flags replace the fold map and the cursor. `PromptView { collapsed,
+  thinking_collapsed }` is the only fold state, and `Fold::{Chat, Answer,
+  Thinking}` on each body part names the one flag that part obeys through
+  `Fold::open`. `n`/`p`, `e`/`c`, per-block Enter, the override map, the block
+  keys, the selection band, and the reveal-on-select code are deleted. Enter
+  folds or opens the chat, so recovering from a fold takes one key instead of
+  `c` then `e`.
+- A folded section keeps five wrapped lines and a stub naming the hidden count.
+  One function, `section_rows`, applies that rule to the saved chat and to the
+  live turn, so the two views always agree. A section with five lines or fewer
+  shows in full and gets no stub. A block with several parts previews each part,
+  so a three-call message still shows the first five lines of every call.
+- The agent's answer never folds with the chat, and saved thinking is shown
+  before the answer. `t` folds thinking alone, saved or streaming. This
+  supersedes the previous entry's tradeoff that saved thinking is not in the
+  audit view. `spoken` still drops thinking when it decides a block's label, and
+  `wire_form` still drops thinking from the merge baseline, so a response with
+  thinking neither hides its calls nor makes the next request look rewritten.
+- The view starts unfolded. Follow pins the newest rows, so the first screen is
+  the conversation. A folded start would put five previews of every context
+  layer above it, which is the problem the per-kind defaults solved with more
+  state than it was worth.
+- Alternatives considered. Keeping a cursor and per-block Enter kept fine
+  control at the cost of two fold keys and a selection band; one fold key won.
+  Hiding thinking outright when `t` is pressed was rejected because a five-line
+  preview keeps the shape of the thought readable and reuses the same collapse
+  rule. Splitting thinking and each tool call into their own top-level block
+  would delete the part list, but it would repeat the `HEARTH` header and the
+  turn time on every section, lose the `TOOL CALL · n calls` aggregate, and make
+  the live turn change shape when it is saved; one block per message won.
+- Tradeoffs accepted. A fold no longer opens one block, so reading one long
+  layer means opening the whole chat. A fold does not move the scroll position,
+  so a paused reader can land on different lines when the document length
+  changes; Home and End recover. Markdown is still rendered as plain text.
