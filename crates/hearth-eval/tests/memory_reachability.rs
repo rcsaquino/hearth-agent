@@ -148,7 +148,7 @@ fn a_paraphrase_is_reachable_only_through_the_vector_channel() {
     let (_directory, service) = home();
     let service = service.with_embedder(Arc::new(FakeEmbedding));
     service
-        .write(NewMemory::new("she was painting a sunrise").subject("study"))
+        .write(NewMemory::new("Alice was painting a sunrise").subject("study"))
         .expect("write");
 
     let lexical = MemoryService::new(service.session().clone());

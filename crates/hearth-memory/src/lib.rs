@@ -989,10 +989,10 @@ mod tests {
     fn a_retired_rule_stops_holding_the_rules_budget() {
         let (_directory, service) = service();
         let retired_text = "Always write the changelog entry before the release tag and cite \
-                             every merged change with its risk in plain words so the record \
+                             every merged change with the risk in plain words so the record \
                              reads clearly now.";
         let live_text = "Never publish a release tag without the changelog entry that cites \
-                         each merged change and its risk in plain words so the record reads \
+                         each merged change and the risk in plain words so the record reads \
                          clearly now.";
         assert_eq!(
             retired_text.chars().count(),
@@ -1080,5 +1080,4 @@ mod tests {
             recall.digest
         );
     }
-
 }

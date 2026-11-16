@@ -27,9 +27,10 @@ const SUMMARY_INSTRUCTION: &str = "You compress an older part of a conversation 
 can be replaced by your output. Return one JSON object with two keys and nothing else. \
 `summary` is a compact paragraph that keeps decisions, open threads, names, dates, numbers, \
 and user preferences, and drops small talk and superseded detail. `memories` is a list of at \
-most three durable statements from the range, each a JSON object with `content` (one statement), \
-`kind` (one of fact, preference, person, decision, commitment, episode), and `subject` (the \
-person, project, or thing it is about). Use an empty list when nothing in the range is worth \
+most three durable statements from the range, each a JSON object with `content` (one standalone \
+statement that names its actor: \"the user\", the assistant's own name, or a person by name, \
+never a pronoun), `kind` (one of fact, preference, person, decision, commitment, episode), and \
+`subject` (the person, project, or thing it is about). Use an empty list when nothing in the range is worth \
 recalling later. Do not record requests, greetings, tool output, or credentials.";
 
 /// A failure that stopped a compaction.

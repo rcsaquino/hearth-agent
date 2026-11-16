@@ -74,6 +74,9 @@ const PREFERENCE: &[&str] = &[
     "from now on ",
 ];
 
+/// Adverbs that may sit between the subject and the verb.
+const ADVERBS: &[&str] = &["always", "never", "usually", "often", "sometimes", "rarely"];
+
 /// Relations that make "X is my Y" a fact about a person.
 const RELATIONS: &[&str] = &[
     "wife",
@@ -167,8 +170,8 @@ fn from_remember(sentence: &str) -> Option<Candidate> {
     let phrase = REMEMBER
         .iter()
         .find(|phrase| lowered.starts_with(**phrase))?;
-    let content = trim_end(&sentence[phrase.len()..]);
-    if content.is_empty() {
+    let content = rewrite_first_person(&trim_end(&sentence[phrase.len()..]));
+    if content.is_empty() || crate::actor::pronoun(&content).is_some() {
         return None;
     }
     Some(Candidate {
@@ -199,7 +202,7 @@ fn from_possessive(sentence: &str) -> Option<Candidate> {
         } else {
             normalize(noun)
         },
-        content: trim_end(sentence),
+        content: format!("the user's {}", trim_end(rest)),
         kind: if relation { Kind::Person } else { Kind::Fact },
     })
 }
@@ -222,7 +225,7 @@ fn from_relation(sentence: &str) -> Option<Candidate> {
     }
     Some(Candidate {
         subject,
-        content: trim_end(sentence),
+        content: trim_end(&format!("{} is the user's {}", left.trim(), right.trim())),
         kind: Kind::Person,
     })
 }
@@ -241,22 +244,159 @@ fn split_ignore_case<'a>(text: &'a str, marker: &str) -> Option<(&'a str, &'a st
 }
 
 fn from_preference(sentence: &str) -> Option<Candidate> {
-    let lowered = sentence.to_lowercase();
-    if !PREFERENCE.iter().any(|phrase| lowered.starts_with(*phrase)) {
-        return None;
-    }
-    let content = trim_end(sentence);
+    let lowered = sentence.to_ascii_lowercase();
+    let content = if lowered.starts_with("my favourite ") {
+        format!(
+            "the user's favourite {}",
+            trim_end(&sentence["my favourite ".len()..])
+        )
+    } else if lowered.starts_with("my favorite ") {
+        format!(
+            "the user's favorite {}",
+            trim_end(&sentence["my favorite ".len()..])
+        )
+    } else if lowered.starts_with("from now on ") {
+        trim_end(sentence)
+    } else {
+        let phrase = PREFERENCE
+            .iter()
+            .find(|phrase| lowered.starts_with(**phrase))?;
+        let rest = trim_end(&sentence[phrase.len()..]);
+        let clause = match *phrase {
+            "i prefer " => format!("prefers {rest}"),
+            "i hate " => format!("hates {rest}"),
+            "i love " => format!("loves {rest}"),
+            "i always " | "i never " | "i usually " => {
+                let adverb = phrase.trim_start_matches("i ").trim();
+                let mut parts = rest.splitn(2, ' ');
+                let verb = third_person(parts.next().unwrap_or(""));
+                let tail = parts.next().unwrap_or("");
+                if tail.is_empty() {
+                    format!("{adverb} {verb}")
+                } else {
+                    format!("{adverb} {verb} {tail}")
+                }
+            }
+            _ => return None,
+        };
+        format!("the user {clause}")
+    };
     Some(Candidate {
         subject: "user".to_owned(),
-        content,
+        content: trim_end(&content),
         kind: Kind::Preference,
     })
+}
+
+/// Rewrite a statement whose actor is the user.
+///
+/// First person has a determinate meaning without the message, so the extractor
+/// can name it. A remaining pronoun means the rewrite did not cover the sentence;
+/// the caller drops that candidate.
+fn rewrite_first_person(text: &str) -> String {
+    let lowered = text.to_ascii_lowercase();
+    if lowered.starts_with("i ") {
+        return format!("the user {}", third_person_rest(&text[2..]));
+    }
+    if lowered.starts_with("we ") {
+        return format!("the user {}", third_person_rest(&text[3..]));
+    }
+    let mut rewritten = text.to_owned();
+    for (from, to) in [
+        ("my", "the user's"),
+        ("our", "the user's"),
+        ("mine", "the user's"),
+        ("ours", "the user's"),
+        ("me", "the user"),
+        ("us", "the user"),
+    ] {
+        rewritten = replace_word(&rewritten, from, to);
+    }
+    rewritten
+}
+
+/// The rest of a third-person clause, with its verb agreed to `the user`.
+fn third_person_rest(rest: &str) -> String {
+    let mut parts = rest.splitn(2, ' ');
+    let first = parts.next().unwrap_or("");
+    let tail = parts.next().unwrap_or("");
+    if ADVERBS.contains(&first.to_ascii_lowercase().as_str()) {
+        let mut inner = tail.splitn(2, ' ');
+        let verb = inner.next().unwrap_or("");
+        let rest = inner.next().unwrap_or("");
+        let verb = third_person(verb);
+        return if rest.is_empty() {
+            format!("{first} {verb}")
+        } else {
+            format!("{first} {verb} {rest}")
+        };
+    }
+    let verb = third_person(first);
+    if tail.is_empty() {
+        verb
+    } else {
+        format!("{verb} {tail}")
+    }
+}
+
+/// The third-person singular form of an English verb.
+fn third_person(verb: &str) -> String {
+    let lower = verb.to_ascii_lowercase();
+    match lower.as_str() {
+        "have" => return "has".to_owned(),
+        "be" | "am" | "are" => return "is".to_owned(),
+        "do" => return "does".to_owned(),
+        "go" => return "goes".to_owned(),
+        _ => {}
+    }
+    if lower.ends_with('y')
+        && !matches!(
+            lower.chars().rev().nth(1),
+            Some('a' | 'e' | 'i' | 'o' | 'u')
+        )
+    {
+        return format!("{}ies", &verb[..verb.len() - 1]);
+    }
+    if ["s", "x", "z", "ch", "sh", "o"]
+        .iter()
+        .any(|ending| lower.ends_with(ending))
+    {
+        return format!("{verb}es");
+    }
+    format!("{verb}s")
+}
+
+/// Replace a whole word, keeping the punctuation that follows it.
+fn replace_word(text: &str, from: &str, to: &str) -> String {
+    text.split_whitespace()
+        .map(|word| {
+            let (core, suffix) = split_suffix(word);
+            if core.eq_ignore_ascii_case(from) {
+                format!("{to}{suffix}")
+            } else {
+                word.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn split_suffix(word: &str) -> (&str, &str) {
+    let end = word
+        .char_indices()
+        .rev()
+        .find(|(_, character)| character.is_alphanumeric())
+        .map(|(index, character)| index + character.len_utf8())
+        .unwrap_or(0);
+    (&word[..end], &word[end..])
 }
 
 fn acceptable(candidate: &Candidate) -> bool {
     let words = candidate.content.split_whitespace().count();
     let length = candidate.content.chars().count();
-    words >= 3 && (MIN_CHARS..=MAX_CHARS).contains(&length)
+    words >= 3
+        && (MIN_CHARS..=MAX_CHARS).contains(&length)
+        && crate::actor::pronoun(&candidate.content).is_none()
 }
 
 /// The name a statement is about, when it opens with one.
@@ -323,7 +463,10 @@ mod tests {
         let found = candidates("I prefer dark roast coffee in the morning.");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, Kind::Preference);
-        assert_eq!(found[0].content, "the user prefers dark roast coffee in the morning");
+        assert_eq!(
+            found[0].content,
+            "the user prefers dark roast coffee in the morning"
+        );
         assert_eq!(found[0].subject, "user");
     }
 

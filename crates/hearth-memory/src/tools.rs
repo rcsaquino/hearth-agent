@@ -121,16 +121,15 @@ impl Tool for SaveTool {
             SAVE,
             "Store one durable statement about the user or their world: a preference, a person, \
              a decision, a commitment, or a fact. Use it when the user says something lasting. \
-             Give `subject` the person, project, or thing the statement is about, because that \
-             is what makes it findable later. To replace something already stored, pass its id \
-             as `supersedes`; the old statement is kept as history. Pin only a rule that must be \
-             obeyed on every turn.",
+             Give `subject` the person, project, or thing it is about; that is what makes it \
+             findable. To replace a stored statement, pass its id as `supersedes`; history is \
+             kept. Pin only a rule obeyed every turn.",
             json!({
                 "type": "object",
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "One standalone statement, at most 200 characters, in the third person."
+                        "description": "One standalone statement, at most 200 characters, naming its actor: \"the user\", the assistant's name, or a person's name. No pronouns."
                     },
                     "kind": {
                         "type": "string",
@@ -602,13 +601,15 @@ mod tests {
         assert!(error.message.contains("does not exist"), "{error:?}");
     }
 
-
     #[test]
     fn a_pronoun_is_refused_by_the_save_tool() {
         let (_directory, service) = memory();
         let tools = registry(&service);
         let error = tools
-            .call(SAVE, &json!({"content": "He likes apples", "subject": "bob"}))
+            .call(
+                SAVE,
+                &json!({"content": "He likes apples", "subject": "bob"}),
+            )
             .expect("call")
             .expect_err("a pronoun has no antecedent");
         assert_eq!(error.code, "invalid_input");
