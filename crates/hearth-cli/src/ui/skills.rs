@@ -75,10 +75,10 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             let selected = index == app.skills.selected;
             let marker = if selected { "▶ " } else { "  " };
             let label = format!(
-                "{marker}{} [{}] {:.0}%",
+                "{marker}{} [{}] {:>4}",
                 skill.name,
                 skill.scope.as_str(),
-                skill.success_rate() * 100.0
+                rate(skill)
             );
             lines.push(if selected {
                 Line::raw(label).style(theme::selected())
@@ -113,6 +113,16 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         }
     }
     new_skill_prompt(app, frame, area);
+}
+
+/// The rate column. A skill with no counted use has no measured rate, so it
+/// shows a dash instead of a zero that reads as a failure.
+fn rate(skill: &hearth_runtime::skills::Skill) -> String {
+    if skill.uses == 0 {
+        "—".to_owned()
+    } else {
+        format!("{:.0}%", skill.success_rate() * 100.0)
+    }
 }
 
 fn new_skill_prompt(app: &App, frame: &mut Frame, area: Rect) {
