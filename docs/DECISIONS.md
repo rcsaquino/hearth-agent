@@ -2291,3 +2291,43 @@ just after.
   layer means opening the whole chat. A fold does not move the scroll position,
   so a paused reader can land on different lines when the document length
   changes; Home and End recover. Markdown is still rendered as plain text.
+
+## 2026-11-16: The clock note names its payload
+
+- The one uncached prompt line is
+  `<current_time>2026-11-16T11:55:16+08:00</current_time>` and nothing else.
+  `runtime` named the layer, not the fact, so the tag now carries the meaning and
+  the `Current time:` label and the sentence period are gone. The ISO string
+  still uses `identity.timezone`. The L7 name, `tokens.runtime`,
+  `PromptInput.runtime_note`, and the saved-document key stay as they are: they
+  name the layer, and old blobs already use the key.
+- `now` was rejected as less explicit than `current_time`, and keeping the
+  `Current time:` label inside the tag was rejected as redundant. A period was
+  rejected because the payload is data, not a sentence, and a copied time string
+  should not carry one.
+
+## 2026-11-16: The working row is anchored and one key folds the chat
+
+- The Prompt tab reserves a second row below the status line, so the model and
+  the turn counts do not touch the first block. The chat body starts one row
+  lower. The margin belongs to the render path, not the cache, so it costs no
+  rebuild.
+- The live turn is a `WORKING` block, not a `HEARTH` block, because the label
+  names what the turn is doing. `HEARTH` stays the saved assistant label.
+- The working row is the last row of the live block, after a blank row below the
+  text, so the spinner holds the tail of the card while the answer grows above
+  it. Once the document reaches the card, follow pins the row; a continuation
+  turn clears the live text and the row does not move. A row reserved at the
+  bottom of the card was rejected because it costs a permanent blank row and a
+  second viewport for the live text. A sticky row at the top of the card was
+  rejected because it sits above the saved chat rather than beside the live text.
+- The spinner is the eight-frame clockwise flux cycle, `⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣽ ⣻`: a
+  full braille cell with one dot missing, one frame per 100 ms. The classic
+  ten-frame cycle was rejected because its single dot moves unevenly and reads as
+  a flicker at this size.
+- `thinking_collapsed` and the `t` key are gone. One `collapsed` flag drives the
+  chat and thinking, so Enter folds or opens both and the footer stays `↑↓
+  scroll · ↵ fold · f follow · q quit`. This supersedes the `t` contract in the
+  earlier 2026-11-16 "The Prompt tab folds as a whole" entry. A separate thinking
+  key was rejected because it bought only a shorter thinking block while the chat
+  stayed open, at the cost of a second flag and a second key.

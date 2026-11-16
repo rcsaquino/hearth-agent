@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.32, plain-language edition
+**Status:** Draft 0.33, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,15 @@
 ---
 
 ## A note on language
+
+Draft 0.33 names the clock note for what it carries and anchors the working row.
+The one uncached line is
+`<current_time>2026-11-16T11:55:16+08:00</current_time>`, still appended to the
+newest input message instead of a separate system message. The Prompt tab puts a
+blank row between its status line and the chat. The live turn ends in a `WORKING`
+row, so its clockwise flux spinner holds the tail of the card while the text
+grows above it. Enter is the only fold key: it folds the chat and thinking
+together, and `t` no longer folds thinking.
 
 Draft 0.32 gives the Prompt tab one fold key. Enter folds or opens the chat and
 keeps the first five wrapped lines of a folded section; `t` folds thinking on
@@ -879,8 +888,9 @@ guidance files, tools, rules, or skills change. The L4 budget is a warning: ever
 active skill is indexed, up to the 50-active count cap, and a long description
 never retires one. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
-message; it never rewrites the prefix. L7 is a `<runtime>` line paid fresh on every
-turn and carried by the newest input message, not by a separate system message: it
+message; it never rewrites the prefix. L7 is a `<current_time>ISO 8601</current_time>`
+line paid fresh on every turn and carried by the newest input message, not by a
+separate system message: it
 is appended to the last tool result on a continuation and to the newest user message
 otherwise. A trailing system note sits in instruction position, so a continuation
 whose only new content is the clock can be answered as though the clock were the
@@ -969,7 +979,8 @@ preambles and no server-side additions.
   request prints only the messages it added. A rewritten history, such as a
   compaction, prints a notice instead of hiding the change. A change of session
   prints a conversation boundary and starts a fresh transcript. Memory prints
-  when it changes; a stable recall is not repeated.
+  when it changes; a stable recall is not repeated. A blank row separates the
+  status line from the first block.
 - Every block is one message or one context layer. User and tool blocks are
   full-width background panels, assistant text stays on the page, and system
   layers and memory are tinted receipts. Each header opens with `▌`, names its
@@ -986,21 +997,26 @@ preambles and no server-side additions.
   wrapped lines, and a stub naming the hidden line count. A section with five
   lines or fewer shows in full and gets no stub. A block with several parts
   previews each part. The agent's answer never folds with the chat, and thinking
-  folds only with `t`. The chat starts unfolded, so follow puts the conversation
-  on the first screen. A folded block still shows its runtime note.
+  folds with the chat. Enter is the only fold key. The chat starts unfolded, so
+  follow puts the conversation on the first screen. A folded block still shows
+  its runtime note.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or
-  `g`/`G`) jump to the top or tail. `f` toggles live follow. Enter and `t`
-  change the fold without moving the scroll position. The footer is the only key
-  legend. Scrolling away from the tail pauses follow; End or reaching the bottom
-  resumes it.
+  `g`/`G`) jump to the top or tail. `f` toggles live follow. Enter changes the
+  fold without moving the scroll position. The footer is the only key legend.
+  Scrolling away from the tail pauses follow; End or reaching the bottom resumes
+  it.
 - Assistant deltas are drawn as a live block after the cached document: thinking
-  first, then text, under one `HEARTH` header with a spinner in place of `▌` and
-  `streaming` on the right. The spinner's phase starts when the turn starts. The
-  live block never folds with the chat and is never cached; `t` also folds its
-  thinking. It clears when the run settles. A saved request or a settled run
-  reloads the document; a reload alone does not animate. The header names the
-  model, the loaded turns, the message count, the token total, the session, and
-  the prefix hash of the newest saved request.
+  first, then text, then a `WORKING` row with a spinner in place of `▌` and
+  `streaming` on the right. The working row is the last row of the block, so the
+  spinner holds the tail of the card while the text grows above it. The block
+  keeps a blank row above the working row and one below it. The eight-frame
+  clockwise flux spinner steps one frame every 100 ms and its phase starts when
+  the turn starts. The live answer never folds, and Enter also folds its thinking
+  to the same five-line preview. The live block is never cached. It clears when
+  the run settles. A saved request or a settled run reloads the document; a reload
+  alone does not animate. The status row names the model, the loaded turns, the
+  message count, the token total, the session, and the prefix hash of the newest
+  saved request.
 - A saved response contributes to the merge baseline in the form it is sent
   back: its thinking blocks are dropped and a message that carries no request is
   omitted. A response with thinking therefore neither makes the next request
