@@ -1019,6 +1019,104 @@ mod tests {
         );
     }
 
+    fn skills_home(home: &std::path::Path) {
+        std::fs::create_dir_all(home.join("skills")).expect("skills dir");
+        std::fs::write(
+            home.join("skills/simple.md"),
+            "# A simple skill\n\nUse this when simple work appears.\n\n## Steps\n\nDo it.\n",
+        )
+        .expect("user skill");
+        hearth_runtime::skills::SkillLibrary::new(home)
+            .save_learned(hearth_runtime::skills::SkillSave {
+                name: "triage".to_owned(),
+                description: "Triage a request".to_owned(),
+                body: "## When to use\n\nWhen triage is needed.\n\n## Steps\n\nRevision 0.\n\n## Pitfalls\n\nNone."
+                    .to_owned(),
+                evidence: Vec::new(),
+            })
+            .expect("learned skill");
+    }
+
+    #[test]
+    fn the_skills_tab_filters_by_scope() {
+        let (home, mut app) = initialized_app();
+        skills_home(home.path());
+        app.tab = Tab::Skills;
+        app.skills.reload();
+        let text = buffer_text(&app, 110, 40);
+        for expected in ["simple [user]", "triage [learned]", "showing both"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        let text = buffer_text(&app, 110, 40);
+        assert!(text.contains("showing user"), "{text}");
+        assert!(text.contains("simple [user]"), "{text}");
+        assert!(!text.contains("triage [learned]"), "{text}");
+        assert!(
+            text.contains("A simple skill"),
+            "the body follows the filtered selection: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        let text = buffer_text(&app, 110, 40);
+        assert!(text.contains("showing learned"), "{text}");
+        assert!(text.contains("triage [learned]"), "{text}");
+        assert!(!text.contains("simple [user]"), "{text}");
+        assert!(
+            text.contains("When triage is needed."),
+            "the body follows the filtered selection: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        let text = buffer_text(&app, 110, 40);
+        assert!(text.contains("showing both"), "{text}");
+        assert!(
+            text.contains("simple [user]") && text.contains("triage [learned]"),
+            "{text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
+        let text = buffer_text(&app, 110, 40);
+        assert!(
+            text.contains("showing learned"),
+            "the left key wraps back: {text}"
+        );
+    }
+
+    #[test]
+    fn an_empty_filter_names_the_mode_it_is_empty_in() {
+        let (home, mut app) = initialized_app();
+        std::fs::create_dir_all(home.path().join("skills")).expect("skills dir");
+        std::fs::write(
+            home.path().join("skills/simple.md"),
+            "# A simple skill\n\nUse this when simple work appears.\n\n## Steps\n\nDo it.\n",
+        )
+        .expect("user skill");
+        app.tab = Tab::Skills;
+        app.skills.reload();
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        let text = buffer_text(&app, 110, 40);
+        assert!(text.contains("No learned skills yet"), "{text}");
+        assert!(
+            !text.contains("No skills yet"),
+            "a filtered empty list is not an empty library: {text}"
+        );
+    }
+
+    #[test]
+    fn the_skills_footer_names_the_filter_keys() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Skills;
+        let text = buffer_text(&app, 120, 40);
+        let footer = text
+            .lines()
+            .find(|line| line.contains("quit"))
+            .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
+        assert!(footer.contains("[/] filter"), "{footer}");
+    }
+
     #[test]
     fn narrow_dashboard_wraps_the_seven_tabs() {
         let (_home, app) = initialized_app();
