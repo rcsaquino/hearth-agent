@@ -2396,3 +2396,16 @@ just after.
 - `Skill::success_rate` is unchanged: the index cap still sorts learned skills by
   it, and a computed zero is the right value there. The dash is a display rule at
   the render site, which already has `uses`.
+
+## 2026-11-16: The Skills tab only reads
+
+- The Skills tab keeps selection, reading, and scrolling. `e`, `n`, and `v`, the
+  in-tab new-skill prompt, the version-history view, `EditorKind::Skill`, and the
+  `skills/<name>.md` write path are gone. The library is changed by editing the
+  files or by Hearth's skill loop; a second write route in the TUI duplicated the
+  first and could only drift from it.
+- Removing `v` removed the only reader of `SkillsView.version` and `versions`, so
+  those fields and `show_history`/`leave_history` went too. `SkillLibrary::history`
+  and `version_body` stay: the files remain versioned on disk, and the library API
+  is what the tests and the skill loop use.
+- Editing `SOUL.md` and `HEARTH.md` from Settings is a different route and stays.

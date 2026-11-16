@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.37, plain-language edition
+**Status:** Draft 0.38, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.38 makes the Skills tab read-only. `e`, `n`, and `v` are gone with the
+editor, the new-skill prompt, and the version-history view they opened, along with
+the footer, help, and empty-state hints that named them. The tab selects, reads,
+and scrolls. A skill is read where it lives, and the library changes by editing the
+files or through Hearth's own skill loop. `skills/<name>.md` no longer has a TUI
+write path, so `EditorKind::Skill` is gone.
 
 Draft 0.37 stops reporting a zero rate for a skill that never ran. A user skill
 can never be counted, and a learned skill is uncounted until its first run, so
@@ -1583,7 +1590,9 @@ Rules:
   lowest success rate, then the least recently used.
 - Every version is kept under `skills/learned/.history/`, and every change is
   appended to `skills/learned/CHANGELOG.md`.
-- The TUI Skills tab exposes the library read-only: bodies, history, and counts.
+- The TUI Skills tab exposes the library read-only: bodies and counts, with no
+  key that edits, creates, or walks versions. A skill is read where it lives, and
+  the library changes by editing the files or through Hearth's own skill loop.
   A skill with no counted use shows an em dash where its rate would be; a rate
   appears only after a use has been counted.
   The `skill` tool loads a body by name, records the outcome, and can save or archive
