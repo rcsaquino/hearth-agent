@@ -1162,6 +1162,29 @@ mod tests {
     }
 
     #[test]
+    fn the_prompt_footer_is_the_only_key_legend() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![snapshot("test-model", "hash", 1)];
+        let text = buffer_text(&app, 120, 40);
+        let footer = text
+            .lines()
+            .find(|line| line.contains("snapshots") && line.contains("quit"))
+            .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
+        for key in ["[ ]", "follow", "system", "raw"] {
+            assert!(
+                footer.contains(key),
+                "the footer is missing {key}: {footer}"
+            );
+        }
+        assert_eq!(
+            text.matches(" snapshots").count(),
+            1,
+            "the prompt tab shows one legend: {text}"
+        );
+    }
+
+    #[test]
     fn prompt_markers_name_every_saved_snapshot() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;

@@ -1500,10 +1500,6 @@ mod tests {
             summary.contains("tok"),
             "the summary names the cost: {hidden}"
         );
-        assert!(
-            hidden.contains("s system"),
-            "the key hint stays visible: {hidden}"
-        );
         app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
         assert!(
             rendered(&app, 80, 60).contains(SOUL),
@@ -1618,11 +1614,21 @@ mod tests {
                     "width {width} is missing {expected}: {text}"
                 );
             }
-            assert!(
-                text.contains("[ ] snapshots · f follow · s system · r raw · o refresh"),
-                "width {width} keeps the hint line: {text}"
-            );
         }
+    }
+
+    #[test]
+    fn the_tab_leaves_the_key_legend_to_the_footer() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 120, 80);
+        assert!(
+            !text.contains("snapshots ·"),
+            "the card must not repeat the key legend: {text}"
+        );
+        assert!(
+            !text.contains("f follow"),
+            "the footer owns the tab keys: {text}"
+        );
     }
 
     #[test]
