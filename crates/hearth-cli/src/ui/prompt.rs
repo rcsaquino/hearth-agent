@@ -124,17 +124,29 @@ pub(crate) fn toggle_fold(prompt: &mut PromptView) {
     prompt.collapsed = !prompt.collapsed;
 }
 
+/// Fold or open every thinking block, leaving the chat as it is.
+pub(crate) fn toggle_thinking(prompt: &mut PromptView) {
+    prompt.thinking_collapsed = !prompt.thinking_collapsed;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     /// The loaded requests, named by hash and answering entry.
     signature: String,
     collapsed: bool,
+    thinking_collapsed: bool,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(exchanges: &[Value], collapsed: bool, width: u16, zone: &Zone) -> Self {
+    fn new(
+        exchanges: &[Value],
+        collapsed: bool,
+        thinking_collapsed: bool,
+        width: u16,
+        zone: &Zone,
+    ) -> Self {
         let mut signature = String::new();
         for exchange in exchanges {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
@@ -145,6 +157,7 @@ impl CacheKey {
         Self {
             signature,
             collapsed,
+            thinking_collapsed,
             width,
             zone: zone.name().to_owned(),
         }
@@ -197,6 +210,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let key = CacheKey::new(
         &app.prompt.exchanges,
         app.prompt.collapsed,
+        app.prompt.thinking_collapsed,
         inner.width,
         &app.zone,
     );
@@ -227,7 +241,14 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .prompt
         .live
         .as_ref()
-        .map(|live| live_lines(live, width, app.prompt.collapsed))
+        .map(|live| {
+            live_lines(
+                live,
+                width,
+                app.prompt.collapsed,
+                app.prompt.thinking_collapsed,
+            )
+        })
         .unwrap_or_default();
     let saved = cache.lines.len();
     let total = saved + live.len();
@@ -293,18 +314,20 @@ fn status_line(summary: &Summary, width: usize) -> Line<'static> {
 /// The turn being written, drawn below the saved chat with its thinking before
 /// its text and its working row last, so the tail holds the spinner while the
 /// text grows above it.
-fn live_lines(live: &LiveReply, width: usize, collapsed: bool) -> Vec<Line<'static>> {
+fn live_lines(
+    live: &LiveReply,
+    width: usize,
+    collapsed: bool,
+    thinking_collapsed: bool,
+) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from("")];
     if !live.thinking.is_empty() {
-        lines.extend(body_block(
-            "thinking",
-            &live.thinking,
-            theme::THINK,
-            theme::THINK,
-            None,
-            width,
-            collapsed,
-        ));
+        let block = thinking_block([live.thinking.clone()], "streaming".to_owned())
+            .expect("a thinking block");
+        let mut painter = Painter::new(width, collapsed, thinking_collapsed);
+        painter.block(&block);
+        lines.extend(painter.lines);
+        lines.push(Line::from(""));
     }
     if !live.text.is_empty() {
         lines.extend(body_block(
@@ -420,10 +443,11 @@ enum Fold {
 }
 
 impl Fold {
-    fn open(self, collapsed: bool) -> bool {
+    fn open(self, collapsed: bool, thinking_collapsed: bool) -> bool {
         match self {
             Fold::Answer => true,
-            Fold::Chat | Fold::Thinking => !collapsed,
+            Fold::Chat => !collapsed,
+            Fold::Thinking => !thinking_collapsed,
         }
     }
 }
@@ -580,14 +604,20 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
                 .map(str::to_owned);
             let role = Role::parse(message["role"].as_str().unwrap_or_default());
             let blocks = message["blocks"].as_array().cloned().unwrap_or_default();
-            chat.entries.push(Entry::Block(message_block(
-                role,
-                &blocks,
-                &call_names,
-                note,
-                turn,
-                &clock,
-            )));
+            let (thinking, spoken) = split_thinking(&blocks);
+            let printed =
+                thinking_block(thinking_text(&thinking), format!("turn {turn} · {clock}"));
+            chat.entries.extend(printed.into_iter().map(Entry::Block));
+            if !spoken.is_empty() {
+                chat.entries.push(Entry::Block(message_block(
+                    role,
+                    &spoken,
+                    &call_names,
+                    note,
+                    turn,
+                    &clock,
+                )));
+            }
             chat.summary.messages += 1;
         }
 
@@ -602,12 +632,19 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
         } else {
             let blocks = response["blocks"].as_array().cloned().unwrap_or_default();
             let answered_at = response["created_at"].as_i64().unwrap_or(at);
-            chat.entries.push(Entry::Block(response_block(
-                &blocks,
-                &call_names,
-                turn,
-                &zone.local(answered_at).clock(),
-            )));
+            let clock = zone.local(answered_at).clock();
+            let (thinking, spoken) = split_thinking(&blocks);
+            let printed =
+                thinking_block(thinking_text(&thinking), format!("turn {turn} · {clock}"));
+            chat.entries.extend(printed.into_iter().map(Entry::Block));
+            if !spoken.is_empty() {
+                chat.entries.push(Entry::Block(response_block(
+                    &spoken,
+                    &call_names,
+                    turn,
+                    &clock,
+                )));
+            }
             chat.summary.messages += 1;
             remember_calls(&mut call_names, response);
         }
@@ -699,17 +736,16 @@ fn message_block(
     turn: usize,
     clock: &str,
 ) -> Block {
-    let spoken = spoken(blocks);
-    let only_calls = !spoken.is_empty() && spoken.iter().all(|block| block["type"] == "tool_call");
-    let failed = spoken
+    let only_calls = !blocks.is_empty() && blocks.iter().all(|block| block["type"] == "tool_call");
+    let failed = blocks
         .iter()
         .any(|block| block["is_error"].as_bool() == Some(true));
     let (label, bg, accent) = match role {
         Role::User => ("YOU".to_owned(), Some(theme::USER_BG), theme::ACCENT),
-        Role::Assistant if only_calls => (call_label(&spoken), Some(theme::TOOL_BG), theme::WARN),
+        Role::Assistant if only_calls => (call_label(blocks), Some(theme::TOOL_BG), theme::WARN),
         Role::Assistant => ("HEARTH".to_owned(), None, theme::ACCENT),
         Role::Tool => (
-            format!("TOOL RESULT · {}", result_name(&spoken, calls)),
+            format!("TOOL RESULT · {}", result_name(blocks, calls)),
             Some(if failed {
                 theme::TOOL_BAD_BG
             } else {
@@ -736,10 +772,9 @@ fn response_block(
     turn: usize,
     clock: &str,
 ) -> Block {
-    let spoken = spoken(blocks);
-    let only_calls = !spoken.is_empty() && spoken.iter().all(|block| block["type"] == "tool_call");
+    let only_calls = !blocks.is_empty() && blocks.iter().all(|block| block["type"] == "tool_call");
     let (label, bg, accent) = if only_calls {
-        (call_label(&spoken), Some(theme::TOOL_BG), theme::WARN)
+        (call_label(blocks), Some(theme::TOOL_BG), theme::WARN)
     } else {
         ("HEARTH".to_owned(), None, theme::ACCENT)
     };
@@ -754,24 +789,49 @@ fn response_block(
     }
 }
 
-/// The blocks that decide a message's label and error state.
-fn spoken(blocks: &[Value]) -> Vec<Value> {
+/// The thinking and the spoken blocks of one message.
+fn split_thinking(blocks: &[Value]) -> (Vec<Value>, Vec<Value>) {
     blocks
         .iter()
-        .filter(|block| block["type"] != "thinking")
         .cloned()
-        .collect()
+        .partition(|block| block["type"] == "thinking")
+}
+
+/// The reasoning a message carried, as its own block.
+fn thinking_block(texts: impl IntoIterator<Item = String>, meta: String) -> Option<Block> {
+    let parts: Vec<Part> = texts
+        .into_iter()
+        .map(|text| Part {
+            label: None,
+            text,
+            fold: Fold::Thinking,
+        })
+        .collect();
+    if parts.is_empty() {
+        return None;
+    }
+    Some(Block {
+        label: "THINKING".to_owned(),
+        meta,
+        note: None,
+        parts,
+        bg: None,
+        accent: theme::THINK,
+        fg: theme::THINK,
+    })
+}
+
+/// The text of each thinking block.
+fn thinking_text(blocks: &[Value]) -> impl Iterator<Item = String> + '_ {
+    blocks
+        .iter()
+        .map(|block| block["text"].as_str().unwrap_or_default().to_owned())
 }
 
 fn parts_of(blocks: &[Value], role: Role, calls: &BTreeMap<String, String>) -> Vec<Part> {
     let mut parts = Vec::new();
     for block in blocks {
         let part = match block["type"].as_str().unwrap_or_default() {
-            "thinking" => Part {
-                label: Some("thinking".to_owned()),
-                text: block["text"].as_str().unwrap_or_default().to_owned(),
-                fold: Fold::Thinking,
-            },
             "text" => Part {
                 label: None,
                 text: block["text"].as_str().unwrap_or_default().to_owned(),
@@ -960,7 +1020,7 @@ fn over_layer(request: &Value, layer: &Layer) -> Option<SegmentCost> {
 
 fn build_cache(exchanges: &[Value], key: &CacheKey, width: usize, zone: &Zone) -> PromptCache {
     let chat = derive(exchanges, zone);
-    let mut painter = Painter::new(width, key.collapsed);
+    let mut painter = Painter::new(width, key.collapsed, key.thinking_collapsed);
     for entry in &chat.entries {
         match entry {
             Entry::Notice(notice) => painter.notice(notice),
@@ -1001,7 +1061,7 @@ fn section_rows(text: &str, width: usize, open: bool) -> (Vec<String>, Option<St
     (rows, Some(stub))
 }
 
-fn content(block: &Block, inner: usize, collapsed: bool) -> Vec<Content> {
+fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: bool) -> Vec<Content> {
     let mut rows = Vec::new();
     for part in &block.parts {
         if part.label.is_none() && part.text.trim().is_empty() {
@@ -1023,7 +1083,7 @@ fn content(block: &Block, inner: usize, collapsed: bool) -> Vec<Content> {
         if let Some(label) = &part.label {
             rows.push(Content::Label(label.clone(), ink));
         }
-        let open = part.fold.open(collapsed);
+        let open = part.fold.open(collapsed, thinking_collapsed);
         let (lines, stub) = section_rows(&part.text, inner, open);
         rows.extend(lines.into_iter().map(|line| Content::Text(line, ink)));
         if let Some(stub) = stub {
@@ -1037,14 +1097,16 @@ fn content(block: &Block, inner: usize, collapsed: bool) -> Vec<Content> {
 struct Painter {
     width: usize,
     collapsed: bool,
+    thinking_collapsed: bool,
     lines: Vec<Line<'static>>,
 }
 
 impl Painter {
-    fn new(width: usize, collapsed: bool) -> Self {
+    fn new(width: usize, collapsed: bool, thinking_collapsed: bool) -> Self {
         Self {
             width: width.max(1),
             collapsed,
+            thinking_collapsed,
             lines: Vec::new(),
         }
     }
@@ -1095,7 +1157,7 @@ impl Painter {
 
     fn block(&mut self, block: &Block) {
         let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        let rows = content(block, inner, self.collapsed);
+        let rows = content(block, inner, self.collapsed, self.thinking_collapsed);
         self.gap();
         let label_style = tinted(block.accent, block.bg).add_modifier(Modifier::BOLD);
         let header = band_line(
@@ -1659,7 +1721,7 @@ mod tests {
             .map(|index| format!("answer line {index}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let (_home, mut app) = prompt_app(vec![json!({
+        let (_home, app) = prompt_app(vec![json!({
             "request": {
                 "transcript": [
                     {"role": "user", "blocks": [{"type": "text", "text": "a question"}]}
@@ -1884,7 +1946,7 @@ mod tests {
             text: "STREAMING REPLY".to_owned(),
             started: Instant::now(),
         };
-        let lines = live_lines(&live, 100, false);
+        let lines = live_lines(&live, 100, false, false);
         assert_eq!(
             lines.first().map(|line| line.width()),
             Some(0),
