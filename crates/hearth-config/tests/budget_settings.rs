@@ -15,6 +15,9 @@ fn budget_settings_have_the_spec_defaults() {
     assert!((settings.compaction.soft_compact - 0.65).abs() < f64::EPSILON);
     assert!((settings.compaction.hard_compact - 0.85).abs() < f64::EPSILON);
     assert_eq!(settings.compaction.keep_recent_tokens, 20_000);
+    assert_eq!(settings.memory.rules_max_tokens, 800);
+    assert_eq!(settings.memory.recall_max_tokens, 700);
+    assert_eq!(settings.memory.recall_max_items, 10);
 }
 
 #[test]

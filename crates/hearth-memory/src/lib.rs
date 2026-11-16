@@ -718,6 +718,35 @@ mod tests {
     }
 
     #[test]
+    fn the_memory_recall_defaults_are_700_tokens_and_10_items() {
+        let config = MemoryConfig::default();
+        assert_eq!(config.recall_max_tokens, 700);
+        assert_eq!(config.recall_max_items, 10);
+    }
+
+    #[test]
+    fn ten_memories_at_the_content_limit_fit_the_default_digest() {
+        let (_directory, service) = service();
+        let mut subjects = Vec::new();
+        for index in 0..10 {
+            let subject = format!("topic{index}");
+            let content = format!("{} note {index}", "x".repeat(CONTENT_LIMIT - 7));
+            assert_eq!(content.chars().count(), CONTENT_LIMIT);
+            seed(&service, &content, &subject);
+            subjects.push(subject);
+        }
+
+        let recall = service.recall(&subjects.join(" ")).expect("recall");
+        assert_eq!(recall.items.len(), 10, "{}", recall.digest);
+        assert!(
+            hearth_model::estimate_tokens(&recall.digest) <= 700,
+            "ten full rows must fit the 700-token budget: {}\n{}",
+            hearth_model::estimate_tokens(&recall.digest),
+            recall.digest
+        );
+    }
+
+    #[test]
     fn every_live_rule_fits_in_the_rules_block() {
         use crate::errors::Code;
 
@@ -890,7 +919,7 @@ mod tests {
     fn the_rules_budget_is_enforced_at_the_write() {
         let (_directory, service) = service();
         let service = service.with_config(MemoryConfig {
-            rules_max_tokens: 80,
+            rules_max_tokens: 50,
             ..MemoryConfig::default()
         });
         service
@@ -902,7 +931,7 @@ mod tests {
             .expect("first");
         let error = service
             .write(
-                NewMemory::new("b".repeat(400))
+                NewMemory::new("b".repeat(CONTENT_LIMIT))
                     .kind(Kind::Rule)
                     .pinned(true),
             )
@@ -982,12 +1011,12 @@ mod tests {
     #[test]
     fn a_retired_rule_stops_holding_the_rules_budget() {
         let (_directory, service) = service();
-        let retired_text = "Always write the changelog entry before the release tag and cite every \
-                             merged change with its risk in plain words so the record reads clearly to \
-                             anyone who was not in the room.";
-        let live_text = "Never publish a release tag without the changelog entry that cites each \
-                         merged change and its risk in plain words so the record reads clearly to \
-                         anyone who was not in the room.";
+        let retired_text = "Always write the changelog entry before the release tag and cite \
+                             every merged change with its risk in plain words so the record \
+                             reads clearly now.";
+        let live_text = "Never publish a release tag without the changelog entry that cites \
+                         each merged change and its risk in plain words so the record reads \
+                         clearly now.";
         assert_eq!(
             retired_text.chars().count(),
             live_text.chars().count(),

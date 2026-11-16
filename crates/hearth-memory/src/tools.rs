@@ -709,6 +709,34 @@ mod tests {
             .expect_err("empty");
         assert_eq!(error.code, "invalid_input");
     }
+
+    #[test]
+    fn the_save_schema_names_the_content_limit() {
+        let (_directory, service) = memory();
+        let spec = service
+            .tools()
+            .iter()
+            .find(|tool| tool.spec().name == SAVE)
+            .expect("save tool")
+            .spec();
+        let description = spec.parameters["properties"]["content"]["description"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(description.contains("150"), "{description}");
+    }
+
+    #[test]
+    fn a_long_statement_is_refused_with_its_length_and_the_limit() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let error = tools
+            .call(SAVE, &json!({"content": "a".repeat(151)}))
+            .expect("call")
+            .expect_err("too long");
+        assert_eq!(error.code, "invalid_input");
+        assert!(error.message.contains("151"), "{}", error.message);
+        assert!(error.message.contains("150"), "{}", error.message);
+    }
 }
 
 #[cfg(test)]

@@ -1049,6 +1049,74 @@ mod tests {
     }
 
     #[test]
+    fn a_memory_at_the_content_limit_is_accepted_and_one_over_is_refused() {
+        let (_directory, session) = home();
+        let at_limit = "a".repeat(CONTENT_LIMIT);
+        insert(
+            &session,
+            Pending {
+                item: NewMemory::new(&at_limit),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("150 characters is accepted");
+
+        let over = "b".repeat(CONTENT_LIMIT + 1);
+        let error = insert(
+            &session,
+            Pending {
+                item: NewMemory::new(&over),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect_err("151 characters is refused");
+        assert_eq!(error.code, Code::InvalidInput);
+        assert!(error.message.contains("151"), "{}", error.message);
+        assert!(error.message.contains("150"), "{}", error.message);
+        assert_eq!(
+            count(&session).expect("count"),
+            1,
+            "the refused write must save nothing"
+        );
+    }
+
+    #[test]
+    fn a_pinned_rule_uses_the_same_content_limit() {
+        let (_directory, session) = home();
+        let at_limit = "r".repeat(CONTENT_LIMIT);
+        insert(
+            &session,
+            Pending {
+                item: NewMemory::new(&at_limit).kind(Kind::Rule).pinned(true),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("150 characters is accepted as a rule");
+
+        let over = "s".repeat(CONTENT_LIMIT + 1);
+        let error = insert(
+            &session,
+            Pending {
+                item: NewMemory::new(&over).kind(Kind::Rule).pinned(true),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect_err("151 characters is refused as a rule");
+        assert_eq!(error.code, Code::InvalidInput);
+        assert!(error.message.contains("151"), "{}", error.message);
+        assert!(error.message.contains("150"), "{}", error.message);
+        assert!(
+            !error.message.contains("pinned rule"),
+            "a rule uses the content error, not a separate one: {}",
+            error.message
+        );
+    }
+
+    #[test]
     fn a_credential_is_refused_before_it_is_stored() {
         let (_directory, session) = home();
         // A token-shaped string, assembled so the repository holds no literal.

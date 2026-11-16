@@ -336,6 +336,33 @@ mod tests {
     }
 
     #[test]
+    fn a_statement_at_the_content_limit_is_captured() {
+        let content = format!("alpha beta {}", "a".repeat(139));
+        assert_eq!(content.chars().count(), 150);
+        let found = candidates(&format!("Remember that {content}"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content.chars().count(), 150);
+    }
+
+    #[test]
+    fn an_over_limit_statement_is_not_captured() {
+        let content = format!("alpha beta {}", "a".repeat(140));
+        assert_eq!(content.chars().count(), 151);
+        assert!(candidates(&format!("Remember that {content}")).is_empty());
+    }
+
+    #[test]
+    fn a_long_message_is_still_scanned_for_a_short_statement() {
+        let message = format!(
+            "{}.Remember that Alice manages the OR board.",
+            "x".repeat(900)
+        );
+        let found = candidates(&message);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, "Alice manages the OR board");
+    }
+
+    #[test]
     fn at_most_three_statements_are_taken_from_one_message() {
         let found = candidates(
             "Remember that Alice manages the OR board. Remember that Bob is my boss. \

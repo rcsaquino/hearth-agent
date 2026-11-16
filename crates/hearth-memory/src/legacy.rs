@@ -238,4 +238,33 @@ mod tests {
             "the standing file was retired after a refused write"
         );
     }
+
+    #[test]
+    fn an_over_limit_bullet_is_skipped_instead_of_vanishing() {
+        let home = TempDir::new().expect("temp home");
+        let harness = Harness::open(home.path()).expect("harness");
+        let service = MemoryService::new(harness.session().clone());
+        std::fs::create_dir_all(home.path().join("memory")).expect("memory directory");
+        std::fs::write(
+            home.path().join("memory/standing.md"),
+            format!("- [s_0123456789abcdef] [p=90] {}\n", "x".repeat(500)),
+        )
+        .expect("standing file");
+
+        let report = import(&service, home.path()).expect("import");
+        assert_eq!(report.rules, 0);
+        assert_eq!(
+            report.skipped, 1,
+            "a refused bullet is counted, not dropped"
+        );
+        assert!(!report.complete());
+        assert!(
+            report.archived.is_none(),
+            "a refused bullet must keep the old file"
+        );
+        assert!(
+            home.path().join("memory/standing.md").is_file(),
+            "the standing file was retired after a refused write"
+        );
+    }
 }

@@ -231,7 +231,7 @@ fn the_digest_stays_inside_its_token_budget() {
         items.push(
             NewMemory::new(format!(
                 "Alice owns the {topic} track for cycle {index}, {}",
-                "with a long note attached ".repeat(9)
+                "with a long note attached ".repeat(3)
             ))
             .subject("alice"),
         );

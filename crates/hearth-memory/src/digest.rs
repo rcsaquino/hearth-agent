@@ -333,6 +333,22 @@ mod tests {
     }
 
     #[test]
+    fn a_memory_at_the_content_limit_is_shown_in_full() {
+        let content = "a".repeat(150);
+        let line = line(&memory("m_1", "topic", &content), 0);
+        assert!(line.ends_with(content.as_str()), "{line}");
+        assert!(!line.contains('…'), "a new memory is not clipped: {line}");
+    }
+
+    #[test]
+    fn an_older_row_above_the_content_limit_is_clipped() {
+        let content = "b".repeat(160);
+        let line = line(&memory("m_1", "topic", &content), 0);
+        assert!(line.contains('…'), "an old row is clipped: {line}");
+        assert!(!line.contains(content.as_str()), "{line}");
+    }
+
+    #[test]
     fn an_empty_recall_renders_nothing() {
         assert!(recall_body(&[], &Coverage::default(), 0).is_empty());
     }
