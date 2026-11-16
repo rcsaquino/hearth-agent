@@ -241,11 +241,16 @@ fn the_digest_stays_inside_its_token_budget() {
     let recall = service
         .recall("what do you know about Alice")
         .expect("recall");
+    assert_eq!(
+        recall.items.len(),
+        10,
+        "the item cap is the recall bound: {}",
+        recall.digest
+    );
     let tokens = hearth_model::estimate_tokens(&recall.digest);
     assert!(
-        tokens <= service.config().recall_max_tokens as i64,
-        "the digest used {tokens} tokens against a {} budget",
-        service.config().recall_max_tokens
+        tokens <= 1_200,
+        "the digest used {tokens} tokens, over the count bound's ceiling"
     );
     assert!(
         !recall.coverage.is_empty(),

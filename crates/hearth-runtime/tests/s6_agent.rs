@@ -1289,7 +1289,7 @@ fn tool_result_text(message: &hearth_model::ChatMessage) -> String {
 }
 
 #[test]
-fn recall_is_bounded_to_fit_the_context_budget() {
+fn a_full_recall_is_not_shrunk_for_the_context_budget() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
     let memory = Arc::new(MemoryService::new(harness.session().clone()));
@@ -1320,22 +1320,33 @@ fn recall_is_bounded_to_fit_the_context_budget() {
     assert_eq!(outcome.answer_text.as_deref(), Some("Short."));
 
     let requests = provider.requests();
-    let request = requests.first().expect("request");
-    let recall = request
-        .messages
-        .iter()
-        .filter(|message| message.role == Role::System)
-        .map(message_text)
-        .find(|text| text.contains("<memory>"))
-        .expect("recall message");
-    let lines = recall.lines().filter(|line| line.starts_with("m_")).count();
-    // Ten memories match, so a bounded recall must return fewer than all of them.
     assert!(
-        lines > 0 && lines < 10,
-        "expected a bounded recall, got {lines} lines: {recall}"
+        requests.is_empty(),
+        "a full recall digest must not be shrunk and re-asked"
     );
-    // The ceiling is the recall cap, which is eight.
-    assert!(lines <= 8, "recall exceeded the item cap, got {lines}");
+    let prompt = harness
+        .session()
+        .latest_prompt()
+        .expect("prompt")
+        .expect("saved prompt");
+    let document: serde_json::Value =
+        serde_json::from_str(&prompt.text).expect("prompt document");
+    let recall = document["recall"].as_str().expect("recall layer");
+    let lines = recall.lines().filter(|line| line.starts_with("m_")).count();
+    assert_eq!(
+        lines, 10,
+        "the item cap is the bound, not the prompt budget: {recall}"
+    );
+    assert_eq!(outcome.submission.status, SubmissionStatus::Unanswered);
+    assert!(
+        outcome
+            .notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("too large"),
+        "the person must see the budget notice: {:?}",
+        outcome.notice
+    );
 }
 
 #[test]

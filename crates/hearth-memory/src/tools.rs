@@ -722,20 +722,28 @@ mod tests {
         let description = spec.parameters["properties"]["content"]["description"]
             .as_str()
             .unwrap_or_default();
-        assert!(description.contains("150"), "{description}");
+        assert!(
+            description.contains(&crate::store::CONTENT_LIMIT.to_string()),
+            "{description}"
+        );
     }
 
     #[test]
     fn a_long_statement_is_refused_with_its_length_and_the_limit() {
         let (_directory, service) = memory();
         let tools = registry(&service);
+        let length = crate::store::CONTENT_LIMIT + 1;
         let error = tools
-            .call(SAVE, &json!({"content": "a".repeat(151)}))
+            .call(SAVE, &json!({"content": "a".repeat(length)}))
             .expect("call")
             .expect_err("too long");
         assert_eq!(error.code, "invalid_input");
-        assert!(error.message.contains("151"), "{}", error.message);
-        assert!(error.message.contains("150"), "{}", error.message);
+        assert!(error.message.contains(&length.to_string()), "{}", error.message);
+        assert!(
+            error.message.contains(&crate::store::CONTENT_LIMIT.to_string()),
+            "{}",
+            error.message
+        );
     }
 }
 

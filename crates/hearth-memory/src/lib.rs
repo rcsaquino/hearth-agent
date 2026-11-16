@@ -718,9 +718,8 @@ mod tests {
     }
 
     #[test]
-    fn the_memory_recall_defaults_are_700_tokens_and_10_items() {
+    fn the_memory_recall_default_is_10_items() {
         let config = MemoryConfig::default();
-        assert_eq!(config.recall_max_tokens, 700);
         assert_eq!(config.recall_max_items, 10);
     }
 
@@ -738,12 +737,58 @@ mod tests {
 
         let recall = service.recall(&subjects.join(" ")).expect("recall");
         assert_eq!(recall.items.len(), 10, "{}", recall.digest);
+        let tokens = hearth_model::estimate_tokens(&recall.digest);
         assert!(
-            hearth_model::estimate_tokens(&recall.digest) <= 700,
-            "ten full rows must fit the 700-token budget: {}\n{}",
-            hearth_model::estimate_tokens(&recall.digest),
+            tokens <= 1_200,
+            "ten full rows must stay under the count bound's ceiling: {tokens}\n{}",
             recall.digest
         );
+        println!("ten full rows: {tokens} tokens");
+    }
+
+    #[test]
+    fn the_worst_case_digest_stays_under_its_ceiling() {
+        let (_directory, service) = service();
+        let main = "m".repeat(120);
+        let long_a = "s".repeat(120);
+        let long_b = "t".repeat(120);
+        for (index, subject) in [main.as_str(), long_a.as_str(), long_b.as_str()]
+            .iter()
+            .enumerate()
+        {
+            let old = seed(
+                &service,
+                &format!("{} old note {index}", "o".repeat(CONTENT_LIMIT - 20)),
+                subject,
+            );
+            service
+                .write(
+                    NewMemory::new(format!("{} new note {index}", "n".repeat(CONTENT_LIMIT - 20)))
+                        .subject(*subject)
+                        .supersedes(old.id.clone()),
+                )
+                .expect("replace");
+        }
+        for index in 0..10 {
+            seed(
+                &service,
+                &format!("note {index} {}", "x".repeat(CONTENT_LIMIT - 12)),
+                &main,
+            );
+        }
+
+        let message = format!("{main} {long_a} {long_b}");
+        let recall = service.recall(&message).expect("recall");
+        let tokens = hearth_model::estimate_tokens(&recall.digest);
+        assert_eq!(recall.items.len(), 10, "{}", recall.digest);
+        assert!(recall.digest.contains("more:"), "{}", recall.digest);
+        assert!(recall.digest.contains("earlier:"), "{}", recall.digest);
+        assert!(
+            tokens <= 1_200,
+            "the worst-case digest must stay under the count bound's ceiling: {tokens}\n{}",
+            recall.digest
+        );
+        println!("worst-case digest: {tokens} tokens");
     }
 
     #[test]
@@ -774,54 +819,9 @@ mod tests {
     }
 
     #[test]
-    fn the_digest_never_exceeds_its_budget() {
-        let (_directory, service) = service();
-        let service = service.with_config(MemoryConfig {
-            recall_max_tokens: 120,
-            recall_max_items: 1,
-            ..MemoryConfig::default()
-        });
-        let subjects: Vec<String> = (0..3)
-            .map(|index| format!("topic{index}{}", "x".repeat(100)))
-            .collect();
-        for (index, subject) in subjects.iter().enumerate() {
-            for round in 0..2 {
-                seed(
-                    &service,
-                    &format!("the {subject} note says {index} {round}"),
-                    subject,
-                );
-            }
-        }
-
-        let message = subjects.join(" ");
-        let recall = service.recall(&message).expect("recall");
-        assert!(
-            hearth_model::estimate_tokens(&recall.digest) <= 120,
-            "the digest must fit its budget: {} tokens\n{}",
-            hearth_model::estimate_tokens(&recall.digest),
-            recall.digest
-        );
-
-        let tiny = service.with_config(MemoryConfig {
-            recall_max_tokens: 60,
-            recall_max_items: 1,
-            ..MemoryConfig::default()
-        });
-        let recall = tiny.recall(&message).expect("recall");
-        assert!(
-            hearth_model::estimate_tokens(&recall.digest) <= 60,
-            "a tiny budget must drop coverage lines: {} tokens\n{}",
-            hearth_model::estimate_tokens(&recall.digest),
-            recall.digest
-        );
-    }
-
-    #[test]
     fn a_question_naming_a_subject_reports_what_was_left_out() {
         let (_directory, service) = service();
         let service = service.with_config(MemoryConfig {
-            recall_max_tokens: 120,
             recall_max_items: 4,
             ..MemoryConfig::default()
         });

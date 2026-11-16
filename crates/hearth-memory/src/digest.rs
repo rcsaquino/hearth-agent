@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn a_memory_at_the_content_limit_is_shown_in_full() {
-        let content = "a".repeat(150);
+        let content = "a".repeat(crate::store::CONTENT_LIMIT);
         let line = line(&memory("m_1", "topic", &content), 0);
         assert!(line.ends_with(content.as_str()), "{line}");
         assert!(!line.contains('…'), "a new memory is not clipped: {line}");
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn an_older_row_above_the_content_limit_is_clipped() {
-        let content = "b".repeat(160);
+        let content = "b".repeat(crate::store::CONTENT_LIMIT + 10);
         let line = line(&memory("m_1", "topic", &content), 0);
         assert!(line.contains('…'), "an old row is clipped: {line}");
         assert!(!line.contains(content.as_str()), "{line}");

@@ -16,8 +16,19 @@ fn budget_settings_have_the_spec_defaults() {
     assert!((settings.compaction.hard_compact - 0.85).abs() < f64::EPSILON);
     assert_eq!(settings.compaction.keep_recent_tokens, 20_000);
     assert_eq!(settings.memory.rules_max_tokens, 800);
-    assert_eq!(settings.memory.recall_max_tokens, 700);
     assert_eq!(settings.memory.recall_max_items, 10);
+}
+
+#[test]
+fn a_retired_recall_token_budget_is_refused_by_name() {
+    let error = hearth_config::settings_from_value(serde_json::json!({
+        "memory": {"recall_max_tokens": 700}
+    }))
+    .expect_err("the retired setting must be refused");
+    assert!(
+        error.to_string().contains("memory.recall_max_tokens"),
+        "the error must name the line to delete: {error}"
+    );
 }
 
 #[test]

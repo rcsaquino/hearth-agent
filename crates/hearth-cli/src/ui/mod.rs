@@ -607,8 +607,11 @@ mod tests {
         }));
         let text = buffer_text(&app, 130, 34);
         assert!(text.contains("hybrid"), "{text}");
-        assert!(text.contains("8"), "{text}");
-        assert!(text.contains("900"), "{text}");
+        assert!(text.contains("8 recall"), "{text}");
+        assert!(
+            !text.contains("900"),
+            "the Overview must not show a recall token budget: {text}"
+        );
     }
 
     #[test]

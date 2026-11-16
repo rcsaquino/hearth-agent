@@ -1962,7 +1962,6 @@ mod tests {
         .expect("form");
         for path in [
             ["memory", "rules_max_tokens"],
-            ["memory", "recall_max_tokens"],
             ["memory", "recall_max_items"],
             ["memory", "embeddings"],
             ["memory", "embedding_model_dir"],

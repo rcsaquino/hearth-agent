@@ -1055,7 +1055,7 @@ mod tests {
             },
             MemoryConfig::default().rules_max_tokens,
         )
-        .expect("150 characters is accepted");
+        .expect("the content limit is accepted");
 
         let over = "b".repeat(CONTENT_LIMIT + 1);
         let error = insert(
@@ -1066,10 +1066,18 @@ mod tests {
             },
             MemoryConfig::default().rules_max_tokens,
         )
-        .expect_err("151 characters is refused");
+        .expect_err("one over the content limit is refused");
         assert_eq!(error.code, Code::InvalidInput);
-        assert!(error.message.contains("151"), "{}", error.message);
-        assert!(error.message.contains("150"), "{}", error.message);
+        assert!(
+            error.message.contains(&(CONTENT_LIMIT + 1).to_string()),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains(&CONTENT_LIMIT.to_string()),
+            "{}",
+            error.message
+        );
         assert_eq!(
             count(&session).expect("count"),
             1,
@@ -1089,7 +1097,7 @@ mod tests {
             },
             MemoryConfig::default().rules_max_tokens,
         )
-        .expect("150 characters is accepted as a rule");
+        .expect("the content limit is accepted as a rule");
 
         let over = "s".repeat(CONTENT_LIMIT + 1);
         let error = insert(
@@ -1100,10 +1108,18 @@ mod tests {
             },
             MemoryConfig::default().rules_max_tokens,
         )
-        .expect_err("151 characters is refused as a rule");
+        .expect_err("one over the content limit is refused as a rule");
         assert_eq!(error.code, Code::InvalidInput);
-        assert!(error.message.contains("151"), "{}", error.message);
-        assert!(error.message.contains("150"), "{}", error.message);
+        assert!(
+            error.message.contains(&(CONTENT_LIMIT + 1).to_string()),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains(&CONTENT_LIMIT.to_string()),
+            "{}",
+            error.message
+        );
         assert!(
             !error.message.contains("pinned rule"),
             "a rule uses the content error, not a separate one: {}",

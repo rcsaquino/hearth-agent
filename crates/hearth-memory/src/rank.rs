@@ -306,28 +306,28 @@ mod tests {
     }
 
     #[test]
-    fn the_budget_buys_short_facts_before_long_ones() {
-        let candidates = || {
-            vec![
-                Candidate {
-                    memory: memory("long", Kind::Fact, "", &"x".repeat(400)),
-                    score: 1.0,
-                },
-                Candidate {
-                    memory: memory("short", Kind::Fact, "", "a short fact"),
-                    score: 0.95,
-                },
-            ]
-        };
-        let cost = |memory: &Memory| (memory.content.len() as u64) / 2;
-        let roomy = fill(candidates(), 500, 8, cost);
-        assert_eq!(roomy.len(), 2);
-        let tight = fill(candidates(), 40, 8, cost);
-        assert_eq!(
-            tight.len(),
-            1,
-            "the long statement cannot fit the tight budget"
+    fn a_long_high_scoring_statement_is_not_displaced_by_a_shorter_one() {
+        let mut candidates = vec![Candidate {
+            memory: memory("long", Kind::Fact, "", &"x".repeat(400)),
+            score: 1.0,
+        }];
+        for index in 0..10 {
+            candidates.push(Candidate {
+                memory: memory(
+                    &format!("short{index}"),
+                    Kind::Fact,
+                    "",
+                    "a short fact",
+                ),
+                score: 0.95,
+            });
+        }
+        let cost = |memory: &Memory| if memory.id == "long" { 100 } else { 1 };
+        let chosen = fill(candidates, 10_000, 10, cost);
+        assert_eq!(chosen.len(), 10);
+        assert!(
+            chosen.iter().any(|memory| memory.id == "long"),
+            "a long statement at the highest score must keep its slot"
         );
-        assert_eq!(tight[0].id, "short");
     }
 }

@@ -343,17 +343,17 @@ mod tests {
 
     #[test]
     fn a_statement_at_the_content_limit_is_captured() {
-        let content = format!("alpha beta {}", "a".repeat(139));
-        assert_eq!(content.chars().count(), 150);
+        let content = format!("alpha beta {}", "a".repeat(189));
+        assert_eq!(content.chars().count(), 200);
         let found = candidates(&format!("Remember that {content}"));
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].content.chars().count(), 150);
+        assert_eq!(found[0].content.chars().count(), 200);
     }
 
     #[test]
     fn an_over_limit_statement_is_not_captured() {
-        let content = format!("alpha beta {}", "a".repeat(140));
-        assert_eq!(content.chars().count(), 151);
+        let content = format!("alpha beta {}", "a".repeat(190));
+        assert_eq!(content.chars().count(), 201);
         assert!(candidates(&format!("Remember that {content}")).is_empty());
     }
 
