@@ -2609,3 +2609,29 @@ just after.
 - This supersedes the recall reserve and render trim in the 2026-11-15 "The memory
   block honours its own budget" entry and the 700-token part of the 2026-11-16
   "Every memory is capped at 150 characters" entry.
+
+## 2026-11-17: The digest row is a delimited header
+
+- `digest::line` renders `kind | subject | age: statement`. The kind is always
+  present, including `fact`, so every memory row starts with a token from
+  `Kind::code`; `pref` and `commit` stay the short codes because the separator now
+  marks the field. An empty subject renders `-`, so the field count never changes.
+  There is no bullet: the newline is the row boundary, and `clip` removes
+  whitespace so a statement cannot contain one.
+- `digest::is_memory_line` is the one predicate that tells a memory row from a
+  coverage line or the rules notice, and the row-count tests use it.
+- A whole row carries no id. A clipped row appends its id after the ellipsis,
+  because `memory_recall(id)` is the only way to read the rest. `digest::tool_line`
+  always appends the id, because the recall tool is where addressing belongs. The
+  related-statement hint in `memory_save` uses the same tool line.
+- The rules block renders `content` per line with no fields, no id, and no bullet.
+  A rule is read, not addressed; `memory_recall(kind = rule)` returns the ids.
+  `store::ID_SAMPLE` is gone, so `rules_fit` and `rules_cost` measure the line that
+  is actually rendered.
+- `clip` returns `Clipped { text, truncated }`, so the id is appended from the
+  same decision that cut the text rather than from a second length check.
+- The ten-row digest measures 611 estimated tokens and the worst case 1,071, down
+  from 682 and 1,143 when the id was in every row; the benchmark p95 falls from
+  139 to 97. The id's fixed cost was most of the difference. A bullet was rejected
+  because it adds characters to every row and marks no boundary the newline does
+  not already mark.

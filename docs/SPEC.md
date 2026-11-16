@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.47, plain-language edition
+**Status:** Draft 0.48, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.48 makes each memory row a delimited header. A line is
+`kind | subject | age: statement`, the kind is always present, an empty subject is
+`-`, and a whole row carries no id. A clipped row appends its id after the
+ellipsis, and the recall tool always ends a row with its id. The rules block is one
+plain line per rule. The ten-row digest measures 611 estimated tokens, the worst
+case 1,071, and the benchmark p95 falls to 97.
 
 Draft 0.47 raises the memory content limit to 200 characters and bounds recall by
 count alone. `memory.recall_max_tokens` is gone, `recall_max_items` stays 10, and
@@ -1290,14 +1297,21 @@ one prompt position that is never cached. Every token there is paid in full on
 every turn, so a line is terse:
 
 ```text
-m_4f2a1c8b9d7e person alice 12d: Alice manages the OR board
-m_9c01ab2d3e4f pref 3mo: prefers dark roast coffee
+fact | alice | 12d: Alice manages the OR board
+pref | - | 3mo: prefers dark roast coffee
 more: alice 6 | memory_recall(subject) for the rest
 ```
 
-A line is the id, the kind when it is not `fact`, the subject, the age, and the
-statement. The ids are there so a follow-up call is one shot instead of a second
-search.
+A line is the kind, the subject, the age, and the statement, separated by ` | `
+with a colon before the statement. The kind is always present, so every row
+starts with a known token. An empty subject is `-`, so the field count never
+changes, and a multi-word subject stays one field. There is no bullet: the
+newline is the row boundary, and a statement cannot contain one.
+
+A whole row carries no id, because the statement is shown whole. A row clipped at
+200 characters appends its id after the ellipsis, because `memory_recall(id)` is
+the only way to read the rest. The recall tool always ends a row with its id,
+because that is where addressing belongs.
 
 The coverage line is the part that makes recall honest. For each subject the
 message named, the store counts what it holds and reports the difference. A digest
@@ -1307,8 +1321,8 @@ between a bounded digest and a bounded memory.
 
 The rules block is capped at 800 tokens. Recall is bounded by count: at most 10
 statements of 200 characters each, plus at most two coverage lines of three
-subjects. The worst case measures 1,143 estimated tokens and ten ordinary full
-rows measure 682; the benchmark digest is 139 tokens at the 95th percentile.
+subjects. The worst case measures 1,071 estimated tokens and ten ordinary full
+rows measure 611; the benchmark digest is 97 tokens at the 95th percentile.
 
 ### 7.6 Rules
 
@@ -1320,6 +1334,8 @@ text moves.
   refused, not silently evicted.
 - Every rule uses the one 200-character content limit. A row written before
   that limit is clipped at 400 characters for display, with an ellipsis.
+- The block renders one plain line per rule, with no id, no fields, and no bullet.
+  A rule is read, not addressed; `memory_recall(kind = rule)` returns the ids.
 - Any rule that does not fit the render is named as `N more rules were not
   shown`, so a hand-edited store cannot hide content silently.
 - The content hash is the rules version, so a change invalidates the cached
@@ -1382,7 +1398,7 @@ digest will always miss something. Measured on the committed fixture:
 | Automatic recall, lexical | 0.92 | 0.928 |
 | Automatic recall, hybrid | 0.92 | 0.954 |
 | Paraphrase, automatic, hybrid | 0.85 | 0.900 |
-| Digest tokens, p95 | 300 | 139 |
+| Digest tokens, p95 | 300 | 97 |
 | Retrieval latency, p95 | 100 ms | 6.5 ms lexical, 14.1 ms hybrid |
 | Contradiction answered by the current statement | all | 15 of 15 |
 | Duplicate writes that became new rows | 0 | 0 |
