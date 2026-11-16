@@ -1157,6 +1157,56 @@ mod tests {
     }
 
     #[test]
+    fn the_block_cursor_is_highlighted() {
+        let alpha = block_body("ALPHA", 30);
+        let beta = block_body("BETA", 30);
+        let exchanges = vec![json!({
+            "request": request(
+                json!([
+                    {"role": "user", "blocks": [{"type": "text", "text": alpha}]},
+                    {"role": "user", "blocks": [{"type": "text", "text": beta}]}
+                ]),
+                500
+            ),
+            "prompt_hash": "hash-highlight",
+            "requested_at": 1,
+            "response": Value::Null,
+            "usage": Value::Null
+        })];
+        let (_home, mut app) = prompt_app(exchanges);
+        let _ = rendered(&app, 100, 40);
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        let backend = TestBackend::new(100, 80);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(&app, frame, area);
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let labels: Vec<u16> = (0..80)
+            .filter(|row| {
+                let text: String = (1..99)
+                    .map(|column| buffer[(column, *row)].symbol())
+                    .collect();
+                text.starts_with("▌ you")
+            })
+            .collect();
+        assert_eq!(labels.len(), 2, "both long blocks keep their label");
+        assert_eq!(
+            buffer[(3, labels[0])].style().bg,
+            Some(theme::SELECT_BG),
+            "the first long block is highlighted after n"
+        );
+        assert_ne!(
+            buffer[(3, labels[1])].style().bg,
+            Some(theme::SELECT_BG),
+            "only the selected block is highlighted"
+        );
+    }
+
+    #[test]
     fn tab_moves_the_block_cursor_and_shift_tab_moves_it_back() {
         let alpha = block_body("ALPHA", 30);
         let beta = block_body("BETA", 30);
