@@ -506,6 +506,31 @@ mod tests {
     }
 
     #[test]
+    fn a_recall_line_keeps_its_id_for_addressing() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let saved = tools
+            .call(
+                SAVE,
+                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+            )
+            .expect("call")
+            .expect("result");
+        let id = saved.content.split_whitespace().nth(1).expect("id");
+        let recalled = tools
+            .call(RECALL, &json!({"query": "who runs the OR board"}))
+            .expect("call")
+            .expect("result");
+        let row = recalled
+            .content
+            .lines()
+            .find(|line| line.contains("OR board"))
+            .expect("the recalled row");
+        assert!(row.contains(" | "), "{row}");
+        assert!(row.ends_with(id), "the recall tool must keep the id: {row}");
+    }
+
+    #[test]
     fn a_saved_statement_can_be_recalled_by_id() {
         let (_directory, service) = memory();
         let tools = registry(&service);

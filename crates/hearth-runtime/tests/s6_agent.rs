@@ -1330,7 +1330,10 @@ fn a_full_recall_is_not_shrunk_for_the_context_budget() {
         .expect("saved prompt");
     let document: serde_json::Value = serde_json::from_str(&prompt.text).expect("prompt document");
     let recall = document["recall"].as_str().expect("recall layer");
-    let lines = recall.lines().filter(|line| line.starts_with("m_")).count();
+    let lines = recall
+        .lines()
+        .filter(|line| hearth_memory::is_memory_line(line))
+        .count();
     assert_eq!(
         lines, 10,
         "the item cap is the bound, not the prompt budget: {recall}"

@@ -97,6 +97,16 @@ pub fn line(memory: &Memory, now: i64) -> String {
     line
 }
 
+/// One line of the recall tool output.
+pub fn tool_line(memory: &Memory, now: i64) -> String {
+    line(memory, now)
+}
+
+/// Whether a line is a memory row rather than a coverage or rules notice.
+pub fn is_memory_line(line: &str) -> bool {
+    line.starts_with("m_")
+}
+
 /// Render the recall digest.
 ///
 /// The tags belong to the prompt layer, which emits one segment per layer. This
@@ -282,9 +292,85 @@ mod tests {
     }
 
     #[test]
-    fn a_line_is_identity_subject_age_and_statement() {
+    fn a_line_is_a_delimited_header() {
         let line = line(&memory("m_1", "alice", "Alice manages the OR board."), 0);
-        assert_eq!(line, "m_1 alice now: Alice manages the OR board.");
+        assert_eq!(line, "fact | alice | now: Alice manages the OR board.");
+    }
+
+    #[test]
+    fn every_kind_is_the_first_field() {
+        for (kind, code) in [
+            (Kind::Rule, "rule"),
+            (Kind::Preference, "pref"),
+            (Kind::Person, "person"),
+            (Kind::Decision, "decision"),
+            (Kind::Commitment, "commit"),
+            (Kind::Episode, "episode"),
+            (Kind::Fact, "fact"),
+        ] {
+            let mut item = memory("m_1", "alice", "a statement");
+            item.kind = kind;
+            let line = line(&item, 0);
+            assert!(line.starts_with(&format!("{code} | ")), "{line}");
+        }
+    }
+
+    #[test]
+    fn an_empty_subject_renders_a_dash() {
+        let line = line(&memory("m_1", "", "the deploy pipeline has no owner"), 0);
+        assert_eq!(line, "fact | - | now: the deploy pipeline has no owner");
+    }
+
+    #[test]
+    fn a_multi_word_subject_is_one_field() {
+        let line = line(
+            &memory("m_1", "or board", "the OR board is reviewed on Mondays"),
+            0,
+        );
+        assert_eq!(
+            line,
+            "fact | or board | now: the OR board is reviewed on Mondays"
+        );
+    }
+
+    #[test]
+    fn a_pipe_and_a_colon_inside_the_statement_keep_one_row() {
+        let line = line(&memory("m_1", "topic", "a | b: c"), 0);
+        assert_eq!(line, "fact | topic | now: a | b: c");
+        assert_eq!(line.lines().count(), 1);
+    }
+
+    #[test]
+    fn a_whole_row_carries_no_id() {
+        let line = line(&memory("m_1", "alice", "a short statement"), 0);
+        assert!(!line.contains("m_1"), "{line}");
+    }
+
+    #[test]
+    fn a_clipped_row_ends_with_its_id() {
+        let content = "b".repeat(crate::store::CONTENT_LIMIT + 10);
+        let line = line(&memory("m_legacy", "topic", &content), 0);
+        assert!(line.contains('…'), "{line}");
+        assert!(line.ends_with("m_legacy"), "{line}");
+    }
+
+    #[test]
+    fn a_tool_line_always_ends_with_its_id() {
+        let line = tool_line(&memory("m_1", "alice", "a short statement"), 0);
+        assert!(line.contains(" | "), "{line}");
+        assert!(line.ends_with("m_1"), "{line}");
+    }
+
+    #[test]
+    fn only_a_memory_row_starts_with_a_kind() {
+        assert!(is_memory_line("fact | alice | now: a statement"));
+        assert!(!is_memory_line(
+            "more: alice 3 | memory_recall(subject) for the rest"
+        ));
+        assert!(!is_memory_line(
+            "earlier: alice 2 | memory_recall(as_of) for what was true then"
+        ));
+        assert!(!is_memory_line("2 more rules were not shown."));
     }
 
     #[test]
@@ -293,6 +379,7 @@ mod tests {
         let line = line(&memory("m_1", "topic", &content), 0);
         assert!(line.ends_with(content.as_str()), "{line}");
         assert!(!line.contains('…'), "a new memory is not clipped: {line}");
+        assert!(!line.contains("m_1"), "a whole row carries no id: {line}");
     }
 
     #[test]
@@ -336,6 +423,18 @@ mod tests {
         );
         assert!(block.contains("earlier: lab 1"), "{block}");
         assert!(!block.contains("more:"), "nothing is hidden: {block}");
+    }
+
+    #[test]
+    fn the_rules_block_is_plain_lines() {
+        let rules = vec![
+            memory("m_1", "", "Never deploy on Friday"),
+            memory("m_2", "", "Keep replies short"),
+        ];
+        let block = rules_body(&rules, 800);
+        assert_eq!(block, "Never deploy on Friday\nKeep replies short");
+        assert!(!block.contains("m_1"), "{block}");
+        assert!(!block.contains(" | "), "{block}");
     }
 
     #[test]

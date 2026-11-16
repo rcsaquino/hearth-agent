@@ -41,7 +41,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use hearth_core::{Session, Zone};
 
-pub use digest::Coverage;
+pub use digest::{Coverage, is_memory_line};
 pub use embedding::{
     BekkoEmbedding, EmbeddingProvider, MODEL_DIMS, MODEL_NAME, download_model, model_files_present,
 };
@@ -783,7 +783,11 @@ mod tests {
         assert!(written > 1, "the store must admit more than one rule");
 
         let block = service.rules().expect("rules").text;
-        let shown = block.lines().filter(|line| line.starts_with("m_")).count();
+        assert!(
+            !block.contains("more rules were not shown"),
+            "every live rule must fit the block: {block}"
+        );
+        let shown = block.lines().count();
         assert_eq!(
             shown, written,
             "the store admitted {written} rules but the block shows {shown}\n{block}"
