@@ -1306,7 +1306,7 @@ fn a_full_recall_is_not_shrunk_for_the_context_budget() {
             &conversation,
             "req-budget-recall",
             "input",
-            json!({"text": "what do you know about project?"}),
+            json!({"text": "what do you know about Atlas?"}),
         )
         .expect("submit")
         .submission;
@@ -1317,20 +1317,18 @@ fn a_full_recall_is_not_shrunk_for_the_context_budget() {
         .with_budget(budget)
         .run_submission(&submission.id)
         .expect("run");
-    assert_eq!(outcome.answer_text.as_deref(), Some("Short."));
 
     let requests = provider.requests();
     assert!(
         requests.is_empty(),
-        "a full recall digest must not be shrunk and re-asked"
+        "an over-budget prompt must not be sent, and recall must not be re-asked"
     );
     let prompt = harness
         .session()
         .latest_prompt()
         .expect("prompt")
         .expect("saved prompt");
-    let document: serde_json::Value =
-        serde_json::from_str(&prompt.text).expect("prompt document");
+    let document: serde_json::Value = serde_json::from_str(&prompt.text).expect("prompt document");
     let recall = document["recall"].as_str().expect("recall layer");
     let lines = recall.lines().filter(|line| line.starts_with("m_")).count();
     assert_eq!(

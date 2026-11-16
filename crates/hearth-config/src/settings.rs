@@ -291,8 +291,6 @@ impl Default for Compaction {
 pub struct Memory {
     #[serde(default = "default_rules_max_tokens")]
     pub rules_max_tokens: u64,
-    #[serde(default = "default_recall_max_tokens")]
-    pub recall_max_tokens: u64,
     #[serde(default = "default_recall_max_items")]
     pub recall_max_items: u64,
     /// Semantic recall. Off means keyword search only.
@@ -307,7 +305,6 @@ impl Default for Memory {
     fn default() -> Self {
         Self {
             rules_max_tokens: default_rules_max_tokens(),
-            recall_max_tokens: default_recall_max_tokens(),
             recall_max_items: default_recall_max_items(),
             embeddings: default_embeddings(),
             embedding_model_dir: default_embedding_model_dir(),
@@ -421,10 +418,6 @@ fn default_rules_max_tokens() -> u64 {
     800
 }
 
-fn default_recall_max_tokens() -> u64 {
-    700
-}
-
 fn default_recall_max_items() -> u64 {
     10
 }
@@ -502,7 +495,6 @@ pub fn default_settings_value() -> Value {
         },
         "memory": {
             "rules_max_tokens": default_rules_max_tokens(),
-            "recall_max_tokens": default_recall_max_tokens(),
             "recall_max_items": default_recall_max_items(),
             "embeddings": default_embeddings(),
             "embedding_model_dir": default_embedding_model_dir(),

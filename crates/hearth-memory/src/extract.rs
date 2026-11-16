@@ -36,7 +36,7 @@ impl Candidate {
 /// The shortest statement worth keeping.
 const MIN_CHARS: usize = 8;
 /// The longest statement worth keeping.
-const MAX_CHARS: usize = 150;
+const MAX_CHARS: usize = 200;
 /// The longest message that may contain a statement worth keeping.
 ///
 /// A long message is a request, not a durable statement, but a short promise can

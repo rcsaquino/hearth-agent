@@ -25,7 +25,7 @@ use crate::model::{Kind, Memory, NewMemory, Source, WriteOutcome};
 use crate::query::normalize;
 
 /// The longest statement a write may store.
-pub const CONTENT_LIMIT: usize = 150;
+pub const CONTENT_LIMIT: usize = 200;
 /// The rows the prompt injects as rules.
 ///
 /// A pin belongs to a live statement, and retirement clears it. The validity

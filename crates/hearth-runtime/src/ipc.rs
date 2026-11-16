@@ -202,7 +202,6 @@ fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError>
             "embeddings_active": context.memory.embeddings_active(),
             "embedding_model": context.memory.embedding_model(),
             "max_items": context.memory.config().recall_max_items,
-            "max_tokens": context.memory.config().recall_max_tokens,
         },
         "last_consolidation": last_consolidation,
         "skills": {

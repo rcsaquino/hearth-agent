@@ -130,7 +130,7 @@ impl Tool for SaveTool {
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "One statement, at most 150 characters, in the user's terms."
+                        "description": "One standalone statement, at most 200 characters, in the third person."
                     },
                     "kind": {
                         "type": "string",
@@ -738,9 +738,15 @@ mod tests {
             .expect("call")
             .expect_err("too long");
         assert_eq!(error.code, "invalid_input");
-        assert!(error.message.contains(&length.to_string()), "{}", error.message);
         assert!(
-            error.message.contains(&crate::store::CONTENT_LIMIT.to_string()),
+            error.message.contains(&length.to_string()),
+            "{}",
+            error.message
+        );
+        assert!(
+            error
+                .message
+                .contains(&crate::store::CONTENT_LIMIT.to_string()),
             "{}",
             error.message
         );

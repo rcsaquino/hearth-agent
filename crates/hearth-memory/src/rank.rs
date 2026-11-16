@@ -9,9 +9,8 @@
 //! 3. **Ranking** scores each candidate on evidence a personal message actually
 //!    provides: what the channels said, whether the message named its subject,
 //!    what kind of statement it is, whether it is still true, and how old it is.
-//! 4. **Fill** spends the token budget on the best value per token instead of
-//!    cutting a ranked list at a fixed count, so a short decisive fact is not
-//!    displaced by a long lukewarm one.
+//! 4. **Fill** keeps the best-scored candidates up to the item cap, so a long
+//!    decisive fact is not displaced by a short one.
 
 use std::collections::{HashMap, HashSet};
 
@@ -201,45 +200,23 @@ pub fn diversify(candidates: Vec<Candidate>, entities: &HashSet<String>) -> Vec<
     kept
 }
 
-/// Spend the token budget on the best value per token.
+/// Keep the best `max_items` candidates.
 ///
-/// The cost of one line is its own content plus the per-line prefix the digest
-/// renders. Ordering by `score / cost` means a short decisive fact beats a long
-/// vague one, which is the point of a budgeted slate rather than a top-k cut.
-pub fn fill(
-    candidates: Vec<Candidate>,
-    max_tokens: u64,
-    max_items: usize,
-    cost_of: impl Fn(&Memory) -> u64,
-) -> Vec<Memory> {
-    let mut scored: Vec<(f32, u64, Memory)> = candidates
-        .into_iter()
-        .map(|candidate| {
-            let cost = cost_of(&candidate.memory).max(1);
-            let value = candidate.score / cost as f32;
-            (value, cost, candidate.memory)
-        })
-        .collect();
+/// The item cap is the only bound. Ordering by score keeps a long, decisive
+/// statement from being displaced by a shorter one at a lower score.
+pub fn fill(candidates: Vec<Candidate>, max_items: usize) -> Vec<Memory> {
+    let mut scored = candidates;
     scored.sort_by(|left, right| {
         right
-            .0
-            .total_cmp(&left.0)
-            .then_with(|| left.2.id.cmp(&right.2.id))
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| left.memory.id.cmp(&right.memory.id))
     });
-
-    let mut chosen = Vec::new();
-    let mut used = 0u64;
-    for (_, cost, memory) in scored {
-        if chosen.len() >= max_items {
-            break;
-        }
-        if used + cost > max_tokens {
-            continue;
-        }
-        used += cost;
-        chosen.push(memory);
-    }
-    chosen
+    scored
+        .into_iter()
+        .take(max_items)
+        .map(|candidate| candidate.memory)
+        .collect()
 }
 
 #[cfg(test)]
@@ -313,17 +290,11 @@ mod tests {
         }];
         for index in 0..10 {
             candidates.push(Candidate {
-                memory: memory(
-                    &format!("short{index}"),
-                    Kind::Fact,
-                    "",
-                    "a short fact",
-                ),
+                memory: memory(&format!("short{index}"), Kind::Fact, "", "a short fact"),
                 score: 0.95,
             });
         }
-        let cost = |memory: &Memory| if memory.id == "long" { 100 } else { 1 };
-        let chosen = fill(candidates, 10_000, 10, cost);
+        let chosen = fill(candidates, 10);
         assert_eq!(chosen.len(), 10);
         assert!(
             chosen.iter().any(|memory| memory.id == "long"),

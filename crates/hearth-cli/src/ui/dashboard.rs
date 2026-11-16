@@ -223,13 +223,9 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
             let items = recall
                 .and_then(|recall| recall["max_items"].as_u64())
                 .unwrap_or(settings.memory.recall_max_items);
-            let tokens = recall
-                .and_then(|recall| recall["max_tokens"].as_u64())
-                .unwrap_or(settings.memory.recall_max_tokens);
             format!(
-                "{} rules · {items}×{} recall",
-                compact_count(settings.memory.rules_max_tokens),
-                compact_count(tokens)
+                "{} rules · {items} recall",
+                compact_count(settings.memory.rules_max_tokens)
             )
         })
         .unwrap_or_else(|| "not configured".to_owned());

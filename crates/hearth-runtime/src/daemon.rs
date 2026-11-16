@@ -137,7 +137,6 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     let mut memory = MemoryService::new(session.clone())
         .with_config(hearth_memory::MemoryConfig {
             rules_max_tokens: settings.memory.rules_max_tokens,
-            recall_max_tokens: settings.memory.recall_max_tokens,
             recall_max_items: settings.memory.recall_max_items,
         })
         .with_embeddings(settings.memory.embeddings);

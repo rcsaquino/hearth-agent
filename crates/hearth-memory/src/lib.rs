@@ -58,8 +58,6 @@ pub use transcript::{EntryHit, TranscriptRead};
 pub struct MemoryConfig {
     /// The budget for rules in the cached prefix.
     pub rules_max_tokens: u64,
-    /// The budget for the recall digest before the newest user message.
-    pub recall_max_tokens: u64,
     /// The most statements one digest may show.
     pub recall_max_items: u64,
 }
@@ -68,7 +66,6 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             rules_max_tokens: 800,
-            recall_max_tokens: 700,
             recall_max_items: 10,
         }
     }
@@ -78,7 +75,6 @@ impl MemoryConfig {
     pub fn bounded(self) -> Self {
         Self {
             rules_max_tokens: self.rules_max_tokens.clamp(50, 4_000),
-            recall_max_tokens: self.recall_max_tokens.clamp(50, 4_000),
             recall_max_items: self.recall_max_items.clamp(1, 64),
         }
     }
@@ -262,15 +258,6 @@ impl MemoryService {
 
     /// Recall as of an instant, for a question about what used to be true.
     pub fn recall_at(&self, text: &str, at: Option<i64>) -> Result<Recall> {
-        self.recall_within(text, at, self.config().recall_max_tokens)
-    }
-
-    /// Recall with a smaller digest budget.
-    ///
-    /// A caller that is over the context budget asks for a shorter digest rather
-    /// than trimming the rendered block, which would cut the tags or the coverage
-    /// line and leave the model with a broken segment.
-    pub fn recall_within(&self, text: &str, at: Option<i64>, tokens: u64) -> Result<Recall> {
         let known = self.known_subjects()?;
         let parsed = query::analyze(text, &known);
         if parsed.trivial {
@@ -316,27 +303,9 @@ impl MemoryService {
         let ranked = rank::rank(&fused, &memories, &entities, &terms, now);
         let diverse = rank::diversify(ranked, &entities);
         let config = self.config();
-        let mut coverage = self.coverage(&parsed.entities, at)?;
-        let statement_budget = tokens
-            .saturating_sub(digest::coverage_cost(&coverage))
-            .max(1);
-        let mut items = rank::fill(
-            diverse,
-            statement_budget,
-            config.recall_max_items as usize,
-            digest::line_cost,
-        );
-
-        // The fill's per-line estimate and the rendered text can differ, and a
-        // long subject can make the coverage lines outweigh the reserve. Drop
-        // from the end until the rendered digest fits the budget the caller set.
-        let mut digest = digest::recall_body(&items, &coverage, now);
-        while hearth_model::estimate_tokens(&digest) > tokens as i64 {
-            if items.pop().is_none() && !digest::trim_coverage(&mut coverage) {
-                break;
-            }
-            digest = digest::recall_body(&items, &coverage, now);
-        }
+        let coverage = self.coverage(&parsed.entities, at)?;
+        let items = rank::fill(diverse, config.recall_max_items as usize);
+        let digest = digest::recall_body(&items, &coverage, now);
         Ok(Recall {
             items,
             coverage,
@@ -763,9 +732,12 @@ mod tests {
             );
             service
                 .write(
-                    NewMemory::new(format!("{} new note {index}", "n".repeat(CONTENT_LIMIT - 20)))
-                        .subject(*subject)
-                        .supersedes(old.id.clone()),
+                    NewMemory::new(format!(
+                        "{} new note {index}",
+                        "n".repeat(CONTENT_LIMIT - 20)
+                    ))
+                    .subject(*subject)
+                    .supersedes(old.id.clone()),
                 )
                 .expect("replace");
         }

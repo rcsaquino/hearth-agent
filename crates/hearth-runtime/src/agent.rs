@@ -493,35 +493,10 @@ impl Agent {
                 guidance: self.config.guidance.text.clone(),
                 runtime_note: runtime_note.clone(),
             };
-            let mut recall_text = recall;
-            let mut prompt = build_prompt(make_input(recall_text.clone()), &history)?;
-            // Shaving tokens off the rendered digest would cut the block tag or
-            // the coverage line, which is the part that says what is missing.
-            // Ask the store for a smaller digest instead.
-            let mut recall_tokens = self
-                .memory
-                .as_ref()
-                .map(|memory| memory.config().recall_max_tokens)
-                .unwrap_or(0);
-            while prompt.tokens.total > self.budget.usable
-                && recall_tokens > digest_floor()
-                && let (Some(memory), Some(query)) = (&self.memory, latest_user_text(&history))
-            {
-                recall_tokens = recall_tokens * 2 / 3;
-                match memory.recall_within(&query, None, recall_tokens) {
-                    Ok(smaller) => {
-                        recall_text = smaller.digest;
-                        prompt = build_prompt(make_input(recall_text.clone()), &history)?;
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "recall could not be shrunk");
-                        break;
-                    }
-                }
-            }
+            let mut prompt = build_prompt(make_input(recall.clone()), &history)?;
             if prompt.tokens.total > self.budget.usable {
                 let shrunk = shrink_tool_results(&history);
-                prompt = build_prompt(make_input(recall_text), &shrunk)?;
+                prompt = build_prompt(make_input(recall), &shrunk)?;
             }
             if prompt.tokens.total > self.budget.hard && !hard_compacted {
                 hard_compacted = true;
@@ -1155,11 +1130,6 @@ fn write_private(path: &std::path::Path, content: &str) -> std::io::Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
-}
-
-/// The smallest digest budget worth asking for.
-fn digest_floor() -> u64 {
-    64
 }
 
 fn latest_user_text(history: &[Entry]) -> Option<String> {

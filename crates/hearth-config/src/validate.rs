@@ -96,7 +96,6 @@ impl Settings {
             self.compaction.keep_recent_tokens,
         )?;
         positive("memory.rules_max_tokens", self.memory.rules_max_tokens)?;
-        positive("memory.recall_max_tokens", self.memory.recall_max_tokens)?;
         positive("memory.recall_max_items", self.memory.recall_max_items)?;
 
         if !matches!(

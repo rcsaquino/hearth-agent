@@ -20,10 +20,10 @@ use crate::model::Memory;
 ///
 /// A new memory is capped at this length, so it is shown whole. The clip only
 /// protects a row written before that limit.
-const LINE_CHARS: usize = 150;
+const LINE_CHARS: usize = 200;
 /// The read-side guard for a rule line.
 ///
-/// A rule written before the 150-character limit used to be capped at this
+/// A rule written before the 200-character limit used to be capped at this
 /// length. The clip only protects an older store.
 const RULE_CHARS: usize = 400;
 
@@ -95,23 +95,6 @@ pub fn line(memory: &Memory, now: i64) -> String {
     line.push_str(": ");
     line.push_str(&clip(&memory.content, LINE_CHARS));
     line
-}
-
-/// What one recall line costs, in estimated tokens.
-///
-/// The per-line overhead is the id, kind, subject, age, and separator. The fill
-/// spends the statement budget on this cost, and [`coverage_cost`] reserves what
-/// the coverage lines need, so the render cannot overshoot.
-pub fn line_cost(memory: &Memory) -> u64 {
-    let content = clip(&memory.content, LINE_CHARS);
-    let metadata = 14
-        + memory.id.len()
-        + if memory.subject.is_empty() {
-            0
-        } else {
-            memory.subject.len()
-        };
-    hearth_model::estimate_tokens(&content).max(1) as u64 + (metadata as u64) / 4
 }
 
 /// Render the recall digest.
@@ -254,36 +237,6 @@ fn omitted_notice(omitted: usize) -> String {
 /// The token cost of a rendered block, from its character count.
 fn cost_of_chars(chars: u64) -> u64 {
     hearth_model::estimate_tokens_chars(chars).max(0) as u64
-}
-
-/// What the coverage lines cost when no statement is shown.
-///
-/// The fill spends only what is left, so a long subject cannot push the
-/// rendered digest past its budget.
-pub fn coverage_cost(coverage: &Coverage) -> u64 {
-    let text = coverage_lines(&[], coverage).join("\n");
-    if text.is_empty() {
-        0
-    } else {
-        hearth_model::estimate_tokens(&text).max(1) as u64
-    }
-}
-
-/// Drop one coverage subject, longest name first. Returns false when empty.
-pub fn trim_coverage(coverage: &mut Coverage) -> bool {
-    let current = coverage.current.keys().max_by_key(|key| key.len()).cloned();
-    let earlier = coverage.earlier.keys().max_by_key(|key| key.len()).cloned();
-    let drop_current = match (&current, &earlier) {
-        (Some(current), Some(earlier)) => current.len() >= earlier.len(),
-        (Some(_), None) => true,
-        (None, Some(_)) => false,
-        (None, None) => return false,
-    };
-    if drop_current {
-        current.is_some_and(|key| coverage.current.remove(&key).is_some())
-    } else {
-        earlier.is_some_and(|key| coverage.earlier.remove(&key).is_some())
-    }
 }
 
 /// The token cost of rendering a rule line.
