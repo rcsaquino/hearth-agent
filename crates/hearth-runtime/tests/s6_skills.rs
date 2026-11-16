@@ -156,24 +156,36 @@ fn the_agent_indexes_skills_and_can_load_one() {
     assert!(skill.last_used.is_some());
 }
 
-fn write_named_skill(home: &Path, name: &str, last_used: &str) {
+fn write_named_skill(home: &Path, name: &str, description: &str, last_used: &str) {
     let path = home.join("skills/learned").join(format!("{name}.md"));
     fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
     fs::write(
         path,
         format!(
-            "---\nname: {name}\ndescription: {name} skill\nversion: 1\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\nlast_used: {last_used}\nuses: 4\nsuccesses: 3\nfailures: 0\nevidence: [entry-1]\n---\n\n## When to use\n\nWhen {name} work appears.\n\n## Steps\n\nDo it.\n"
+            "---\nname: {name}\ndescription: {description}\nversion: 1\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\nlast_used: {last_used}\nuses: 4\nsuccesses: 3\nfailures: 0\nevidence: [entry-1]\n---\n\n## When to use\n\nWhen {name} work appears.\n\n## Steps\n\nDo it.\n"
         ),
     )
     .expect("skill file");
 }
 
 #[test]
-fn the_prompt_index_archives_the_overflow() {
+fn the_prompt_index_lists_every_active_skill_past_the_old_token_cap() {
     let home = TempDir::new().expect("temp home");
-    for index in 0..60 {
-        write_named_skill(home.path(), &format!("skill-{index:02}"), "2026-11-01");
+    let description = "A description written long on purpose because the one line is how the model finds the skill without loading its body, and the prompt must not have to choose between an accurate description and an offered skill. ";
+    for index in 0..40 {
+        write_named_skill(
+            home.path(),
+            &format!("skill-{index:02}"),
+            description,
+            "2026-11-01",
+        );
     }
+    let index = SkillLibrary::new(home.path()).index().expect("index");
+    assert!(
+        hearth_model::estimate_tokens(&index) > 300,
+        "the fixture must exceed the removed cap: {} tokens",
+        hearth_model::estimate_tokens(&index)
+    );
     let harness = Harness::open(home.path()).expect("harness");
     let conversation = harness
         .session()
@@ -188,7 +200,7 @@ fn the_prompt_index_archives_the_overflow() {
     let provider = Arc::new(ScriptedProvider::new(vec![done()]));
     let agent = Agent::new(
         harness.session().clone(),
-        provider,
+        provider.clone(),
         AgentConfig {
             soul: "test soul".to_owned(),
             model: "test-model".to_owned(),
@@ -204,14 +216,24 @@ fn the_prompt_index_archives_the_overflow() {
 
     agent.run_submission(&submission.id).expect("run");
 
+    let requests = provider.requests();
+    let skills_text = requests[0]
+        .messages
+        .iter()
+        .map(text)
+        .find(|text| text.contains("<skills>"))
+        .expect("skills layer");
+    for index in 0..40 {
+        assert!(
+            skills_text.contains(&format!("skill-{index:02}:")),
+            "the prompt must offer skill-{index:02}: {skills_text}"
+        );
+    }
     let archived = SkillLibrary::new(home.path())
         .load_all()
         .expect("load")
         .iter()
         .filter(|skill| skill.status == hearth_runtime::skills::SkillStatus::Archived)
         .count();
-    assert!(
-        archived > 0,
-        "the prompt index must archive learned skills past the cap"
-    );
+    assert_eq!(archived, 0, "a long prompt must not archive a skill");
 }

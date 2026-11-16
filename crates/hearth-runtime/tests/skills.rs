@@ -115,7 +115,40 @@ fn one_malformed_skill_does_not_hide_the_rest() {
 }
 
 #[test]
-fn the_index_archives_low_success_learned_skills_over_the_cap() {
+fn the_index_lists_every_active_skill_past_the_old_token_cap() {
+    let home = TempDir::new().expect("temp home");
+    let description = "A description written long on purpose because the one line is how the model finds the skill without loading its body, and the prompt must not have to choose between an accurate description and an offered skill. ";
+    for index in 0..15 {
+        learned_skill(
+            home.path(),
+            &format!("skill-{index:02}"),
+            "active",
+            4,
+            3,
+            "2026-01-01",
+            description,
+        );
+    }
+    let library = SkillLibrary::new(home.path());
+    let index = library.index().expect("index");
+    let lines = index.lines().filter(|line| line.starts_with("- ")).count();
+    assert_eq!(lines, 15, "every active skill stays in the index: {index}");
+    assert!(
+        hearth_model::estimate_tokens(&index) > 300,
+        "the fixture must exceed the removed cap: {} tokens",
+        hearth_model::estimate_tokens(&index)
+    );
+    let archived = library
+        .load_all()
+        .expect("load")
+        .into_iter()
+        .filter(|skill| skill.status == SkillStatus::Archived)
+        .count();
+    assert_eq!(archived, 0, "a long index must not archive a skill");
+}
+
+#[test]
+fn the_index_archives_learned_skills_only_past_the_active_count_cap() {
     let home = TempDir::new().expect("temp home");
     for index in 0..60 {
         let name = format!("skill-{index:02}");
@@ -133,22 +166,28 @@ fn the_index_archives_low_success_learned_skills_over_the_cap() {
     let library = SkillLibrary::new(home.path());
     let index = library.index().expect("index");
     let lines = index.lines().filter(|line| line.starts_with("- ")).count();
-    assert!(lines <= 50, "index has {lines} lines");
-    assert!(
-        hearth_model::estimate_tokens(&index) <= 300,
-        "index is {} tokens",
-        hearth_model::estimate_tokens(&index)
-    );
-    let archived = library
+    assert_eq!(lines, 50, "the count cap still bounds the index: {index}");
+    let archived: Vec<String> = library
         .load_all()
         .expect("load")
         .into_iter()
         .filter(|skill| skill.status == SkillStatus::Archived)
-        .count();
-    assert!(archived > 0, "no learned skill was archived");
+        .map(|skill| skill.name)
+        .collect();
+    assert_eq!(
+        archived.len(),
+        10,
+        "the count cap retires ten: {archived:?}"
+    );
+    for name in ["skill-00", "skill-04"] {
+        assert!(
+            archived.iter().any(|archived| archived == name),
+            "the zero-success skills must be archived first: {archived:?}"
+        );
+    }
     assert!(
-        archived >= 5,
-        "the zero-success skills must be archived first"
+        !archived.iter().any(|archived| archived == "skill-05"),
+        "the first successful skill stays: {archived:?}"
     );
 }
 
