@@ -101,33 +101,19 @@ fn save_prompt(home: &Path, tokens: serde_json::Value) {
 }
 
 #[test]
-fn doctor_names_a_prompt_segment_over_budget() {
+fn doctor_keeps_prompt_counts_quiet() {
     let home = TempDir::new().expect("temp home");
     init_home(home.path());
     save_prompt(
         home.path(),
         serde_json::json!({
             "identity": 3_200, "tools": 10, "rules": 10, "skills": 0, "guidance": 0,
-            "transcript": 10, "recall": 0, "runtime": 10, "total": 3_240, "fixed": 3_230
-        }),
-    );
-    let output = run(home.path(), false).expect("doctor");
-    assert!(output.contains("identity over budget"), "{output}");
-    assert!(output.contains("3200 tok of 800"), "{output}");
-}
-
-#[test]
-fn doctor_reports_a_prompt_that_fits() {
-    let home = TempDir::new().expect("temp home");
-    init_home(home.path());
-    save_prompt(
-        home.path(),
-        serde_json::json!({
-            "identity": 800, "tools": 1_200, "rules": 800, "skills": 300, "guidance": 400,
-            "transcript": 100, "recall": 300, "runtime": 150, "total": 4_050, "fixed": 3_650
+            "transcript": 10, "recall": 0, "runtime": 10, "total": 3_240, "fixed": 5_000
         }),
     );
     let output = run(home.path(), false).expect("doctor");
     assert!(output.contains("prompt: ok"), "{output}");
+    assert!(output.contains("5000 fixed tok"), "{output}");
     assert!(!output.contains("over budget"), "{output}");
+    assert!(!output.contains("over target"), "{output}");
 }

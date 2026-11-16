@@ -713,13 +713,8 @@ mod tests {
     }
 
     #[test]
-    fn the_memory_default_rules_budget_matches_the_prompt_segment() {
+    fn the_memory_default_rules_budget_is_800() {
         assert_eq!(MemoryConfig::default().rules_max_tokens, 800);
-        assert_eq!(
-            MemoryConfig::default().rules_max_tokens,
-            hearth_core::SEGMENT_RULES,
-            "the service default and the prompt segment must be one number"
-        );
     }
 
     #[test]

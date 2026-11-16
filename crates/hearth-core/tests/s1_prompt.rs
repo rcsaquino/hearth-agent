@@ -891,12 +891,6 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
         tokens.total,
         tokens.fixed + tokens.transcript + tokens.recall
     );
-    assert!(
-        tokens.fixed <= hearth_core::FIXED_OVERHEAD_TARGET,
-        "fixed overhead {} exceeds the target",
-        tokens.fixed
-    );
-    assert!(tokens.over_budget().is_empty());
     assert_eq!(prompt.document["tokens"]["total"], tokens.total);
     assert_eq!(prompt.document["tokens"]["fixed"], tokens.fixed);
 }

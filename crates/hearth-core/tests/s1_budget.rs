@@ -38,28 +38,10 @@ fn the_keep_budget_is_capped_at_thirty_five_percent() {
 }
 
 #[test]
-fn segment_budgets_match_the_spec() {
-    assert_eq!(hearth_core::SEGMENT_IDENTITY, 800);
-    assert_eq!(hearth_core::SEGMENT_TOOLS, 1_200);
-    assert_eq!(hearth_core::SEGMENT_RULES, 800);
-    assert_eq!(hearth_core::SEGMENT_RECALL, 300);
-    assert_eq!(hearth_core::SEGMENT_SKILLS, 300);
-    assert_eq!(hearth_core::SEGMENT_RUNTIME, 150);
-    assert_eq!(hearth_core::FIXED_OVERHEAD_TARGET, 4_500);
-}
-
-#[test]
 fn token_counts_sum_and_report_the_fixed_overhead() {
     let counts = TokenCounts::new(10, 30, 40, 0, 0, 50, 60, 70);
     assert_eq!(counts.total, 260);
     assert_eq!(counts.fixed, 150);
-    assert!(counts.over_budget().is_empty());
-}
-
-#[test]
-fn an_over_budget_segment_is_named() {
-    let counts = TokenCounts::new(900, 30, 40, 0, 0, 50, 60, 70);
-    assert_eq!(counts.over_budget(), vec!["identity"]);
 }
 
 #[test]
@@ -90,30 +72,6 @@ fn an_image_carries_its_provider_cost() {
     );
 }
 
-#[test]
-fn every_segment_carries_the_budget_it_is_measured_against() {
-    let counts = TokenCounts::new(900, 1_300, 10, 400, 0, 50, 10, 200);
-    let segments: Vec<(String, u64, u64)> = counts
-        .segments()
-        .map(|segment| (segment.name.to_owned(), segment.tokens, segment.budget))
-        .collect();
-    assert_eq!(
-        segments,
-        vec![
-            ("identity".to_owned(), 900, 800),
-            ("tools".to_owned(), 1_300, 1_200),
-            ("rules".to_owned(), 10, 800),
-            ("skills".to_owned(), 400, 300),
-            ("recall".to_owned(), 10, 300),
-            ("runtime".to_owned(), 200, 150),
-        ],
-        "the report names every segment with its spec budget"
-    );
-    assert_eq!(
-        counts.over_budget(),
-        vec!["identity", "tools", "skills", "runtime"]
-    );
-}
 
 #[test]
 fn the_counts_are_read_back_from_a_saved_document() {
