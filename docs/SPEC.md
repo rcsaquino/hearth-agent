@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.35, plain-language edition
+**Status:** Draft 0.36, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,14 @@
 ---
 
 ## A note on language
+
+Draft 0.36 gives every saved request an outcome. An assistant entry answers it, a
+notice entry settles it without an answer and records the reason (a provider
+error, an empty answer, the context budget, a stop, or an interruption), and no
+entry means it is still in flight. The Prompt tab prints `no reply · <cause>`
+only when a notice exists, so a running turn and an answered request stay quiet.
+A budget refusal now saves the prompt it could not send, so the audit shows what
+did not fit.
 
 Draft 0.35 reports the segment budgets. A prompt layer over its spec budget now
 prints a `▲ identity over budget · 3,200 tok of 800` line above the layer in the
@@ -995,7 +1003,15 @@ Every byte sent to the provider comes from the assembled prompt. There are no hi
 preambles and no server-side additions.
 
 - The exact prompt text is saved in `prompt_blobs` before the request and linked from
-  the generation checkpoint.
+  the generation checkpoint. A prompt the budget refuses is saved too, with the
+  notice that says why it was not sent.
+- A saved request is answered, settled without an answer, or still in flight. The
+  answer is an assistant entry carrying the prompt hash. A request that fails, is
+  stopped, or runs out of budget saves a notice entry carrying the same hash and
+  the machine reason, and the Prompt tab prints `no reply · <cause>` under it.
+  The causes read `provider error`, `the model returned no answer`, `over the
+  context budget`, `stopped`, and `interrupted by a restart`. A request with no
+  entry stays quiet, because only a settled request has a cause to name.
 - The Prompt tab is one conversation assembled from the loaded saved requests.
   Consecutive requests are merged by their common message prefix, so each
   request prints only the messages it added. A rewritten history, such as a

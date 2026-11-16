@@ -2366,3 +2366,22 @@ just after.
   note would spend prefix tokens on a fact only the person can act on. The log
   line stays for diagnosis. Reporting the same numbers in the system prompt was
   rejected for that cost.
+
+## 2026-11-16: A notice names the request it settled
+
+- The notice entry that settles a failure or a stop now carries the prompt hash of
+  the request it answers and a machine `reason` alongside its `text`. That is the
+  link the Prompt tab needs, and it needs no new column: `entries.prompt_hash`
+  already existed, and the content is a JSON object either way. A timestamp join
+  to `submissions` was rejected as a guess, and a new column was rejected because
+  the entry is the record of the settlement, not the submission.
+- `inspect::prompt_exchanges` now reads `entries.kind` and reports three outcomes
+  per request: an assistant `response`, a `notice`, or neither. An assistant entry
+  wins over a notice for the same hash, so a stop that follows a saved tool call
+  never hides that call's answer.
+- The Prompt tab shows `no reply · <cause>` only for a notice. The old line covered
+  a running turn, five kinds of failure, and no failure at all; the new rule keeps
+  the cause in the record instead of inferring it from a missing reply.
+- The budget refusal saves the prompt it never sent, so the audit has a request to
+  attach its notice to. The crash recovery path reads the failed task's checkpoint
+  and links its poison notice to the same request.
