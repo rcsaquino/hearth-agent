@@ -2,9 +2,8 @@
 //!
 //! The harness saves a full prompt for every request, so consecutive requests
 //! differ only in their tail. This view merges the saved requests into a single
-//! transcript and prints each request's delta under a snapshot marker. `[` and
-//! `]` walk the markers, `s` hides the system layers, `r` shows the documents
-//! as they were saved, and a spinner says when a turn is in flight.
+//! transcript and prints each request's delta under a bare rule. `s` hides the
+//! system layers, and a spinner says when a turn is in flight.
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -46,7 +45,6 @@ pub(crate) fn scroll_up(prompt: &mut PromptView, lines: usize) {
     };
     prompt.follow = false;
     prompt.scroll = current.saturating_sub(lines);
-    sync_selected(prompt);
 }
 
 /// Scroll down by `lines`, resuming the live tail at the bottom.
@@ -55,7 +53,6 @@ pub(crate) fn scroll_down(prompt: &mut PromptView, lines: usize) {
     let current = if prompt.follow { max } else { prompt.scroll };
     prompt.scroll = (current + lines).min(max);
     prompt.follow = prompt.scroll >= max;
-    sync_selected(prompt);
 }
 
 pub(crate) fn page_up(prompt: &mut PromptView) {
@@ -69,13 +66,11 @@ pub(crate) fn page_down(prompt: &mut PromptView) {
 pub(crate) fn scroll_top(prompt: &mut PromptView) {
     prompt.follow = false;
     prompt.scroll = 0;
-    prompt.selected = 0;
 }
 
 pub(crate) fn scroll_bottom(prompt: &mut PromptView) {
     prompt.follow = true;
     prompt.scroll = prompt.max_scroll.get();
-    prompt.selected = marker_count(prompt).saturating_sub(1);
 }
 
 pub(crate) fn toggle_follow(prompt: &mut PromptView) {
@@ -85,93 +80,17 @@ pub(crate) fn toggle_follow(prompt: &mut PromptView) {
     }
 }
 
-/// Show the next-older saved snapshot with its marker at the top.
-pub(crate) fn older(prompt: &mut PromptView) -> bool {
-    if prompt.cursor + 1 >= prompt.exchanges.len() {
-        return false;
-    }
-    prompt.cursor += 1;
-    prompt.follow = false;
-    jump_to_cursor(prompt);
-    true
-}
-
-/// Show the next-newer saved snapshot. The newest snapshot resumes the tail.
-pub(crate) fn newer(prompt: &mut PromptView) -> bool {
-    if prompt.cursor == 0 {
-        return false;
-    }
-    prompt.cursor -= 1;
-    prompt.follow = prompt.cursor == 0;
-    jump_to_cursor(prompt);
-    true
-}
-
-/// Put the selected snapshot's marker at the top of the viewport.
-fn jump_to_cursor(prompt: &mut PromptView) {
-    if prompt.follow {
-        prompt.scroll = prompt.max_scroll.get();
-    } else if let Some(line) = prompt
-        .cache
-        .borrow()
-        .as_ref()
-        .and_then(|cache| cache.marker_line(prompt.cursor))
-    {
-        prompt.scroll = line;
-    } else {
-        prompt.scroll = 0;
-    }
-    prompt.selected = marker_index(prompt);
-}
-
-/// The selected snapshot as an index into the chronological markers.
-fn marker_index(prompt: &PromptView) -> usize {
-    prompt
-        .cache
-        .borrow()
-        .as_ref()
-        .map(|cache| cache.markers.len().saturating_sub(prompt.cursor + 1))
-        .unwrap_or(0)
-}
-
-fn marker_count(prompt: &PromptView) -> usize {
-    prompt
-        .cache
-        .borrow()
-        .as_ref()
-        .map(|cache| cache.markers.len())
-        .unwrap_or(0)
-}
-
-/// Point `selected` at the marker nearest the top of the viewport.
-fn sync_selected(prompt: &mut PromptView) {
-    let index = prompt
-        .cache
-        .borrow()
-        .as_ref()
-        .map(|cache| {
-            cache
-                .markers
-                .iter()
-                .rposition(|marker| marker.line <= prompt.scroll)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
-    prompt.selected = index;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     /// The loaded requests, named by hash and answering entry.
     signature: String,
-    raw: bool,
     show_system: bool,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(exchanges: &[Value], width: u16, raw: bool, show_system: bool, zone: &Zone) -> Self {
+    fn new(exchanges: &[Value], width: u16, show_system: bool, zone: &Zone) -> Self {
         let mut signature = String::new();
         for exchange in exchanges {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
@@ -181,7 +100,6 @@ impl CacheKey {
         }
         Self {
             signature,
-            raw,
             show_system,
             width,
             zone: zone.name().to_owned(),
@@ -189,37 +107,15 @@ impl CacheKey {
     }
 }
 
-/// A snapshot marker inside the built document.
-struct Marker {
-    /// Line of the marker in the document.
-    line: usize,
-    /// The same marker in the selection emphasis.
-    selected: Line<'static>,
-}
-
 /// One built document, kept until the loaded set or the view flags change.
 pub(crate) struct PromptCache {
     key: CacheKey,
-    /// Markers in chronological order, oldest first.
-    markers: Vec<Marker>,
     lines: Vec<Line<'static>>,
-}
-
-impl PromptCache {
-    /// The marker line of the exchange at `cursor`, counted from the newest.
-    fn marker_line(&self, cursor: usize) -> Option<usize> {
-        self.markers
-            .len()
-            .checked_sub(cursor + 1)
-            .map(|index| self.markers[index].line)
-    }
 }
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let title = if app.prompt.loading {
         " Prompt · refreshing "
-    } else if app.prompt.raw {
-        " Prompt · raw "
     } else if app.prompt.follow {
         " Prompt · conversation · live "
     } else {
@@ -282,39 +178,24 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     }
 }
 
-/// The model, the selected snapshot, and the numbers a reader needs at a glance.
+/// The model and the numbers a reader needs at a glance.
 fn header_line(app: &App, width: usize) -> Line<'static> {
-    let Some(exchange) = app.prompt.current() else {
+    let Some(exchange) = app.prompt.exchanges.first() else {
         return Line::from("");
     };
     let request = &exchange["request"];
     let model = request["model"].as_str().unwrap_or("unknown model");
     let session = request["session_id"].as_str().unwrap_or("-");
     let prefix = request["prefix_hash"].as_str().unwrap_or("-");
-    let snapshots = app.prompt.exchanges.len();
-    let selected = snapshots.saturating_sub(app.prompt.cursor);
-    let peers = app
-        .prompt
-        .exchanges
-        .iter()
-        .filter(|other| other["request"]["prefix_hash"] == request["prefix_hash"])
-        .count();
     let mut row = Row::new();
     row.push(format!(" {model}"), theme::text());
     row.push(" · session ", theme::faint());
     row.push(short(session, 8), theme::muted());
-    row.push(
-        format!(" · snapshot {selected} of {snapshots}"),
-        theme::muted(),
-    );
     if let Some(tokens) = token(request, "total") {
         row.push(format!(" · {} tok", count(tokens)), theme::muted());
     }
     row.push(" · prefix ", theme::faint());
     row.push(short(prefix, 8), theme::muted());
-    if peers > 1 {
-        row.push(format!(" · {peers} peers"), theme::good());
-    }
     row.fit(width)
 }
 
@@ -331,13 +212,12 @@ fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
     let key = CacheKey::new(
         &app.prompt.exchanges,
         area.width,
-        app.prompt.raw,
         app.prompt.show_system,
         &app.zone,
     );
     let mut slot = app.prompt.cache.borrow_mut();
     if slot.as_ref().is_none_or(|cache| cache.key != key) {
-        *slot = Some(build_cache(&app.prompt.exchanges, &key, &app.zone, width));
+        *slot = Some(build_cache(&app.prompt.exchanges, &key, width));
     }
     let cache = slot.as_mut().expect("prompt cache");
 
@@ -350,15 +230,7 @@ fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
         app.prompt.scroll.min(max_scroll)
     };
     let end = (scroll + height).min(total);
-    let selected = cache.markers.len().checked_sub(app.prompt.cursor + 1);
-    let lines: Vec<Line<'static>> = (scroll..end)
-        .map(|index| match selected {
-            Some(marker) if cache.markers[marker].line == index => {
-                cache.markers[marker].selected.clone()
-            }
-            _ => cache.lines[index].clone(),
-        })
-        .collect();
+    let lines: Vec<Line<'static>> = cache.lines[scroll..end].to_vec();
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -380,14 +252,8 @@ fn spinner_frame() -> usize {
 
 /// One block of a conversation, derived from the saved requests.
 enum Entry {
-    /// A saved request, printed before its delta.
-    Snapshot {
-        number: usize,
-        at: i64,
-        hash: String,
-        tokens: Option<u64>,
-        changed: Vec<String>,
-    },
+    /// Where one saved request ends and the next begins.
+    Divider,
     /// The stable layers, printed once and again only when they change.
     System { parts: Vec<SystemPart>, tokens: u64 },
     /// The memory injected for this request, before its new input.
@@ -476,13 +342,7 @@ fn derive(exchanges: &[Value]) -> Vec<Entry> {
             let tokens = parts.iter().map(|part| part.tokens).sum();
             entries.push(Entry::System { parts, tokens });
         }
-        entries.push(Entry::Snapshot {
-            number: position + 1,
-            at: exchange["requested_at"].as_i64().unwrap_or(0),
-            hash: exchange["prompt_hash"].as_str().unwrap_or("-").to_owned(),
-            tokens: token(request, "total"),
-            changed,
-        });
+        entries.push(Entry::Divider);
         let recall = request["recall"].as_str().unwrap_or_default().to_owned();
         if !recall.trim().is_empty() {
             entries.push(Entry::Recall {
@@ -681,45 +541,20 @@ fn token(document: &Value, name: &str) -> Option<u64> {
     document["tokens"][name].as_u64()
 }
 
-fn build_cache(exchanges: &[Value], key: &CacheKey, zone: &Zone, width: usize) -> PromptCache {
+fn build_cache(exchanges: &[Value], key: &CacheKey, width: usize) -> PromptCache {
     let mut painter = Painter::new(width);
-    if key.raw {
-        for (position, exchange) in exchanges.iter().rev().enumerate() {
-            painter.marker(
-                position + 1,
-                exchange["requested_at"].as_i64().unwrap_or(0),
-                exchange["prompt_hash"].as_str().unwrap_or("-"),
-                token(&exchange["request"], "total"),
-                &[],
-                zone,
-            );
-            let text =
-                serde_json::to_string_pretty(exchange).unwrap_or_else(|_| exchange.to_string());
-            for line in text.lines() {
-                painter.body(line, theme::text());
-            }
-        }
-    } else {
-        for entry in derive(exchanges) {
-            push_entry(&mut painter, &entry, key.show_system, zone);
-        }
+    for entry in derive(exchanges) {
+        push_entry(&mut painter, &entry, key.show_system);
     }
     PromptCache {
         key: key.clone(),
-        markers: painter.markers,
         lines: painter.lines,
     }
 }
 
-fn push_entry(painter: &mut Painter, entry: &Entry, show_system: bool, zone: &Zone) {
+fn push_entry(painter: &mut Painter, entry: &Entry, show_system: bool) {
     match entry {
-        Entry::Snapshot {
-            number,
-            at,
-            hash,
-            tokens,
-            changed,
-        } => painter.marker(*number, *at, hash, *tokens, changed, zone),
+        Entry::Divider => painter.divider(),
         Entry::System { parts, tokens } => push_system(painter, parts, *tokens, show_system),
         Entry::Recall { text, tokens } => push_recall(painter, text, *tokens, show_system),
         Entry::Conversation { id } => painter.conversation(id),
@@ -826,7 +661,6 @@ fn push_blocks(painter: &mut Painter, role: Role, blocks: &[Value]) {
 struct Painter {
     width: usize,
     lines: Vec<Line<'static>>,
-    markers: Vec<Marker>,
 }
 
 impl Painter {
@@ -834,7 +668,6 @@ impl Painter {
         Self {
             width: width.max(1),
             lines: Vec::new(),
-            markers: Vec::new(),
         }
     }
 
@@ -930,38 +763,12 @@ impl Painter {
         self.lines.push(line);
     }
 
-    /// One separator line naming the request, with the selection emphasis kept
-    /// for the snapshot the reader is on.
-    fn marker(
-        &mut self,
-        number: usize,
-        at: i64,
-        hash: &str,
-        tokens: Option<u64>,
-        changed: &[String],
-        zone: &Zone,
-    ) {
+    /// A bare rule where one saved request ends and the next begins.
+    fn divider(&mut self) {
         self.gap();
-        let mut body = vec![number.to_string(), zone.iso(at), short(hash, 8)];
-        if let Some(tokens) = tokens {
-            body.push(format!("{} tok", count(tokens)));
-        }
-        if !changed.is_empty() {
-            body.push(format!("changed {}", changed.join(", ")));
-        }
-        let body = body.join(" · ");
-        let line = self.lines.len();
         self.lines
-            .push(separator("── ", &body, self.width, theme::faint()));
-        let selected = separator("▸── ", &body, self.width, theme::accent_style());
-        self.markers.push(Marker { line, selected });
+            .push(Line::styled("─".repeat(self.width), theme::faint()));
     }
-}
-
-fn separator(lead: &str, body: &str, width: usize, style: Style) -> Line<'static> {
-    let text = format!("{lead}{body} ");
-    let pad = width.saturating_sub(text.width());
-    Line::styled(clip(&format!("{text}{}", "─".repeat(pad)), width), style)
 }
 
 struct Row {
@@ -1249,42 +1056,6 @@ mod tests {
             "usage": Value::Null
         });
         vec![newest, oldest]
-    }
-
-    /// Three saved requests of one long conversation, newest first.
-    fn long_conversation() -> Vec<Value> {
-        let identity = (0..10)
-            .map(|index| format!("identity line {index}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut saved = Vec::new();
-        let mut messages: Vec<Value> = Vec::new();
-        for index in 0..3 {
-            let body = (0..18)
-                .map(|line| format!("question {index} line {line}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            messages.push(json!({"role": "user", "blocks": [{"type": "text", "text": body}]}));
-            let mut document = request(Value::Array(messages.clone()), 500 + index);
-            document["identity"] = json!(identity);
-            let answer = format!("answer {index}");
-            messages
-                .push(json!({"role": "assistant", "blocks": [{"type": "text", "text": answer}]}));
-            saved.push(json!({
-                "request": document,
-                "prompt_hash": format!("hash-{index}-0123456789"),
-                "requested_at": 1_700_000_000_000_000_i64 + index as i64 * 10_000_000,
-                "response": {
-                    "entry_id": format!("entry-{index}"),
-                    "created_at": 1_700_000_005_000_000_i64,
-                    "blocks": [{"type": "text", "text": answer}],
-                    "tokens_est": 10
-                },
-                "usage": Value::Null
-            }));
-        }
-        saved.reverse();
-        saved
     }
 
     fn cache_lines(app: &App) -> Vec<String> {

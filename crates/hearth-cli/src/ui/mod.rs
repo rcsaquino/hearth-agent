@@ -177,10 +177,8 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
         Tab::Prompt => theme::hints(&[
             ("↑↓", "scroll"),
             ("pgup/pgdn", "page"),
-            ("[ ]", "snapshots"),
             ("f", "follow"),
             ("s", "system"),
-            ("r", "raw"),
             ("q", "quit"),
         ]),
         Tab::Settings => theme::hints(&[
@@ -1000,7 +998,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_and_activity_stamps_follow_the_configured_zone() {
+    fn activity_stamps_follow_the_configured_zone() {
         let (_home, mut app) = initialized_app_in("Asia/Manila");
         let expected = if Zone::resolve("Asia/Manila").name() == "Asia/Manila" {
             "2023-11-15T06:13:20+08:00"
@@ -1008,21 +1006,6 @@ mod tests {
             // This host has no Asia/Manila entry, so the zone falls back to UTC.
             "2023-11-14T22:13:20+00:00"
         };
-        app.tab = Tab::Prompt;
-        app.prompt.exchanges = vec![json!({
-            "request": {
-                "identity": "SOUL TEXT",
-                "transcript": [
-                    {"role": "user", "blocks": [{"type": "text", "text": "please inspect"}]}
-                ]
-            },
-            "prompt_hash": "abc123def456",
-            "requested_at": 1_700_000_000_000_000_i64,
-            "response": json!(null),
-            "usage": json!(null)
-        })];
-        let prompt_text = buffer_text(&app, 100, 100);
-
         app.tab = Tab::Activity;
         app.events.push_back(json!({
             "ts": 1_700_000_000_000_000_i64,
@@ -1034,10 +1017,6 @@ mod tests {
         assert!(
             activity_text.contains(expected),
             "the activity detail must show {expected}: {activity_text}"
-        );
-        assert!(
-            prompt_text.contains(expected),
-            "the prompt audit must show {expected}: {prompt_text}"
         );
     }
 
@@ -1407,7 +1386,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_home_and_end_reach_the_first_and_last_snapshot() {
+    fn prompt_home_and_end_reach_the_ends_of_the_document() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         let identity = (0..60)
@@ -1433,10 +1412,15 @@ mod tests {
             .collect();
         let _ = buffer_text(&app, 100, 24);
         app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
-        assert_eq!(app.prompt.selected, 2, "End reaches the last snapshot");
+        assert_eq!(
+            app.prompt.scroll,
+            app.prompt.max_scroll.get(),
+            "End reaches the tail"
+        );
+        assert!(app.prompt.follow, "End resumes the live tail");
         app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-        assert_eq!(app.prompt.selected, 0, "Home reaches the first snapshot");
-        assert_eq!(app.prompt.scroll, 0);
+        assert_eq!(app.prompt.scroll, 0, "Home reaches the top");
+        assert!(!app.prompt.follow, "Home pauses the live tail");
     }
 
     #[test]

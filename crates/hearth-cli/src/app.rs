@@ -109,11 +109,6 @@ pub struct SkillsView {
 pub struct PromptView {
     /// Newest-first prompt/response exchanges loaded by the worker.
     pub exchanges: Vec<Value>,
-    /// Snapshot being shown; zero is the newest exchange.
-    pub cursor: usize,
-    /// Snapshot marker nearest the top of the viewport, oldest first.
-    pub selected: usize,
-    pub raw: bool,
     /// Show the system layers in the transcript.
     pub show_system: bool,
     pub scroll: usize,
@@ -130,9 +125,6 @@ impl Default for PromptView {
     fn default() -> Self {
         Self {
             exchanges: Vec::new(),
-            cursor: 0,
-            selected: 0,
-            raw: false,
             show_system: true,
             scroll: 0,
             max_scroll: Cell::new(0),
@@ -141,14 +133,6 @@ impl Default for PromptView {
             pending: false,
             cache: RefCell::new(None),
         }
-    }
-}
-
-impl PromptView {
-    pub fn current(&self) -> Option<&Value> {
-        self.exchanges
-            .get(self.cursor)
-            .or_else(|| self.exchanges.first())
     }
 }
 
@@ -948,26 +932,14 @@ impl App {
 
     fn handle_prompt(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('r') => {
-                self.prompt.raw = !self.prompt.raw;
-                self.prompt.follow = false;
-                self.prompt.scroll = 0;
-            }
             KeyCode::Char('f') => ui::prompt::toggle_follow(&mut self.prompt),
             KeyCode::Char('s') => self.prompt.show_system = !self.prompt.show_system,
-            KeyCode::Char('[') | KeyCode::Char('<') => {
-                let _ = ui::prompt::older(&mut self.prompt);
-            }
-            KeyCode::Char(']') | KeyCode::Char('>') => {
-                let _ = ui::prompt::newer(&mut self.prompt);
-            }
             KeyCode::Up | KeyCode::Char('k') => ui::prompt::scroll_up(&mut self.prompt, 1),
             KeyCode::Down | KeyCode::Char('j') => ui::prompt::scroll_down(&mut self.prompt, 1),
             KeyCode::PageUp => ui::prompt::page_up(&mut self.prompt),
             KeyCode::PageDown => ui::prompt::page_down(&mut self.prompt),
             KeyCode::Home | KeyCode::Char('g') => ui::prompt::scroll_top(&mut self.prompt),
             KeyCode::End | KeyCode::Char('G') => ui::prompt::scroll_bottom(&mut self.prompt),
-            KeyCode::Char('o') => self.refresh_prompt(),
             _ => {}
         }
     }
@@ -1218,29 +1190,7 @@ impl App {
                                     .to_owned(),
                             );
                         } else {
-                            // A live tail moves to the new snapshot. A paused
-                            // reader keeps the saved hash under the cursor.
-                            let preserve = self.prompt.cursor > 0 || !self.prompt.follow;
-                            let viewing = preserve
-                                .then(|| {
-                                    self.prompt
-                                        .current()
-                                        .and_then(|exchange| exchange["prompt_hash"].as_str())
-                                        .map(str::to_owned)
-                                })
-                                .flatten();
                             self.prompt.exchanges = exchanges;
-                            self.prompt.cursor = viewing
-                                .and_then(|hash| {
-                                    self.prompt.exchanges.iter().position(|exchange| {
-                                        exchange["prompt_hash"].as_str() == Some(hash.as_str())
-                                    })
-                                })
-                                .unwrap_or(0);
-                            self.prompt.cursor = self
-                                .prompt
-                                .cursor
-                                .min(self.prompt.exchanges.len().saturating_sub(1));
                         }
                     }
                     Err(error) => {
