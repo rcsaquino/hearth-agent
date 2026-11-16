@@ -2676,10 +2676,15 @@ just after.
   statement already names its subject, so `Alice likes apples` is stored and `he
   likes apples` is not. `acceptable` runs the pronoun check on every candidate as
   a second gate.
-- The `memory_save` content description asks for a standalone statement that
-  names its actor and forbids a pronoun. `SUMMARY_INSTRUCTION` asks the same for
-  each compaction statement. The four memory schemas measure 799 tokens, under
-  the 800-token budget; the save description lost redundant words to make room.
+- The `memory_save` content description states the same rule as prose: one
+  standalone statement, understandable without prior context, references
+  clarified only as far as ambiguity requires. Naming the actor is the concrete
+  case of that rule, so the description keeps one clause for it, since the store
+  refuses a pronoun on every write. `SUMMARY_INSTRUCTION` asks the same for each
+  compaction statement. The four memory schemas measure 823 tokens, under the
+  830-token budget. The earlier fragment wording cost 24 fewer tokens and read as
+  a rulebook; the guard moved rather than shaving the other three schemas to buy
+  room for the words the model uses most.
 - A rule keeps its imperative shape: `Never deploy on Friday` has no pronoun and
   is accepted. A rule that does carry a pronoun is refused like any other
   statement.

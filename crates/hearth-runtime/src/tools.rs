@@ -429,8 +429,13 @@ mod tests {
 const CORE_SCHEMA_TOKEN_BUDGET: i64 = 1_800;
 
 /// The memory family's share of the core schema budget.
+///
+/// The family moves from 799 to 823 tokens now that the save description states
+/// the rule as prose instead of a fragment. That is worth paying on the write
+/// path the model uses most, and the guard still sits just above the measured
+/// total.
 #[cfg(test)]
-const MEMORY_SCHEMA_TOKEN_BUDGET: i64 = 800;
+const MEMORY_SCHEMA_TOKEN_BUDGET: i64 = 830;
 
 #[cfg(test)]
 mod core_budget_tests {

@@ -1401,7 +1401,7 @@ Four verbs, and each one does one thing.
 
 There is no store selector, no id-prefix convention, and no tag array. An id is
 exact, never a prefix. The four
-schemas measure 799 tokens against 1,410 for the five they replace, and the
+schemas measure 823 tokens against 1,410 for the five they replace, and the
 saving is paid on every request.
 
 A bare `as_of` date means that whole local day in `identity.timezone`, so its

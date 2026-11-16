@@ -129,7 +129,7 @@ impl Tool for SaveTool {
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "One standalone statement, at most 200 characters, naming its actor: \"the user\", the assistant's name, or a person's name. No pronouns."
+                        "description": "One standalone statement of at most 200 characters, understandable without prior context. Clarify references when necessary to avoid ambiguity, but do not add unnecessary details. Name who it is about instead of a pronoun."
                     },
                     "kind": {
                         "type": "string",
@@ -138,7 +138,7 @@ impl Tool for SaveTool {
                     },
                     "subject": {
                         "type": "string",
-                        "description": "The person, project, or thing it is about, such as alice or or board."
+                        "description": "The person, project, or thing it is about, such as alice or the board."
                     },
                     "supersedes": {
                         "type": "string",
