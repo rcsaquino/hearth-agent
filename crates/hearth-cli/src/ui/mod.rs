@@ -1197,10 +1197,6 @@ mod tests {
             !text.contains("1970-01-01T00:00:00"),
             "the separator keeps no timestamp: {text}"
         );
-        assert!(
-            text.contains("no reply saved"),
-            "a request with no answer says so: {text}"
-        );
     }
 
     #[test]

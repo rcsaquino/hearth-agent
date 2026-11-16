@@ -405,8 +405,8 @@ enum Notice {
     Conversation(String),
     /// Compaction dropped messages this view has already shown.
     Rewritten(usize),
-    /// The request has no saved answer.
-    NoReply,
+    /// The request settled without an answer, with the cause it recorded.
+    NoReply(&'static str),
     /// A prompt layer costs more than its spec budget.
     OverBudget(SegmentCost),
 }
@@ -593,7 +593,12 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
 
         let response = &exchange["response"];
         if response.is_null() {
-            chat.entries.push(Entry::Notice(Notice::NoReply));
+            // A notice links the request to the reason it settled without an
+            // answer. No notice means the request is still in flight.
+            if let Some(reason) = exchange["notice"]["reason"].as_str() {
+                chat.entries
+                    .push(Entry::Notice(Notice::NoReply(no_answer(reason))));
+            }
         } else {
             let blocks = response["blocks"].as_array().cloned().unwrap_or_default();
             let answered_at = response["created_at"].as_i64().unwrap_or(at);
@@ -933,6 +938,18 @@ fn cost(tokens: Option<u64>) -> String {
         .unwrap_or_default()
 }
 
+/// The cause a saved notice settled a request with, in the tab's words.
+fn no_answer(reason: &str) -> &'static str {
+    match reason {
+        "provider_error" => "provider error",
+        "empty_answer" => "the model returned no answer",
+        "budget" => "over the context budget",
+        "cancelled" => "stopped",
+        "interrupted" => "interrupted by a restart",
+        _ => "no reply saved",
+    }
+}
+
 /// A layer's count against its budget, when the saved document records it over.
 fn over_layer(request: &Value, layer: &Layer) -> Option<SegmentCost> {
     let counts = TokenCounts::from_document(request)?;
@@ -1055,7 +1072,10 @@ impl Painter {
                 );
                 row.fit(width)
             }
-            Notice::NoReply => Line::styled(clip("  no reply saved", width), theme::faint()),
+            Notice::NoReply(cause) => Line::styled(
+                clip(&format!("  no reply · {cause}"), width),
+                theme::faint(),
+            ),
             Notice::OverBudget(segment) => {
                 let mut row = Row::new();
                 row.push(format!(" ▲ {} over budget", segment.name), theme::warn());

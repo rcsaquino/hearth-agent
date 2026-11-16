@@ -1,5 +1,6 @@
 //! Read-only views of the durable record.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use hearth_core::Zone;
@@ -42,11 +43,12 @@ pub fn latest_prompt(home: &Path) -> Result<Option<Value>, InspectError> {
 /// Newest-first prompt/response exchanges for the Prompt audit tab.
 ///
 /// Each item carries the saved request document, the hash it was stored under,
-/// and the assistant entry that answered it. `usage` is always null today: the
-/// schema has no `prompt_hash` on `usage_events`, and the only candidate link
-/// (`usage_events.task_id` -> `tasks.checkpoint_json.prompt_hash`) is rewritten
-/// every turn, so a task with many turns keeps just its latest hash. Attaching
-/// usage by task or timestamp would be a guess.
+/// the assistant entry that answered it, or the notice that settled it without
+/// an answer. A request with neither is still in flight. `usage` is always null
+/// today: the schema has no `prompt_hash` on `usage_events`, and the only
+/// candidate link (`usage_events.task_id` -> `tasks.checkpoint_json.prompt_hash`)
+/// is rewritten every turn, so a task with many turns keeps just its latest
+/// hash. Attaching usage by task or timestamp would be a guess.
 pub fn prompt_exchanges(home: &Path, limit: usize) -> Result<Vec<Value>, InspectError> {
     let database = home.join("hearth.db");
     if !database.is_file() {
@@ -55,7 +57,7 @@ pub fn prompt_exchanges(home: &Path, limit: usize) -> Result<Vec<Value>, Inspect
     let connection = hearth_storage::open_read_only(&database)?;
     let want = limit.max(1);
     let mut statement = connection.prepare(
-        "SELECT b.hash, b.created_at, b.text, e.id, e.created_at, e.content_json, e.tokens_est \
+        "SELECT b.hash, b.created_at, b.text, e.kind, e.id, e.created_at, e.content_json, e.tokens_est \
          FROM prompt_blobs b LEFT JOIN entries e ON e.prompt_hash = b.hash \
          ORDER BY b.created_at DESC, b.rowid DESC LIMIT ?",
     )?;
@@ -66,16 +68,17 @@ pub fn prompt_exchanges(home: &Path, limit: usize) -> Result<Vec<Value>, Inspect
             row.get::<_, i64>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<i64>>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, Option<i64>>(6)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<i64>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<i64>>(7)?,
         ))
     })?;
-    let mut exchanges: Vec<Value> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
+    let mut exchanges: Vec<Exchange> = Vec::new();
+    let mut index: BTreeMap<String, usize> = BTreeMap::new();
     for row in rows {
-        let (hash, created_at, text, entry_id, entry_at, content, tokens) = row?;
-        if exchanges.len() >= want {
+        let (hash, created_at, text, kind, entry_id, entry_at, content, tokens) = row?;
+        if exchanges.len() >= want && !index.contains_key(&hash) {
             break;
         }
         if !text.trim_start().starts_with('{') {
@@ -84,36 +87,78 @@ pub fn prompt_exchanges(home: &Path, limit: usize) -> Result<Vec<Value>, Inspect
         let Ok(request) = serde_json::from_str::<Value>(&text) else {
             continue;
         };
-        // A hash answers at most one entry; ignore duplicates from the join.
-        let duplicate = seen.iter().any(|seen| seen == &hash);
-        if duplicate {
+        if let Some(&at) = index.get(&hash) {
+            // An assistant entry answers the request even when a notice was also
+            // linked to it, so it wins whichever row the join returns first.
+            if kind.as_deref() == Some("assistant") {
+                exchanges[at].response = response(entry_id, entry_at, content, tokens);
+            }
             continue;
         }
-        seen.push(hash.clone());
-        let response = match (entry_id, entry_at, content) {
-            (Some(entry_id), Some(entry_at), Some(content)) => {
-                let blocks = serde_json::from_str::<Value>(&content)
-                    .ok()
-                    .filter(Value::is_array)
-                    .unwrap_or(Value::Array(Vec::new()));
-                json!({
-                    "entry_id": entry_id,
-                    "created_at": entry_at,
-                    "blocks": blocks,
-                    "tokens_est": tokens.unwrap_or(0),
-                })
-            }
-            _ => Value::Null,
+        let (response, notice) = match kind.as_deref() {
+            Some("assistant") => (response(entry_id, entry_at, content, tokens), None),
+            Some("notice") => (None, notice(content)),
+            _ => (None, None),
         };
-        exchanges.push(json!({
-            "request": request,
-            "prompt_hash": hash,
-            "requested_at": created_at,
-            "response": response,
-            "usage": Value::Null,
-        }));
+        index.insert(hash.clone(), exchanges.len());
+        exchanges.push(Exchange {
+            hash,
+            request,
+            requested_at: created_at,
+            response,
+            notice,
+        });
     }
-    Ok(exchanges)
+    Ok(exchanges.into_iter().map(Exchange::json).collect())
+}
+
+/// The reply a request was answered with.
+fn response(
+    entry_id: Option<String>,
+    entry_at: Option<i64>,
+    content: Option<String>,
+    tokens: Option<i64>,
+) -> Option<Value> {
+    let (Some(entry_id), Some(entry_at), Some(content)) = (entry_id, entry_at, content) else {
+        return None;
+    };
+    let blocks = serde_json::from_str::<Value>(&content)
+        .ok()
+        .filter(Value::is_array)
+        .unwrap_or(Value::Array(Vec::new()));
+    Some(json!({
+        "entry_id": entry_id,
+        "created_at": entry_at,
+        "blocks": blocks,
+        "tokens_est": tokens.unwrap_or(0),
+    }))
+}
+
+/// The notice that settled a request without an answer.
+fn notice(content: Option<String>) -> Option<Value> {
+    serde_json::from_str::<Value>(&content?).ok()
+}
+
+/// One saved request and the outcome that settled it.
+struct Exchange {
+    hash: String,
+    request: Value,
+    requested_at: i64,
+    response: Option<Value>,
+    notice: Option<Value>,
+}
+
+impl Exchange {
+    fn json(self) -> Value {
+        json!({
+            "request": self.request,
+            "prompt_hash": self.hash,
+            "requested_at": self.requested_at,
+            "response": self.response.unwrap_or(Value::Null),
+            "notice": self.notice.unwrap_or(Value::Null),
+            "usage": Value::Null,
+        })
+    }
 }
 
 /// One saved memory row for the operator surface.

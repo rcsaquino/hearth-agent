@@ -2417,6 +2417,14 @@ impl Session {
                                     ),
                                 )?;
                                 if let Some(conversation_id) = conversation_id.as_deref() {
+                                    let in_flight: Option<String> = writer
+                                        .query_optional(
+                                            "SELECT json_extract(checkpoint_json, '$.prompt_hash') \
+                                             FROM tasks WHERE id = ?",
+                                            (id.as_str(),),
+                                            |row| row.get::<_, Option<String>>(0),
+                                        )?
+                                        .flatten();
                                     let seq = record_commit(
                                         writer,
                                         now,
@@ -2426,13 +2434,21 @@ impl Session {
                                     )?;
                                     let entry_id = ids.new_id();
                                     let content = redacted_json(&serde_json::json!({
-                                        "text": "A request stopped the process twice, so it was not answered. Please send it again."
+                                        "text": "A request stopped the process twice, so it was not answered. Please send it again.",
+                                        "reason": "interrupted"
                                     }))?;
                                     writer.execute(
                                         "INSERT INTO entries (id, conversation_id, seq, kind, \
                                          content_json, tokens_est, source, prompt_hash, created_at) \
-                                         VALUES (?, ?, ?, 'notice', ?, 0, NULL, NULL, ?)",
-                                        (entry_id, conversation_id, seq, content, now),
+                                         VALUES (?, ?, ?, 'notice', ?, 0, NULL, ?, ?)",
+                                        (
+                                            entry_id,
+                                            conversation_id,
+                                            seq,
+                                            content,
+                                            in_flight.as_deref(),
+                                            now,
+                                        ),
                                     )?;
                                 }
                                 report.poisoned += 1;

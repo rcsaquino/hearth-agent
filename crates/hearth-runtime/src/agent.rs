@@ -423,7 +423,7 @@ impl Agent {
         self.load_selection(claimed.checkpoint.as_ref());
         let mut absorbed: Vec<String> = Vec::new();
         if cancel.load(Ordering::Relaxed) {
-            return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
+            return self.settle_cancelled(&submission, &claimed.id, None, &absorbed, events);
         }
 
         let mut turn = claimed
@@ -465,7 +465,7 @@ impl Agent {
         'turn: loop {
             self.absorb_queued(&submission.conversation_id, &submission.id, &mut absorbed)?;
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
+                return self.settle_cancelled(&submission, &claimed.id, None, &absorbed, events);
             }
             emit(
                 events,
@@ -538,12 +538,18 @@ impl Agent {
             }
             if prompt.tokens.total > self.budget.usable {
                 let message = self.budget_failure(prompt.tokens);
+                let withheld = serde_json::to_string(&prompt.document)
+                    .map_err(|error| AgentError::Invalid(error.to_string()))?;
+                let hash = self.session.save_prompt_blob(&withheld)?;
                 return self.settle_failure(
                     &absorbed,
                     &submission,
                     &claimed.id,
-                    &message,
-                    "budget",
+                    Failure {
+                        prompt_hash: Some(&hash),
+                        notice: &message,
+                        reason: "budget",
+                    },
                     events,
                 );
             }
@@ -579,7 +585,13 @@ impl Agent {
                 json!({"phase": "request", "turn": turn}),
             );
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
+                return self.settle_cancelled(
+                    &submission,
+                    &claimed.id,
+                    Some(&prompt_hash),
+                    &absorbed,
+                    events,
+                );
             }
 
             let started = Instant::now();
@@ -596,8 +608,11 @@ impl Agent {
                         &absorbed,
                         &submission,
                         &claimed.id,
-                        &format!("Provider error: {error}"),
-                        "provider_error",
+                        Failure {
+                            prompt_hash: Some(&prompt_hash),
+                            notice: &format!("Provider error: {error}"),
+                            reason: "provider_error",
+                        },
                         events,
                     );
                 }
@@ -643,8 +658,11 @@ impl Agent {
                             &absorbed,
                             &submission,
                             &claimed.id,
-                            &format!("Provider error: {error}"),
-                            "provider_error",
+                            Failure {
+                                prompt_hash: Some(&prompt_hash),
+                                notice: &format!("Provider error: {error}"),
+                                reason: "provider_error",
+                            },
                             events,
                         );
                     }
@@ -664,14 +682,26 @@ impl Agent {
             self.session
                 .heartbeat_task(&claimed.id, &self.config.owner, 60_000_000)?;
             if cancel.load(Ordering::Relaxed) {
-                return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
+                return self.settle_cancelled(
+                    &submission,
+                    &claimed.id,
+                    Some(&prompt_hash),
+                    &absorbed,
+                    events,
+                );
             }
 
             if !calls.is_empty() {
                 self.save_assistant(&submission, &prompt_hash, &thinking, &text, &calls)?;
                 self.execute_calls(&submission, &claimed.id, &calls, false, events)?;
                 if cancel.load(Ordering::Relaxed) {
-                    return self.settle_cancelled(&submission, &claimed.id, &absorbed, events);
+                    return self.settle_cancelled(
+                        &submission,
+                        &claimed.id,
+                        None,
+                        &absorbed,
+                        events,
+                    );
                 }
                 turn += 1;
                 self.session.checkpoint_task(
@@ -693,8 +723,11 @@ impl Agent {
                     &absorbed,
                     &submission,
                     &claimed.id,
-                    "The model returned no answer.",
-                    "empty_answer",
+                    Failure {
+                        prompt_hash: Some(&prompt_hash),
+                        notice: "The model returned no answer.",
+                        reason: "empty_answer",
+                    },
                     events,
                 );
             }
@@ -936,13 +969,18 @@ impl Agent {
         &self,
         submission: &Submission,
         task_id: &str,
+        prompt_hash: Option<&str>,
         absorbed: &[String],
         events: &dyn EventSink,
     ) -> Result<RunOutcome, AgentError> {
         let notice = "Stopped.";
-        self.session.save(
-            Save::new(&submission.conversation_id).entry("notice", json!({"text": notice})),
-        )?;
+        self.session
+            .save(Save::new(&submission.conversation_id).entry_with(NewEntry {
+                kind: "notice".to_owned(),
+                content: json!({"text": notice, "reason": "cancelled"}),
+                source: None,
+                prompt_hash: prompt_hash.map(str::to_owned),
+            }))?;
         let settled = self
             .session
             .settle(&submission.id, SubmissionStatus::Cancelled, None)?;
@@ -976,27 +1014,35 @@ impl Agent {
         absorbed: &[String],
         submission: &Submission,
         task_id: &str,
-        message: &str,
-        reason: &str,
+        failure: Failure<'_>,
         events: &dyn EventSink,
     ) -> Result<RunOutcome, AgentError> {
-        let notice = hearth_core::secrets::redact_secrets(&short_notice(message));
-        self.session.save(
-            Save::new(&submission.conversation_id).entry("notice", json!({"text": notice})),
-        )?;
+        let notice = hearth_core::secrets::redact_secrets(&short_notice(failure.notice));
+        self.session
+            .save(Save::new(&submission.conversation_id).entry_with(NewEntry {
+                kind: "notice".to_owned(),
+                content: json!({"text": notice, "reason": failure.reason}),
+                source: None,
+                prompt_hash: failure.prompt_hash.map(str::to_owned),
+            }))?;
         let settled = self.session.settle_with_error(
             &submission.id,
             SubmissionStatus::Unanswered,
             None,
-            Some(json!({"reason": reason})),
+            Some(json!({"reason": failure.reason})),
         )?;
-        self.settle_absorbed(absorbed, SubmissionStatus::Unanswered, None, Some(reason))?;
+        self.settle_absorbed(
+            absorbed,
+            SubmissionStatus::Unanswered,
+            None,
+            Some(failure.reason),
+        )?;
         self.session.finish_task(
             task_id,
             &self.config.owner,
             StepOutput::Terminal {
                 outcome: TerminalOutcome::Failed,
-                result: json!({"error": notice, "reason": reason}),
+                result: json!({"error": notice, "reason": failure.reason}),
             },
         )?;
         emit(
@@ -1004,7 +1050,7 @@ impl Agent {
             task_id,
             &submission.conversation_id,
             "run_settled",
-            json!({"status": "unanswered", "answer_entry_id": null, "reason": reason}),
+            json!({"status": "unanswered", "answer_entry_id": null, "reason": failure.reason}),
         );
         Ok(RunOutcome {
             submission: settled,
@@ -1014,6 +1060,16 @@ impl Agent {
             notice: Some(notice),
         })
     }
+}
+
+/// Why a run settled without an answer.
+struct Failure<'a> {
+    /// The saved request the notice answers, when the run built one.
+    prompt_hash: Option<&'a str>,
+    /// The text the person reads on the next request.
+    notice: &'a str,
+    /// The machine reason the notice and the submission record.
+    reason: &'a str,
 }
 
 struct Reservation<'a> {
