@@ -1027,6 +1027,88 @@ mod tests {
     }
 
     #[test]
+    fn the_skills_tab_offers_no_writing_keys() {
+        let (home, mut app) = initialized_app();
+        std::fs::create_dir_all(home.path().join("skills")).expect("skills dir");
+        std::fs::write(
+            home.path().join("skills/simple.md"),
+            "# A simple skill\n\nUse this when simple work appears.\n\n## Steps\n\nDo it.\n",
+        )
+        .expect("user skill");
+        let library = hearth_runtime::skills::SkillLibrary::new(home.path());
+        for revision in 0..2 {
+            library
+                .save_learned(hearth_runtime::skills::SkillSave {
+                    name: "triage".to_owned(),
+                    description: "Triage a request".to_owned(),
+                    body: format!(
+                        "## When to use\n\nWhen triage is needed.\n\n## Steps\n\nRevision {revision}.\n\n## Pitfalls\n\nNone."
+                    ),
+                    evidence: Vec::new(),
+                })
+                .expect("learned skill");
+        }
+        app.tab = Tab::Skills;
+        app.skills.reload();
+        let before = buffer_text(&app, 100, 40);
+        for key in ['e', 'n', 'v'] {
+            app.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+            assert!(
+                app.editor.is_none(),
+                "{key} must not open an editor on the read-only library"
+            );
+            assert_eq!(
+                buffer_text(&app, 100, 40),
+                before,
+                "{key} must not change the view"
+            );
+        }
+    }
+
+    #[test]
+    fn the_skills_footer_names_only_reading_keys() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Skills;
+        let text = buffer_text(&app, 120, 40);
+        let footer = text
+            .lines()
+            .find(|line| line.contains("quit"))
+            .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
+        assert!(footer.contains("select"), "{footer}");
+        assert!(footer.contains("scroll"), "{footer}");
+        for gone in ["history", "edit", "new skill"] {
+            assert!(
+                !footer.contains(gone),
+                "the footer still names {gone}: {footer}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_empty_skills_library_points_at_no_key() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Skills;
+        app.skills.reload();
+        let text = buffer_text(&app, 100, 40);
+        assert!(text.contains("No skills yet"), "{text}");
+        assert!(
+            !text.contains("Press n"),
+            "the empty state must not name a key that is gone: {text}"
+        );
+    }
+
+    #[test]
+    fn the_help_does_not_advertise_a_skill_editor() {
+        let (_home, mut app) = initialized_app();
+        app.help = true;
+        let text = buffer_text(&app, 100, 40);
+        assert!(
+            !text.contains("edits your own skill files"),
+            "the help must not name a key that is gone: {text}"
+        );
+    }
+
+    #[test]
     fn narrow_dashboard_wraps_the_seven_tabs() {
         let (_home, app) = initialized_app();
         let text = buffer_text(&app, 80, 24);
