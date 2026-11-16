@@ -1168,7 +1168,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, Screen, Tab};
+    use crate::app::{App, AppEvent, Screen, Tab};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -1681,32 +1681,143 @@ mod tests {
         );
     }
 
+    /// True when a line opens with one of the spinner frames and `label`.
+    fn spun(text: &str, label: &str) -> bool {
+        text.lines().any(|line| {
+            FRAMES
+                .iter()
+                .any(|frame| line.starts_with(&format!("{frame} {label}")))
+        })
+    }
+
     #[test]
-    fn the_working_line_appears_only_while_a_turn_is_in_flight() {
+    fn the_live_turn_is_drawn_after_the_saved_answer() {
         let (_home, mut app) = prompt_app(conversation());
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "turn_started",
+            "data": {"turn": 1}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "STREAMING REPLY"}
+        })));
+        let text = rendered(&app, 100, 60);
+        let answer = line_of(&text, ANSWER);
+        let live = line_of(&text, "STREAMING REPLY");
         assert!(
-            !rendered(&app, 100, 24).contains("working"),
-            "a settled view shows no working line"
+            live > answer,
+            "the live reply sits after the saved answer: {text}"
         );
+        assert!(
+            text.lines().skip(live).any(|line| line.starts_with("▏ ")),
+            "the live body keeps the message bar: {text}"
+        );
+        assert!(
+            spun(&text, "hearth"),
+            "the spinner sits on the live message label: {text}"
+        );
+        assert!(
+            !text.contains("working"),
+            "the detached working line is gone: {text}"
+        );
+    }
+
+    #[test]
+    fn the_live_turn_shows_its_thinking_before_its_text() {
+        let (_home, mut app) = prompt_app(conversation());
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "turn_started",
+            "data": {"turn": 1}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "thinking_delta",
+            "data": {"text": "WEIGHING IT"}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "STREAMING REPLY"}
+        })));
+        let text = rendered(&app, 100, 60);
+        assert!(
+            line_of(&text, "WEIGHING IT") < line_of(&text, "STREAMING REPLY"),
+            "thinking comes before the text it precedes: {text}"
+        );
+        assert!(
+            spun(&text, "thinking"),
+            "the spinner marks the first live part: {text}"
+        );
+        assert_eq!(
+            text.matches("▌ hearth").count(),
+            2,
+            "the saved answer and the live text both carry the role label: {text}"
+        );
+    }
+
+    #[test]
+    fn a_new_turn_drops_the_previous_live_text() {
+        let (_home, mut app) = prompt_app(conversation());
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "OLD STREAM"}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "turn_started",
+            "data": {"turn": 2}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "NEW STREAM"}
+        })));
+        let text = rendered(&app, 100, 60);
+        assert!(
+            !text.contains("OLD STREAM"),
+            "a new turn does not inherit the last turn's text: {text}"
+        );
+        assert!(text.contains("NEW STREAM"), "{text}");
+    }
+
+    #[test]
+    fn a_settled_run_removes_the_live_text() {
+        let (_home, mut app) = prompt_app(conversation());
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "STREAMING REPLY"}
+        })));
+        assert!(
+            rendered(&app, 100, 60).contains("STREAMING REPLY"),
+            "the partial reply is visible while it streams"
+        );
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "run_settled",
+            "data": {"status": "done"}
+        })));
+        assert!(
+            !rendered(&app, 100, 60).contains("STREAMING REPLY"),
+            "the saved document replaces the live turn"
+        );
+    }
+
+    #[test]
+    fn a_refresh_alone_does_not_animate_working() {
+        let (_home, mut app) = prompt_app(conversation());
         app.prompt.loading = true;
+        let text = rendered(&app, 100, 24);
+        assert!(!text.contains("working"), "a reload is not a turn: {text}");
         assert!(
-            rendered(&app, 100, 24).contains("working"),
-            "a loading view shows the working line"
-        );
-        app.prompt.follow = false;
-        app.prompt.scroll = 0;
-        assert!(
-            rendered(&app, 100, 24).contains("working"),
-            "the working line stays visible away from the tail"
+            !spun(&text, "hearth"),
+            "a reload draws no spinner on a message: {text}"
         );
         app.prompt.loading = false;
         app.status = Some(json!({"tasks_running": 2}));
+        let text = rendered(&app, 100, 24);
         assert!(
-            rendered(&app, 100, 24).contains("working"),
-            "a running task shows the working line"
+            !text.contains("working"),
+            "a scheduled task is not this conversation's turn: {text}"
         );
-        app.status = Some(json!({"tasks_running": 0}));
-        assert!(!rendered(&app, 100, 24).contains("working"));
+        assert_eq!(
+            app.prompt.follow, true,
+            "a status poll must not move the reader"
+        );
     }
 
     #[test]

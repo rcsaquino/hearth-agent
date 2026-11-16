@@ -1494,7 +1494,23 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn an_agent_message_refreshes_the_open_prompt_view() {
+    fn a_saved_request_refreshes_the_open_prompt_view() {
+        let home = TempDir::new().expect("temp home");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Prompt;
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "task_step",
+            "data": {"phase": "request", "turn": 1}
+        })));
+        assert!(
+            app.prompt.loading,
+            "a saved request must refresh the Prompt view while it is open"
+        );
+    }
+
+    #[test]
+    fn a_finished_reply_waits_for_the_saved_request_to_refresh() {
         let home = TempDir::new().expect("temp home");
         let mut app = App::new(home.path().to_path_buf());
         app.screen = Screen::Dashboard;
@@ -1504,9 +1520,30 @@ mod tests {
             "data": {"text": "the answer"}
         })));
         assert!(
-            app.prompt.loading,
-            "a reply must refresh the Prompt view while it is open"
+            !app.prompt.loading,
+            "the reply is not a saved request and must not reload the view"
         );
+    }
+
+    #[test]
+    fn a_text_delta_does_not_become_an_activity_row() {
+        let home = TempDir::new().expect("temp home");
+        let mut app = App::new(home.path().to_path_buf());
+        app.screen = Screen::Dashboard;
+        app.tab = Tab::Prompt;
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "partial"}
+        })));
+        assert!(
+            app.events.is_empty(),
+            "the feed keeps whole messages, not partial text"
+        );
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "user_message",
+            "data": {"text": "the question"}
+        })));
+        assert_eq!(app.events.len(), 1, "a whole event still reaches the feed");
     }
 
     #[test]
