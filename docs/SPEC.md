@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.33, plain-language edition
+**Status:** Draft 0.34, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.34 reads guidance whole. `HEARTH.md` and every `AGENTS.md` reach the
+prompt exactly as written: the 16 KB per-file cap, the 32 KB combined cap, the
+truncation markers, and `Guidance.truncated` are gone. The per-segment cost
+stays in the saved document and is reported. When the guidance alone leaves no
+room for a turn, the budget failure names the largest guidance file and its
+size instead of cutting an instruction the person wrote.
 
 Draft 0.33 names the clock note for what it carries and anchors the working row.
 The one uncached line is
@@ -485,8 +492,11 @@ durable belongs there.
 `SOUL.md` is plain Markdown with three sections: Identity, Voice, and Rules.
 `HEARTH.md` holds the user's rules and workspace guidance; it is read on every run
 and may be empty. Hearth also reads every `AGENTS.md` from the filesystem root down
-to the workspace, most specific last. `SOUL.md` is who Hearth is; `HEARTH.md` and
-`AGENTS.md` are what the user wants it to do.
+to the workspace, most specific last. Both are read whole: no cap applies to one
+file or to the total. The prompt reports their cost, and a turn that cannot fit
+them fails naming the largest file and its size rather than cutting an
+instruction. `SOUL.md` is who Hearth is; `HEARTH.md` and `AGENTS.md` are what the
+user wants it to do.
 
 ### 3.2 Which setting wins
 
@@ -875,7 +885,7 @@ Every request is assembled in the same order:
 | Layer | Content | How often it changes | Budget |
 |---|---|---|---|
 | L0 identity | `SOUL.md`, voice, hard rules | Stable | 800 tokens |
-| L1 project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | 32 KB text |
+| L1 project guidance | `HEARTH.md` and project `AGENTS.md` | Stable until edited | Read whole; cost reported |
 | L2 tools | Core tool schemas | Stable | 1200 |
 | L3 rules | Pinned instructions, versioned | Rare | 800 |
 | L4 skills index | Skill names and one-line descriptions | Rare | 300, warning |

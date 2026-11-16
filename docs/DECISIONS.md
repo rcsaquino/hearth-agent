@@ -2331,3 +2331,21 @@ just after.
   earlier 2026-11-16 "The Prompt tab folds as a whole" entry. A separate thinking
   key was rejected because it bought only a shorter thinking block while the chat
   stayed open, at the cost of a second flag and a second key.
+
+## 2026-11-16: Guidance files are read whole and never cut
+
+- `MAX_GUIDANCE_FILE_BYTES`, `MAX_GUIDANCE_TOTAL_BYTES`, the truncation markers,
+  and `Guidance.truncated` are gone. `HEARTH.md` and every `AGENTS.md` are read
+  with `fs::read` and placed in the prompt exactly as written, so the instruction
+  a person adds last cannot vanish silently. Bytes are recorded per file in
+  `Guidance.files` as `GuidanceFile { path, bytes }`; the text and the file list
+  travel together because the prompt and the budget failure both need them.
+- The agent budget failure keeps the existing message when the strain is
+  elsewhere, and names the largest guidance file and its size when the guidance
+  alone is at least the usable window. Naming the file that is too large was
+  chosen over a generic "too large" because the person is the one who can trim
+  it. Naming every guidance file was rejected because the notice is capped at
+  200 characters and the largest file is the one that buys the most room.
+- `SOUL.md` was already unbounded and stays that way; the two file kinds now
+  behave alike. The prefix cache cost of editing a large guidance file is real
+  and stays the person's to accept. This supersedes the 2026-11-09 cap entry.

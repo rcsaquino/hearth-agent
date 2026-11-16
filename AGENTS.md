@@ -170,7 +170,9 @@ Key invariants:
   tools, guidance, rules, or skills must be visible in the Prompt tab
   and must name the changed layer.
 - Guidance comes from `HEARTH.md` in the home and `AGENTS.md` from the filesystem
-  root down to the workspace. Each file is capped at 16 KB and the total at 32 KB.
+  root down to the workspace. Every file is read whole; there is no size cap. A
+  prompt whose guidance cannot fit the model window fails naming the largest
+  file instead of cutting it.
 - Memory is one table in `hearth.db`. Never overwrite a statement: close its
   window and point `superseded_by` at the replacement. Recall is three cheap
   channels (FTS5, subject, INT8 vectors behind a 0.40 floor) fused by RRF k=60,
