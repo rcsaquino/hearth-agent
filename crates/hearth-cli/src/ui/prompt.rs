@@ -610,10 +610,10 @@ fn push_recall(painter: &mut Painter, text: &str, tokens: u64, show: bool) {
 }
 
 fn push_blocks(painter: &mut Painter, role: Role, blocks: &[Value]) {
+    painter.message_start(role);
     if blocks.is_empty() {
         painter.label(role.label(), role.style(), "");
         painter.body("(empty)", theme::faint());
-        return;
     }
     for block in blocks {
         match block["type"].as_str().unwrap_or_default() {
@@ -655,12 +655,22 @@ fn push_blocks(painter: &mut Painter, role: Role, blocks: &[Value]) {
             _ => {}
         }
     }
+    painter.message_end();
 }
+
+/// The bar that opens a message and each of its parts.
+const LEAD: &str = "▌ ";
+/// The bar that runs down a message body.
+const BODY_LEAD: &str = "▏";
 
 /// The typed document, drawn as lines with a fixed width.
 struct Painter {
     width: usize,
     lines: Vec<Line<'static>>,
+    /// The role bar while a message is open, and nothing outside one.
+    gutter: Option<Style>,
+    /// A blank separator is already in the document.
+    gap_open: bool,
 }
 
 impl Painter {
@@ -668,18 +678,47 @@ impl Painter {
         Self {
             width: width.max(1),
             lines: Vec::new(),
+            gutter: None,
+            gap_open: false,
         }
     }
 
+    fn message_start(&mut self, role: Role) {
+        self.gap();
+        self.gutter = Some(role.style());
+    }
+
+    fn message_end(&mut self) {
+        self.gutter = None;
+    }
+
+    fn push(&mut self, line: Line<'static>) {
+        self.lines.push(line);
+        self.gap_open = false;
+    }
+
     fn gap(&mut self) {
-        if !self.lines.is_empty() {
-            self.lines.push(Line::from(""));
+        if self.lines.is_empty() || self.gap_open {
+            return;
         }
+        match self.gutter {
+            Some(style) => self.lines.push(Line::styled(BODY_LEAD, style)),
+            None => self.lines.push(Line::from("")),
+        }
+        self.gap_open = true;
     }
 
     /// A role or layer label, with its cost against the right edge.
     fn label(&mut self, text: &str, style: Style, meta: &str) {
         self.gap();
+        if let Some(gutter) = self.gutter {
+            let body = clip(text, self.width.saturating_sub(LEAD.width()));
+            self.push(Line::from(vec![
+                Span::styled(LEAD.to_owned(), gutter),
+                Span::styled(body, style),
+            ]));
+            return;
+        }
         let mut row = Row::new();
         row.push(text.to_owned(), style);
         if !meta.is_empty() && row.width + meta.width() + BODY_INDENT <= self.width {
@@ -687,7 +726,7 @@ impl Painter {
             row.push(meta.to_owned(), theme::faint());
         }
         let line = row.fit(self.width);
-        self.lines.push(line);
+        self.push(line);
     }
 
     /// One line that names what it leaves out, with its cost inline.
@@ -697,21 +736,28 @@ impl Painter {
         row.push(text.to_owned(), style);
         row.push(cost.to_owned(), theme::faint());
         let line = row.fit(self.width);
-        self.lines.push(line);
+        self.push(line);
     }
 
     /// A wrapped body under its label, with a hanging indent.
     fn body(&mut self, text: &str, style: Style) {
+        let gutter = self.gutter;
         let indent = " ".repeat(BODY_INDENT);
         let inner = self.width.saturating_sub(BODY_INDENT).max(1);
         for line in wrap_text(text, inner) {
-            if line.is_empty() {
-                self.lines.push(Line::from(""));
-            } else {
-                self.lines.push(Line::styled(
+            match gutter {
+                Some(bar) => {
+                    let body = clip(&line, self.width.saturating_sub(BODY_INDENT));
+                    self.push(Line::from(vec![
+                        Span::styled(format!("{BODY_LEAD} "), bar),
+                        Span::styled(body, style),
+                    ]));
+                }
+                None if line.is_empty() => self.push(Line::from("")),
+                None => self.push(Line::styled(
                     clip(&format!("{indent}{line}"), self.width),
                     style,
-                ));
+                )),
             }
         }
     }
@@ -726,7 +772,7 @@ impl Painter {
             } else {
                 format!("{indent}  ")
             };
-            self.lines.push(Line::styled(
+            self.push(Line::styled(
                 clip(&format!("{lead}{line}"), self.width),
                 theme::faint(),
             ));
@@ -737,7 +783,7 @@ impl Painter {
     fn faint(&mut self, text: &str) {
         self.gap();
         let indent = " ".repeat(BODY_INDENT);
-        self.lines.push(Line::styled(
+        self.push(Line::styled(
             clip(&format!("{indent}{text}"), self.width),
             theme::faint(),
         ));
@@ -745,7 +791,7 @@ impl Painter {
 
     fn conversation(&mut self, id: &str) {
         self.gap();
-        self.lines.push(Line::styled(
+        self.push(Line::styled(
             clip(&format!("  conversation · {}", short(id, 8)), self.width),
             theme::faint(),
         ));
@@ -760,14 +806,13 @@ impl Painter {
             theme::faint(),
         );
         let line = row.fit(self.width);
-        self.lines.push(line);
+        self.push(line);
     }
 
     /// A bare rule where one saved request ends and the next begins.
     fn divider(&mut self) {
         self.gap();
-        self.lines
-            .push(Line::styled("─".repeat(self.width), theme::faint()));
+        self.push(Line::styled("─".repeat(self.width), theme::faint()));
     }
 }
 
