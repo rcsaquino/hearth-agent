@@ -225,6 +225,20 @@ fn a_provider_error_settles_unanswered_with_a_notice() {
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].kind, "notice");
     assert_eq!(history[1].content["text"], notice);
+    assert_eq!(
+        history[1].content["reason"], "provider_error",
+        "the notice records why it exists"
+    );
+    let prompt = harness
+        .session()
+        .latest_prompt()
+        .expect("latest prompt")
+        .expect("the failed request is saved");
+    assert_eq!(
+        history[1].prompt_hash.as_deref(),
+        Some(prompt.hash.as_str()),
+        "the notice points at the request it answers"
+    );
 
     let task = harness
         .session()
@@ -1400,6 +1414,22 @@ fn an_oversized_prompt_settles_with_a_budget_notice() {
         provider.requests().is_empty(),
         "the provider must not be called for an over-budget prompt"
     );
+    let prompt = harness
+        .session()
+        .latest_prompt()
+        .expect("latest prompt")
+        .expect("the rejected request is kept for audit");
+    let history = harness.session().history(&conversation).expect("history");
+    let notice_entry = history
+        .iter()
+        .find(|entry| entry.kind == "notice")
+        .expect("a notice entry");
+    assert_eq!(
+        notice_entry.prompt_hash.as_deref(),
+        Some(prompt.hash.as_str()),
+        "the budget notice points at the request that did not fit"
+    );
+    assert_eq!(notice_entry.content["reason"], "budget");
     let task = harness
         .session()
         .task(&outcome.task_id)

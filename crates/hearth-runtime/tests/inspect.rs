@@ -1,6 +1,6 @@
-use hearth_core::{Harness, PromptInput, Save};
+use hearth_core::{Harness, NewEntry, PromptInput, Save};
 use hearth_memory::{Kind, MemoryService, NewMemory};
-use hearth_runtime::inspect::{latest_prompt, list_memories};
+use hearth_runtime::inspect::{latest_prompt, list_memories, prompt_exchanges};
 use hearth_runtime::{InitOptions, init};
 use serde_json::json;
 use tempfile::TempDir;
@@ -234,4 +234,81 @@ fn latest_prompt_survives_redaction_of_an_ordinary_path() {
         .expect("inspect prompt")
         .expect("the prompt is readable");
     assert_eq!(document["identity"], "SOUL TEXT");
+}
+
+#[test]
+fn prompt_exchanges_settle_each_request_with_its_outcome() {
+    let home = TempDir::new().expect("temp home");
+    init(home.path(), options()).expect("init");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Prompt", "local", "local:outcome")
+        .expect("conversation");
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL TEXT".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "fake-model".to_owned(),
+            tools: Vec::new(),
+            rules: String::new(),
+            rules_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: String::new(),
+            runtime_note: "RUNTIME".to_owned(),
+        })
+        .expect("prompt");
+    let text = serde_json::to_string(&prompt.document).expect("prompt json");
+
+    let answered = session.save_prompt_blob(&text).expect("answered hash");
+    session
+        .save(Save::new(&conversation.id).entry_with(NewEntry {
+            kind: "assistant".to_owned(),
+            content: json!([{"type": "text", "text": "the answer"}]),
+            source: None,
+            prompt_hash: Some(answered.clone()),
+        }))
+        .expect("answer");
+
+    let failed = session
+        .save_prompt_blob(&format!("{text} "))
+        .expect("failed hash");
+    session
+        .save(Save::new(&conversation.id).entry_with(NewEntry {
+            kind: "notice".to_owned(),
+            content: json!({"text": "Provider error: boom", "reason": "provider_error"}),
+            source: None,
+            prompt_hash: Some(failed.clone()),
+        }))
+        .expect("notice");
+
+    let running = session
+        .save_prompt_blob(&format!("{text}  "))
+        .expect("running hash");
+
+    let exchanges = prompt_exchanges(home.path(), 10).expect("exchanges");
+    assert_eq!(exchanges.len(), 3);
+    let find = |hash: &str| {
+        exchanges
+            .iter()
+            .find(|exchange| exchange["prompt_hash"] == hash)
+            .unwrap_or_else(|| panic!("missing exchange {hash}"))
+    };
+    assert!(
+        find(&answered)["response"].is_object(),
+        "an answered request carries its reply"
+    );
+    assert!(find(&answered)["notice"].is_null());
+    assert!(find(&failed)["response"].is_null());
+    assert_eq!(
+        find(&failed)["notice"]["reason"],
+        "provider_error",
+        "a failed request carries the reason it settled with"
+    );
+    assert!(find(&running)["response"].is_null());
+    assert!(
+        find(&running)["notice"].is_null(),
+        "a request with no outcome yet says nothing"
+    );
 }

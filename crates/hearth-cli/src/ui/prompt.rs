@@ -2101,12 +2101,43 @@ mod tests {
     }
 
     #[test]
-    fn a_request_with_no_saved_reply_says_so() {
+    fn a_request_with_no_answer_and_no_reason_says_nothing() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 100, 80);
+        assert!(
+            !text.contains("no reply"),
+            "an answered request says nothing: {text}"
+        );
+
         let mut exchanges = conversation();
         exchanges[0]["response"] = Value::Null;
         let (_home, app) = prompt_app(exchanges);
         let text = rendered(&app, 100, 80);
-        assert!(text.contains("no reply saved"), "{text}");
+        assert!(
+            !text.contains("no reply"),
+            "a request still in flight says nothing: {text}"
+        );
+    }
+
+    #[test]
+    fn each_no_answer_reason_reads_as_its_cause() {
+        for (reason, cause) in [
+            ("provider_error", "provider error"),
+            ("empty_answer", "the model returned no answer"),
+            ("budget", "over the context budget"),
+            ("cancelled", "stopped"),
+            ("interrupted", "interrupted by a restart"),
+        ] {
+            let mut exchanges = conversation();
+            exchanges[0]["response"] = Value::Null;
+            exchanges[0]["notice"] = json!({"text": "detail", "reason": reason});
+            let (_home, app) = prompt_app(exchanges);
+            let text = rendered(&app, 100, 80);
+            assert!(
+                text.contains(&format!("no reply · {cause}")),
+                "reason {reason} must name its cause: {text}"
+            );
+        }
     }
 
     #[test]
