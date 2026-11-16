@@ -2463,7 +2463,8 @@ just after.
   by design, and reusing Enter was rejected because it cannot fold thinking
   without folding the reply.
 - `PromptView.thinking_collapsed` is a second fold flag, and the cache key carries
-  it so a thinking fold rebuilds the cached lines.
+  it so a thinking fold rebuilds the cached lines. (The key and flag were removed
+  on 2026-11-16; see that entry. Thinking keeps its block.)
 
 ## 2026-11-16: The prompt segment warnings were removed
 
@@ -2516,3 +2517,27 @@ just after.
 - The 800-token rules block stays a separate aggregate budget. A 150-character
   rule consumes its share of that block, and `check_rules_budget` still refuses a
   write that would overflow it.
+
+## 2026-11-16: The Prompt tab starts folded under one key
+
+- `PromptView` has one `collapsed` flag, default true. `Fold::Thinking` stays only
+  to choose the thinking ink; `Fold::open` treats `Chat` and `Thinking` alike.
+  `thinking_collapsed`, `toggle_thinking`, and the `t` binding are gone, and the
+  cache key carries the one fold state.
+- The first render previews every foldable section, thinking included, with the
+  five-line stub. Enter opens the whole view; the next Enter folds it again. A
+  short section still shows in full and gets no stub. A refresh, a new exchange,
+  or a tab switch does not reset the chosen fold.
+- The agent's answer and the live reply never fold. Enter folds the transcript
+  around them, not the text the person is reading. The live thinking block folds
+  with the chat, so the folded start shows its preview and the full live reply.
+- The footer loses the thinking hint and keeps `↑↓ scroll · ↵ fold · f follow ·
+  q quit`.
+- This supersedes the `t` key and second flag in "Thinking owns a block and a fold
+  key", restores the one-key contract in "The working row is anchored and one key
+  folds the chat", and reverses the start-unfolded choice in "The Prompt tab folds
+  as a whole". The thinking block itself stays as Draft 0.40 decided.
+- A separate thinking key was rejected again: it moves apart from the reading
+  state the person actually changes, and it costs a second flag and a cache-key
+  member. Keeping the open start and making Enter fold both was rejected because
+  the first screen stays a wall of context instead of an outline.

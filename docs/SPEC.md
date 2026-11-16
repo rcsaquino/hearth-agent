@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.43, plain-language edition
+**Status:** Draft 0.44, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,12 @@
 ---
 
 ## A note on language
+
+Draft 0.44 gives the Prompt tab one fold state, folded at the start. The first
+screen is a five-line preview of every foldable section, thinking included.
+Enter opens the whole view and folds it again, `t` is gone, and the answer and
+the live reply never fold. Thinking keeps its own block; only its fold key
+changes. This supersedes the `t` key in Draft 0.40.
 
 Draft 0.43 groups the Memory tab: pinned rows first, then current rows, then
 closed windows, each group newest first. A retired row with a newer update time
@@ -467,7 +473,7 @@ terminal application. There are no subcommands or flags.
 | Activity | The live event stream from the daemon, one row per whole event, with a readable event detail. |
 | Memory | Browse and search saved memory records, pinned first, then current, then closed windows, each newest first. |
 | Skills | Browse skills with automatic, scrollable body preview; create and edit user skills; learned skills stay read-only. |
-| Prompt | A live conversation: the saved requests merged into one transcript, every prompt layer and message in its role bar, one key that folds the chat to five-line previews, memory per request, and the turn being written at the tail. |
+| Prompt | A live conversation, folded at the start: the saved requests merged into one transcript, every prompt layer and message in its role bar, one key that opens every section from a five-line preview, memory per request, and the turn being written at the tail. |
 | Doctor | Offline and live checks. |
 | Settings | The last tab. Every option is shown inline, with SOUL.md and HEARTH.md actions, daemon controls, a raw JSON editor, changed-row markers, and reset to default. |
 
@@ -1069,20 +1075,21 @@ preambles and no server-side additions.
   `TOOL CALL · name`, a tool result `TOOL RESULT · name`, and recalled memory
   `MEMORY`. A message with several parts keeps one header. Thinking is shown
   before the answer, both saved and streaming, and it is its own block: a
-  `▌ THINKING` header, its own gutter, its own turn and request time, and its own
-  fold. The next request never sends it back.
+  `▌ THINKING` header, its own gutter, its own turn and request time. It folds
+  with the chat. The next request never sends it back.
 - Enter folds the whole chat and Enter again opens it. A fold applies to each
   body section: context layers, memory, user messages, tool calls, tool results,
   and system transcripts. A folded section keeps its label, its first five
   wrapped lines, and a stub naming the hidden line count. A section with five
   lines or fewer shows in full and gets no stub. A block with several parts
-  previews each part. The agent's answer never folds with the chat, and thinking
-  folds on its own key instead: `t` folds or opens every thinking block, and the
-  chat fold never hides one. The chat starts unfolded, so follow puts the
-  conversation on the first screen. A folded block still shows its runtime note.
+  previews each part. The agent's answer never folds with the chat. Thinking
+  folds with the chat. The chat starts folded, so the first screen is a compact
+  outline of every section. Enter opens every foldable section, thinking
+  included, and the next Enter folds them again. A folded block still shows its
+  runtime note.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or
-  `g`/`G`) jump to the top or tail. `f` toggles live follow. Enter and `t` change
-  a fold without moving the scroll position. The footer is the only key legend.
+  `g`/`G`) jump to the top or tail. `f` toggles live follow. Enter changes a
+  fold without moving the scroll position. The footer is the only key legend.
   Scrolling away from the tail pauses follow; End or reaching the bottom resumes
   it.
 - Assistant deltas are drawn as a live block after the cached document: a
@@ -1092,8 +1099,8 @@ preambles and no server-side additions.
   card while the text grows above it. The block keeps a blank row above the
   working row and one below it. The eight-frame clockwise flux spinner steps one
   frame every 100 ms and its phase starts when the turn starts. The live answer
-  never folds, and `t` folds live thinking to the same five-line preview. The
-  live block is never cached. It clears when
+  never folds; live thinking folds with the chat to the same five-line preview.
+  The live block is never cached. It clears when
   the run settles. A saved request or a settled run reloads the document; a reload
   alone does not animate. The status row names the model, the loaded turns, the
   message count, the token total, the session, and the prefix hash of the newest
@@ -1105,7 +1112,7 @@ preambles and no server-side additions.
 - Tool definitions show argument names, types, enums, required or optional
   markers, and argument descriptions instead of pretty-printed schema JSON.
   Wrapping preserves leading indentation for code and JSON. The rendered
-  conversation is cached by the loaded set, width, both fold states, and zone, so
+  conversation is cached by the loaded set, width, the fold state, and zone, so
   scrolling and streaming do not rebuild the document.
 - The open view refreshes when a `task_step` request event or a `run_settled`
   event arrives. A refresh that arrives while one is already running is
