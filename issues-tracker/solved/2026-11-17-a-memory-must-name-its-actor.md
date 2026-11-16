@@ -1,5 +1,9 @@
 # A memory must name its actor
 
+> Reversed. The actor rule was removed on 2026-11-17; see "The store takes a
+> memory in any wording" in `docs/DECISIONS.md`. This file stays as the record of
+> why the rule was tried.
+
 | | |
 | --- | --- |
 | Kind | change |

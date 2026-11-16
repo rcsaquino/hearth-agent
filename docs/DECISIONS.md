@@ -2691,3 +2691,31 @@ just after.
 - Existing rows are not rewritten, hidden, or deleted. A vague row still renders;
   the owner can replace it with `supersedes` or remove it with `memory_forget`,
   and the replacement is held to the new rule.
+
+## 2026-11-17: The store takes a memory in any wording
+
+- The actor rule is removed. `store::validate` no longer inspects pronouns, and
+  `actor.rs` is deleted with its refusal text and its three-person table. The
+  gate cost a refused write on a word the user had already said, and the model
+  had no way to know which words were refused except by hitting it.
+- The schema says nothing about it either way. The `memory_save` content
+  description ends at "do not add unnecessary details", and
+  `SUMMARY_INSTRUCTION` no longer asks for a named actor. Telling the model to
+  name an actor is the encouragement half of the rule, so it goes with the gate.
+- The extractor stops refusing too. It no longer drops a candidate whose pronoun
+  its rewrite cannot resolve, and `acceptable` no longer tests for one. Its own
+  templates still compose `the user's ...`, because that is the voice of the
+  deterministic net rather than a rule the agent is held to; a statement it
+  cannot resolve is stored as written.
+- What the store still refuses is unchanged: empty content, over 200 characters,
+  NUL, a subject over its limit, credential-shaped content, and a pin that is not
+  a rule. Those are properties of the row, not of the writer's grammar.
+- The four memory schemas measure 811 tokens against the 820-token guard, down
+  from 823 before this change.
+- No benchmark moved, measured on both sides of this change. Automatic recall is
+  0.928 on the 200-statement fixture and 0.938 with 4,170 rows, recoverable in one
+  call is 0.99, and digest tokens are 97 at p95, the same before and after.
+  Retrieval reads `subject` and the FTS5 terms, so a wording rule could not move
+  it.
+- This supersedes the 2026-11-17 "A memory must name its actor" entry, which
+  stands as the record of why the rule was tried.
