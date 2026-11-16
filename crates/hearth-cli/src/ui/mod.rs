@@ -678,6 +678,25 @@ mod tests {
     }
 
     #[test]
+    fn overview_reports_the_skills_index_instead_of_the_review_stamp() {
+        let (_home, mut app) = initialized_app();
+        app.daemon = DaemonState::Running;
+        app.status = Some(json!({
+            "model": "fake-model",
+            "last_skill_review": "2026-11-16T04:30:00Z",
+            "last_skill_review_changes": 3,
+            "skills": {"active": 4, "index_tokens": 246}
+        }));
+        let text = buffer_text(&app, 130, 34);
+        assert!(text.contains("4 active · 246 tokens"), "{text}");
+        assert!(
+            !text.contains("2026-11-16T04:30"),
+            "the review stamp is not the skills row: {text}"
+        );
+        assert!(!text.contains("3 changes"), "{text}");
+    }
+
+    #[test]
     fn overview_names_the_standing_bullets_not_the_hash() {
         let (_home, mut app) = initialized_app();
         app.daemon = DaemonState::Running;

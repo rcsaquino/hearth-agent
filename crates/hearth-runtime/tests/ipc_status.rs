@@ -116,3 +116,62 @@ fn usage_today_starts_at_the_configured_local_midnight() {
     );
     assert_eq!(local["cache_read_tokens"], CACHE_READ_TOKENS, "{local}");
 }
+
+fn write_skill(home: &Path, learned: bool, name: &str, description: &str) {
+    let path = if learned {
+        home.join("skills/learned").join(format!("{name}.md"))
+    } else {
+        home.join("skills").join(format!("{name}.md"))
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("skill directory");
+    }
+    let status = if learned {
+        "version: 1\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\nlast_used: \nuses: 0\nsuccesses: 0\nfailures: 0\nevidence: [entry-1]\n"
+    } else {
+        ""
+    };
+    std::fs::write(
+        &path,
+        format!(
+            "---\nname: {name}\ndescription: {description}\n{status}---\n\n## Steps\n\nDo it.\n"
+        ),
+    )
+    .expect("skill file");
+}
+
+#[test]
+fn status_reports_the_active_skill_count_and_index_cost() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("harness");
+    write_skill(home.path(), false, "writing", "Write clearly");
+    write_skill(home.path(), true, "research", "Research a topic");
+    let expected = hearth_runtime::skills::SkillLibrary::new(home.path())
+        .index()
+        .expect("index");
+    let expected_tokens = hearth_model::estimate_tokens(&expected);
+
+    let context = StatusContext {
+        session: harness.session().clone(),
+        model: "fake-model".to_owned(),
+        started: Instant::now(),
+        memory: Arc::new(MemoryService::new(harness.session().clone())),
+    };
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let handle = serve(
+        home.path(),
+        context,
+        Arc::new(EventBus::new(Vec::new())),
+        Arc::clone(&shutdown),
+    )
+    .expect("serve");
+    let status = read_status(home.path()).expect("read status");
+    shutdown.store(true, Ordering::SeqCst);
+    handle.join().expect("server thread");
+
+    assert_eq!(status["skills"]["active"], 2, "{status}");
+    assert_eq!(
+        status["skills"]["index_tokens"], expected_tokens,
+        "the status must measure the same index the agent builds: {status}"
+    );
+}
