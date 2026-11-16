@@ -955,15 +955,6 @@ mod tests {
             .collect()
     }
 
-    /// Rows whose visible text is exactly `label`.
-    fn exact(text: &str, label: &str) -> Vec<usize> {
-        text.lines()
-            .enumerate()
-            .filter(|(_, line)| line.trim_end() == label)
-            .map(|(index, _)| index)
-            .collect()
-    }
-
     fn line_of(text: &str, needle: &str) -> usize {
         text.lines()
             .position(|line| line.contains(needle))
@@ -1083,7 +1074,7 @@ mod tests {
             1,
             "the identity layer belongs to the conversation once: {text}"
         );
-        let user = exact(&text, "you");
+        let user = starting(&text, "▌ you");
         assert_eq!(
             user.len(),
             1,
@@ -1094,8 +1085,80 @@ mod tests {
         assert!(text.contains("PROJECT RULES"), "{text}");
         assert!(text.contains("MEMORY HIT"), "{text}");
         assert!(
-            starting(&text, "hearth").len() == 1,
+            starting(&text, "▌ hearth").len() == 1,
             "the answer is labelled as Hearth: {text}"
+        );
+    }
+
+    #[test]
+    fn a_message_is_enclosed_by_a_role_bar() {
+        let (_home, app) = prompt_app(vec![json!({
+            "request": request(
+                json!([
+                    {"role": "user", "blocks": [{"type": "text", "text": "FIRST QUESTION"}]},
+                    {"role": "assistant", "blocks": [{"type": "text", "text": "FIRST ANSWER"}]},
+                    {"role": "user", "blocks": [{"type": "text", "text": "SECOND QUESTION"}]}
+                ]),
+                500
+            ),
+            "prompt_hash": "hash-bar",
+            "requested_at": 1,
+            "response": {
+                "entry_id": "entry-bar",
+                "created_at": 2,
+                "blocks": [
+                    {"type": "thinking", "text": "A LONG THOUGHT"},
+                    {"type": "text", "text": "SECOND ANSWER"}
+                ],
+                "tokens_est": 3
+            },
+            "usage": Value::Null
+        })]);
+        let text = rendered(&app, 100, 60);
+        let row = |needle: &str| -> String {
+            text.lines()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle}: {text}"))
+                .to_owned()
+        };
+        assert!(row("▌ you").starts_with("▌ you"), "{text}");
+        assert!(row("FIRST QUESTION").starts_with("▏ "), "{text}");
+        assert!(row("FIRST ANSWER").starts_with("▏ "), "{text}");
+        assert!(row("▌ thinking").starts_with("▌ thinking"), "{text}");
+        assert!(row("A LONG THOUGHT").starts_with("▏ "), "{text}");
+        assert!(row("▌ hearth").starts_with("▌ hearth"), "{text}");
+        assert!(row("SECOND ANSWER").starts_with("▏ "), "{text}");
+        let system = row(SOUL);
+        assert!(
+            !system.starts_with('▌') && !system.starts_with('▏'),
+            "a system layer is not a message: {system:?}"
+        );
+
+        let thought = line_of(&text, "A LONG THOUGHT");
+        let answer = line_of(&text, "SECOND ANSWER");
+        assert!(
+            text.lines()
+                .skip(thought + 1)
+                .take(answer - thought - 1)
+                .any(|line| line.trim_end() == "▏"),
+            "the bar continues across two parts of one message: {text}"
+        );
+
+        let first_answer = line_of(&text, "FIRST ANSWER");
+        let second_label = text
+            .lines()
+            .enumerate()
+            .skip(first_answer)
+            .find(|(_, line)| line.starts_with("▌ you"))
+            .map(|(index, _)| index)
+            .expect("the second question keeps its label");
+        assert_eq!(
+            text.lines()
+                .nth(second_label - 1)
+                .unwrap_or_default()
+                .trim(),
+            "",
+            "a blank line separates one message from the next: {text}"
         );
     }
 
@@ -1170,14 +1233,14 @@ mod tests {
             !text.contains("system · CLOCK") && !text.contains("runtime note"),
             "the note is not a system message of its own: {text}"
         );
-        let first = exact(&text, "you")[0];
+        let first = starting(&text, "▌ you")[0];
         let note = line_of(&text, "CLOCK NOTE seven seconds past");
         let call = line_of(&text, "tool call · read_file");
         assert!(
             first < note && note < call,
             "the note sits under the question it rode with: {text}"
         );
-        let result = exact(&text, "tool result")[0];
+        let result = starting(&text, "▌ tool result")[0];
         let second = line_of(&text, "CLOCK NOTE eight seconds past");
         let answer = line_of(&text, ANSWER);
         assert!(
