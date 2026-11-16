@@ -269,6 +269,19 @@ fn a_huge_text_file_is_refused() {
 }
 
 #[test]
+fn a_write_through_the_tool_to_spill_is_refused() {
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let spill = home.path().join("spill");
+    let tool = FileTool::new(&workspace, &spill);
+
+    let error = tool
+        .call(&json!({"action": "write", "path": "spill/out.txt", "content": "bad"}))
+        .expect_err("spill is read-only");
+    assert_eq!(error.code, "invalid_path");
+}
+
+#[test]
 fn only_a_transient_io_error_is_retryable() {
     use hearth_tools::ToolError;
 
