@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.30, plain-language edition
+**Status:** Draft 0.31, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,15 @@
 ---
 
 ## A note on language
+
+Draft 0.31 rebuilds the Prompt tab as a chat window. Every saved message is a
+role-labelled block: user and tool blocks are full-width panels, assistant text
+sits on the page, and system layers and memory are their own folded receipts. One
+cursor visits every block, Enter folds or opens it, and `e`/`c` expand or collapse
+everything. Headers carry the loaded turn and the request time, the merged
+transcript still prints each message once, and a response's thinking no longer
+makes the next request look rewritten. Assistant text and thinking stream into a
+live block at the tail.
 
 Draft 0.30 finishes the Prompt tab as a conversation. Each message is enclosed
 by a role bar, long blocks fold under an `n`/`p` cursor and open with Enter, the
@@ -950,42 +959,46 @@ preambles and no server-side additions.
   the generation checkpoint.
 - The Prompt tab is one conversation assembled from the loaded saved requests.
   Consecutive requests are merged by their common message prefix, so each
-  request prints only the messages it added. A bare rule marks where one saved
-  request ends and the next begins; a request number, hash, time, or token total
-  is not printed. A rewritten history, such as a compaction, prints a note
-  instead of hiding the change. A change of session prints a conversation
-  boundary and starts a fresh transcript.
-- Every message is enclosed by a role bar: its label row opens with `▌` and its
-  body lines with `▏`, coloured by the role, and a blank line closes the
-  message. System layers, memory, and the runtime note are not messages and keep
-  their flush-left label and two-space body. A message with several parts keeps
-  the bar across them, so thinking, text, and a tool call read as one message.
-- The stable layers show once at the start and again only when a prefix part
-  changes: system identity (`SOUL.md`), guidance, rules, the skills index, and
-  the request `tools` field. Relevant memory is per request and prints after the
-  rule. The runtime note prints under the message that carried it. The saved
-  response follows each request's delta. A message block longer than 12 lines
-  starts folded to its first line and a stub that names the hidden count; `n`
-  and `p` move a block cursor and Enter opens or closes the block under it.
-  System layers fold as a group with `s`, not one block at a time.
+  request prints only the messages it added. A rewritten history, such as a
+  compaction, prints a notice instead of hiding the change. A change of session
+  prints a conversation boundary and starts a fresh transcript. Memory prints
+  when it changes; a stable recall is not repeated.
+- Every block is one message or one context layer. User and tool blocks are
+  full-width background panels, assistant text stays on the page, and system
+  layers and memory are tinted receipts. Each header opens with `▌`, names its
+  role in uppercase, and carries the loaded turn and the request time in
+  `identity.timezone` on the right. A context layer reads `SYSTEM · SOUL.md`, a
+  user message `YOU`, an assistant message `HEARTH`, a tool call
+  `TOOL CALL · name`, a tool result `TOOL RESULT · name`, and recalled memory
+  `MEMORY`. A message with several parts keeps one header. Thinking is streamed
+  live and is not replayed from storage.
+- A block folds as a unit. `n` and `p` move a cursor over every block, including
+  short messages and context, and Enter folds or opens the selected one. `e`
+  expands every block and `c` collapses every block. A folded block shows its
+  header, its runtime note, and a stub naming the hidden line count; a folded
+  tool result or system transcript also keeps one preview line. Context layers
+  start folded. Memory opens up to 6 wrapped lines, a user message up to 12, a
+  tool result and a system transcript up to 8, and assistant text is open.
 - Up/Down scroll one line, PageUp/PageDown move one page, and Home/End (or
-  `g`/`G`) jump to the top or tail. `f` toggles live follow and `s` collapses
-  the system layers to their names and token costs. The footer is the only key
-  legend. Scrolling away from the tail pauses follow; End or reaching the bottom
-  resumes it.
-- Assistant deltas are drawn as a live turn after the cached document: thinking
-  first, then text, under the same role bars, with a spinner in place of the
-  label bar on the part being written. The spinner's phase starts when the turn
-  starts. The live turn is not part of the cache, so it never invalidates the
-  document, and it is cleared when the run settles. A saved request or a settled
-  run reloads the document; a reload alone does not animate. The header names
-  the model, session, token total, and prefix hash of the newest saved request.
+  `g`/`G`) jump to the top or tail. `f` toggles live follow. The footer is the
+  only key legend. Scrolling away from the tail pauses follow; End or reaching
+  the bottom resumes it.
+- Assistant deltas are drawn as a live block after the cached document: thinking
+  first, then text, under one `HEARTH` header with a spinner in place of `▌` and
+  `streaming` on the right. The spinner's phase starts when the turn starts. The
+  live block is never folded, never cached, and cleared when the run settles. A
+  saved request or a settled run reloads the document; a reload alone does not
+  animate. The header names the model, the loaded turns, the message count, the
+  token total, the session, and the prefix hash of the newest saved request.
+- A saved response contributes to the merge baseline in the form it is sent
+  back: its thinking blocks are dropped and a message that carries no request is
+  omitted. A response with thinking therefore neither makes the next request
+  look rewritten nor repeats the answer.
 - Tool definitions show argument names, types, enums, required or optional
   markers, and argument descriptions instead of pretty-printed schema JSON.
   Wrapping preserves leading indentation for code and JSON. The rendered
-  conversation is cached by the loaded set, width, system visibility, the open
-  block set, and zone, so scrolling, moving the block cursor, and streaming do
-  not rebuild the document.
+  conversation is cached by the loaded set, width, fold state, and zone, so
+  scrolling, moving the cursor, and streaming do not rebuild the document.
 - The open view refreshes when a `task_step` request event or a `run_settled`
   event arrives. A refresh that arrives while one is already running is
   coalesced into one follow-up read, so the final saved response is shown even

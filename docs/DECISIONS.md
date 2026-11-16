@@ -2207,3 +2207,50 @@ its body until opened. Selecting a block pauses the live tail. A tool turn can
 briefly drop the previous turn's live text while the next request is being
 prepared, because the live turn resets at `turn_started` and the saved blob lands
 just after.
+
+## 2026-11-16: The Prompt tab is a chat window
+
+- Every saved message is one foldable block. `Folds { mode, overrides }` replaces
+  the part-keyed `expanded` set and the `show_system` flag. `e` sets `AllOpen`,
+  `c` sets `AllClosed`, and Enter flips one block against its kind default.
+  `n`/`p` visit every block, including short messages and context, which the old
+  long-part cursor skipped.
+- Context layers and memory are blocks, not a preamble. Each layer prints only
+  when its prefix part changes. Memory prints only when it changes. `s` dies.
+- Visual families: user and tool blocks are full-width background panels,
+  assistant text is unbacked, context and memory are tinted receipts, and
+  notices are thin rows. A header is `▌ ROLE` plus the loaded turn and the
+  request time in the configured zone. This supersedes the lowercase role bars
+  and the bare request rule of the two earlier Prompt-tab decisions.
+- A folded block shows its header, its runtime note, and a hidden-count stub.
+  Tool results and system transcripts keep one preview line; user, assistant,
+  context, and memory blocks hide their bodies completely. A fold changes only
+  the body, so `c` then `e` always recovers it. Context layers start folded;
+  memory opens to six wrapped lines, a user message to twelve, a tool result and
+  a system transcript to eight, and assistant text is open.
+- Response thinking is excluded from the dedupe baseline through `wire_form`,
+  because `message_for_entry` does not replay it. This fixes a false
+  `history rewritten` note and a repeated answer on the request after a thinking
+  response. The view also stops replaying saved thinking; thinking is live-only,
+  matching spec 2.5.
+- The cache is keyed by the exchange hashes and response entry ids, width, zone,
+  and the whole `Folds`. The selected header is prebuilt and swapped on draw, so
+  moving the cursor does not rebuild. The live block stays outside the cache.
+  Selecting a block reveals its header and pauses follow only when the header is
+  outside the viewport, so folding a visible block does not stop a live turn.
+- The status row names the model, the loaded turns, the message count, the token
+  total, the session, and the prefix hash of the newest saved request. Message
+  headers carry the loaded turn and the request time; there is no separate
+  request boundary line.
+- Alternatives considered. Two-level folding kept independent thinking control
+  but needed a second cursor and two fold keys; one block, one fold won. A group
+  receipt for all context saved a few lines but could not name a changed layer or
+  fold one layer; one block per layer won. A boundary line with time and tokens
+  was proposed; message-header metadata gives the same audit anchor without a
+  second row between every message. Replaying saved thinking was rejected
+  because it made a response block differ from the message the model actually
+  received.
+- Tradeoffs accepted. Collapsing a block hides its body; `c` then `e` is the
+  recovery. Saved thinking is not in the audit view. Context bodies start
+  folded, so the first screen is the conversation, not the prompt. Markdown is
+  rendered as plain text.
