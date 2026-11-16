@@ -1650,7 +1650,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_folds_thinking_with_the_chat() {
+    fn thinking_is_its_own_block() {
         let thoughts = (0..10)
             .map(|index| format!("thought line {index}"))
             .collect::<Vec<_>>()
@@ -1680,18 +1680,64 @@ mod tests {
         })]);
 
         let text = rendered(&app, 100, 80);
+        let thinking = line_of(&text, "▌ THINKING");
         let thought = line_of(&text, "thought line 9");
+        let answer_header = line_of(&text, "▌ HEARTH");
         let answer = line_of(&text, "answer line 7");
         assert!(
-            thought < answer,
-            "thinking comes before the answer it precedes: {text}"
+            thinking < thought && thought < answer_header && answer_header < answer,
+            "thinking owns its own block before the answer: {text}"
         );
+        let header = text.lines().nth(thinking).expect("the thinking header");
+        assert!(
+            header.contains("turn 1"),
+            "the header carries its turn: {header}"
+        );
+    }
+
+    #[test]
+    fn thinking_folds_on_its_own_key() {
+        let thoughts = (0..10)
+            .map(|index| format!("thought line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let answers = (0..8)
+            .map(|index| format!("answer line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_home, mut app) = prompt_app(vec![json!({
+            "request": {
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "a question"}]}
+                ]
+            },
+            "prompt_hash": "thinking-hash",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": {
+                "entry_id": "entry-1",
+                "created_at": 1_700_000_005_000_000_i64,
+                "blocks": [
+                    {"type": "thinking", "text": thoughts},
+                    {"type": "text", "text": answers}
+                ],
+                "tokens_est": 20
+            },
+            "usage": Value::Null
+        })]);
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
+            text.contains("thought line 9"),
+            "the chat fold must not fold thinking: {text}"
+        );
+        assert!(text.contains("answer line 7"), "{text}");
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
             text.contains("thought line 4"),
-            "the fifth thought survives the chat fold: {text}"
+            "the fifth thought survives the thinking fold: {text}"
         );
         assert!(
             !text.contains("thought line 5"),
@@ -1699,24 +1745,18 @@ mod tests {
         );
         assert!(
             text.lines().any(|line| line.contains("hidden")),
-            "a folded thinking section says what it hides: {text}"
+            "a folded thinking block says what it hides: {text}"
         );
         assert!(
             text.contains("answer line 7"),
-            "the chat fold never folds the answer: {text}"
+            "folding thinking must not fold the answer: {text}"
         );
+        assert!(text.contains("▌ THINKING"), "the header stays: {text}");
 
         app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
-        assert_eq!(
-            rendered(&app, 100, 80),
-            text,
-            "t is not a fold key any more"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
             rendered(&app, 100, 80).contains("thought line 9"),
-            "enter opens thinking with the chat"
+            "t opens thinking again"
         );
     }
 
@@ -2000,6 +2040,11 @@ mod tests {
             "the live block ends in its working row: {text}"
         );
 
+        assert!(
+            text.contains("▌ THINKING"),
+            "the live turn draws thinking as its own block: {text}"
+        );
+
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
@@ -2007,19 +2052,26 @@ mod tests {
             "the chat fold never folds the turn being written: {text}"
         );
         assert!(
-            text.contains("WEIGHING IT 4") && !text.contains("WEIGHING IT 5"),
-            "the chat fold previews live thinking: {text}"
+            text.contains("WEIGHING IT 9"),
+            "the chat fold must not fold live thinking: {text}"
         );
 
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
-            text.contains("WEIGHING IT 9"),
-            "enter opens live thinking with the chat: {text}"
+            text.contains("WEIGHING IT 4") && !text.contains("WEIGHING IT 5"),
+            "the thinking key previews live thinking: {text}"
         );
         assert!(
             text.contains("STREAMING REPLY"),
-            "the live answer never folds: {text}"
+            "folding live thinking must not fold the reply: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("WEIGHING IT 9"),
+            "t opens live thinking again: {text}"
         );
         app.apply_event(AppEvent::Live(json!({
             "kind": "run_settled",
