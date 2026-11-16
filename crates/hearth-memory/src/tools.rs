@@ -129,7 +129,7 @@ impl Tool for SaveTool {
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "One standalone statement of at most 200 characters, understandable without prior context. Clarify references when necessary to avoid ambiguity, but do not add unnecessary details. Name who it is about instead of a pronoun."
+                        "description": "One standalone statement of at most 200 characters, understandable without prior context. Clarify references when necessary to avoid ambiguity, but do not add unnecessary details."
                     },
                     "kind": {
                         "type": "string",

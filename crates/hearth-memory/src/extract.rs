@@ -171,7 +171,7 @@ fn from_remember(sentence: &str) -> Option<Candidate> {
         .iter()
         .find(|phrase| lowered.starts_with(**phrase))?;
     let content = rewrite_first_person(&trim_end(&sentence[phrase.len()..]));
-    if content.is_empty() || crate::actor::pronoun(&content).is_some() {
+    if content.is_empty() {
         return None;
     }
     Some(Candidate {
@@ -291,8 +291,7 @@ fn from_preference(sentence: &str) -> Option<Candidate> {
 /// Rewrite a statement whose actor is the user.
 ///
 /// First person has a determinate meaning without the message, so the extractor
-/// can name it. A remaining pronoun means the rewrite did not cover the sentence;
-/// the caller drops that candidate.
+/// can name it. A pronoun the rewrite does not cover is stored as written.
 fn rewrite_first_person(text: &str) -> String {
     let lowered = text.to_ascii_lowercase();
     if lowered.starts_with("i ") {
@@ -394,9 +393,7 @@ fn split_suffix(word: &str) -> (&str, &str) {
 fn acceptable(candidate: &Candidate) -> bool {
     let words = candidate.content.split_whitespace().count();
     let length = candidate.content.chars().count();
-    words >= 3
-        && (MIN_CHARS..=MAX_CHARS).contains(&length)
-        && crate::actor::pronoun(&candidate.content).is_none()
+    words >= 3 && (MIN_CHARS..=MAX_CHARS).contains(&length)
 }
 
 /// The name a statement is about, when it opens with one.

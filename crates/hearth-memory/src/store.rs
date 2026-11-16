@@ -214,9 +214,6 @@ pub fn validate(item: &NewMemory) -> Result<()> {
     if content.contains('\0') {
         return Err(MemoryError::invalid("memory content cannot contain NUL."));
     }
-    if let Some((word, person)) = crate::actor::pronoun(content) {
-        return Err(MemoryError::invalid(crate::actor::refusal(word, person)));
-    }
     if item.subject.chars().count() > SUBJECT_LIMIT {
         return Err(MemoryError::invalid(format!(
             "memory subject must be at most {SUBJECT_LIMIT} characters."
