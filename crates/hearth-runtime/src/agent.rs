@@ -270,10 +270,10 @@ impl Agent {
     fn runtime_note(&self) -> String {
         let zone = Zone::resolve(&hearth_config::identity_timezone(&self.config.home));
         // The note is paid fresh on every turn, and the conversation id already
-        // travels with the request. The tag keeps the clock distinct from the
-        // message that carries it.
+        // travels with the request. The tag names the payload; the ISO string
+        // carries the zone offset.
         format!(
-            "<runtime>Current time: {}.</runtime>",
+            "<current_time>{}</current_time>",
             zone.iso(self.session.now_micros())
         )
     }
