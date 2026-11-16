@@ -773,7 +773,7 @@ unchanged: recall@10 0.939, precision@5 0.928, temporal 20/20, supersession
 
 - `models.context_window` (default 128000) and `models.max_output_tokens` (default 8192) are optional settings. `compaction.soft_compact` (0.65), `hard_compact` (0.85), and `keep_recent_tokens` (24000) are optional.
 - Budget: reserve = max(max_output, 4096) + 1024; usable = window - reserve; soft and hard are floors of their fractions of usable; keep is min(keep_recent, 35% of usable).
-- Segment budgets follow 6.1. The fixed overhead is identity + operation + tools + standing + skills + runtime; the target is 4500. The transcript takes the remainder. The prompt audit document records per-segment counts plus total and fixed.
+- Segment budgets follow 6.1. The fixed overhead is identity + operation + tools + standing + skills + runtime. The transcript takes the remainder. The prompt audit document records per-segment counts plus total and fixed. (The per-segment warning thresholds and the fixed-overhead target were removed on 2026-11-16; see that entry. The audit document still records the counts.)
 - Before a provider request, if the prompt exceeds usable: drop trailing recall lines from the lowest score, then replace oversized old tool results with a bounded head and tail plus a truncation note, then settle unanswered with reason `budget` and make no provider call.
 - The provider request's `max_tokens` is the configured max output. Local chat and the daemon build the budget from settings; the default applies when the new keys are omitted. The `budget` notice is the M5a fallback; soft and hard compaction is M5b.
 
@@ -2015,18 +2015,16 @@ force-pushing, which is the approval named above and not a step in this change.
 
 ## 2026-11-16: The rules budget is 800 tokens
 
-- The prompt rules segment and `memory.rules_max_tokens` both default to 800.
-  The fixed overhead target has room: the live prompt measured 3,548 tokens with
-  272 of rules, so 800 rules leaves 424 under 4,500.
-- The prompt constant, the settings default, and the `MemoryConfig` default are
-  one number, pinned by `segment_budgets_match_the_spec`,
-  `the_rules_budget_matches_the_prompt_segment`, and
-  `the_memory_default_rules_budget_matches_the_prompt_segment`.
+- `memory.rules_max_tokens` defaults to 800. The settings default and the
+  `MemoryConfig` default are one number, pinned by
+  `the_rules_budget_defaults_to_800` and
+  `the_memory_default_rules_budget_is_800`.
 - The write check and the render share `digest::rules_fit`, so a rule admitted by
   the write is a rule the block shows. The notice line and the joining newlines
   are inside the budget.
-- `RULE_CHARS` stays 400 characters. It caps one rule's content and is not the
-  token budget.
+- `RULE_CHARS` stays 400 characters as the rule line's read-side guard.
+- The prompt rules warning copy, `SEGMENT_RULES`, was removed on 2026-11-16; see
+  that entry.
 
 ## 2026-11-16: A helper runs on the configured budget
 
@@ -2104,9 +2102,8 @@ force-pushing, which is the approval named above and not a step in this change.
 - `INDEX_MAX_TOKENS` is gone. `SkillLibrary::index` lists every active skill up
   to the 50-active count. Only the count archives a learned skill, by lowest
   success rate and then least recently used; user skills stay read-only.
-- `SEGMENT_SKILLS` stays 300 as a prompt warning. `TokenCounts::over_budget`
-  still names `skills`, and the agent still logs a segment over budget, but the
-  index is never truncated and no skill is retired for a long description.
+- `SEGMENT_SKILLS` was removed with the other prompt warning thresholds on
+  2026-11-16; only the 50-active count cap remains. See that entry.
 - The replacement tests assert that 15 and 40 long-description skills are all
   indexed with zero archived, and that 60 skills still archive ten under the
   count cap.
@@ -2366,6 +2363,9 @@ just after.
   note would spend prefix tokens on a fact only the person can act on. The log
   line stays for diagnosis. Reporting the same numbers in the system prompt was
   rejected for that cost.
+- The warning thresholds and this surface were removed on 2026-11-16 because a
+  threshold that never refuses is not a budget. The counts remain. See that
+  entry.
 
 ## 2026-11-16: A notice names the request it settled
 
@@ -2442,3 +2442,27 @@ just after.
   without folding the reply.
 - `PromptView.thinking_collapsed` is a second fold flag, and the cache key carries
   it so a thinking fold rebuilds the cached lines.
+
+## 2026-11-16: The prompt segment warnings were removed
+
+- `SEGMENT_IDENTITY`, `SEGMENT_TOOLS`, `SEGMENT_RULES`, `SEGMENT_SKILLS`,
+  `SEGMENT_RECALL`, `SEGMENT_RUNTIME`, `FIXED_OVERHEAD_TARGET`,
+  `SEGMENT_BUDGETS`, `SegmentCost`, `TokenCounts::segments`, and
+  `TokenCounts::over_budget` are gone, with the agent log line and the Prompt tab
+  and Doctor notices that read them.
+- A threshold that never refuses is a second definition of the word budget.
+  Every enforced limit stays: `ContextBudget`, `memory.rules_max_tokens`,
+  `memory.recall_max_tokens`, `check_rules_budget`, `rules_fit`,
+  `recall_within`, and `INDEX_MAX_ACTIVE`. The per-layer counts stay in the saved
+  prompt document, and the Prompt tab still shows them beside each layer.
+- The Doctor prints only `prompt: ok (N fixed tok)`. It no longer names an
+  over-budget segment or a fixed-overhead target. Reporting the counts without a
+  comparison was kept because the cost is still useful in a health report; a
+  second warning surface was rejected because it told the reader a request failed
+  when the request was sent in full.
+- The Prompt tab no longer prints `▲ <segment> over budget`. Keeping the notice
+  and removing only the numbers was rejected: the notice would still read as an
+  error.
+- This supersedes the warning surface in "Every segment budget is reported to the
+  person" and the prompt copies of the budgets in "M5a context budgets", "The
+  rules budget is 800 tokens", and "The skills index has no token cap".
