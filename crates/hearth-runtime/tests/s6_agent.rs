@@ -853,8 +853,12 @@ fn a_text_run_emits_live_events_in_order() {
     assert!(index("assistant_reply").is_some(), "kinds: {kinds:?}");
     assert!(index("user_message").is_some(), "kinds: {kinds:?}");
     assert!(
-        index("text_delta").is_none(),
-        "deltas must not stream: {kinds:?}"
+        index("text_delta").is_some(),
+        "the reply must stream as it arrives: {kinds:?}"
+    );
+    assert!(
+        index("text_delta") < index("assistant_reply"),
+        "the delta lands before the finished reply: {kinds:?}"
     );
     assert!(index("usage").is_some(), "kinds: {kinds:?}");
     assert!(index("run_settled").is_some(), "kinds: {kinds:?}");
@@ -863,11 +867,88 @@ fn a_text_run_emits_live_events_in_order() {
     assert!(index("assistant_reply") < index("usage"));
     assert!(index("usage") < index("run_settled"));
     let events = sink.events.lock().expect("event lock");
+    let streamed: String = events
+        .iter()
+        .filter(|event| event.kind == "text_delta")
+        .map(|event| event.data["text"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(streamed, "hello", "the streamed chunks carry the reply");
     let settled = events
         .iter()
         .find(|event| event.kind == "run_settled")
         .expect("settled");
     assert_eq!(settled.data["status"], "done");
+}
+
+#[test]
+fn a_thinking_run_streams_thinking_before_the_reply() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::ThinkingDelta("weighing it".to_owned())),
+        Ok(StreamEvent::TextDelta("the answer".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let sink = Arc::new(RecordingSink::default());
+    agent(home.path(), &harness, provider)
+        .run_submission_with_events(
+            &submission.id,
+            Arc::new(AtomicBool::new(false)),
+            sink.clone(),
+        )
+        .expect("run");
+    let kinds = event_kinds(&sink);
+    let index = |kind: &str| kinds.iter().position(|value| value == kind);
+    assert!(index("thinking_delta").is_some(), "kinds: {kinds:?}");
+    assert!(index("text_delta").is_some(), "kinds: {kinds:?}");
+    assert!(
+        index("thinking_delta") < index("text_delta"),
+        "thinking reaches the watcher before the text: {kinds:?}"
+    );
+    let events = sink.events.lock().expect("event lock");
+    let thinking: String = events
+        .iter()
+        .filter(|event| event.kind == "thinking_delta")
+        .map(|event| event.data["text"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(thinking, "weighing it");
+}
+
+#[test]
+fn a_long_reply_streams_in_coalesced_chunks() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let reply = "x".repeat(1_000);
+    let deltas: Vec<Result<StreamEvent, ProviderError>> = reply
+        .chars()
+        .map(|character| Ok(StreamEvent::TextDelta(character.to_string())))
+        .collect();
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(deltas)]));
+    let sink = Arc::new(RecordingSink::default());
+    agent(home.path(), &harness, provider)
+        .run_submission_with_events(
+            &submission.id,
+            Arc::new(AtomicBool::new(false)),
+            sink.clone(),
+        )
+        .expect("run");
+    let events = sink.events.lock().expect("event lock");
+    let chunks: Vec<&str> = events
+        .iter()
+        .filter(|event| event.kind == "text_delta")
+        .map(|event| event.data["text"].as_str().unwrap_or_default())
+        .collect();
+    assert!(
+        chunks.len() < 10,
+        "{} deltas must not become {} events",
+        1_000,
+        chunks.len()
+    );
+    assert_eq!(chunks.concat(), reply, "the chunks rebuild the reply");
 }
 
 #[test]
