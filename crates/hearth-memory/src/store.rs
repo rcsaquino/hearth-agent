@@ -37,6 +37,11 @@ fn new_id() -> String {
     format!("m_{}", uuid::Uuid::new_v4().simple())
 }
 
+/// The canonical form of an id for lookup.
+pub fn normalize_id(id: &str) -> String {
+    id.to_owned()
+}
+
 /// The longest subject a write may store.
 pub const SUBJECT_LIMIT: usize = 120;
 /// How similar two statements about one subject must be to count as the same.
@@ -259,12 +264,13 @@ pub fn rules(session: &Session) -> Result<Vec<Memory>> {
 
 /// One memory by id.
 pub fn get(session: &Session, id: &str) -> Result<Option<Memory>> {
+    let id = normalize_id(id);
     session
         .storage()
         .read(|reader| {
             reader.query_optional(
                 &format!("SELECT {COLUMNS} FROM memories WHERE id = ?"),
-                [id],
+                [id.as_str()],
                 map_memory,
             )
         })
@@ -520,6 +526,18 @@ pub fn insert_many(
     })
 }
 
+#[cfg(test)]
+fn insert_with(
+    writer: &hearth_storage::Writer<'_>,
+    pending: Pending,
+    now: i64,
+    rules_budget: u64,
+    ids: &mut dyn FnMut() -> String,
+) -> Result<WriteOutcome> {
+    let _ = ids;
+    insert_in(writer, pending, now, rules_budget)
+}
+
 fn insert_in(
     writer: &hearth_storage::Writer<'_>,
     pending: Pending,
@@ -694,7 +712,7 @@ fn write_vector(
 
 /// Delete one memory permanently.
 pub fn forget(session: &Session, id: &str) -> Result<()> {
-    let identifier = id.to_owned();
+    let identifier = normalize_id(id);
     let removed = session.storage().write(move |writer| {
         writer.execute(
             "DELETE FROM memory_vectors WHERE memory_id = ?",
@@ -1222,4 +1240,146 @@ mod tests {
         assert_eq!(now.len(), 1);
         assert_eq!(now[0].id, new.memory().id);
     }
+    #[test]
+    fn a_new_id_is_short_and_crockford() {
+        let id = new_id();
+        assert!(id.starts_with("m_"), "{id}");
+        let suffix = &id[2..];
+        assert_eq!(suffix.chars().count(), 10, "{id}");
+        assert!(
+            suffix
+                .chars()
+                .all(|character| "0123456789abcdefghjkmnpqrstvwxyz".contains(character)),
+            "an id must use Crockford base32: {id}"
+        );
+    }
+
+    #[test]
+    fn a_taken_id_is_retried() {
+        let (_directory, session) = home();
+        let first = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the first fact"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("first");
+        let taken = first.memory().id.clone();
+        let fresh = new_id();
+        let mut ids = vec![taken.clone(), fresh.clone()].into_iter();
+        let now = session.now_micros();
+        let outcome = session
+            .storage()
+            .write(move |writer| {
+                insert_with(
+                    writer,
+                    Pending {
+                        item: NewMemory::new("the second fact"),
+                        vector: None,
+                    },
+                    now,
+                    MemoryConfig::default().rules_max_tokens,
+                    &mut || ids.next().expect("an id"),
+                )
+            })
+            .expect("second");
+        assert!(outcome.created());
+        assert_eq!(outcome.memory().id, fresh, "the taken id must be retried");
+        assert_ne!(outcome.memory().id, taken);
+        assert_eq!(count(&session).expect("count"), 2);
+    }
+
+    #[test]
+    fn an_id_is_read_case_insensitively_and_trimmed() {
+        let (_directory, session) = home();
+        let row = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("a fact worth finding"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("row")
+        .memory()
+        .clone();
+        let upper = format!("  {}  ", row.id.to_uppercase());
+        assert!(
+            get(&session, &upper).expect("get").is_some(),
+            "an id must be read in either case with surrounding whitespace"
+        );
+        forget(&session, &upper).expect("forget");
+        assert!(get(&session, &row.id).expect("get").is_none());
+    }
+
+    #[test]
+    fn a_prefix_is_not_an_id() {
+        let (_directory, session) = home();
+        let row = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("a fact worth finding"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("row")
+        .memory()
+        .clone();
+        let prefix = &row.id[..4];
+        assert!(
+            get(&session, prefix).expect("get").is_none(),
+            "a prefix must not address a row"
+        );
+    }
+
+    #[test]
+    fn a_legacy_id_is_still_found_and_replaced() {
+        let (_directory, session) = home();
+        let row = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the lab is in building 4").subject("lab"),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("row")
+        .memory()
+        .clone();
+        let legacy = "m_00000000000000000000000000000000";
+        let old_id = row.id.clone();
+        session
+            .storage()
+            .write(move |writer| {
+                writer.execute(
+                    "UPDATE memories SET id = ? WHERE id = ?",
+                    rusqlite::params![legacy, old_id],
+                )
+            })
+            .expect("rename to a legacy id");
+
+        let found = get(&session, legacy).expect("get").expect("legacy row");
+        assert_eq!(found.content, "the lab is in building 4");
+        let replaced = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("the lab is in building 9")
+                    .subject("lab")
+                    .supersedes(legacy),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("replace");
+        assert!(replaced.created());
+        let old = get(&session, legacy).expect("get").expect("old row");
+        assert_eq!(
+            old.superseded_by.as_deref(),
+            Some(replaced.memory().id.as_str())
+        );
+    }
+
 }

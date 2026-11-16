@@ -554,6 +554,51 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn a_recall_by_id_accepts_case_and_whitespace() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let saved = tools
+            .call(
+                SAVE,
+                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+            )
+            .expect("call")
+            .expect("result");
+        let id = saved.content.split_whitespace().nth(1).expect("id");
+        let typed = format!("  {}  ", id.to_uppercase());
+        let recalled = tools
+            .call(RECALL, &json!({"id": typed}))
+            .expect("call")
+            .expect("result");
+        assert!(recalled.content.contains("OR board"), "{}", recalled.content);
+    }
+
+    #[test]
+    fn a_forget_by_id_accepts_case_and_whitespace() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let saved = tools
+            .call(
+                SAVE,
+                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+            )
+            .expect("call")
+            .expect("result");
+        let id = saved.content.split_whitespace().nth(1).expect("id");
+        let typed = format!("  {}  ", id.to_uppercase());
+        tools
+            .call(FORGET, &json!({"id": typed}))
+            .expect("call")
+            .expect("result");
+        let error = tools
+            .call(RECALL, &json!({"id": id}))
+            .expect("call")
+            .expect_err("the row is gone");
+        assert!(error.message.contains("does not exist"), "{error:?}");
+    }
+
     #[test]
     fn a_statement_beside_a_related_one_names_the_neighbour() {
         let (_directory, service) = memory();
