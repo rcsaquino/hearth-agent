@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use hearth_core::{
     ContextBudget, CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session,
@@ -605,14 +605,17 @@ impl Agent {
             let mut thinking = String::new();
             let mut calls = Vec::new();
             let mut usage = Usage::default();
+            let mut deltas = Deltas::new(events, &claimed.id, &submission.conversation_id);
             for event in stream {
                 match event {
                     Ok(StreamEvent::TextDelta(delta)) => {
                         text.push_str(&delta);
+                        deltas.text(&delta);
                         hearth_storage::crash_if("mid_stream");
                     }
                     Ok(StreamEvent::ThinkingDelta(delta)) => {
                         thinking.push_str(&delta);
+                        deltas.thinking(&delta);
                         hearth_storage::crash_if("mid_stream");
                     }
                     Ok(StreamEvent::ToolCall(call)) => calls.push(call),
@@ -646,6 +649,7 @@ impl Agent {
                     }
                 }
             }
+            deltas.flush();
             emit(
                 events,
                 &claimed.id,
@@ -1200,6 +1204,88 @@ fn short_notice(message: &str) -> String {
         "The run failed.".to_owned()
     } else {
         text
+    }
+}
+
+/// Deltas waiting for their next publish, so the model's hot path never pays
+/// for a socket write per token.
+const DELTA_INTERVAL: Duration = Duration::from_millis(100);
+/// Pending bytes that force a publish before the interval elapses.
+const DELTA_BYTES: usize = 512;
+
+struct Deltas<'a> {
+    events: &'a dyn EventSink,
+    task_id: &'a str,
+    conversation_id: &'a str,
+    pending_text: String,
+    pending_thinking: String,
+    published_at: Instant,
+}
+
+impl<'a> Deltas<'a> {
+    fn new(events: &'a dyn EventSink, task_id: &'a str, conversation_id: &'a str) -> Self {
+        Self {
+            events,
+            task_id,
+            conversation_id,
+            pending_text: String::new(),
+            pending_thinking: String::new(),
+            published_at: Instant::now(),
+        }
+    }
+
+    fn text(&mut self, delta: &str) {
+        self.flush_thinking();
+        self.pending_text.push_str(delta);
+        if self.pending_text.len() >= DELTA_BYTES || self.published_at.elapsed() >= DELTA_INTERVAL {
+            self.flush_text();
+        }
+    }
+
+    fn thinking(&mut self, delta: &str) {
+        self.flush_text();
+        self.pending_thinking.push_str(delta);
+        if self.pending_thinking.len() >= DELTA_BYTES
+            || self.published_at.elapsed() >= DELTA_INTERVAL
+        {
+            self.flush_thinking();
+        }
+    }
+
+    /// Publish what the last interval left behind.
+    fn flush(&mut self) {
+        self.flush_thinking();
+        self.flush_text();
+    }
+
+    fn flush_text(&mut self) {
+        if self.pending_text.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.pending_text);
+        emit(
+            self.events,
+            self.task_id,
+            self.conversation_id,
+            "text_delta",
+            json!({"text": text}),
+        );
+        self.published_at = Instant::now();
+    }
+
+    fn flush_thinking(&mut self) {
+        if self.pending_thinking.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.pending_thinking);
+        emit(
+            self.events,
+            self.task_id,
+            self.conversation_id,
+            "thinking_delta",
+            json!({"text": text}),
+        );
+        self.published_at = Instant::now();
     }
 }
 
