@@ -202,11 +202,12 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         theme::muted()
     };
-    let review = status
-        .and_then(|status| status["last_skill_review"].as_str())
-        .unwrap_or("not yet");
-    let changes = status
-        .and_then(|status| status["last_skill_review_changes"].as_u64())
+    let skills = status.and_then(|status| status.get("skills"));
+    let active_skills = skills
+        .and_then(|skills| skills["active"].as_u64())
+        .unwrap_or(0);
+    let index_tokens = skills
+        .and_then(|skills| skills["index_tokens"].as_u64())
         .unwrap_or(0);
     let settings = app.settings_data.as_ref();
     let helpers = settings
@@ -252,7 +253,10 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
             metric("recall", recall_label, recall_style),
             metric(
                 "skills",
-                format!("{} · {changes} changes", short(review, 18)),
+                format!(
+                    "{active_skills} active · {} tokens",
+                    compact_count(index_tokens)
+                ),
                 theme::muted(),
             ),
         ],

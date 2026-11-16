@@ -16,6 +16,7 @@ use thiserror::Error;
 use time::Duration as TimeDuration;
 
 use crate::events::EventBus;
+use crate::skills::SkillLibrary;
 
 /// The socket file inside the home folder.
 pub const SOCKET_FILE: &str = "hearth.sock";
@@ -166,6 +167,9 @@ fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError>
     let memory = context.memory.count().unwrap_or(0);
     let rules = context.memory.rules().unwrap_or_default();
     let last_consolidation = context.session.meta_value("last_consolidation")?;
+    let library = SkillLibrary::new(home);
+    let skills_index = library.index().unwrap_or_default();
+    let skills_active = library.stats().map(|stats| stats.active).unwrap_or(0);
     let last_skill_review = context.session.meta_value("last_skill_review")?;
     let last_skill_review_changes = context
         .session
@@ -201,6 +205,10 @@ fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError>
             "max_tokens": context.memory.config().recall_max_tokens,
         },
         "last_consolidation": last_consolidation,
+        "skills": {
+            "active": skills_active,
+            "index_tokens": hearth_model::estimate_tokens(&skills_index),
+        },
         "last_skill_review": last_skill_review,
         "last_skill_review_changes": last_skill_review_changes,
     }))
