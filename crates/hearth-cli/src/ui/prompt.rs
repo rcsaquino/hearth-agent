@@ -441,7 +441,7 @@ impl Role {
 }
 
 /// Build the document once, with every system layer where it changed, the
-/// delta of every snapshot, and the answer that followed it.
+/// delta of every saved request, and the answer that followed it.
 fn derive(exchanges: &[Value]) -> Vec<Entry> {
     let mut entries = Vec::new();
     let mut previous_sent: Vec<(String, String)> = Vec::new();
@@ -1409,6 +1409,31 @@ mod tests {
     }
 
     #[test]
+    fn the_block_cursor_starts_in_the_visible_tail() {
+        let transcript: Vec<Value> = (0..20)
+            .map(|index| {
+                let body = block_body(&format!("BLOCK {index}"), 30);
+                json!({"role": "user", "blocks": [{"type": "text", "text": body}]})
+            })
+            .collect();
+        let exchanges = vec![json!({
+            "request": request(Value::Array(transcript), 500),
+            "prompt_hash": "hash-tail",
+            "requested_at": 1,
+            "response": Value::Null,
+            "usage": Value::Null
+        })];
+        let (_home, mut app) = prompt_app(exchanges);
+        let _ = rendered(&app, 100, 24);
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        let text = rendered(&app, 100, 24);
+        assert!(
+            !text.contains("BLOCK 0 line 0"),
+            "n starts at the block in the visible tail, not the document top: {text}"
+        );
+    }
+
+    #[test]
     fn the_block_cursor_is_highlighted() {
         let alpha = block_body("ALPHA", 30);
         let beta = block_body("BETA", 30);
@@ -1846,7 +1871,10 @@ mod tests {
             !text.contains("working"),
             "a scheduled task is not this conversation's turn: {text}"
         );
-        assert!(app.prompt.follow, "a status poll must not move the reader");
+        assert!(
+            text.contains(ANSWER),
+            "a status poll must not replace the conversation: {text}"
+        );
     }
 
     #[test]

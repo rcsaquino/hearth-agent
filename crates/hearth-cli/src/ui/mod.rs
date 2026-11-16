@@ -1125,11 +1125,11 @@ mod tests {
         assert!(text.contains("the whole answer"), "{text}");
         assert!(
             !text.contains("more · enter"),
-            "the transcript must not collapse the session: {text}"
+            "the system layers are shown in full: {text}"
         );
     }
 
-    fn snapshot(model: &str, hash: &str, at: i64) -> serde_json::Value {
+    fn exchange(model: &str, hash: &str, at: i64) -> serde_json::Value {
         json!({
             "request": {
                 "model": model,
@@ -1150,7 +1150,7 @@ mod tests {
     fn the_prompt_footer_is_the_only_key_legend() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
-        app.prompt.exchanges = vec![snapshot("test-model", "hash", 1)];
+        app.prompt.exchanges = vec![exchange("test-model", "hash", 1)];
         let text = buffer_text(&app, 120, 40);
         let footer = text
             .lines()
@@ -1174,8 +1174,8 @@ mod tests {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         app.prompt.exchanges = vec![
-            snapshot("newest", "newest-hash", 2),
-            snapshot("older", "older-hash", 1),
+            exchange("newest", "newest-hash", 2),
+            exchange("older", "older-hash", 1),
         ];
         let text = buffer_text(&app, 100, 40);
         assert!(
@@ -1199,8 +1199,8 @@ mod tests {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         app.prompt.exchanges = vec![
-            snapshot("newest", "newest-hash", 2),
-            snapshot("older", "older-hash", 1),
+            exchange("newest", "newest-hash", 2),
+            exchange("older", "older-hash", 1),
         ];
         let before = buffer_text(&app, 100, 40);
         for key in ['[', ']', 'r', 'o'] {
