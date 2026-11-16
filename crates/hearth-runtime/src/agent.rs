@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use hearth_core::{
-    ContextBudget, CoreError, Entry, NewEntry, NewTask, NewUsage, PromptInput, Save, Session,
-    StepOutput, Submission, SubmissionStatus, TerminalOutcome, Zone, build_prompt, parse_blocks,
-    plan_compaction, prefix_cause,
+    ContextBudget, CoreError, Entry, Guidance, NewEntry, NewTask, NewUsage, PromptInput, Save,
+    Session, StepOutput, Submission, SubmissionStatus, TerminalOutcome, TokenCounts, Zone,
+    build_prompt, parse_blocks, plan_compaction, prefix_cause,
 };
 use hearth_memory::MemoryService;
 use hearth_model::{ContentBlock, Provider, ProviderError, StreamEvent, ToolCall, ToolSpec, Usage};
@@ -32,7 +32,7 @@ pub struct AgentConfig {
     pub tools: ToolRegistry,
     pub home: PathBuf,
     pub spill_dir: PathBuf,
-    pub guidance: String,
+    pub guidance: Guidance,
 }
 
 /// The outcome of one submission.
@@ -295,7 +295,7 @@ impl Agent {
                 rules_version,
                 recall,
                 skills_index: self.skills_index(),
-                guidance: self.config.guidance.clone(),
+                guidance: self.config.guidance.text.clone(),
                 runtime_note,
             },
             &history,
@@ -490,7 +490,7 @@ impl Agent {
                 rules_version,
                 recall,
                 skills_index: self.skills_index(),
-                guidance: self.config.guidance.clone(),
+                guidance: self.config.guidance.text.clone(),
                 runtime_note: runtime_note.clone(),
             };
             let mut recall_text = recall;
@@ -537,11 +537,12 @@ impl Agent {
                 }
             }
             if prompt.tokens.total > self.budget.usable {
+                let message = self.budget_failure(prompt.tokens);
                 return self.settle_failure(
                     &absorbed,
                     &submission,
                     &claimed.id,
-                    "The conversation is too large for the model window even after shrinking. Start a new chat or let compaction run.",
+                    &message,
                     "budget",
                     events,
                 );
@@ -906,6 +907,29 @@ impl Agent {
             latency_ms,
         })?;
         Ok(())
+    }
+
+    /// The budget failure, naming the guidance file when its cost alone fills
+    /// the window and no amount of shrinking the conversation can help.
+    fn budget_failure(&self, tokens: TokenCounts) -> String {
+        const FALLBACK: &str = "The conversation is too large for the model window even after shrinking. Start a new chat or let compaction run.";
+        if tokens.guidance < self.budget.usable {
+            return FALLBACK.to_owned();
+        }
+        let largest = self
+            .config
+            .guidance
+            .files
+            .iter()
+            .max_by_key(|file| file.bytes);
+        match largest {
+            Some(file) => format!(
+                "The conversation is too large for the model window: {} is {} bytes, and the guidance alone leaves no room for a turn. Trim it or raise models.context_window.",
+                file.path.display(),
+                file.bytes
+            ),
+            None => FALLBACK.to_owned(),
+        }
     }
 
     fn settle_cancelled(

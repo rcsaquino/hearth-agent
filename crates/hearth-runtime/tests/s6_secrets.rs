@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use hearth_core::Harness;
+use hearth_core::{Guidance, Harness};
 use hearth_model::{
     ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, ToolCall, ToolSpec,
 };
@@ -97,7 +97,7 @@ fn config(home: &std::path::Path, tools: ToolRegistry) -> AgentConfig {
         tools,
         home: home.to_path_buf(),
         spill_dir: home.join("spill"),
-        guidance: String::new(),
+        guidance: Guidance::default(),
     }
 }
 

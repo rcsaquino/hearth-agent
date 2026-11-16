@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use hearth_core::{Harness, Submission};
+use hearth_core::{Guidance, Harness, Submission};
 use hearth_model::{
     ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, ToolCall, ToolSpec, Usage,
 };
@@ -159,7 +159,7 @@ fn tool_search_loads_a_group_for_the_next_request() {
             tools: core,
             home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
-            guidance: String::new(),
+            guidance: Guidance::default(),
         },
     )
     .with_groups(Arc::clone(&groups), Arc::clone(&selection));

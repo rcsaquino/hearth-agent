@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use hearth_core::{Harness, Submission};
+use hearth_core::{Guidance, Harness, Submission};
 use hearth_model::{
     ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, ToolCall, Usage,
 };
@@ -128,7 +128,7 @@ fn the_agent_indexes_skills_and_can_load_one() {
             tools,
             home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
-            guidance: String::new(),
+            guidance: Guidance::default(),
         },
     )
     .with_skills(Arc::clone(&library));
@@ -209,7 +209,7 @@ fn the_prompt_index_lists_every_active_skill_past_the_old_token_cap() {
             tools: ToolRegistry::default(),
             home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
-            guidance: String::new(),
+            guidance: Guidance::default(),
         },
     )
     .with_skills(library);

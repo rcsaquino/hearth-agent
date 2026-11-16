@@ -23,8 +23,7 @@ pub use compaction::{
 };
 pub use error::CoreError;
 pub use guidance::{
-    AGENTS_GUIDANCE_FILE, Guidance, HEARTH_GUIDANCE_FILE, MAX_GUIDANCE_FILE_BYTES,
-    MAX_GUIDANCE_TOTAL_BYTES, load as load_guidance,
+    AGENTS_GUIDANCE_FILE, Guidance, GuidanceFile, HEARTH_GUIDANCE_FILE, load as load_guidance,
 };
 pub use model::{
     Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,

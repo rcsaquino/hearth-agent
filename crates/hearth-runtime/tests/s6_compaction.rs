@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use hearth_core::{
-    ContextBudget, Harness, NewEntry, Save, Submission, plan_compaction, summary_text,
+    ContextBudget, Guidance, Harness, NewEntry, Save, Submission, plan_compaction, summary_text,
 };
 use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent, Usage};
 use hearth_runtime::{Agent, AgentConfig, Compactor};
@@ -141,7 +141,7 @@ fn agent(
             tools: ToolRegistry::default(),
             home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
-            guidance: String::new(),
+            guidance: Guidance::default(),
         },
     )
     .with_budget(budget)

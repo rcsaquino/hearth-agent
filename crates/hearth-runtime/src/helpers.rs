@@ -534,8 +534,7 @@ impl HelperPool {
                 tools: built.core,
                 home: self.config.home.clone(),
                 spill_dir: self.config.spill.clone(),
-                guidance: hearth_core::load_guidance(&self.config.home, &self.config.workspace)
-                    .text,
+                guidance: hearth_core::load_guidance(&self.config.home, &self.config.workspace),
             },
         )
         .with_memory(Arc::clone(&self.config.memory))

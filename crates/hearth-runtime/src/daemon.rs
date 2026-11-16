@@ -790,7 +790,7 @@ impl TelegramWorker {
                 tools: built.core,
                 home: self.home.clone(),
                 spill_dir: self.spill.clone(),
-                guidance: hearth_core::load_guidance(&self.home, &self.workspace).text,
+                guidance: hearth_core::load_guidance(&self.home, &self.workspace),
             },
         )
         .with_memory(Arc::clone(&self.memory))

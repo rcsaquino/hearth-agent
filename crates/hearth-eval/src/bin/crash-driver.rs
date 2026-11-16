@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use hearth_core::{Harness, Save};
+use hearth_core::{Guidance, Harness, Save};
 use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent};
 use hearth_runtime::{Agent, AgentConfig, EffectWorker};
 use hearth_tools::ToolRegistry;
@@ -74,7 +74,7 @@ fn agent(args: &[String]) -> Result<()> {
         tools: ToolRegistry::new(vec![]),
         home: home.clone(),
         spill_dir: home.join("spill"),
-        guidance: String::new(),
+        guidance: Guidance::default(),
     };
     let agent = Agent::new(session, Arc::new(ScriptedProvider), config);
     let outcome = agent.run_submission(&submitted.submission.id)?;

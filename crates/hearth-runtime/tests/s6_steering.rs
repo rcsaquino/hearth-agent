@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use hearth_core::{Harness, Submission, SubmissionStatus};
+use hearth_core::{Guidance, Harness, Submission, SubmissionStatus};
 use hearth_model::{
     ChatRequest, ContentBlock, Provider, ProviderError, ProviderStream, StreamEvent, ToolCall,
     ToolSpec, Usage,
@@ -154,7 +154,7 @@ fn agent(home: &std::path::Path, harness: &Harness, provider: Arc<dyn Provider>)
             tools: ToolRegistry::new(vec![Arc::new(Echo)]),
             home: home.to_path_buf(),
             spill_dir: home.join("spill"),
-            guidance: String::new(),
+            guidance: Guidance::default(),
         },
     )
 }

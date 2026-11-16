@@ -45,13 +45,13 @@ fn home_and_project_guidance_are_loaded_in_order() {
         guidance
             .files
             .iter()
-            .any(|path| path.ends_with("HEARTH.md"))
+            .any(|file| file.path.ends_with("HEARTH.md"))
     );
     assert!(
         guidance
             .files
             .iter()
-            .any(|path| path.ends_with("project/AGENTS.md"))
+            .any(|file| file.path.ends_with("project/AGENTS.md"))
     );
 }
 
@@ -79,6 +79,11 @@ fn every_guidance_file_is_read_whole() {
         guidance.text.len()
     );
     assert_eq!(guidance.files.len(), 1);
+    assert_eq!(
+        guidance.files[0].bytes as usize,
+        large.len(),
+        "the loader records the size it read"
+    );
 }
 
 #[test]

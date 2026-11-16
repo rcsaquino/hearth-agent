@@ -5,7 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use hearth_core::{
-    ContextBudget, Harness, NewEntry, NewTask, Save, Submission, SubmissionStatus, TaskStatus,
+    ContextBudget, Guidance, Harness, NewEntry, NewTask, Save, Submission, SubmissionStatus,
+    TaskStatus,
 };
 use hearth_memory::{Kind, MemoryService, NewMemory};
 use hearth_model::{
@@ -98,7 +99,7 @@ fn agent_with(
             tools,
             home: home.to_path_buf(),
             spill_dir: home.join("spill"),
-            guidance: String::new(),
+            guidance: Guidance::default(),
         },
     )
 }
@@ -1436,7 +1437,7 @@ fn guidance_that_cannot_fit_names_its_file() {
             tools: ToolRegistry::default(),
             home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
-            guidance: guidance.text,
+            guidance,
         },
     )
     .with_budget(budget);
@@ -1478,7 +1479,7 @@ fn the_voice_tag_guidance_is_not_repeated_in_the_runtime_note() {
             tools: ToolRegistry::default(),
             home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
-            guidance: String::new(),
+            guidance: Guidance::default(),
         },
     );
     let outcome = agent.run_submission(&submission.id).expect("run");
@@ -1631,7 +1632,10 @@ fn project_guidance_reaches_the_prompt() {
             tools: ToolRegistry::default(),
             home: home.path().to_path_buf(),
             spill_dir: home.path().join("spill"),
-            guidance: "PROJECT RULES".to_owned(),
+            guidance: Guidance {
+                text: "PROJECT RULES".to_owned(),
+                files: Vec::new(),
+            },
         },
     );
     agent.run_submission(&submission.id).expect("run");
