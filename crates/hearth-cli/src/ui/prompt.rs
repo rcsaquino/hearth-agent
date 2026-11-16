@@ -1700,116 +1700,177 @@ mod tests {
             system[0] < line_of(&text, QUESTION) && line_of(&text, QUESTION) < result[0],
             "blocks follow the order the model saw: {text}"
         );
-        assert!(!text.contains(SOUL), "a context body starts folded: {text}");
+        assert!(
+            text.contains(SOUL),
+            "the identity is open until the chat folds: {text}"
+        );
     }
 
     #[test]
-    fn e_expands_every_block_and_c_collapses_every_block() {
+    fn enter_folds_and_opens_the_whole_chat() {
         let (_home, mut app) = prompt_app(conversation());
-        let folded = rendered(&app, 100, 80);
-        assert!(!folded.contains(SOUL), "context starts folded: {folded}");
+        let text = rendered(&app, 100, 80);
         assert!(
-            !folded.contains("result line 29"),
-            "the long tool result starts folded: {folded}"
+            text.contains("result line 29"),
+            "the saved view shows the whole tool result: {text}"
         );
         assert!(
-            folded.contains("hidden") && folded.to_lowercase().contains("enter"),
-            "a folded block names what it hides and the key: {folded}"
+            !text.lines().any(|line| line.contains("hidden")),
+            "the saved view hides nothing: {text}"
         );
 
-        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
-        let open = rendered(&app, 100, 120);
-        assert!(open.contains(SOUL), "e opens every block: {open}");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
         assert!(
-            open.contains("result line 29"),
-            "e opens the tool result: {open}"
+            text.contains("package hearth-cli"),
+            "the first line of the tool result survives the fold: {text}"
         );
-        assert!(open.contains(ANSWER), "the answer is still there: {open}");
+        assert!(
+            text.contains("result line 3"),
+            "the fifth wrapped line survives the fold: {text}"
+        );
+        assert!(
+            !text.contains("result line 4"),
+            "the sixth wrapped line is hidden: {text}"
+        );
+        assert!(
+            text.lines().any(|line| line.contains("hidden")),
+            "a folded section says what it hides: {text}"
+        );
 
-        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
-        let closed = rendered(&app, 100, 80);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
         assert!(
-            !closed.contains(QUESTION) && !closed.contains(ANSWER),
-            "c folds messages too: {closed}"
+            text.contains("result line 29"),
+            "enter opens the whole chat again: {text}"
+        );
+    }
+
+    #[test]
+    fn thinking_is_shown_before_the_answer_and_t_folds_it() {
+        let thoughts = (0..10)
+            .map(|index| format!("thought line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let answers = (0..8)
+            .map(|index| format!("answer line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_home, mut app) = prompt_app(vec![json!({
+            "request": {
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "a question"}]}
+                ]
+            },
+            "prompt_hash": "thinking-hash",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": {
+                "entry_id": "entry-1",
+                "created_at": 1_700_000_005_000_000_i64,
+                "blocks": [
+                    {"type": "thinking", "text": thoughts},
+                    {"type": "text", "text": answers}
+                ],
+                "tokens_est": 20
+            },
+            "usage": Value::Null
+        })]);
+
+        let text = rendered(&app, 100, 80);
+        let thought = line_of(&text, "thought line 9");
+        let answer = line_of(&text, "answer line 7");
+        assert!(
+            thought < answer,
+            "thinking comes before the answer it precedes: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("thought line 9"),
+            "the chat fold never folds thinking: {text}"
         );
         assert!(
-            !closed.contains("result line 0") && !closed.contains(SOUL),
-            "c folds tool and context bodies: {closed}"
+            text.contains("answer line 7"),
+            "the chat fold never folds the answer: {text}"
         );
-        for label in [
-            "▌ SYSTEM · SOUL.md",
-            "▌ YOU",
-            "▌ TOOL RESULT · read_file",
-            "▌ HEARTH",
-        ] {
-            assert!(
-                closed.contains(label),
-                "c keeps every header visible: missing {label} in {closed}"
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("thought line 4"),
+            "the fifth thought survives the thinking fold: {text}"
+        );
+        assert!(
+            !text.contains("thought line 5"),
+            "the sixth thought is hidden: {text}"
+        );
+        assert!(
+            text.lines().any(|line| line.contains("hidden")),
+            "a folded thinking section says what it hides: {text}"
+        );
+        assert!(
+            text.contains("answer line 7"),
+            "t leaves the answer alone: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert!(
+            rendered(&app, 100, 80).contains("thought line 9"),
+            "t shows thinking again"
+        );
+    }
+
+    #[test]
+    fn n_p_e_c_change_nothing() {
+        let (_home, mut app) = prompt_app(conversation());
+        let before = rendered(&app, 100, 80);
+        for key in ['n', 'p', 'e', 'c'] {
+            app.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+            assert_eq!(
+                rendered(&app, 100, 80),
+                before,
+                "{key} must no longer change the view"
+            );
+        }
+        let buffer = draw(&app, 100, 80);
+        for row in 0..buffer.area.height {
+            assert_ne!(
+                buffer[(1, row)].style().bg,
+                Some(theme::SELECT_BG),
+                "row {row} still draws a cursor"
             );
         }
     }
 
     #[test]
-    fn n_and_p_move_a_cursor_over_every_block() {
-        let (_home, mut app) = prompt_app(conversation());
-        let _ = rendered(&app, 100, 80);
-        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-        let _ = rendered(&app, 100, 80);
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        let buffer = draw(&app, 100, 80);
-        assert_eq!(
-            header_bg(&buffer, 100, "▌ SYSTEM · SOUL.md"),
-            Some(theme::SELECT_BG),
-            "n selects the first block in the document"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        let buffer = draw(&app, 100, 80);
-        assert_eq!(
-            header_bg(&buffer, 100, "▌ SYSTEM · guidance"),
-            Some(theme::SELECT_BG),
-            "n reaches the next block"
-        );
-        assert_ne!(
-            header_bg(&buffer, 100, "▌ SYSTEM · SOUL.md"),
-            Some(theme::SELECT_BG),
-            "only the current block is selected"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let text = rendered(&app, 100, 80);
-        assert!(
-            text.contains("PROJECT RULES"),
-            "enter opens the selected block: {text}"
-        );
-        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let text = rendered(&app, 100, 80);
-        assert!(
-            text.contains(SOUL),
-            "p returns to the first block and enter opens it: {text}"
-        );
-    }
-
-    #[test]
-    fn a_short_message_is_a_foldable_block() {
+    fn a_short_section_survives_a_fold() {
         let (_home, mut app) = prompt_app(single_user("a short question"));
         let text = rendered(&app, 100, 40);
         assert!(text.contains("a short question"), "{text}");
-        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 40);
         assert!(
-            !text.contains("a short question"),
-            "enter folds a short message too: {text}"
+            text.contains("a short question"),
+            "a one-line message is not previewed away: {text}"
         );
         assert!(text.contains("▌ YOU"), "the header stays visible: {text}");
+
+        let rows = (0..7)
+            .map(|index| format!("row {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_home, mut app) = prompt_app(single_user(&rows));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 40);
         assert!(
-            rendered(&app, 100, 40).contains("a short question"),
-            "enter opens it again"
+            text.contains("row 4"),
+            "the fifth line survives the fold: {text}"
+        );
+        assert!(!text.contains("row 5"), "the sixth line is hidden: {text}");
+        assert!(
+            text.lines().any(|line| line.contains("hidden")),
+            "a folded section says what it hides: {text}"
         );
     }
 
@@ -1983,11 +2044,21 @@ mod tests {
             "the spinner sits on the live block header: {text}"
         );
 
-        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
             text.contains("STREAMING REPLY"),
-            "collapse all never folds the turn being written: {text}"
+            "the chat fold never folds the turn being written: {text}"
+        );
+        assert!(
+            text.contains("WEIGHING IT"),
+            "the chat fold leaves live thinking alone: {text}"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("STREAMING REPLY"),
+            "t folds thinking, never the live answer: {text}"
         );
         app.apply_event(AppEvent::Live(json!({
             "kind": "run_settled",
@@ -2106,6 +2177,11 @@ mod tests {
         });
         let (_home, app) = prompt_app(vec![newest, oldest]);
         let text = rendered(&app, 100, 80);
+        assert_eq!(
+            text.matches("A PRIVATE THOUGHT").count(),
+            1,
+            "the saved thinking is shown once: {text}"
+        );
         let lowered = text.to_lowercase();
         assert_eq!(
             text.matches("FIRST ANSWER").count(),
@@ -2154,24 +2230,29 @@ mod tests {
     #[test]
     fn a_realistic_chat_fits_eighty_and_one_hundred_and_twenty_columns() {
         for width in [80u16, 120] {
-            let (_home, app) = prompt_app(conversation());
-            let text = rendered(&app, width, 80);
-            for line in cache_lines(&app) {
-                assert!(
-                    line.width() <= usize::from(width) - 2,
-                    "line {line:?} does not fit {width} columns"
-                );
-            }
-            for expected in [
-                "▌ SYSTEM · SOUL.md",
-                "▌ YOU",
-                "▌ TOOL RESULT · read_file",
-                ANSWER,
-            ] {
-                assert!(
-                    text.contains(expected),
-                    "width {width} is missing {expected}: {text}"
-                );
+            let (_home, mut app) = prompt_app(conversation());
+            for pass in 0..2 {
+                if pass == 1 {
+                    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                }
+                let text = rendered(&app, width, 120);
+                for line in cache_lines(&app) {
+                    assert!(
+                        line.width() <= usize::from(width) - 2,
+                        "line {line:?} does not fit {width} columns"
+                    );
+                }
+                for expected in [
+                    "▌ SYSTEM · SOUL.md",
+                    "▌ YOU",
+                    "▌ TOOL RESULT · read_file",
+                    ANSWER,
+                ] {
+                    assert!(
+                        text.contains(expected),
+                        "width {width} is missing {expected}: {text}"
+                    );
+                }
             }
         }
     }
@@ -2179,13 +2260,18 @@ mod tests {
     #[test]
     fn a_narrow_width_keeps_every_line_inside_the_card() {
         for width in [48u16, 24, 12] {
-            let (_home, app) = prompt_app(conversation());
-            let _ = rendered(&app, width, 30);
-            for line in cache_lines(&app) {
-                assert!(
-                    line.width() <= usize::from(width) - 2,
-                    "line {line:?} overflows {width} columns"
-                );
+            let (_home, mut app) = prompt_app(conversation());
+            for pass in 0..2 {
+                if pass == 1 {
+                    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                }
+                let _ = rendered(&app, width, 30);
+                for line in cache_lines(&app) {
+                    assert!(
+                        line.width() <= usize::from(width) - 2,
+                        "line {line:?} overflows {width} columns"
+                    );
+                }
             }
         }
     }

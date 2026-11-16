@@ -1047,7 +1047,6 @@ mod tests {
             },
             "usage": json!(null)
         })];
-        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let text = buffer_text(&app, 100, 100);
         for label in [
             "▌ SYSTEM · SOUL.md",
@@ -1117,11 +1116,10 @@ mod tests {
             },
             "usage": json!(null)
         })];
-        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let text = buffer_text(&app, 100, 120);
         assert!(
             text.contains("identity line 11"),
-            "the whole identity is opened by expand all: {text}"
+            "the whole identity is open until the chat folds: {text}"
         );
         assert!(
             text.contains("The path to read."),
@@ -1132,7 +1130,7 @@ mod tests {
         assert!(text.contains("the whole answer"), "{text}");
         assert!(
             !text.contains("hidden"),
-            "expand all leaves nothing folded: {text}"
+            "an unfolded chat hides nothing: {text}"
         );
     }
 
@@ -1163,10 +1161,16 @@ mod tests {
             .lines()
             .find(|line| line.contains("follow") && line.contains("quit"))
             .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
-        for key in ["scroll", "block", "fold", "all", "follow"] {
+        for key in ["scroll", "fold", "thinking", "follow"] {
             assert!(
                 footer.contains(key),
                 "the footer is missing {key}: {footer}"
+            );
+        }
+        for gone in ["block", "all"] {
+            assert!(
+                !footer.contains(gone),
+                "the footer still names {gone}: {footer}"
             );
         }
         assert_eq!(
@@ -1240,7 +1244,6 @@ mod tests {
             "response": json!(null),
             "usage": json!(null)
         })];
-        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let _ = buffer_text(&app, 100, 24);
         for _ in 0..3 {
             app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -1419,7 +1422,6 @@ mod tests {
                 })
             })
             .collect();
-        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let _ = buffer_text(&app, 100, 24);
         app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
         assert_eq!(
