@@ -124,29 +124,17 @@ pub(crate) fn toggle_fold(prompt: &mut PromptView) {
     prompt.collapsed = !prompt.collapsed;
 }
 
-/// Fold or open every thinking block, leaving the chat as it is.
-pub(crate) fn toggle_thinking(prompt: &mut PromptView) {
-    prompt.thinking_collapsed = !prompt.thinking_collapsed;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     /// The loaded requests, named by hash and answering entry.
     signature: String,
     collapsed: bool,
-    thinking_collapsed: bool,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(
-        exchanges: &[Value],
-        collapsed: bool,
-        thinking_collapsed: bool,
-        width: u16,
-        zone: &Zone,
-    ) -> Self {
+    fn new(exchanges: &[Value], collapsed: bool, width: u16, zone: &Zone) -> Self {
         let mut signature = String::new();
         for exchange in exchanges {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
@@ -157,7 +145,6 @@ impl CacheKey {
         Self {
             signature,
             collapsed,
-            thinking_collapsed,
             width,
             zone: zone.name().to_owned(),
         }
@@ -210,7 +197,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let key = CacheKey::new(
         &app.prompt.exchanges,
         app.prompt.collapsed,
-        app.prompt.thinking_collapsed,
         inner.width,
         &app.zone,
     );
@@ -241,14 +227,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .prompt
         .live
         .as_ref()
-        .map(|live| {
-            live_lines(
-                live,
-                width,
-                app.prompt.collapsed,
-                app.prompt.thinking_collapsed,
-            )
-        })
+        .map(|live| live_lines(live, width, app.prompt.collapsed))
         .unwrap_or_default();
     let saved = cache.lines.len();
     let total = saved + live.len();
@@ -314,17 +293,12 @@ fn status_line(summary: &Summary, width: usize) -> Line<'static> {
 /// The turn being written, drawn below the saved chat with its thinking before
 /// its text and its working row last, so the tail holds the spinner while the
 /// text grows above it.
-fn live_lines(
-    live: &LiveReply,
-    width: usize,
-    collapsed: bool,
-    thinking_collapsed: bool,
-) -> Vec<Line<'static>> {
+fn live_lines(live: &LiveReply, width: usize, collapsed: bool) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from("")];
     if !live.thinking.is_empty() {
         let block = thinking_block([live.thinking.clone()], "streaming".to_owned())
             .expect("a thinking block");
-        let mut painter = Painter::new(width, collapsed, thinking_collapsed);
+        let mut painter = Painter::new(width, collapsed);
         painter.block(&block);
         lines.extend(painter.lines);
         lines.push(Line::from(""));
@@ -432,7 +406,7 @@ enum Notice {
     NoReply(&'static str),
 }
 
-/// What a section obeys: the whole chat, nothing, or thinking alone.
+/// What a section obeys: the whole chat, nothing, or the thinking ink.
 #[derive(Clone, Copy)]
 enum Fold {
     Chat,
@@ -441,11 +415,10 @@ enum Fold {
 }
 
 impl Fold {
-    fn open(self, collapsed: bool, thinking_collapsed: bool) -> bool {
+    fn open(self, collapsed: bool) -> bool {
         match self {
             Fold::Answer => true,
-            Fold::Chat => !collapsed,
-            Fold::Thinking => !thinking_collapsed,
+            Fold::Chat | Fold::Thinking => !collapsed,
         }
     }
 }
@@ -1007,7 +980,7 @@ fn no_answer(reason: &str) -> &'static str {
 
 fn build_cache(exchanges: &[Value], key: &CacheKey, width: usize, zone: &Zone) -> PromptCache {
     let chat = derive(exchanges, zone);
-    let mut painter = Painter::new(width, key.collapsed, key.thinking_collapsed);
+    let mut painter = Painter::new(width, key.collapsed);
     for entry in &chat.entries {
         match entry {
             Entry::Notice(notice) => painter.notice(notice),
@@ -1048,7 +1021,7 @@ fn section_rows(text: &str, width: usize, open: bool) -> (Vec<String>, Option<St
     (rows, Some(stub))
 }
 
-fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: bool) -> Vec<Content> {
+fn content(block: &Block, inner: usize, collapsed: bool) -> Vec<Content> {
     let mut rows = Vec::new();
     for part in &block.parts {
         if part.label.is_none() && part.text.trim().is_empty() {
@@ -1070,7 +1043,7 @@ fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: boo
         if let Some(label) = &part.label {
             rows.push(Content::Label(label.clone(), ink));
         }
-        let open = part.fold.open(collapsed, thinking_collapsed);
+        let open = part.fold.open(collapsed);
         let (lines, stub) = section_rows(&part.text, inner, open);
         rows.extend(lines.into_iter().map(|line| Content::Text(line, ink)));
         if let Some(stub) = stub {
@@ -1084,16 +1057,14 @@ fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: boo
 struct Painter {
     width: usize,
     collapsed: bool,
-    thinking_collapsed: bool,
     lines: Vec<Line<'static>>,
 }
 
 impl Painter {
-    fn new(width: usize, collapsed: bool, thinking_collapsed: bool) -> Self {
+    fn new(width: usize, collapsed: bool) -> Self {
         Self {
             width: width.max(1),
             collapsed,
-            thinking_collapsed,
             lines: Vec::new(),
         }
     }
@@ -1131,7 +1102,7 @@ impl Painter {
 
     fn block(&mut self, block: &Block) {
         let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        let rows = content(block, inner, self.collapsed, self.thinking_collapsed);
+        let rows = content(block, inner, self.collapsed);
         self.gap();
         let label_style = tinted(block.accent, block.bg).add_modifier(Modifier::BOLD);
         let header = band_line(
@@ -1951,7 +1922,7 @@ mod tests {
             text: "STREAMING REPLY".to_owned(),
             started: Instant::now(),
         };
-        let lines = live_lines(&live, 100, false, false);
+        let lines = live_lines(&live, 100, false);
         assert_eq!(
             lines.first().map(|line| line.width()),
             Some(0),

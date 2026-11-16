@@ -182,8 +182,6 @@ pub struct PromptView {
     pub exchanges: Vec<Value>,
     /// The whole chat folds to a preview of every section; Enter toggles.
     pub collapsed: bool,
-    /// Thinking blocks fold on their own; `t` toggles.
-    pub thinking_collapsed: bool,
     pub scroll: usize,
     pub max_scroll: Cell<usize>,
     pub loading: bool,
@@ -200,8 +198,7 @@ impl Default for PromptView {
     fn default() -> Self {
         Self {
             exchanges: Vec::new(),
-            collapsed: false,
-            thinking_collapsed: false,
+            collapsed: true,
             scroll: 0,
             max_scroll: Cell::new(0),
             loading: false,
@@ -898,7 +895,6 @@ impl App {
     fn handle_prompt(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('f') => ui::prompt::toggle_follow(&mut self.prompt),
-            KeyCode::Char('t') => ui::prompt::toggle_thinking(&mut self.prompt),
             KeyCode::Enter => ui::prompt::toggle_fold(&mut self.prompt),
             KeyCode::Up | KeyCode::Char('k') => ui::prompt::scroll_up(&mut self.prompt, 1),
             KeyCode::Down | KeyCode::Char('j') => ui::prompt::scroll_down(&mut self.prompt, 1),
