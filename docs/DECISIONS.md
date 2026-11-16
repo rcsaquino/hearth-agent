@@ -2349,3 +2349,20 @@ just after.
 - `SOUL.md` was already unbounded and stays that way; the two file kinds now
   behave alike. The prefix cache cost of editing a large guidance file is real
   and stays the person's to accept. This supersedes the 2026-11-09 cap entry.
+
+## 2026-11-16: Every segment budget is reported to the person
+
+- `SEGMENT_BUDGETS` is the one table naming each budgeted segment and its
+  budget. `TokenCounts::segments` reads that table, `over_budget` filters it, and
+  the CLI and Doctor both consume it, so no surface can drift from the spec
+  numbers. `TokenCounts::from_document` reads the counts a saved prompt recorded,
+  which is what both read-only surfaces have.
+- The Prompt tab prints a warning line above the layer it names, because the layer
+  block already shows the count and the line adds the comparison in the same
+  place. The Doctor prints one line per offending segment, plus a fixed-overhead
+  line against the section 14 target; a clean prompt prints
+  `prompt: ok (N fixed tok)`.
+- The model is not told. It cannot edit `SOUL.md` or its own tool schemas, so a
+  note would spend prefix tokens on a fact only the person can act on. The log
+  line stays for diagnosis. Reporting the same numbers in the system prompt was
+  rejected for that cost.

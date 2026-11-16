@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.34, plain-language edition
+**Status:** Draft 0.35, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,15 @@
 ---
 
 ## A note on language
+
+Draft 0.35 reports the segment budgets. A prompt layer over its spec budget now
+prints a `▲ identity over budget · 3,200 tok of 800` line above the layer in the
+Prompt tab, and the Doctor prints `prompt: identity over budget (3200 tok of
+800)` from the newest saved prompt, plus a fixed-overhead line when the total
+passes the section 14 target. The budget table, the segment lookup, and
+`TokenCounts::from_document` live in `budget.rs`, so both surfaces read one
+definition. The model is not told: it cannot trim `SOUL.md` or its own tool
+schemas, and the person is the one who can.
 
 Draft 0.34 reads guidance whole. `HEARTH.md` and every `AGENTS.md` reach the
 prompt exactly as written: the 16 KB per-file cap, the 32 KB combined cap, the
@@ -894,7 +903,10 @@ Every request is assembled in the same order:
 | L7 runtime | Current time in `identity.timezone`, ISO 8601 | Every turn | 150 |
 
 L0 through L4 form the cacheable prefix. It changes only when `SOUL.md`, the
-guidance files, tools, rules, or skills change. The L4 budget is a warning: every
+guidance files, tools, rules, or skills change. Every segment budget is a warning,
+not a refusal: the Prompt tab prints a line naming each layer over its budget with
+its count and the budget, and the Doctor reports the same check from the newest
+saved prompt, including the fixed-overhead target. The L4 budget is a warning: every
 active skill is indexed, up to the 50-active count cap, and a long description
 never retires one. L5 is append-only, so the provider's prefix cache
 keeps working. L6 is a delimited context message immediately before the newest user
