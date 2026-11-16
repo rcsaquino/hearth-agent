@@ -645,16 +645,13 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
             )),
             _ => {}
         }
+        if let Some(note) = message["runtime_note"].as_str() {
+            rows.push(
+                PromptRow::text("runtime note", theme::muted(), note)
+                    .with_meta(token_meta(view.request(), "runtime")),
+            );
+        }
     }
-
-    rows.push(
-        PromptRow::text(
-            "runtime note",
-            theme::muted(),
-            view.request()["runtime"].as_str().unwrap_or_default(),
-        )
-        .with_meta(token_meta(view.request(), "runtime")),
-    );
 
     let response = &view.exchange["response"];
     if response.is_null() {
@@ -1103,9 +1100,9 @@ mod tests {
             "request · tools",
             "system · relevant memory",
             "user",
+            "runtime note",
             "assistant · thinking",
             "tool call · read_file",
-            "runtime note",
             "response · thinking",
             "response",
             "response · tool · lookup",

@@ -538,13 +538,21 @@ fn the_saved_document_marks_the_user_message_that_carried_the_runtime_note() {
         .enumerate()
         .filter(|(_, message)| message.get("runtime_note").is_some())
         .collect::<Vec<_>>();
-    assert_eq!(marked.len(), 1, "one message carries the note: {transcript:?}");
+    assert_eq!(
+        marked.len(),
+        1,
+        "one message carries the note: {transcript:?}"
+    );
     let (index, carrier) = marked[0];
     assert_eq!(carrier["role"], json!("user"));
     assert_eq!(carrier["runtime_note"], json!("RUNTIME"));
     assert_eq!(carrier["blocks"][0]["text"], json!("newest"));
 
-    let sent = prompt.request.messages.last().expect("newest request message");
+    let sent = prompt
+        .request
+        .messages
+        .last()
+        .expect("newest request message");
     assert_eq!(sent.role, Role::User);
     assert!(
         text_of(sent).ends_with("RUNTIME"),
@@ -608,7 +616,11 @@ fn the_saved_document_marks_the_tool_result_that_carried_the_runtime_note() {
         json!("file body"),
         "the note is a marker on the message, not a second result"
     );
-    let sent = prompt.request.messages.last().expect("newest request message");
+    let sent = prompt
+        .request
+        .messages
+        .last()
+        .expect("newest request message");
     assert_eq!(sent.role, Role::Tool);
     assert!(
         sent.blocks.iter().any(|block| match block {
@@ -857,9 +869,16 @@ fn the_prompt_reports_segment_tokens_and_fixed_overhead() {
         estimate(&serde_json::to_string(&prompt.document["tools"]).expect("tools JSON"))
     );
     assert_eq!(tokens.rules, estimate("S1"));
+    let mut sent = prompt.document["transcript"].clone();
+    for message in sent.as_array_mut().expect("transcript") {
+        message
+            .as_object_mut()
+            .expect("message")
+            .remove("runtime_note");
+    }
     assert_eq!(
         tokens.transcript,
-        estimate(&serde_json::to_string(&prompt.document["transcript"]).expect("transcript JSON"))
+        estimate(&serde_json::to_string(&sent).expect("transcript JSON"))
     );
     assert_eq!(tokens.recall, estimate("R1"));
     assert_eq!(tokens.runtime, estimate("RUNTIME"));

@@ -66,7 +66,25 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
             input.skills_index
         ))],
     });
-    let history_messages = paired_messages(history);
+    let mut history_messages = paired_messages(history);
+    let mut transcript: Vec<Value> = history_messages
+        .iter()
+        .map(|message| {
+            json!({
+                "role": role_str(message.role),
+                "blocks": message.blocks.iter().map(block_json).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    // The note is text inside a sent message, but the transcript estimates the
+    // history without it and the runtime layer carries its cost. Record where it
+    // rode so a reader of the document does not look for a message of its own.
+    let transcript_text = serde_json::to_string(&transcript)
+        .map_err(|error| CoreError::Invalid(error.to_string()))?;
+    let runtime_carrier = attach_runtime_note(&mut history_messages, &input.runtime_note);
+    if let Some(index) = runtime_carrier {
+        transcript[index]["runtime_note"] = Value::String(input.runtime_note.clone());
+    }
     let newest_user = history_messages
         .iter()
         .rposition(|message| message.role == Role::User);
@@ -82,17 +100,7 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         }
         messages.push(message.clone());
     }
-    attach_runtime_note(&mut messages, &input.runtime_note);
 
-    let transcript: Vec<Value> = history_messages
-        .iter()
-        .map(|message| {
-            json!({
-                "role": role_str(message.role),
-                "blocks": message.blocks.iter().map(block_json).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
     let tools: Vec<Value> = input
         .tools
         .iter()
@@ -109,8 +117,6 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
     } else {
         serde_json::to_string(&tools).map_err(|error| CoreError::Invalid(error.to_string()))?
     };
-    let transcript_text = serde_json::to_string(&transcript)
-        .map_err(|error| CoreError::Invalid(error.to_string()))?;
     let tokens = TokenCounts::new(
         tokens_for(&input.soul),
         tokens_for(&tools_text),
@@ -144,7 +150,6 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
         "guidance": input.guidance,
         "recall": input.recall,
         "transcript": transcript,
-        "runtime": input.runtime_note,
         "model": input.model,
         "session_id": input.conversation_id,
         "prefix_hash": prefix_hash,
@@ -189,14 +194,13 @@ pub fn build(input: PromptInput, history: &[Entry]) -> Result<Prompt, CoreError>
 /// tool message instead, where it is read as context next to the content it
 /// describes. A conversation with neither has nowhere to put it, so the note is
 /// dropped rather than returned to instruction position.
-fn attach_runtime_note(messages: &mut [ChatMessage], note: &str) {
-    let Some(message) = messages
-        .iter_mut()
-        .rev()
-        .find(|message| matches!(message.role, Role::User | Role::Tool))
-    else {
-        return;
-    };
+///
+/// Returns the index of the message that now carries the note.
+fn attach_runtime_note(messages: &mut [ChatMessage], note: &str) -> Option<usize> {
+    let index = messages
+        .iter()
+        .rposition(|message| matches!(message.role, Role::User | Role::Tool))?;
+    let message = &mut messages[index];
     if message.role == Role::Tool
         && let Some(ContentBlock::ToolResult { content, .. }) = message
             .blocks
@@ -206,11 +210,12 @@ fn attach_runtime_note(messages: &mut [ChatMessage], note: &str) {
     {
         content.push_str("\n\n");
         content.push_str(note);
-        return;
+        return Some(index);
     }
     message
         .blocks
         .push(ContentBlock::Text(format!("\n\n{note}")));
+    Some(index)
 }
 
 fn hash_part(text: &str) -> String {
