@@ -181,7 +181,7 @@ fn work_card(app: &App, frame: &mut Frame, area: Rect) {
         .and_then(|status| status["memory_items"].as_u64())
         .unwrap_or(0);
     let standing = status
-        .and_then(|status| status["standing_bullets"].as_u64())
+        .and_then(|status| status["rules_bullets"].as_u64())
         .unwrap_or(0);
     let recall = status.and_then(|status| status.get("memory_recall"));
     let embeddings_active = recall
