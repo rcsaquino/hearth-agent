@@ -306,6 +306,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, Kind::Person);
         assert_eq!(found[0].subject, "alice");
+        assert_eq!(found[0].content, "the user's sister is Alice");
     }
 
     #[test]
@@ -314,6 +315,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].subject, "bob");
         assert_eq!(found[0].kind, Kind::Person);
+        assert_eq!(found[0].content, "Bob is the user's boss");
     }
 
     #[test]
@@ -321,6 +323,36 @@ mod tests {
         let found = candidates("I prefer dark roast coffee in the morning.");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, Kind::Preference);
+        assert_eq!(found[0].content, "the user prefers dark roast coffee in the morning");
+        assert_eq!(found[0].subject, "user");
+    }
+
+    #[test]
+    fn a_first_person_preference_names_the_user() {
+        let found = candidates("I prefer dark mode.");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, "the user prefers dark mode");
+        assert_eq!(found[0].subject, "user");
+    }
+
+    #[test]
+    fn a_third_person_statement_without_a_name_is_dropped() {
+        assert!(candidates("Remember that he likes apples.").is_empty());
+    }
+
+    #[test]
+    fn a_named_third_person_statement_keeps_the_name() {
+        let found = candidates("Remember that Alice likes apples.");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, "Alice likes apples");
+        assert_eq!(found[0].subject, "alice");
+    }
+
+    #[test]
+    fn a_first_person_remember_statement_names_the_user() {
+        let found = candidates("Remember that we ship on Fridays.");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, "the user ships on Fridays");
     }
 
     #[test]

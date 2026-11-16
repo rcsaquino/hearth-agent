@@ -22,6 +22,7 @@
 //! features ranks the pool, and a greedy fill spends the token budget on the best
 //! value per token.
 
+mod actor;
 mod digest;
 mod embedding;
 mod errors;
@@ -1056,4 +1057,28 @@ mod tests {
         let names: Vec<String> = service.tools().iter().map(|t| t.spec().name).collect();
         assert_eq!(names, vec![FORGET, RECALL, SAVE, TRANSCRIPT]);
     }
+    #[test]
+    fn an_existing_vague_row_still_renders() {
+        let (_directory, service) = service();
+        let row = seed(&service, "bob likes apples", "bob");
+        let id = row.id.clone();
+        service
+            .session()
+            .storage()
+            .write(move |writer| {
+                writer.execute(
+                    "UPDATE memories SET content = 'he likes apples', terms = 'he likes apples' \
+                     WHERE id = ?",
+                    [id],
+                )
+            })
+            .expect("a row written before the actor rule");
+        let recall = service.recall("apples").expect("recall");
+        assert!(
+            recall.digest.contains("he likes apples"),
+            "the new rule must not hide an existing row: {}",
+            recall.digest
+        );
+    }
+
 }

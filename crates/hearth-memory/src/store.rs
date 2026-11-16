@@ -1430,4 +1430,69 @@ mod tests {
             Some(replaced.memory().id.as_str())
         );
     }
+    #[test]
+    fn a_statement_with_a_pronoun_is_refused() {
+        let (_directory, session) = home();
+        for content in [
+            "He likes apples",
+            "I prefer dark mode",
+            "you should deploy on Friday",
+            "we ship on Fridays",
+        ] {
+            let error = insert(
+                &session,
+                Pending {
+                    item: NewMemory::new(content),
+                    vector: None,
+                },
+                MemoryConfig::default().rules_max_tokens,
+            )
+            .expect_err("a pronoun has no antecedent in a memory");
+            assert_eq!(error.code, Code::InvalidInput, "{content}");
+            assert!(
+                error.message.contains("memory content says"),
+                "the refusal must name the pronoun and the rule: {}",
+                error.message
+            );
+        }
+        assert_eq!(
+            count(&session).expect("count"),
+            0,
+            "a refused write must save nothing"
+        );
+    }
+
+    #[test]
+    fn a_statement_with_a_named_actor_is_accepted() {
+        let (_directory, session) = home();
+        for content in ["Bob likes apples", "the user likes apples"] {
+            insert(
+                &session,
+                Pending {
+                    item: NewMemory::new(content),
+                    vector: None,
+                },
+                MemoryConfig::default().rules_max_tokens,
+            )
+            .expect("a named actor is standalone");
+        }
+        assert_eq!(count(&session).expect("count"), 2);
+    }
+
+    #[test]
+    fn a_rule_needs_no_actor() {
+        let (_directory, session) = home();
+        insert(
+            &session,
+            Pending {
+                item: NewMemory::new("Never deploy on Friday")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("an imperative rule has no pronoun");
+    }
+
 }
