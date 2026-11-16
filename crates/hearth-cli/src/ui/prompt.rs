@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use hearth_runtime::Zone;
+use hearth_runtime::{SegmentCost, TokenCounts, Zone};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -407,6 +407,8 @@ enum Notice {
     Rewritten(usize),
     /// The request has no saved answer.
     NoReply,
+    /// A prompt layer costs more than its spec budget.
+    OverBudget(SegmentCost),
 }
 
 /// What a section obeys: the whole chat, nothing, or thinking alone.
@@ -516,6 +518,9 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
             let text = layer_text(request, layer);
             if text.trim().is_empty() {
                 continue;
+            }
+            if let Some(over) = over_layer(request, layer) {
+                chat.entries.push(Entry::Notice(Notice::OverBudget(over)));
             }
             chat.entries.push(Entry::Block(Block {
                 label: format!("SYSTEM · {}", layer.label),
@@ -928,6 +933,14 @@ fn cost(tokens: Option<u64>) -> String {
         .unwrap_or_default()
 }
 
+/// A layer's count against its budget, when the saved document records it over.
+fn over_layer(request: &Value, layer: &Layer) -> Option<SegmentCost> {
+    let counts = TokenCounts::from_document(request)?;
+    counts
+        .segments()
+        .find(|segment| segment.name == layer.tokens && segment.over())
+}
+
 fn build_cache(exchanges: &[Value], key: &CacheKey, width: usize, zone: &Zone) -> PromptCache {
     let chat = derive(exchanges, zone);
     let mut painter = Painter::new(width, key.collapsed);
@@ -1043,6 +1056,19 @@ impl Painter {
                 row.fit(width)
             }
             Notice::NoReply => Line::styled(clip("  no reply saved", width), theme::faint()),
+            Notice::OverBudget(segment) => {
+                let mut row = Row::new();
+                row.push(format!(" ▲ {} over budget", segment.name), theme::warn());
+                row.push(
+                    format!(
+                        " · {} tok of {}",
+                        count(segment.tokens),
+                        count(segment.budget)
+                    ),
+                    theme::faint(),
+                );
+                row.fit(width)
+            }
         };
         self.lines.push(line);
     }

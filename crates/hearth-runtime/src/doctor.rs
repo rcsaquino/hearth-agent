@@ -3,12 +3,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use hearth_config::{ConfigError, Settings};
-use hearth_core::{IdGen, UuidV7};
+use hearth_core::{FIXED_OVERHEAD_TARGET, IdGen, SegmentCost, TokenCounts, UuidV7};
 use hearth_model::{
     ChatMessage, ChatRequest, ContentBlock, OpenAiCompatibleProvider, Provider, ProviderError, Role,
 };
 use hearth_telegram::{TelegramClient, TelegramError};
 use thiserror::Error;
+
+use crate::inspect;
 
 #[derive(Debug, Error)]
 pub enum DoctorError {
@@ -24,6 +26,8 @@ pub enum DoctorError {
     Telegram(#[from] TelegramError),
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    #[error(transparent)]
+    Inspect(#[from] inspect::InspectError),
 }
 
 /// Check the home folder and write the findings to a writer.
@@ -44,12 +48,47 @@ pub fn doctor_with(home: &Path, live: bool, out: &mut impl Write) -> Result<(), 
     writeln!(out, "settings: ok")?;
     writeln!(out, "database: ok (schema {version})")?;
     writeln!(out, "lock: {lock}")?;
+    for line in prompt_report(home)? {
+        writeln!(out, "{line}")?;
+    }
 
     if live {
         check_telegram(&settings, out)?;
         check_provider(&settings, out)?;
     }
     Ok(())
+}
+
+/// The newest saved prompt's cost against every spec budget.
+fn prompt_report(home: &Path) -> Result<Vec<String>, DoctorError> {
+    let Some(document) = inspect::latest_prompt(home)? else {
+        return Ok(vec!["prompt: no prompt saved yet".to_owned()]);
+    };
+    let Some(tokens) = TokenCounts::from_document(&document) else {
+        return Ok(vec![
+            "prompt: the saved prompt has no token counts".to_owned(),
+        ]);
+    };
+    let mut lines: Vec<String> = tokens
+        .segments()
+        .filter(SegmentCost::over)
+        .map(|segment| {
+            format!(
+                "prompt: {} over budget ({} tok of {})",
+                segment.name, segment.tokens, segment.budget
+            )
+        })
+        .collect();
+    if tokens.fixed > FIXED_OVERHEAD_TARGET {
+        lines.push(format!(
+            "prompt: fixed overhead over target ({} tok of {FIXED_OVERHEAD_TARGET})",
+            tokens.fixed
+        ));
+    }
+    if lines.is_empty() {
+        lines.push(format!("prompt: ok ({} fixed tok)", tokens.fixed));
+    }
+    Ok(lines)
 }
 
 fn check_telegram(settings: &Settings, out: &mut impl Write) -> Result<(), DoctorError> {

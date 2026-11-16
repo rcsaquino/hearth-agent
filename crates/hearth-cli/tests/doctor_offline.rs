@@ -113,7 +113,7 @@ fn doctor_names_a_prompt_segment_over_budget() {
     );
     let output = run(home.path(), false).expect("doctor");
     assert!(output.contains("identity over budget"), "{output}");
-    assert!(output.contains("3,200 tok of 800"), "{output}");
+    assert!(output.contains("3200 tok of 800"), "{output}");
 }
 
 #[test]
