@@ -1,42 +1,77 @@
-//! The Prompt tab as one conversation.
+//! The Prompt tab as a chat window.
 //!
 //! The harness saves a full prompt for every request, so consecutive requests
-//! differ only in their tail. This view merges the saved requests into a single
-//! transcript and prints each request's delta under a bare rule. `s` hides the
-//! system layers, long message blocks fold, and the turn being written is drawn
-//! at the tail with its spinner on the message label.
+//! differ only in their tail. This view merges the saved requests into one chat:
+//! every context layer, recall, message, and answer becomes a block with a
+//! banded header, a gutted body, and one fold. `n`/`p` walk the blocks, Enter
+//! folds the one under the cursor, and `e`/`c` open or close them all. The turn
+//! being written is drawn below the cached document with its spinner on the
+//! header.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use hearth_runtime::Zone;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block as Card, Borders, Paragraph};
 use serde_json::Value;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::app::{App, LiveReply, PromptView};
+use crate::app::{App, Folds, LiveReply, PromptView};
 use crate::theme;
 use crate::ui::{count, short};
 
 /// Body lines moved by PageUp and PageDown.
 const PAGE_LINES: usize = 15;
-/// Message blocks longer than this start folded.
-const COLLAPSE_LINES: usize = 12;
-/// Message and layer bodies sit this far under their label.
+/// The bar and the space a block body sits behind.
 const BODY_INDENT: usize = 2;
 /// One frame per 100 ms, which is the event loop's budget.
 const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
-/// The stable prefix layers, with the names a reader knows them by.
-const PREFIX_LAYERS: [(&str, &str); 5] = [
-    ("identity", "SOUL.md"),
-    ("guidance", "AGENTS.md"),
-    ("rules", "rules"),
-    ("skills", "skills index"),
-    ("tools", "tools"),
+
+/// One stable prompt layer: its hash in `prefix_parts`, its saved text, its
+/// token key, and the name a reader knows it by.
+struct Layer {
+    part: &'static str,
+    text: &'static str,
+    tokens: &'static str,
+    label: &'static str,
+}
+
+/// The prefix layers in the order the model reads them.
+const LAYERS: [Layer; 5] = [
+    Layer {
+        part: "identity",
+        text: "identity",
+        tokens: "identity",
+        label: "SOUL.md",
+    },
+    Layer {
+        part: "guidance",
+        text: "guidance",
+        tokens: "guidance",
+        label: "guidance",
+    },
+    Layer {
+        part: "rules",
+        text: "rules",
+        tokens: "rules",
+        label: "rules",
+    },
+    Layer {
+        part: "skills",
+        text: "skills_index",
+        tokens: "skills",
+        label: "skills index",
+    },
+    Layer {
+        part: "tools",
+        text: "tools",
+        tokens: "tools",
+        label: "tools",
+    },
 ];
 
 /// Scroll up by `lines`, pausing the live tail.
@@ -83,56 +118,84 @@ pub(crate) fn toggle_follow(prompt: &mut PromptView) {
     }
 }
 
-/// Move the block cursor down one long message block.
+/// Open every block, and every block that arrives after this key.
+pub(crate) fn expand_all(prompt: &mut PromptView) {
+    prompt.folds.open_all();
+}
+
+/// Fold every block down to its header.
+pub(crate) fn collapse_all(prompt: &mut PromptView) {
+    prompt.folds.close_all();
+}
+
+/// Move the cursor to the next block.
 pub(crate) fn next_block(prompt: &mut PromptView) {
-    select_block(prompt, 1);
-}
-
-/// Move the block cursor up one long message block.
-pub(crate) fn previous_block(prompt: &mut PromptView) {
-    select_block(prompt, -1);
-}
-
-/// Fold or unfold the block under the cursor.
-pub(crate) fn toggle_block(prompt: &mut PromptView) {
-    let Some(key) = prompt.selected_block.clone() else {
+    let Some((key, line)) = step(prompt, true) else {
         return;
     };
-    if !prompt.expanded.remove(&key) {
-        prompt.expanded.insert(key);
-    }
+    prompt.selected = Some(key);
+    reveal(prompt, line);
 }
 
-fn select_block(prompt: &mut PromptView, step: isize) {
-    let selection = {
+/// Move the cursor to the previous block.
+pub(crate) fn previous_block(prompt: &mut PromptView) {
+    let Some((key, line)) = step(prompt, false) else {
+        return;
+    };
+    prompt.selected = Some(key);
+    reveal(prompt, line);
+}
+
+/// Fold or open the block under the cursor, from the fold it was built with.
+pub(crate) fn toggle_block(prompt: &mut PromptView) {
+    let Some(key) = prompt.selected.clone() else {
+        return;
+    };
+    let default = {
         let guard = prompt.cache.borrow();
         let Some(cache) = guard.as_ref() else {
             return;
         };
-        if cache.blocks.is_empty() {
-            return;
+        match cache.blocks.iter().find(|block| block.key == key) {
+            Some(block) => block.default_open,
+            None => return,
         }
-        let index = match prompt
-            .selected_block
-            .as_ref()
-            .and_then(|key| cache.blocks.iter().position(|block| &block.key == key))
-        {
-            Some(index) if step > 0 => (index + 1).min(cache.blocks.len() - 1),
-            Some(index) => index.saturating_sub(1),
-            None => first_visible(prompt, cache),
-        };
-        (cache.blocks[index].key.clone(), cache.blocks[index].line)
     };
-    prompt.selected_block = Some(selection.0);
-    reveal(prompt, selection.1);
+    prompt.folds.toggle(&key, default);
 }
 
-fn first_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
-    let top = if prompt.follow {
+/// The block the cursor moves to: the neighbour of the selection, or the edge
+/// of the visible window when nothing is selected.
+fn step(prompt: &PromptView, forward: bool) -> Option<(String, usize)> {
+    let guard = prompt.cache.borrow();
+    let cache = guard.as_ref()?;
+    if cache.blocks.is_empty() {
+        return None;
+    }
+    let selected = prompt
+        .selected
+        .as_ref()
+        .and_then(|key| cache.blocks.iter().position(|block| &block.key == key));
+    let index = match (selected, forward) {
+        (Some(index), true) => (index + 1).min(cache.blocks.len() - 1),
+        (Some(index), false) => index.saturating_sub(1),
+        (None, true) => first_visible(prompt, cache),
+        (None, false) => last_visible(prompt, cache),
+    };
+    let block = &cache.blocks[index];
+    Some((block.key.clone(), block.line))
+}
+
+fn viewport_top(prompt: &PromptView) -> usize {
+    if prompt.follow {
         prompt.max_scroll.get()
     } else {
         prompt.scroll
-    };
+    }
+}
+
+fn first_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
+    let top = viewport_top(prompt);
     cache
         .blocks
         .iter()
@@ -140,43 +203,39 @@ fn first_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
         .unwrap_or(cache.blocks.len() - 1)
 }
 
-/// Keep the selected block on screen without moving a reader who already sees it.
+fn last_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
+    let bottom = viewport_top(prompt).saturating_add(prompt.viewport.get().max(1) - 1);
+    cache
+        .blocks
+        .iter()
+        .rposition(|block| block.line <= bottom)
+        .unwrap_or(0)
+}
+
+/// Bring a block header on screen without moving a reader who already sees it.
 fn reveal(prompt: &mut PromptView, line: usize) {
     let height = prompt.viewport.get().max(1);
-    let top = if prompt.follow {
-        prompt.max_scroll.get()
-    } else {
-        prompt.scroll
-    };
-    prompt.scroll = if line < top {
-        line
+    let top = viewport_top(prompt);
+    if line < top {
+        prompt.scroll = line;
+        prompt.follow = false;
     } else if line >= top.saturating_add(height) {
-        line.saturating_sub(height - 1)
-    } else {
-        top
-    };
-    prompt.follow = false;
+        prompt.scroll = line.saturating_sub(height - 1);
+        prompt.follow = false;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     /// The loaded requests, named by hash and answering entry.
     signature: String,
-    show_system: bool,
-    /// The long blocks the reader has opened, sorted by key.
-    expanded: Vec<String>,
+    folds: Folds,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(
-        exchanges: &[Value],
-        width: u16,
-        show_system: bool,
-        expanded: &BTreeSet<String>,
-        zone: &Zone,
-    ) -> Self {
+    fn new(exchanges: &[Value], folds: &Folds, width: u16, zone: &Zone) -> Self {
         let mut signature = String::new();
         for exchange in exchanges {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
@@ -186,64 +245,49 @@ impl CacheKey {
         }
         Self {
             signature,
-            show_system,
-            expanded: expanded.iter().cloned().collect(),
+            folds: folds.clone(),
             width,
             zone: zone.name().to_owned(),
         }
     }
 }
 
-/// One long message block, at the line of its label.
+/// One block header, at its line in the cached document.
 struct BlockSpan {
     key: String,
     line: usize,
-    /// The label row in the selection emphasis.
+    /// The fold this block was built with, so Enter toggles the right way.
+    default_open: bool,
+    /// The header row in the selection emphasis.
     selected: Line<'static>,
 }
 
-/// One built document, kept until the loaded set, the open blocks, or the
-/// view flags change.
+/// One built chat, kept until the loaded set, the folds, the width, or the
+/// zone change.
 pub(crate) struct PromptCache {
     key: CacheKey,
+    summary: Summary,
     blocks: Vec<BlockSpan>,
     lines: Vec<Line<'static>>,
 }
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let title = if app.prompt.loading {
-        " Prompt · refreshing "
+        " Prompt · chat · refreshing "
     } else if app.prompt.follow {
-        " Prompt · conversation · live "
+        " Prompt · chat · live "
     } else {
-        " Prompt · conversation · paused "
+        " Prompt · chat · paused "
     };
-    let card = Block::default()
+    let card = Card::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
         .title(theme::heading(title));
     let inner = card.inner(area);
     frame.render_widget(card, area);
 
+    let width = usize::from(inner.width);
     let height = usize::from(inner.height);
-    let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 2);
-    let body_rows = height.saturating_sub(header_rows);
-    let header_area = Rect {
-        height: header_rows as u16,
-        ..inner
-    };
-    let body = Rect {
-        y: inner.y + header_rows as u16,
-        height: body_rows as u16,
-        ..inner
-    };
-
-    if header_rows > 0 {
-        frame.render_widget(
-            Paragraph::new(header_line(app, usize::from(inner.width))),
-            header_area,
-        );
-    }
 
     if app.prompt.exchanges.is_empty() && app.prompt.live.is_none() {
         let message = if app.prompt.loading {
@@ -258,48 +302,14 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 ),
             ]
         };
-        frame.render_widget(Paragraph::new(message), body);
-    } else if body_rows > 0 {
-        draw_transcript(app, frame, body);
+        frame.render_widget(Paragraph::new(message), inner);
+        return;
     }
-}
 
-/// The model and the numbers a reader needs at a glance.
-fn header_line(app: &App, width: usize) -> Line<'static> {
-    let Some(exchange) = app.prompt.exchanges.first() else {
-        return Line::from("");
-    };
-    let request = &exchange["request"];
-    let model = request["model"].as_str().unwrap_or("unknown model");
-    let session = request["session_id"].as_str().unwrap_or("-");
-    let prefix = request["prefix_hash"].as_str().unwrap_or("-");
-    let mut row = Row::new();
-    row.push(format!(" {model}"), theme::text());
-    row.push(" · session ", theme::faint());
-    row.push(short(session, 8), theme::muted());
-    if let Some(tokens) = token(request, "total") {
-        row.push(format!(" · {} tok", count(tokens)), theme::muted());
-    }
-    row.push(" · prefix ", theme::faint());
-    row.push(short(prefix, 8), theme::muted());
-    row.fit(width)
-}
-
-fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
-    let width = usize::from(area.width);
-    let height = usize::from(area.height);
-    app.prompt.viewport.set(height);
-    let live = app
-        .prompt
-        .live
-        .as_ref()
-        .map(|live| live_lines(live, width))
-        .unwrap_or_default();
     let key = CacheKey::new(
         &app.prompt.exchanges,
-        area.width,
-        app.prompt.show_system,
-        &app.prompt.expanded,
+        &app.prompt.folds,
+        inner.width,
         &app.zone,
     );
     let mut slot = app.prompt.cache.borrow_mut();
@@ -307,105 +317,246 @@ fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
         *slot = Some(build_cache(
             &app.prompt.exchanges,
             &key,
-            &app.prompt.expanded,
+            &app.prompt.folds,
             width,
+            &app.zone,
         ));
     }
     let cache = slot.as_mut().expect("prompt cache");
 
+    // The header is drawn after the cache so it can name what the chat holds.
+    let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 2);
+    let body_rows = height.saturating_sub(header_rows);
+    if header_rows > 0 {
+        let row = Rect { height: 1, ..inner };
+        frame.render_widget(Paragraph::new(status_line(&cache.summary, width)), row);
+    }
+    if body_rows == 0 {
+        return;
+    }
+    let body = Rect {
+        y: inner.y + header_rows as u16,
+        height: body_rows as u16,
+        ..inner
+    };
+
+    let live = app
+        .prompt
+        .live
+        .as_ref()
+        .map(|live| live_lines(live, width))
+        .unwrap_or_default();
     let saved = cache.lines.len();
     let total = saved + live.len();
-    let max_scroll = total.saturating_sub(height);
+    let max_scroll = total.saturating_sub(body_rows);
     app.prompt.max_scroll.set(max_scroll);
+    app.prompt.viewport.set(body_rows);
     let scroll = if app.prompt.follow {
         max_scroll
     } else {
         app.prompt.scroll.min(max_scroll)
     };
-    let end = (scroll + height).min(total);
+    let end = (scroll + body_rows).min(total);
     let selected = app
         .prompt
-        .selected_block
-        .as_ref()
-        .and_then(|key| cache.blocks.iter().find(|block| &block.key == key));
-    let lines: Vec<Line<'static>> = (scroll..end)
-        .map(|index| {
-            if index >= saved {
-                return live[index - saved].clone();
-            }
-            match selected {
-                Some(block) if block.line == index => block.selected.clone(),
-                _ => cache.lines[index].clone(),
-            }
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(lines), area);
+        .selected
+        .as_deref()
+        .and_then(|key| cache.blocks.iter().find(|block| block.key == key))
+        .map(|block| block.line);
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(end.saturating_sub(scroll));
+    for index in scroll..end {
+        if index >= saved {
+            lines.push(live[index - saved].clone());
+        } else if Some(index) == selected {
+            let block = cache
+                .blocks
+                .iter()
+                .find(|block| block.line == index)
+                .expect("a selected block has a line");
+            lines.push(block.selected.clone());
+        } else {
+            lines.push(cache.lines[index].clone());
+        }
+    }
+    frame.render_widget(Paragraph::new(lines), body);
 }
 
-/// The turn being written, drawn below the saved document with its spinner on
-/// the first label.
+/// The model and the numbers a reader needs at a glance.
+fn status_line(summary: &Summary, width: usize) -> Line<'static> {
+    let model = if summary.model.is_empty() {
+        "unknown model"
+    } else {
+        summary.model.as_str()
+    };
+    let mut row = Row::new();
+    row.push(format!(" {model}"), theme::text());
+    let mut tail = vec![format!(
+        " · {} {} · {} {}",
+        summary.turns,
+        if summary.turns == 1 { "turn" } else { "turns" },
+        summary.messages,
+        if summary.messages == 1 {
+            "message"
+        } else {
+            "messages"
+        },
+    )];
+    if let Some(tokens) = summary.tokens {
+        tail.push(format!(" · {} tok", count(tokens)));
+    }
+    if !summary.session.is_empty() {
+        tail.push(format!(" · session {}", short(&summary.session, 8)));
+    }
+    if !summary.prefix.is_empty() {
+        tail.push(format!(" · prefix {}", short(&summary.prefix, 8)));
+    }
+    // A narrow terminal drops the cost and the identifiers before the model.
+    for text in tail {
+        if row.width + text.width() > width {
+            break;
+        }
+        row.push(text, theme::muted());
+    }
+    row.fit(width)
+}
+
+/// The turn being written, drawn below the saved chat with its spinner on the
+/// header and its thinking before its text.
 fn live_lines(live: &LiveReply, width: usize) -> Vec<Line<'static>> {
-    let mut painter = Painter::new(width);
-    painter.message_start(Role::Assistant);
-    let frame = spinner_frame(live.started);
-    let mut spinning = true;
+    let mut lines = vec![Line::from("")];
+    let frame = FRAMES[spinner_frame(live.started)];
+    lines.push(band_line(
+        vec![
+            Span::styled(format!("{frame} "), theme::accent_style()),
+            Span::styled(
+                "HEARTH".to_owned(),
+                theme::accent_style().add_modifier(Modifier::BOLD),
+            ),
+        ],
+        "streaming",
+        theme::faint(),
+        width,
+        Style::default(),
+    ));
     if !live.thinking.is_empty() {
-        painter.live_part("thinking", theme::think(), &live.thinking, Some(frame));
-        spinning = false;
+        lines.extend(body_block(
+            "thinking",
+            &live.thinking,
+            theme::THINK,
+            theme::THINK,
+            None,
+            width,
+        ));
     }
     if !live.text.is_empty() {
-        let frame = spinning.then_some(frame);
-        painter.live_part(
-            Role::Assistant.label(),
-            Role::Assistant.style(),
+        lines.extend(body_block(
+            "",
             &live.text,
-            frame,
-        );
-        spinning = false;
+            theme::ACCENT,
+            theme::TEXT,
+            None,
+            width,
+        ));
     }
-    if spinning {
-        painter.live_label(Role::Assistant.label(), Role::Assistant.style(), frame);
+    lines
+}
+
+/// A sub-panel label and its wrapped body, as one block's rows.
+fn body_block(
+    label: &str,
+    text: &str,
+    accent: Color,
+    fg: Color,
+    bg: Option<Color>,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if !label.is_empty() {
+        lines.push(label_line(label, accent, bg, width));
     }
-    painter.message_end();
-    painter.lines
+    let inner = width.saturating_sub(BODY_INDENT).max(1);
+    lines.extend(
+        wrap_text(text, inner)
+            .into_iter()
+            .map(|line| body_line(&line, accent, fg, bg, width)),
+    );
+    lines
 }
 
 fn spinner_frame(started: Instant) -> usize {
     (started.elapsed().as_millis() / 100) as usize % FRAMES.len()
 }
 
-/// One block of a conversation, derived from the saved requests.
-enum Entry {
-    /// Where one saved request ends and the next begins.
-    Divider,
-    /// The stable layers, printed once and again only when they change.
-    System { parts: Vec<SystemPart>, tokens: u64 },
-    /// The memory injected for this request, before its new input.
-    Recall { text: String, tokens: u64 },
-    /// A different conversation starts here.
-    Conversation { id: String },
-    /// A message that reached the model.
-    Message {
-        /// Stable name for the blocks this message prints.
-        key: String,
-        role: Role,
-        blocks: Vec<Value>,
-    },
-    /// The clock note that rode on the message before it.
-    Runtime { note: String },
-    /// Compaction dropped messages this view has already shown.
-    Rewritten { dropped: usize },
-    /// What the model answered.
-    Response {
-        key: String,
-        blocks: Option<Vec<Value>>,
-    },
+/// The merged chat and the numbers its header names.
+#[derive(Default)]
+struct Summary {
+    model: String,
+    session: String,
+    prefix: String,
+    tokens: Option<u64>,
+    turns: usize,
+    messages: usize,
 }
 
-struct SystemPart {
-    label: &'static str,
+#[derive(Default)]
+struct Chat {
+    summary: Summary,
+    entries: Vec<Entry>,
+}
+
+/// One printed item of the chat.
+enum Entry {
+    /// A boundary, always one line.
+    Notice(Notice),
+    /// A foldable block.
+    Block(Block),
+}
+
+enum Notice {
+    /// A different conversation starts here.
+    Conversation(String),
+    /// Compaction dropped messages this view has already shown.
+    Rewritten(usize),
+    /// The request has no saved answer.
+    NoReply,
+}
+
+/// How a block folds until the reader says otherwise.
+#[derive(Clone, Copy)]
+enum Policy {
+    Open,
+    Closed,
+    /// Open when the wrapped body has at most this many lines.
+    Fit(usize),
+}
+
+/// One run of a block body.
+struct Part {
+    /// A sub-panel label, such as a tool call or a result inside another block.
+    label: Option<String>,
     text: String,
-    tokens: u64,
+}
+
+/// One block of the chat, derived from the saved requests.
+struct Block {
+    /// Stable while its source request is loaded.
+    key: String,
+    /// The header label, uppercase.
+    label: String,
+    /// The right-aligned header meta, dropped first when the terminal is narrow.
+    meta: String,
+    /// The clock note that rode on this message. It stays visible when folded.
+    note: Option<String>,
+    parts: Vec<Part>,
+    fold: Policy,
+    /// Show the first body line while folded.
+    preview: bool,
+    /// The background band behind the header and body.
+    bg: Option<Color>,
+    /// The gutter and sub-panel label colour.
+    accent: Color,
+    /// The body text colour.
+    fg: Color,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -425,152 +576,408 @@ impl Role {
             _ => Self::System,
         }
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::User => "you",
-            Self::Assistant => "hearth",
-            Self::Tool => "tool",
-            Self::System => "system",
-        }
-    }
-
-    fn style(self) -> Style {
-        match self {
-            Self::User => theme::accent_style(),
-            Self::Assistant => theme::text(),
-            Self::Tool => theme::good(),
-            Self::System => theme::muted(),
-        }
-    }
 }
 
-/// Build the document once, with every system layer where it changed, the
-/// delta of every saved request, and the answer that followed it.
-fn derive(exchanges: &[Value]) -> Vec<Entry> {
-    let mut entries = Vec::new();
+/// Merge the newest-first exchanges into one chat, oldest request first.
+fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
+    let mut chat = Chat::default();
     let mut previous_sent: Vec<(String, String)> = Vec::new();
     let mut previous_parts: Option<Value> = None;
     let mut previous_session: Option<String> = None;
-    for (position, exchange) in exchanges.iter().rev().enumerate() {
+    let mut previous_recall: Option<String> = None;
+    let mut call_names: BTreeMap<String, String> = BTreeMap::new();
+    for exchange in exchanges.iter().rev() {
+        chat.summary.turns += 1;
+        let turn = chat.summary.turns;
         let request = &exchange["request"];
-        let hash = exchange["prompt_hash"].as_str().unwrap_or("-");
+        let at = exchange["requested_at"].as_i64().unwrap_or(0);
+        let hash = exchange["prompt_hash"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("@{at}"));
+        let clock = zone.local(at).clock();
         let session = request["session_id"].as_str().unwrap_or("-").to_owned();
-        let new_session = previous_session
-            .as_deref()
-            .is_some_and(|previous| previous != session);
-        if new_session {
-            entries.push(Entry::Conversation {
-                id: session.clone(),
-            });
+        if previous_session.as_ref() != Some(&session) {
+            if previous_session.is_some() {
+                chat.entries
+                    .push(Entry::Notice(Notice::Conversation(session.clone())));
+            }
             previous_sent.clear();
             previous_parts = None;
+            previous_recall = None;
+            call_names.clear();
         }
-        let changed = previous_parts
-            .as_ref()
-            .map(|previous| changed_parts(previous, request))
-            .unwrap_or_default();
-        if position == 0 || new_session || !changed.is_empty() {
-            let parts = system_parts(request);
-            let tokens = parts.iter().map(|part| part.tokens).sum();
-            entries.push(Entry::System { parts, tokens });
+        previous_session = Some(session);
+
+        // Every layer on the first request of a session, only the changed ones
+        // after that.
+        let changed: Vec<&Layer> = match previous_parts.as_ref() {
+            None => LAYERS.iter().collect(),
+            Some(previous) => LAYERS
+                .iter()
+                .filter(|layer| previous[layer.part] != request["prefix_parts"][layer.part])
+                .collect(),
+        };
+        for layer in changed {
+            let text = layer_text(request, layer);
+            if text.trim().is_empty() {
+                continue;
+            }
+            chat.entries.push(Entry::Block(Block {
+                key: format!("{hash}:ctx:{}", layer.part),
+                label: format!("SYSTEM · {}", layer.label),
+                meta: cost(token(request, layer.tokens)),
+                note: None,
+                parts: vec![Part { label: None, text }],
+                fold: Policy::Closed,
+                preview: false,
+                bg: Some(theme::CTX_BG),
+                accent: theme::MUTED,
+                fg: theme::MUTED,
+            }));
         }
-        entries.push(Entry::Divider);
-        let recall = request["recall"].as_str().unwrap_or_default().to_owned();
-        if !recall.trim().is_empty() {
-            entries.push(Entry::Recall {
-                text: recall,
-                tokens: token(request, "recall").unwrap_or(0),
-            });
+        previous_parts = Some(request["prefix_parts"].clone());
+
+        let recall = request["recall"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if !recall.is_empty() && previous_recall.as_deref() != Some(recall.as_str()) {
+            chat.entries.push(Entry::Block(Block {
+                key: format!("{hash}:memory"),
+                label: "MEMORY".to_owned(),
+                meta: cost(token(request, "recall")),
+                note: None,
+                parts: vec![Part {
+                    label: None,
+                    text: recall.clone(),
+                }],
+                fold: Policy::Fit(6),
+                preview: false,
+                bg: Some(theme::CTX_BG),
+                accent: theme::GOOD,
+                fg: theme::MUTED,
+            }));
+            previous_recall = Some(recall);
         }
 
         let messages = request["transcript"]
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let transcript: Vec<(String, String)> = messages.iter().map(normalized).collect();
-        let kept = transcript
-            .iter()
-            .zip(&previous_sent)
-            .take_while(|(current, previous)| current == previous)
-            .count();
+        for message in &messages {
+            remember_calls(&mut call_names, message);
+        }
+        let transcript: Vec<(String, String)> = messages.iter().map(wire_message).collect();
+        let kept = common_prefix(&transcript, &previous_sent);
         if kept < previous_sent.len() {
-            entries.push(Entry::Rewritten {
-                dropped: previous_sent.len() - kept,
-            });
+            chat.entries
+                .push(Entry::Notice(Notice::Rewritten(previous_sent.len() - kept)));
         }
         for (index, message) in messages.iter().enumerate().skip(kept) {
-            entries.push(Entry::Message {
-                key: format!("{hash}:{index}"),
-                role: Role::parse(message["role"].as_str().unwrap_or_default()),
-                blocks: message["blocks"].as_array().cloned().unwrap_or_default(),
-            });
-            if let Some(note) = message["runtime_note"].as_str()
-                && !note.trim().is_empty()
-            {
-                entries.push(Entry::Runtime {
-                    note: note.to_owned(),
-                });
+            let note = message["runtime_note"]
+                .as_str()
+                .filter(|note| !note.trim().is_empty())
+                .map(str::to_owned);
+            let role = Role::parse(message["role"].as_str().unwrap_or_default());
+            let blocks = message["blocks"].as_array().cloned().unwrap_or_default();
+            chat.entries.push(Entry::Block(message_block(
+                format!("{hash}:m{index}"),
+                role,
+                &blocks,
+                &call_names,
+                note,
+                turn,
+                &clock,
+            )));
+            chat.summary.messages += 1;
+        }
+
+        let response = &exchange["response"];
+        if response.is_null() {
+            chat.entries.push(Entry::Notice(Notice::NoReply));
+        } else {
+            let blocks = response["blocks"].as_array().cloned().unwrap_or_default();
+            let answered_at = response["created_at"].as_i64().unwrap_or(at);
+            chat.entries.push(Entry::Block(response_block(
+                format!("{hash}:reply"),
+                &blocks,
+                &call_names,
+                turn,
+                &zone.local(answered_at).clock(),
+            )));
+            chat.summary.messages += 1;
+            remember_calls(&mut call_names, response);
+        }
+
+        previous_sent = transcript;
+        if let Some(wire) = wire_form(response) {
+            previous_sent.push(wire);
+        }
+    }
+
+    if let Some(exchange) = exchanges.first() {
+        let request = &exchange["request"];
+        chat.summary.model = request["model"].as_str().unwrap_or_default().to_owned();
+        chat.summary.session = request["session_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        chat.summary.prefix = request["prefix_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        chat.summary.tokens = token(request, "total");
+    }
+    chat
+}
+
+/// One message as the next request carries it, as a role and its blocks.
+fn wire_message(message: &Value) -> (String, String) {
+    let role = message["role"].as_str().unwrap_or_default().to_owned();
+    let blocks = message
+        .get("blocks")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    (role, blocks.to_string())
+}
+
+/// The answer as the next request carries it.
+///
+/// A reading of the saved JSON that mirrors `hearth_core::prompt::carries_request`:
+/// the CLI reads blobs, not provider blocks, so it keeps the rule locally rather
+/// than depending on core for one predicate. Thinking is never sent back, and a
+/// turn that asked nothing was never written as an entry.
+fn wire_form(response: &Value) -> Option<(String, String)> {
+    let blocks: Vec<Value> = response["blocks"]
+        .as_array()?
+        .iter()
+        .filter(|block| block["type"] != "thinking")
+        .cloned()
+        .collect();
+    let asked = blocks.iter().any(|block| match block["type"].as_str() {
+        Some("thinking") => false,
+        Some("text") => block["text"]
+            .as_str()
+            .is_some_and(|text| !text.trim().is_empty()),
+        _ => true,
+    });
+    if !asked {
+        return None;
+    }
+    Some(("assistant".to_owned(), Value::Array(blocks).to_string()))
+}
+
+fn common_prefix(current: &[(String, String)], previous: &[(String, String)]) -> usize {
+    current
+        .iter()
+        .zip(previous)
+        .take_while(|(now, before)| now == before)
+        .count()
+}
+
+fn remember_calls(calls: &mut BTreeMap<String, String>, message: &Value) {
+    for block in message["blocks"].as_array().into_iter().flatten() {
+        if block["type"] != "tool_call" {
+            continue;
+        }
+        if let (Some(id), Some(name)) = (block["id"].as_str(), block["name"].as_str()) {
+            calls
+                .entry(id.to_owned())
+                .or_insert_with(|| name.to_owned());
+        }
+    }
+}
+
+fn message_block(
+    key: String,
+    role: Role,
+    blocks: &[Value],
+    calls: &BTreeMap<String, String>,
+    note: Option<String>,
+    turn: usize,
+    clock: &str,
+) -> Block {
+    let visible = visible(blocks);
+    let only_calls =
+        !visible.is_empty() && visible.iter().all(|block| block["type"] == "tool_call");
+    let failed = visible
+        .iter()
+        .any(|block| block["is_error"].as_bool() == Some(true));
+    let (label, bg, accent, fold, preview) = match role {
+        Role::User => (
+            "YOU".to_owned(),
+            Some(theme::USER_BG),
+            theme::ACCENT,
+            Policy::Fit(12),
+            false,
+        ),
+        Role::Assistant if only_calls => (
+            call_label(&visible),
+            Some(theme::TOOL_BG),
+            theme::WARN,
+            Policy::Open,
+            false,
+        ),
+        Role::Assistant => (
+            "HEARTH".to_owned(),
+            None,
+            theme::ACCENT,
+            Policy::Open,
+            false,
+        ),
+        Role::Tool => (
+            format!("TOOL RESULT · {}", result_name(&visible, calls)),
+            Some(if failed {
+                theme::TOOL_BAD_BG
+            } else {
+                theme::TOOL_OK_BG
+            }),
+            if failed { theme::BAD } else { theme::GOOD },
+            Policy::Fit(8),
+            true,
+        ),
+        Role::System => (
+            "SYSTEM".to_owned(),
+            None,
+            theme::MUTED,
+            Policy::Fit(8),
+            true,
+        ),
+    };
+    Block {
+        key,
+        label,
+        meta: format!("turn {turn} · {clock}"),
+        note,
+        parts: parts_of(&visible, role, calls),
+        fold,
+        preview,
+        bg,
+        accent,
+        fg: theme::TEXT,
+    }
+}
+
+fn response_block(
+    key: String,
+    blocks: &[Value],
+    calls: &BTreeMap<String, String>,
+    turn: usize,
+    clock: &str,
+) -> Block {
+    let visible = visible(blocks);
+    let only_calls =
+        !visible.is_empty() && visible.iter().all(|block| block["type"] == "tool_call");
+    let (label, bg, accent) = if only_calls {
+        (call_label(&visible), Some(theme::TOOL_BG), theme::WARN)
+    } else {
+        ("HEARTH".to_owned(), None, theme::ACCENT)
+    };
+    Block {
+        key,
+        label,
+        meta: format!("turn {turn} · {clock}"),
+        note: None,
+        parts: parts_of(&visible, Role::Assistant, calls),
+        fold: Policy::Open,
+        preview: false,
+        bg,
+        accent,
+        fg: theme::TEXT,
+    }
+}
+
+/// The blocks a reader sees: thinking is never rendered.
+fn visible(blocks: &[Value]) -> Vec<Value> {
+    blocks
+        .iter()
+        .filter(|block| block["type"] != "thinking")
+        .cloned()
+        .collect()
+}
+
+fn parts_of(blocks: &[Value], role: Role, calls: &BTreeMap<String, String>) -> Vec<Part> {
+    let mut parts = Vec::new();
+    for block in blocks {
+        let part = match block["type"].as_str().unwrap_or_default() {
+            "text" => Part {
+                label: None,
+                text: block["text"].as_str().unwrap_or_default().to_owned(),
+            },
+            "tool_call" => Part {
+                label: Some(format!("⚙ {}", block["name"].as_str().unwrap_or("tool"))),
+                text: arguments(&block["arguments"]),
+            },
+            "tool_result" => {
+                let name = call_name(block["call_id"].as_str(), calls);
+                let failed = block["is_error"].as_bool() == Some(true);
+                Part {
+                    label: (role != Role::Tool)
+                        .then(|| format!("{name} {}", if failed { "✗" } else { "✓" })),
+                    text: block["content"].as_str().unwrap_or_default().to_owned(),
+                }
             }
-        }
-        entries.push(Entry::Response {
-            key: format!("{hash}:reply"),
-            blocks: response_blocks(&exchange["response"]),
-        });
-        previous_sent = sent_messages(&transcript, &exchange["response"]);
-        previous_parts = Some(request["prefix_parts"].clone());
-        previous_session = Some(session);
+            "file" => Part {
+                label: Some(format!(
+                    "file · {}",
+                    block["name"].as_str().unwrap_or("file")
+                )),
+                text: block["path"].as_str().unwrap_or("-").to_owned(),
+            },
+            "image" => Part {
+                label: Some("image".to_owned()),
+                text: block["path"].as_str().unwrap_or("-").to_owned(),
+            },
+            _ => continue,
+        };
+        parts.push(part);
     }
-    entries
-}
-
-/// The prefix layers that differ from the previous saved request.
-fn changed_parts(previous: &Value, request: &Value) -> Vec<String> {
-    let current = &request["prefix_parts"];
-    let mut changed = Vec::new();
-    for (part, label) in PREFIX_LAYERS {
-        if current[part] != previous[part] {
-            changed.push(label.to_owned());
-        }
-    }
-    changed
-}
-
-fn system_parts(request: &Value) -> Vec<SystemPart> {
-    let mut parts = vec![
-        layer(request, "identity"),
-        layer(request, "guidance"),
-        layer(request, "rules"),
-        // The saved key and the token key differ for the skills index.
-        SystemPart {
-            label: "skills index",
-            text: text_of(request, "skills_index"),
-            tokens: token(request, "skills").unwrap_or(0),
-        },
-        SystemPart {
-            label: "tools",
-            text: tools_text(request),
-            tokens: token(request, "tools").unwrap_or(0),
-        },
-    ];
-    parts.retain(|part| !part.text.trim().is_empty());
     parts
 }
 
-/// A layer whose saved key and token key agree.
-fn layer(request: &Value, name: &'static str) -> SystemPart {
-    SystemPart {
-        label: name,
-        text: text_of(request, name),
-        tokens: token(request, name).unwrap_or(0),
+fn call_label(blocks: &[Value]) -> String {
+    match blocks {
+        [block] => format!("TOOL CALL · {}", block["name"].as_str().unwrap_or("tool")),
+        _ => format!("TOOL CALL · {} calls", blocks.len()),
     }
 }
 
-fn text_of(request: &Value, key: &str) -> String {
-    request[key].as_str().unwrap_or_default().to_owned()
+fn result_name(blocks: &[Value], calls: &BTreeMap<String, String>) -> String {
+    blocks
+        .iter()
+        .find(|block| block["type"] == "tool_result")
+        .map(|block| call_name(block["call_id"].as_str(), calls))
+        .unwrap_or_else(|| "tool".to_owned())
 }
 
-/// The tool declarations as one readable block.
+fn call_name(id: Option<&str>, calls: &BTreeMap<String, String>) -> String {
+    id.and_then(|id| calls.get(id).cloned())
+        .unwrap_or_else(|| "tool".to_owned())
+}
+
+/// Tool arguments as a reader can audit them: pretty when they are a structure,
+/// compact when they are one value.
+fn arguments(arguments: &Value) -> String {
+    match arguments {
+        Value::Null => String::new(),
+        Value::Object(_) | Value::Array(_) => {
+            serde_json::to_string_pretty(arguments).unwrap_or_default()
+        }
+        value => value.to_string(),
+    }
+}
+
+/// A layer's text. The tool declarations are a JSON array in the document, so
+/// they are printed as names, descriptions, and argument fields instead.
+fn layer_text(request: &Value, layer: &Layer) -> String {
+    if layer.part == "tools" {
+        return tools_text(request);
+    }
+    request[layer.text].as_str().unwrap_or_default().to_owned()
+}
+
 fn tools_text(request: &Value) -> String {
     let tools = request["tools"].as_array().cloned().unwrap_or_default();
     let mut lines = Vec::new();
@@ -642,385 +1049,192 @@ fn schema_type(schema: &Value) -> String {
         .unwrap_or_else(|| "any".to_owned())
 }
 
-/// One message as it was compared, as a role and its blocks, without the
-/// audit note.
-fn normalized(message: &Value) -> (String, String) {
-    let role = message["role"].as_str().unwrap_or_default().to_owned();
-    let blocks = message
-        .get("blocks")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(Vec::new()));
-    (role, blocks.to_string())
-}
-
-/// The transcript the request carried, plus the answer that came back.
-fn sent_messages(transcript: &[(String, String)], response: &Value) -> Vec<(String, String)> {
-    let mut sent = transcript.to_vec();
-    if let Some(blocks) = response["blocks"].as_array() {
-        sent.push((
-            "assistant".to_owned(),
-            Value::Array(blocks.clone()).to_string(),
-        ));
-    }
-    sent
-}
-
-fn response_blocks(response: &Value) -> Option<Vec<Value>> {
-    if response.is_null() {
-        return None;
-    }
-    response["blocks"].as_array().cloned()
-}
-
 fn token(document: &Value, name: &str) -> Option<u64> {
     document["tokens"][name].as_u64()
+}
+
+fn cost(tokens: Option<u64>) -> String {
+    tokens
+        .map(|tokens| format!("{} tok", count(tokens)))
+        .unwrap_or_default()
 }
 
 fn build_cache(
     exchanges: &[Value],
     key: &CacheKey,
-    expanded: &BTreeSet<String>,
+    folds: &Folds,
     width: usize,
+    zone: &Zone,
 ) -> PromptCache {
-    let mut painter = Painter::new(width);
-    for entry in derive(exchanges) {
-        push_entry(&mut painter, &entry, key.show_system, expanded);
+    let chat = derive(exchanges, zone);
+    let mut painter = Painter::new(width, folds);
+    for entry in &chat.entries {
+        match entry {
+            Entry::Notice(notice) => painter.notice(notice),
+            Entry::Block(block) => painter.block(block),
+        }
     }
     PromptCache {
         key: key.clone(),
+        summary: chat.summary,
         blocks: painter.blocks,
         lines: painter.lines,
     }
 }
 
-fn push_entry(
-    painter: &mut Painter,
-    entry: &Entry,
-    show_system: bool,
-    expanded: &BTreeSet<String>,
-) {
-    match entry {
-        Entry::Divider => painter.divider(),
-        Entry::System { parts, tokens } => push_system(painter, parts, *tokens, show_system),
-        Entry::Recall { text, tokens } => push_recall(painter, text, *tokens, show_system),
-        Entry::Conversation { id } => painter.conversation(id),
-        Entry::Message { key, role, blocks } => {
-            push_blocks(painter, key, *role, blocks, expanded);
+/// One row of a block body.
+enum Content {
+    /// A sub-panel label, such as a tool call inside an assistant block.
+    Label(String),
+    Text(String),
+    /// The hidden-count stub under a folded block.
+    Stub(String),
+    /// A blank row between two parts, so a panel band stays solid.
+    Gap,
+}
+
+fn content(block: &Block, inner: usize) -> Vec<Content> {
+    let mut rows = Vec::new();
+    for (index, part) in block.parts.iter().enumerate() {
+        if part.label.is_none() && part.text.trim().is_empty() {
+            continue;
         }
-        Entry::Runtime { note } => painter.note(note),
-        Entry::Rewritten { dropped } => painter.rewritten(*dropped),
-        Entry::Response { key, blocks } => match blocks {
-            Some(blocks) => push_blocks(painter, key, Role::Assistant, blocks, expanded),
-            None => painter.faint("no reply saved"),
-        },
-    }
-}
-
-fn push_system(painter: &mut Painter, parts: &[SystemPart], tokens: u64, show: bool) {
-    if !show {
-        let names = parts
-            .iter()
-            .map(|part| part.label)
-            .collect::<Vec<_>>()
-            .join(", ");
-        painter.summary(
-            &format!("system · {names}"),
-            theme::muted(),
-            &format!(" · {} tok", count(tokens)),
-        );
-        return;
-    }
-    for part in parts {
-        painter.label(
-            &format!("system · {}", part.label),
-            theme::muted(),
-            &format!("{} tok", count(part.tokens)),
-        );
-        painter.body(&part.text, theme::muted());
-    }
-}
-
-fn push_recall(painter: &mut Painter, text: &str, tokens: u64, show: bool) {
-    if show {
-        painter.label(
-            "system · memory",
-            theme::good(),
-            &format!("{} tok", count(tokens)),
-        );
-        painter.body(text, theme::good());
-    } else {
-        painter.summary(
-            "system · memory",
-            theme::good(),
-            &format!(" · {} tok", count(tokens)),
-        );
-    }
-}
-
-fn push_blocks(
-    painter: &mut Painter,
-    key: &str,
-    role: Role,
-    blocks: &[Value],
-    expanded: &BTreeSet<String>,
-) {
-    painter.message_start(role);
-    if blocks.is_empty() {
-        painter.label(role.label(), role.style(), "");
-        painter.body("(empty)", theme::faint());
-    }
-    for (index, block) in blocks.iter().enumerate() {
-        let key = format!("{key}/{index}");
-        match block["type"].as_str().unwrap_or_default() {
-            "thinking" => painter.part(
-                &key,
-                "thinking",
-                theme::think(),
-                block["text"].as_str().unwrap_or_default(),
-                theme::think(),
-                expanded,
-            ),
-            "text" => painter.part(
-                &key,
-                role.label(),
-                role.style(),
-                block["text"].as_str().unwrap_or_default(),
-                role.style(),
-                expanded,
-            ),
-            "tool_call" => {
-                let name = block["name"].as_str().unwrap_or("tool");
-                let arguments = block
-                    .get("arguments")
-                    .map(|arguments| arguments.to_string())
-                    .unwrap_or_default();
-                painter.part(
-                    &key,
-                    &format!("tool call · {name}"),
-                    theme::warn(),
-                    &arguments,
-                    theme::muted(),
-                    expanded,
-                );
-            }
-            "tool_result" => {
-                let failed = block["is_error"].as_bool().unwrap_or(false);
-                let style = if failed { theme::bad() } else { theme::good() };
-                painter.part(
-                    &key,
-                    "tool result",
-                    style,
-                    block["content"].as_str().unwrap_or_default(),
-                    style,
-                    expanded,
-                );
-            }
-            "file" => painter.part(
-                &key,
-                &format!("file · {}", block["name"].as_str().unwrap_or("file")),
-                theme::faint(),
-                block["path"].as_str().unwrap_or("-"),
-                theme::muted(),
-                expanded,
-            ),
-            "image" => painter.part(
-                &key,
-                "image",
-                theme::faint(),
-                block["path"].as_str().unwrap_or("-"),
-                theme::muted(),
-                expanded,
-            ),
-            _ => {}
+        if index > 0 && !rows.is_empty() {
+            rows.push(Content::Gap);
         }
+        if let Some(label) = &part.label {
+            rows.push(Content::Label(label.clone()));
+        }
+        rows.extend(wrap_text(&part.text, inner).into_iter().map(Content::Text));
     }
-    painter.message_end();
+    rows
 }
 
-/// The bar that opens a message and each of its parts.
-const LEAD: &str = "▌ ";
-/// The bar that runs down a message body.
-const BODY_LEAD: &str = "▏";
-
-/// The typed document, drawn as lines with a fixed width.
-struct Painter {
+/// The chat, drawn as lines with a fixed width.
+struct Painter<'a> {
     width: usize,
+    folds: &'a Folds,
     lines: Vec<Line<'static>>,
-    /// The long message blocks, in document order.
+    /// The block headers, in document order.
     blocks: Vec<BlockSpan>,
-    /// The role bar while a message is open, and nothing outside one.
-    gutter: Option<Style>,
-    /// A blank separator is already in the document.
-    gap_open: bool,
 }
 
-impl Painter {
-    fn new(width: usize) -> Self {
+impl<'a> Painter<'a> {
+    fn new(width: usize, folds: &'a Folds) -> Self {
         Self {
             width: width.max(1),
+            folds,
             lines: Vec::new(),
             blocks: Vec::new(),
-            gutter: None,
-            gap_open: false,
         }
-    }
-
-    fn message_start(&mut self, role: Role) {
-        self.gap();
-        self.gutter = Some(role.style());
-    }
-
-    fn message_end(&mut self) {
-        self.gutter = None;
-    }
-
-    fn push(&mut self, line: Line<'static>) {
-        self.lines.push(line);
-        self.gap_open = false;
     }
 
     fn gap(&mut self) {
-        if self.lines.is_empty() || self.gap_open {
-            return;
+        if !self.lines.is_empty() {
+            self.lines.push(Line::from(""));
         }
-        match self.gutter {
-            Some(style) => self.lines.push(Line::styled(BODY_LEAD, style)),
-            None => self.lines.push(Line::from("")),
-        }
-        self.gap_open = true;
     }
 
-    /// A role or layer label, with its cost against the right edge.
-    fn label(&mut self, text: &str, style: Style, meta: &str) {
+    fn notice(&mut self, notice: &Notice) {
         self.gap();
-        if self.gutter.is_some() {
-            self.role_label(text, style);
-            return;
-        }
-        let mut row = Row::new();
-        row.push(text.to_owned(), style);
-        if !meta.is_empty() && row.width + meta.width() + BODY_INDENT <= self.width {
-            row.pad_to(self.width.saturating_sub(meta.width()));
-            row.push(meta.to_owned(), theme::faint());
-        }
-        let line = row.fit(self.width);
-        self.push(line);
+        let width = self.width;
+        let line = match notice {
+            Notice::Conversation(session) => Line::styled(
+                clip(&format!(" NEW CONVERSATION · {}", short(session, 8)), width),
+                theme::faint(),
+            ),
+            Notice::Rewritten(dropped) => {
+                let mut row = Row::new();
+                row.push(" HISTORY REWRITTEN".to_owned(), theme::warn());
+                row.push(
+                    format!(" · {dropped} earlier messages dropped"),
+                    theme::faint(),
+                );
+                row.fit(width)
+            }
+            Notice::NoReply => Line::styled(clip("  no reply saved", width), theme::faint()),
+        };
+        self.lines.push(line);
     }
 
-    /// A message block: its label, its body, and a stub when folded.
-    fn part(
-        &mut self,
-        key: &str,
-        label: &str,
-        label_style: Style,
-        text: &str,
-        body_style: Style,
-        expanded: &BTreeSet<String>,
-    ) {
+    fn block(&mut self, block: &Block) {
+        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
+        let rows = content(block, inner);
+        let default_open = match block.fold {
+            Policy::Open => true,
+            Policy::Closed => rows.is_empty(),
+            Policy::Fit(lines) => rows.len() <= lines,
+        };
+        let open = self.folds.open(&block.key, default_open);
         self.gap();
         let line = self.lines.len();
-        self.role_label(label, label_style);
-        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        let wrapped = wrap_text(text, inner);
-        let long = wrapped.len() > COLLAPSE_LINES;
-        if long && !expanded.contains(key) {
-            self.body_lines(&wrapped[..1], body_style);
-            let hidden = wrapped.len() - 1;
-            let stub = wrap_text(&format!("… {hidden} lines hidden · enter to open"), inner);
-            self.body_lines(&stub, theme::faint());
-        } else {
-            self.body_lines(&wrapped, body_style);
-        }
-        if long {
-            self.blocks.push(BlockSpan {
-                key: key.to_owned(),
-                line,
-                selected: self.selected_label(label),
-            });
-        }
-    }
-
-    /// One part of the live turn. The spinner replaces the role bar on the
-    /// label that is being written.
-    fn live_part(&mut self, label: &str, style: Style, text: &str, frame: Option<usize>) {
-        self.gap();
-        match frame {
-            Some(frame) => self.live_label(label, style, frame),
-            None => self.role_label(label, style),
-        }
-        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        let wrapped = wrap_text(text, inner);
-        self.body_lines(&wrapped, style);
-    }
-
-    fn live_label(&mut self, label: &str, style: Style, frame: usize) {
-        let lead = self.gutter.unwrap_or(style);
-        let body = clip(label, self.width.saturating_sub(BODY_INDENT));
-        self.push(Line::from(vec![
-            Span::styled(format!("{} ", FRAMES[frame]), lead),
-            Span::styled(body, style),
-        ]));
-    }
-
-    /// The bar and label that open a message part.
-    fn role_label(&mut self, text: &str, style: Style) {
-        let lead = self.gutter.unwrap_or(style);
-        let body = clip(text, self.width.saturating_sub(BODY_INDENT));
-        self.push(Line::from(vec![
-            Span::styled(LEAD.to_owned(), lead),
-            Span::styled(body, style),
-        ]));
-    }
-
-    /// The same label row drawn in the selection emphasis.
-    fn selected_label(&self, text: &str) -> Line<'static> {
-        let body = clip(text, self.width.saturating_sub(BODY_INDENT));
-        Line::styled(
-            clip(&format!("{LEAD}{body}"), self.width),
+        let lead = format!("▌ {}", block.label);
+        let label_style = tinted(block.accent, block.bg).add_modifier(Modifier::BOLD);
+        let header = band_line(
+            vec![Span::styled(lead.clone(), label_style)],
+            &block.meta,
+            faded(block.bg),
+            self.width,
+            fill(block.bg),
+        );
+        // The selection only changes the band, so the row still opens with its
+        // own label and the draw can swap it in without rebuilding.
+        let selected = band_line(
+            vec![Span::styled(lead, theme::selected())],
+            &block.meta,
             theme::selected(),
-        )
-    }
-
-    /// One line that names what it leaves out, with its cost inline.
-    fn summary(&mut self, text: &str, style: Style, cost: &str) {
-        self.gap();
-        let mut row = Row::new();
-        row.push(text.to_owned(), style);
-        row.push(cost.to_owned(), theme::faint());
-        let line = row.fit(self.width);
-        self.push(line);
-    }
-
-    /// A wrapped body under its label, with a hanging indent.
-    fn body(&mut self, text: &str, style: Style) {
-        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        let lines = wrap_text(text, inner);
-        self.body_lines(&lines, style);
-    }
-
-    fn body_lines(&mut self, lines: &[String], style: Style) {
-        let gutter = self.gutter;
-        let indent = " ".repeat(BODY_INDENT);
-        for line in lines {
-            match gutter {
-                Some(bar) => {
-                    let body = clip(line, self.width.saturating_sub(BODY_INDENT));
-                    self.push(Line::from(vec![
-                        Span::styled(format!("{BODY_LEAD} "), bar),
-                        Span::styled(body, style),
-                    ]));
-                }
-                None if line.is_empty() => self.push(Line::from("")),
-                None => self.push(Line::styled(
-                    clip(&format!("{indent}{line}"), self.width),
-                    style,
-                )),
+            self.width,
+            theme::panel_fill(theme::SELECT_BG),
+        );
+        self.lines.push(header);
+        if rows.is_empty() {
+            self.content(block, &Content::Text("(empty)".to_owned()));
+        } else if open {
+            for row in &rows {
+                self.content(block, row);
+            }
+        } else {
+            let shown = usize::from(block.preview);
+            if shown == 1 {
+                self.content(block, &rows[0]);
+            }
+            let hidden = rows.len() - shown;
+            let stub = if hidden == 1 {
+                "… 1 line hidden · enter to open".to_owned()
+            } else {
+                format!("… {hidden} lines hidden · enter to open")
+            };
+            for line in wrap_text(&stub, inner) {
+                self.content(block, &Content::Stub(line));
             }
         }
+        // The note reads as the last line of the message it rode on, and it
+        // stays visible when the body is folded.
+        if let Some(note) = &block.note {
+            self.note(block, note);
+        }
+        self.blocks.push(BlockSpan {
+            key: block.key.clone(),
+            line,
+            default_open,
+            selected,
+        });
     }
 
-    /// The clock note that rode on the message above it.
-    fn note(&mut self, note: &str) {
+    fn content(&mut self, block: &Block, row: &Content) {
+        let line = match row {
+            Content::Label(text) => label_line(text, block.accent, block.bg, self.width),
+            Content::Text(text) => body_line(text, block.accent, block.fg, block.bg, self.width),
+            Content::Stub(text) => {
+                body_line(text, block.accent, theme::FAINT, block.bg, self.width)
+            }
+            Content::Gap => body_line("", block.accent, block.fg, block.bg, self.width),
+        };
+        self.lines.push(line);
+    }
+
+    /// The clock note that rode on the message, always visible.
+    fn note(&mut self, block: &Block, note: &str) {
         let indent = " ".repeat(BODY_INDENT);
         let inner = self.width.saturating_sub(BODY_INDENT + 2).max(1);
         for (index, line) in wrap_text(note, inner).iter().enumerate() {
@@ -1029,48 +1243,112 @@ impl Painter {
             } else {
                 format!("{indent}  ")
             };
-            self.push(Line::styled(
-                clip(&format!("{lead}{line}"), self.width),
-                theme::faint(),
-            ));
+            let style = faded(block.bg);
+            let spans = vec![Span::styled(lead, style), Span::styled(line.clone(), style)];
+            self.lines.push(fit_line(spans, self.width, fill(block.bg)));
         }
     }
+}
 
-    /// A short faint line, used when there is nothing to show.
-    fn faint(&mut self, text: &str) {
-        self.gap();
-        let indent = " ".repeat(BODY_INDENT);
-        self.push(Line::styled(
-            clip(&format!("{indent}{text}"), self.width),
-            theme::faint(),
+/// A header band: the block label, then its meta against the right edge.
+fn band_line(
+    mut spans: Vec<Span<'static>>,
+    meta: &str,
+    meta_style: Style,
+    width: usize,
+    fill: Style,
+) -> Line<'static> {
+    // A trailing pad keeps the meta off the card border without ending the band.
+    let meta = if meta.is_empty() {
+        String::new()
+    } else {
+        format!("{meta} ")
+    };
+    let used: usize = spans.iter().map(|span| span.content.width()).sum();
+    if !meta.is_empty() && used + 1 + meta.width() <= width {
+        spans.push(Span::styled(
+            " ".repeat(width - used - meta.width()),
+            meta_style,
         ));
+        spans.push(Span::styled(meta, meta_style));
     }
+    fit_line(spans, width, fill)
+}
 
-    fn conversation(&mut self, id: &str) {
-        self.gap();
-        self.push(Line::styled(
-            clip(&format!("  conversation · {}", short(id, 8)), self.width),
-            theme::faint(),
-        ));
-    }
+/// A body row: the accent gutter, then the text in the body style.
+fn body_line(
+    text: &str,
+    accent: Color,
+    fg: Color,
+    bg: Option<Color>,
+    width: usize,
+) -> Line<'static> {
+    let spans = vec![
+        Span::styled("▏ ".to_owned(), tinted(accent, bg)),
+        Span::styled(text.to_owned(), tinted(fg, bg)),
+    ];
+    fit_line(spans, width, fill(bg))
+}
 
-    fn rewritten(&mut self, dropped: usize) {
-        self.gap();
-        let mut row = Row::new();
-        row.push("history rewritten", theme::warn());
-        row.push(
-            format!(" · {dropped} earlier messages dropped"),
-            theme::faint(),
-        );
-        let line = row.fit(self.width);
-        self.push(line);
-    }
+/// A sub-panel label inside a body, in the block accent.
+fn label_line(text: &str, accent: Color, bg: Option<Color>, width: usize) -> Line<'static> {
+    let style = tinted(accent, bg).add_modifier(Modifier::BOLD);
+    let spans = vec![
+        Span::styled("▏ ".to_owned(), tinted(accent, bg)),
+        Span::styled(text.to_owned(), style),
+    ];
+    fit_line(spans, width, fill(bg))
+}
 
-    /// A bare rule where one saved request ends and the next begins.
-    fn divider(&mut self) {
-        self.gap();
-        self.push(Line::styled("─".repeat(self.width), theme::faint()));
+/// Text on a block's band, or on the page when it has none.
+fn tinted(fg: Color, bg: Option<Color>) -> Style {
+    match bg {
+        Some(bg) => theme::panel_text(bg).fg(fg),
+        None => Style::default().fg(fg),
     }
+}
+
+/// Secondary text: meta, notes, and the fold stub.
+fn faded(bg: Option<Color>) -> Style {
+    match bg {
+        Some(bg) => theme::panel_stub(bg),
+        None => theme::faint(),
+    }
+}
+
+/// A panel line is filled to the full width, so a band never stops mid-row.
+fn fill(bg: Option<Color>) -> Style {
+    match bg {
+        Some(bg) => theme::panel_fill(bg),
+        None => Style::default(),
+    }
+}
+
+/// Cut composed spans to `width` and fill the remainder.
+fn fit_line(spans: Vec<Span<'static>>, width: usize, fill: Style) -> Line<'static> {
+    let mut fitted = Vec::with_capacity(spans.len() + 1);
+    let mut used = 0;
+    for span in spans {
+        if used >= width {
+            break;
+        }
+        let mut content = String::new();
+        for character in span.content.chars() {
+            let character_width = character.width().unwrap_or(0);
+            if used + character_width > width {
+                break;
+            }
+            used += character_width;
+            content.push(character);
+        }
+        if !content.is_empty() {
+            fitted.push(Span::styled(content, span.style));
+        }
+    }
+    if used < width {
+        fitted.push(Span::styled(" ".repeat(width - used), fill));
+    }
+    Line::from(fitted)
 }
 
 struct Row {
@@ -1090,14 +1368,6 @@ impl Row {
         let span = Span::styled(text.into(), style);
         self.width += span.content.width();
         self.spans.push(span);
-    }
-
-    fn pad_to(&mut self, column: usize) {
-        let pad = column.saturating_sub(self.width);
-        if pad > 0 {
-            self.spans.push(Span::raw(" ".repeat(pad)));
-            self.width += pad;
-        }
     }
 
     /// A line that never draws past `width`, whatever the terminal size.

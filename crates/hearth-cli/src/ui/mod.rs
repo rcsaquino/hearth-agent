@@ -177,9 +177,9 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
         Tab::Prompt => theme::hints(&[
             ("↑↓", "scroll"),
             ("n/p", "block"),
-            ("↵", "toggle"),
+            ("↵", "fold"),
+            ("e/c", "all"),
             ("f", "follow"),
-            ("s", "system"),
             ("q", "quit"),
         ]),
         Tab::Settings => theme::hints(&[
