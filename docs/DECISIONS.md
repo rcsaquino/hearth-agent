@@ -2409,3 +2409,18 @@ just after.
   and `version_body` stay: the files remain versioned on disk, and the library API
   is what the tests and the skill loop use.
 - Editing `SOUL.md` and `HEARTH.md` from Settings is a different route and stays.
+
+## 2026-11-16: The skills list filters by scope
+
+- `SkillsView` keeps the full library in a private `all` and derives `skills` from
+  `SkillFilter`. The visible list stays the index the selection refers to, which is
+  the invariant the body depends on; a filter that only hid rows would let the
+  body show a skill that is no longer listed. `filtered()` over the full library
+  was rejected because then two accessors would describe the same row.
+- `[` cycles back and `]` cycles forward through both, user, and learned. The
+  selection index is clamped to the new length and the body reloads, so switching
+  scopes never leaves a stale body. Keeping the same skill selected across a
+  scope change was rejected: the wanted row is usually the first one in the newly
+  filtered list, and name-matching adds state for no clear gain.
+- The header appends `showing <mode>` and the empty state comes from the filter, so
+  a filtered empty list cannot be read as an empty library.

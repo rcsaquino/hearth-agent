@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.38, plain-language edition
+**Status:** Draft 0.39, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,11 @@
 ---
 
 ## A note on language
+
+Draft 0.39 lets the Skills tab filter by scope. `[` and `]` cycle both, user, and
+learned, the header names the mode (`showing both`), and the empty state says which
+mode is empty instead of claiming the library has nothing. The filtered list is the
+one the selection indexes, so the body always matches the selected row.
 
 Draft 0.38 makes the Skills tab read-only. `e`, `n`, and `v` are gone with the
 editor, the new-skill prompt, and the version-history view they opened, along with
@@ -1594,7 +1599,10 @@ Rules:
   key that edits, creates, or walks versions. A skill is read where it lives, and
   the library changes by editing the files or through Hearth's own skill loop.
   A skill with no counted use shows an em dash where its rate would be; a rate
-  appears only after a use has been counted.
+  appears only after a use has been counted. `[` and `]` cycle the list through
+  both scopes, user only, and learned only. The header names the mode, the empty
+  state names the mode it is empty in, and the selection and body stay on a row
+  that is still listed.
   The `skill` tool loads a body by name, records the outcome, and can save or archive
   a skill.
 - The skills index is the only prompt component the skill loop writes. The Prompt
