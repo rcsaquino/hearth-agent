@@ -371,7 +371,11 @@ fn body_block(
 }
 
 fn spinner_frame(started: Instant) -> usize {
-    (started.elapsed().as_millis() / 100) as usize % FRAMES.len()
+    spinner_frame_at(started.elapsed().as_millis())
+}
+
+fn spinner_frame_at(elapsed_ms: u128) -> usize {
+    (elapsed_ms / 100) as usize % FRAMES.len()
 }
 
 /// The merged chat and the numbers its header names.
@@ -1606,7 +1610,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_is_shown_before_the_answer_and_t_folds_it() {
+    fn enter_folds_thinking_with_the_chat() {
         let thoughts = (0..10)
             .map(|index| format!("thought line {index}"))
             .collect::<Vec<_>>()
@@ -1646,19 +1650,8 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
-            text.contains("thought line 9"),
-            "the chat fold never folds thinking: {text}"
-        );
-        assert!(
-            text.contains("answer line 7"),
-            "the chat fold never folds the answer: {text}"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
-        let text = rendered(&app, 100, 80);
-        assert!(
             text.contains("thought line 4"),
-            "the fifth thought survives the thinking fold: {text}"
+            "the fifth thought survives the chat fold: {text}"
         );
         assert!(
             !text.contains("thought line 5"),
@@ -1670,13 +1663,20 @@ mod tests {
         );
         assert!(
             text.contains("answer line 7"),
-            "t leaves the answer alone: {text}"
+            "the chat fold never folds the answer: {text}"
         );
 
         app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert_eq!(
+            rendered(&app, 100, 80),
+            text,
+            "t is not a fold key any more"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
             rendered(&app, 100, 80).contains("thought line 9"),
-            "t shows thinking again"
+            "enter opens thinking with the chat"
         );
     }
 
@@ -1784,6 +1784,59 @@ mod tests {
     }
 
     #[test]
+    fn the_status_row_has_a_margin_above_the_chat() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 100, 80);
+        let header = line_of(&text, "test-model");
+        let margin = text.lines().nth(header + 1).expect("row after the header");
+        assert!(
+            margin.trim().is_empty(),
+            "the chat starts after a margin: {text}"
+        );
+        let first = line_of(&text, "▌ SYSTEM · SOUL.md");
+        assert!(first > header + 1, "a block follows the margin: {text}");
+    }
+
+    #[test]
+    fn the_working_block_opens_and_closes_with_a_blank_line() {
+        let live = LiveReply {
+            thinking: String::new(),
+            text: "STREAMING REPLY".to_owned(),
+            started: Instant::now(),
+        };
+        let lines = live_lines(&live, 100, false);
+        assert_eq!(
+            lines.first().map(|line| line.width()),
+            Some(0),
+            "a blank line opens the working block"
+        );
+        assert_eq!(
+            lines.last().map(|line| line.width()),
+            Some(0),
+            "a blank line closes the working block"
+        );
+    }
+
+    #[test]
+    fn the_working_spinner_is_the_clockwise_flux_cycle() {
+        assert_eq!(
+            FRAMES.as_slice(),
+            ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣽", "⣻"],
+            "a full cell with one missing dot steps clockwise"
+        );
+        assert_eq!(spinner_frame_at(0), 0, "the turn starts on the first frame");
+        assert_eq!(spinner_frame_at(99), 0, "a frame holds for 100 ms");
+        assert_eq!(spinner_frame_at(100), 1, "the next frame follows at 100 ms");
+        assert_eq!(spinner_frame_at(800), 0, "eight frames make one turn");
+        let frames: Vec<usize> = (0..8).map(|step| spinner_frame_at(step * 100)).collect();
+        assert_eq!(
+            frames,
+            (0..8).collect::<Vec<_>>(),
+            "eight distinct frames in one turn"
+        );
+    }
+
+    #[test]
     fn the_saved_transcript_is_merged_without_repeats() {
         let (_home, app) = prompt_app(conversation());
         let text = rendered(&app, 100, 120);
@@ -1878,9 +1931,13 @@ mod tests {
             "kind": "turn_started",
             "data": {"turn": 1}
         })));
+        let thoughts = (0..10)
+            .map(|index| format!("WEIGHING IT {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         app.apply_event(AppEvent::Live(json!({
             "kind": "thinking_delta",
-            "data": {"text": "WEIGHING IT"}
+            "data": {"text": thoughts}
         })));
         app.apply_event(AppEvent::Live(json!({
             "kind": "text_delta",
@@ -1894,13 +1951,13 @@ mod tests {
             "the live block sits after the saved answer: {text}"
         );
         assert!(
-            line_of(&text, "WEIGHING IT") < live,
+            line_of(&text, "WEIGHING IT 0") < live,
             "thinking comes before the text it precedes: {text}"
         );
         assert!(text.contains("streaming"), "{text}");
         assert!(
-            spun(&text, "HEARTH"),
-            "the spinner sits on the live block header: {text}"
+            spun(&text, "WORKING"),
+            "the live block ends in its working row: {text}"
         );
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -1910,14 +1967,19 @@ mod tests {
             "the chat fold never folds the turn being written: {text}"
         );
         assert!(
-            text.contains("WEIGHING IT"),
-            "the chat fold leaves live thinking alone: {text}"
+            text.contains("WEIGHING IT 4") && !text.contains("WEIGHING IT 5"),
+            "the chat fold previews live thinking: {text}"
         );
-        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
+            text.contains("WEIGHING IT 9"),
+            "enter opens live thinking with the chat: {text}"
+        );
+        assert!(
             text.contains("STREAMING REPLY"),
-            "t folds thinking, never the live answer: {text}"
+            "the live answer never folds: {text}"
         );
         app.apply_event(AppEvent::Live(json!({
             "kind": "run_settled",
@@ -1957,7 +2019,7 @@ mod tests {
         let (_home, mut app) = prompt_app(conversation());
         app.prompt.loading = true;
         let text = rendered(&app, 100, 24);
-        assert!(!spun(&text, "HEARTH"), "a reload is not a turn: {text}");
+        assert!(!spun(&text, "WORKING"), "a reload is not a turn: {text}");
         app.prompt.loading = false;
         app.status = Some(json!({"tasks_running": 2}));
         let text = rendered(&app, 100, 24);
@@ -2133,6 +2195,64 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The rendered row of the working line, if the turn is still live.
+    fn working_row(app: &App, width: u16, height: u16) -> Option<usize> {
+        rendered(app, width, height).lines().position(|line| {
+            FRAMES
+                .iter()
+                .any(|frame| line.starts_with(&format!("{frame} WORKING")))
+        })
+    }
+
+    #[test]
+    fn the_working_row_stays_at_the_tail_as_the_answer_streams() {
+        let (_home, mut app) = prompt_app(conversation());
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "turn_started",
+            "data": {"turn": 1}
+        })));
+        let mut rows = Vec::new();
+        for _ in 0..12 {
+            app.apply_event(AppEvent::Live(json!({
+                "kind": "text_delta",
+                "data": {"text": "a streamed line that grows the answer "}
+            })));
+            rows.push(working_row(&app, 100, 24).expect("a live turn keeps its working row"));
+        }
+        assert!(
+            rows.windows(2).all(|pair| pair[0] == pair[1]),
+            "the working row must not travel with the text: {rows:?}"
+        );
+        let row = *rows.last().expect("a working row");
+        assert!(
+            row >= 20,
+            "the working row sits at the tail of the card: {rows:?}"
+        );
+        let text = rendered(&app, 100, 24);
+        assert!(
+            line_of(&text, "a streamed line") < row,
+            "the working row comes after the text it reports: {text}"
+        );
+        let next = text
+            .lines()
+            .nth(row + 1)
+            .expect("a row after the working row");
+        assert!(
+            next.trim().is_empty(),
+            "the working row keeps a margin below it: {text}"
+        );
+
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "turn_started",
+            "data": {"turn": 2}
+        })));
+        assert_eq!(
+            working_row(&app, 100, 24),
+            Some(row),
+            "a continuation turn does not move the working row"
+        );
     }
 
     #[test]
