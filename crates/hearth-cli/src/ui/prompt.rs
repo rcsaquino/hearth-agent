@@ -241,23 +241,36 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let busy = app.prompt.loading || running_tasks(app) > 0;
     let height = usize::from(inner.height);
+    let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 3);
     let hint_rows = usize::from(height >= 1);
-    let busy_rows = usize::from(busy && height > hint_rows);
-    let body_rows = height.saturating_sub(hint_rows + busy_rows);
+    let busy_rows = usize::from(busy && height > header_rows + hint_rows);
+    let body_rows = height.saturating_sub(header_rows + hint_rows + busy_rows);
+    let header_area = Rect {
+        height: header_rows as u16,
+        ..inner
+    };
     let body = Rect {
+        y: inner.y + header_rows as u16,
         height: body_rows as u16,
         ..inner
     };
     let busy_area = Rect {
-        y: inner.y + body_rows as u16,
+        y: inner.y + (header_rows + body_rows) as u16,
         height: busy_rows as u16,
         ..inner
     };
     let hint_area = Rect {
-        y: inner.y + (body_rows + busy_rows) as u16,
+        y: inner.y + (header_rows + body_rows + busy_rows) as u16,
         height: hint_rows as u16,
         ..inner
     };
+
+    if header_rows > 0 {
+        frame.render_widget(
+            Paragraph::new(header_line(app, usize::from(inner.width))),
+            header_area,
+        );
+    }
 
     if app.prompt.exchanges.is_empty() {
         let message = if app.prompt.loading {
@@ -286,6 +299,42 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             hint_area,
         );
     }
+}
+
+/// The model, the selected snapshot, and the numbers a reader needs at a glance.
+fn header_line(app: &App, width: usize) -> Line<'static> {
+    let Some(exchange) = app.prompt.current() else {
+        return Line::from("");
+    };
+    let request = &exchange["request"];
+    let model = request["model"].as_str().unwrap_or("unknown model");
+    let session = request["session_id"].as_str().unwrap_or("-");
+    let prefix = request["prefix_hash"].as_str().unwrap_or("-");
+    let snapshots = app.prompt.exchanges.len();
+    let selected = snapshots.saturating_sub(app.prompt.cursor);
+    let peers = app
+        .prompt
+        .exchanges
+        .iter()
+        .filter(|other| other["request"]["prefix_hash"] == request["prefix_hash"])
+        .count();
+    let mut row = Row::new();
+    row.push(format!(" {model}"), theme::text());
+    row.push(" · session ", theme::faint());
+    row.push(short(session, 8), theme::muted());
+    row.push(
+        format!(" · snapshot {selected} of {snapshots}"),
+        theme::muted(),
+    );
+    if let Some(tokens) = token(request, "total") {
+        row.push(format!(" · {} tok", count(tokens)), theme::muted());
+    }
+    row.push(" · prefix ", theme::faint());
+    row.push(short(prefix, 8), theme::muted());
+    if peers > 1 {
+        row.push(format!(" · {peers} peers"), theme::good());
+    }
+    row.fit(width)
 }
 
 fn running_tasks(app: &App) -> u64 {
@@ -372,6 +421,10 @@ enum Entry {
     },
     /// The stable layers, printed once and again only when they change.
     System { parts: Vec<SystemPart>, tokens: u64 },
+    /// The memory injected for this request, before its new input.
+    Recall { text: String, tokens: u64 },
+    /// A different conversation starts here.
+    Conversation { id: String },
     /// A message that reached the model.
     Message { role: Role, blocks: Vec<Value> },
     /// The clock note that rode on the message before it.
@@ -431,15 +484,25 @@ fn derive(exchanges: &[Value]) -> Vec<Entry> {
     let mut entries = Vec::new();
     let mut previous_sent: Vec<(String, String)> = Vec::new();
     let mut previous_parts: Option<Value> = None;
-    let mut previous_recall = String::new();
+    let mut previous_session: Option<String> = None;
     for (position, exchange) in exchanges.iter().rev().enumerate() {
         let request = &exchange["request"];
-        let recall = request["recall"].as_str().unwrap_or_default().to_owned();
+        let session = request["session_id"].as_str().unwrap_or("-").to_owned();
+        let new_session = previous_session
+            .as_deref()
+            .is_some_and(|previous| previous != session);
+        if new_session {
+            entries.push(Entry::Conversation {
+                id: session.clone(),
+            });
+            previous_sent.clear();
+            previous_parts = None;
+        }
         let changed = previous_parts
             .as_ref()
             .map(|previous| changed_parts(previous, request))
             .unwrap_or_default();
-        if position == 0 || !changed.is_empty() || recall != previous_recall {
+        if position == 0 || new_session || !changed.is_empty() {
             let parts = system_parts(request);
             let tokens = parts.iter().map(|part| part.tokens).sum();
             entries.push(Entry::System { parts, tokens });
@@ -451,6 +514,13 @@ fn derive(exchanges: &[Value]) -> Vec<Entry> {
             tokens: token(request, "total"),
             changed,
         });
+        let recall = request["recall"].as_str().unwrap_or_default().to_owned();
+        if !recall.trim().is_empty() {
+            entries.push(Entry::Recall {
+                text: recall,
+                tokens: token(request, "recall").unwrap_or(0),
+            });
+        }
 
         let messages = request["transcript"]
             .as_array()
@@ -485,7 +555,7 @@ fn derive(exchanges: &[Value]) -> Vec<Entry> {
         });
         previous_sent = sent_messages(&transcript, &exchange["response"]);
         previous_parts = Some(request["prefix_parts"].clone());
-        previous_recall = recall;
+        previous_session = Some(session);
     }
     entries
 }
@@ -518,7 +588,6 @@ fn system_parts(request: &Value) -> Vec<SystemPart> {
             text: tools_text(request),
             tokens: token(request, "tools").unwrap_or(0),
         },
-        layer(request, "recall"),
     ];
     parts.retain(|part| !part.text.trim().is_empty());
     parts
@@ -683,6 +752,8 @@ fn push_entry(painter: &mut Painter, entry: &Entry, show_system: bool, zone: &Zo
             changed,
         } => painter.marker(*number, *at, hash, *tokens, changed, zone),
         Entry::System { parts, tokens } => push_system(painter, parts, *tokens, show_system),
+        Entry::Recall { text, tokens } => push_recall(painter, text, *tokens, show_system),
+        Entry::Conversation { id } => painter.conversation(id),
         Entry::Message { role, blocks } => push_blocks(painter, *role, blocks),
         Entry::Runtime { note } => painter.note(note),
         Entry::Rewritten { dropped } => painter.rewritten(*dropped),
@@ -714,6 +785,23 @@ fn push_system(painter: &mut Painter, parts: &[SystemPart], tokens: u64, show: b
             &format!("{} tok", count(part.tokens)),
         );
         painter.body(&part.text, theme::muted());
+    }
+}
+
+fn push_recall(painter: &mut Painter, text: &str, tokens: u64, show: bool) {
+    if show {
+        painter.label(
+            "system · memory",
+            theme::good(),
+            &format!("{} tok", count(tokens)),
+        );
+        painter.body(text, theme::good());
+    } else {
+        painter.summary(
+            "system · memory",
+            theme::good(),
+            &format!(" · {} tok", count(tokens)),
+        );
     }
 }
 
@@ -849,6 +937,14 @@ impl Painter {
         let indent = " ".repeat(BODY_INDENT);
         self.lines.push(Line::styled(
             clip(&format!("{indent}{text}"), self.width),
+            theme::faint(),
+        ));
+    }
+
+    fn conversation(&mut self, id: &str) {
+        self.gap();
+        self.lines.push(Line::styled(
+            clip(&format!("  conversation · {}", short(id, 8)), self.width),
             theme::faint(),
         ));
     }

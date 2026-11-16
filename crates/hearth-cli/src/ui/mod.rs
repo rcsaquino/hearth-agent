@@ -178,10 +178,7 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
             ("↑↓", "scroll"),
             ("pgup/pgdn", "page"),
             ("home/end", "top/tail"),
-            ("[/]", "snapshot"),
-            ("f", "follow"),
-            ("r", "raw"),
-            ("o", "refresh"),
+            ("?", "help"),
             ("q", "quit"),
         ]),
         Tab::Settings => theme::hints(&[
