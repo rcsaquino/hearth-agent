@@ -980,6 +980,53 @@ mod tests {
     }
 
     #[test]
+    fn an_unused_skill_shows_no_success_rate() {
+        let (home, mut app) = initialized_app();
+        std::fs::create_dir_all(home.path().join("skills")).expect("skills dir");
+        std::fs::write(
+            home.path().join("skills/simple.md"),
+            "# A simple skill\n\nUse this when simple work appears.\n\n## Steps\n\nDo it.\n",
+        )
+        .expect("user skill");
+        let library = hearth_runtime::skills::SkillLibrary::new(home.path());
+        library
+            .save_learned(hearth_runtime::skills::SkillSave {
+                name: "triage".to_owned(),
+                description: "Triage a request".to_owned(),
+                body: "## When to use\n\nWhen triage is needed.\n\n## Steps\n\nTriage.\n\n## Pitfalls\n\nNone."
+                    .to_owned(),
+                evidence: Vec::new(),
+            })
+            .expect("learned skill");
+
+        app.tab = Tab::Skills;
+        app.skills.reload();
+        let text = buffer_text(&app, 100, 40);
+        assert!(
+            text.contains("simple [user]    —"),
+            "a user skill has no measured rate: {text}"
+        );
+        assert!(
+            text.contains("triage [learned]    —"),
+            "a skill that has never run has no rate: {text}"
+        );
+        assert!(!text.contains("0%"), "a zero is not a rate here: {text}");
+
+        library.record_use("triage").expect("use");
+        library.record_outcome("triage", true).expect("success");
+        app.skills.reload();
+        let text = buffer_text(&app, 100, 40);
+        assert!(
+            text.contains("triage [learned] 100%"),
+            "a successful run has a rate: {text}"
+        );
+        assert!(
+            text.contains("simple [user]    —"),
+            "a user skill never gains a rate: {text}"
+        );
+    }
+
+    #[test]
     fn narrow_dashboard_wraps_the_seven_tabs() {
         let (_home, app) = initialized_app();
         let text = buffer_text(&app, 80, 24);
