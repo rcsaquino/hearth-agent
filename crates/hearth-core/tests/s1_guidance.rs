@@ -1,6 +1,6 @@
 use std::fs;
 
-use hearth_core::{MAX_GUIDANCE_FILE_BYTES, MAX_GUIDANCE_TOTAL_BYTES, load_guidance};
+use hearth_core::load_guidance;
 use tempfile::TempDir;
 
 fn home_and_workspace() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -20,7 +20,6 @@ fn home_and_project_guidance_are_loaded_in_order() {
     fs::write(workspace.join("AGENTS.md"), "NESTED RULE").expect("nested rules");
 
     let guidance = load_guidance(&home, &workspace);
-    assert!(!guidance.truncated);
     let home_at = guidance.text.find("HOME RULE").expect("home text");
     let project_at = guidance.text.find("PROJECT RULE").expect("project text");
     let nested_at = guidance.text.find("NESTED RULE").expect("nested text");
@@ -62,36 +61,44 @@ fn missing_guidance_is_empty() {
     let guidance = load_guidance(&home, &workspace);
     assert!(guidance.text.is_empty());
     assert!(guidance.files.is_empty());
-    assert!(!guidance.truncated);
 }
 
 #[test]
-fn a_large_file_is_truncated() {
+fn every_guidance_file_is_read_whole() {
     let (_root, home, workspace) = home_and_workspace();
-    let large = "A".repeat(MAX_GUIDANCE_FILE_BYTES as usize + 4096);
+    let large = format!("{}\nTHE LAST INSTRUCTION", "A".repeat(20 * 1024));
     fs::write(workspace.join("AGENTS.md"), &large).expect("large rules");
     let guidance = load_guidance(&home, &workspace);
-    assert!(guidance.truncated);
-    assert!(guidance.text.contains("truncated"));
     assert!(
-        guidance.text.len() < large.len(),
-        "large file was not truncated"
+        guidance.text.contains("THE LAST INSTRUCTION"),
+        "the last line of a large file must reach the prompt"
     );
+    assert!(
+        !guidance.text.contains("truncated"),
+        "a guidance file is never cut: {}",
+        guidance.text.len()
+    );
+    assert_eq!(guidance.files.len(), 1);
 }
 
 #[test]
-fn the_total_guidance_is_capped() {
+fn the_total_guidance_is_not_capped() {
     let (root, home, workspace) = home_and_workspace();
-    let large = "B".repeat(MAX_GUIDANCE_FILE_BYTES as usize + 4096);
-    fs::write(root.path().join("project/AGENTS.md"), &large).expect("project rules");
-    fs::write(workspace.join("AGENTS.md"), &large).expect("nested rules");
+    let project = format!("{}\nPROJECT TAIL", "B".repeat(20 * 1024));
+    let nested = format!("{}\nNESTED TAIL", "C".repeat(20 * 1024));
+    fs::write(root.path().join("project/AGENTS.md"), &project).expect("project rules");
+    fs::write(workspace.join("AGENTS.md"), &nested).expect("nested rules");
     let guidance = load_guidance(&home, &workspace);
-    assert!(guidance.truncated);
     assert!(
-        guidance.text.len() <= MAX_GUIDANCE_TOTAL_BYTES + 200,
-        "total guidance was {} bytes",
-        guidance.text.len()
+        guidance.text.contains("PROJECT TAIL"),
+        "the wider project rules reach the prompt"
     );
+    assert!(
+        guidance.text.contains("NESTED TAIL"),
+        "the most specific rules reach the prompt last"
+    );
+    assert!(!guidance.text.contains("truncated"));
+    assert_eq!(guidance.files.len(), 2);
 }
 
 #[test]

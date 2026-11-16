@@ -1415,6 +1415,48 @@ fn an_oversized_prompt_settles_with_a_budget_notice() {
 }
 
 #[test]
+fn guidance_that_cannot_fit_names_its_file() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    let path = home.path().join("HEARTH.md");
+    fs::write(&path, format!("{}\nHOUSE RULES TAIL", "g".repeat(100_000))).expect("guidance");
+    let bytes = fs::metadata(&path).expect("size").len();
+    let guidance = hearth_core::load_guidance(home.path(), &home.path().join("workspace"));
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let budget = ContextBudget::new(5_420, 4_096, 0.65, 0.85, 1_000);
+    let agent = Agent::new(
+        harness.session().clone(),
+        provider.clone(),
+        AgentConfig {
+            soul: "You are a test soul.".to_owned(),
+            model: "test-model".to_owned(),
+            provider_name: "scripted".to_owned(),
+            owner: "test-owner".to_owned(),
+            tools: ToolRegistry::default(),
+            home: home.path().to_path_buf(),
+            spill_dir: home.path().join("spill"),
+            guidance: guidance.text,
+        },
+    )
+    .with_budget(budget);
+    let outcome = agent.run_submission(&submission.id).expect("run");
+    let notice = outcome.notice.expect("a notice");
+    assert!(
+        notice.contains("HEARTH.md"),
+        "the failure names the file that will not fit: {notice}"
+    );
+    assert!(
+        notice.contains(&bytes.to_string()),
+        "the failure names the file size: {notice}"
+    );
+    assert!(
+        provider.requests().is_empty(),
+        "the provider must not be called"
+    );
+}
+
+#[test]
 fn the_voice_tag_guidance_is_not_repeated_in_the_runtime_note() {
     let (home, harness) = harness();
     let conversation = conversation(&harness);
