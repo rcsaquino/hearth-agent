@@ -166,7 +166,12 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
             ("↑↓", "scroll"),
             ("q", "quit"),
         ]),
-        Tab::Skills => theme::hints(&[("↑↓", "select"), ("pgup/pgdn", "scroll"), ("q", "quit")]),
+        Tab::Skills => theme::hints(&[
+            ("↑↓", "select"),
+            ("[/]", "filter"),
+            ("pgup/pgdn", "scroll"),
+            ("q", "quit"),
+        ]),
         Tab::Prompt => theme::hints(&[
             ("↑↓", "scroll"),
             ("↵", "fold"),
@@ -1114,7 +1119,8 @@ mod tests {
             .lines()
             .find(|line| line.contains("quit"))
             .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
-        assert!(footer.contains("[/] filter"), "{footer}");
+        assert!(footer.contains("[/]"), "{footer}");
+        assert!(footer.contains("filter"), "{footer}");
     }
 
     #[test]

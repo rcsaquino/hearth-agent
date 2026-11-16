@@ -16,8 +16,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .split(area);
     let summary = match &app.skills.stats {
         Some(stats) => format!(
-            "{} skills · active {} · learned {}",
-            stats.total, stats.active, stats.learned
+            "{} skills · active {} · learned {} · showing {}",
+            stats.total,
+            stats.active,
+            stats.learned,
+            app.skills.filter.label()
         ),
         None => "Skills".to_owned(),
     };
@@ -42,8 +45,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         );
     } else if app.skills.skills.is_empty() {
         frame.render_widget(
-            Paragraph::new("No skills yet. Write one in skills/, or let Hearth learn one.")
-                .wrap(Wrap { trim: false }),
+            Paragraph::new(app.skills.filter.empty()).wrap(Wrap { trim: false }),
             inner,
         );
     } else {

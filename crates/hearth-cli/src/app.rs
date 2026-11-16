@@ -16,7 +16,7 @@ use serde_json::Value;
 use hearth_config::{Daemon, SETTINGS_FILE, Settings};
 use hearth_runtime::Zone;
 use hearth_runtime::inspect::MemoryRecord;
-use hearth_runtime::skills::{Skill, SkillLibrary, SkillStats};
+use hearth_runtime::skills::{Skill, SkillLibrary, SkillScope, SkillStats};
 
 pub use crate::daemon_client::DaemonState;
 use crate::daemon_client::{self, Ownership};
@@ -90,8 +90,66 @@ pub struct DoctorView {
     pub scroll: usize,
 }
 
+/// Which scope the Skills tab lists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SkillFilter {
+    #[default]
+    Both,
+    User,
+    Learned,
+}
+
+impl SkillFilter {
+    fn next(self) -> Self {
+        match self {
+            Self::Both => Self::User,
+            Self::User => Self::Learned,
+            Self::Learned => Self::Both,
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            Self::Both => Self::Learned,
+            Self::User => Self::Both,
+            Self::Learned => Self::User,
+        }
+    }
+
+    fn matches(self, skill: &Skill) -> bool {
+        match self {
+            Self::Both => true,
+            Self::User => skill.scope == SkillScope::User,
+            Self::Learned => skill.scope == SkillScope::Learned,
+        }
+    }
+
+    /// The word the header shows for this scope.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Both => "both",
+            Self::User => "user",
+            Self::Learned => "learned",
+        }
+    }
+
+    /// What the empty list says, so a filtered view cannot read as an empty
+    /// library.
+    pub fn empty(self) -> &'static str {
+        match self {
+            Self::Both => "No skills yet. Write one in skills/, or let Hearth learn one.",
+            Self::User => "No user skills. Write one in skills/.",
+            Self::Learned => "No learned skills yet. Hearth adds them as it learns.",
+        }
+    }
+}
+
 pub struct SkillsView {
     pub library: SkillLibrary,
+    /// Every skill the library holds, before the scope filter.
+    all: Vec<Skill>,
+    pub filter: SkillFilter,
+    /// The visible rows the selection indexes.
     pub skills: Vec<Skill>,
     pub selected: usize,
     pub body: Option<String>,
@@ -291,6 +349,8 @@ impl App {
         };
         let skills = SkillsView {
             library: SkillLibrary::new(home.clone()),
+            all: Vec::new(),
+            filter: SkillFilter::default(),
             skills: Vec::new(),
             selected: 0,
             body: None,
@@ -461,7 +521,7 @@ impl App {
         match tab {
             Tab::Prompt => self.refresh_prompt(),
             Tab::Skills => {
-                if self.skills.skills.is_empty() {
+                if self.skills.all.is_empty() {
                     self.skills.reload();
                 } else if self.skills.body.is_none() {
                     self.skills.load_selected();
@@ -827,6 +887,8 @@ impl App {
             }
             KeyCode::Home => self.skills.scroll = 0,
             KeyCode::End => self.skills.scroll = self.skills.max_scroll.get(),
+            KeyCode::Char(']') => self.skills.cycle_filter(true),
+            KeyCode::Char('[') => self.skills.cycle_filter(false),
             _ => {}
         }
     }
@@ -1195,15 +1257,37 @@ impl SkillsView {
     pub(crate) fn reload(&mut self) {
         self.error = None;
         match self.library.load_all() {
-            Ok(skills) => self.skills = skills,
+            Ok(skills) => self.all = skills,
             Err(error) => {
-                self.skills.clear();
+                self.all.clear();
                 self.error = Some(error.to_string());
             }
         }
         self.stats = self.library.stats().ok();
+        self.show();
+    }
+
+    /// Rebuild the visible rows from the scope filter, keeping the selection on
+    /// a row that is still listed.
+    fn show(&mut self) {
+        self.skills = self
+            .all
+            .iter()
+            .filter(|skill| self.filter.matches(skill))
+            .cloned()
+            .collect();
         self.selected = self.selected.min(self.skills.len().saturating_sub(1));
         self.load_selected();
+    }
+
+    /// Cycle the scope filter and keep the body on the selected row.
+    pub(crate) fn cycle_filter(&mut self, forward: bool) {
+        self.filter = if forward {
+            self.filter.next()
+        } else {
+            self.filter.previous()
+        };
+        self.show();
     }
 
     pub(crate) fn load_selected(&mut self) {
