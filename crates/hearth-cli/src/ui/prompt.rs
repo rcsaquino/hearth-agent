@@ -649,7 +649,7 @@ fn build_rows(view: &View<'_>) -> Vec<PromptRow> {
 
     rows.push(
         PromptRow::text(
-            "runtime note · newest input",
+            "runtime note",
             theme::muted(),
             view.request()["runtime"].as_str().unwrap_or_default(),
         )
@@ -997,7 +997,11 @@ mod tests {
                 ],
                 "recall": "MEMORY HIT",
                 "transcript": [
-                    {"role": "user", "blocks": [{"type": "text", "text": "please inspect"}]},
+                    {
+                        "role": "user",
+                        "runtime_note": "RUNTIME NOTE",
+                        "blocks": [{"type": "text", "text": "please inspect"}]
+                    },
                     {
                         "role": "assistant",
                         "blocks": [
@@ -1006,7 +1010,6 @@ mod tests {
                         ]
                     }
                 ],
-                "runtime": "RUNTIME NOTE",
                 "prefix_hash": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
                 "prefix_parts": {
                     "identity": format!("hash({identity})"),
@@ -1102,7 +1105,7 @@ mod tests {
             "user",
             "assistant · thinking",
             "tool call · read_file",
-            "runtime note · newest input",
+            "runtime note",
             "response · thinking",
             "response",
             "response · tool · lookup",
@@ -1181,7 +1184,7 @@ mod tests {
         let exchange = sample("SOUL TEXT");
         let text = render_audit(&exchange, None);
         assert!(!text.contains("system · runtime note"), "{text}");
-        assert!(text.contains("runtime note · newest input"), "{text}");
+        assert!(text.contains("runtime note"), "{text}");
     }
 
     #[test]

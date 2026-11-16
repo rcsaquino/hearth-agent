@@ -489,7 +489,143 @@ fn the_audit_document_has_five_segments() {
         prompt.document["transcript"][0]["blocks"][0]["text"],
         serde_json::json!("hello")
     );
-    assert_eq!(prompt.document["runtime"], "RUNTIME NOTE");
+    assert!(
+        prompt.document.get("runtime").is_none(),
+        "the note must ride on its message, not sit beside the segments"
+    );
+    assert_eq!(
+        prompt.document["transcript"][0]["runtime_note"],
+        serde_json::json!("RUNTIME NOTE")
+    );
+}
+
+#[test]
+fn the_saved_document_marks_the_user_message_that_carried_the_runtime_note() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "first"}))
+                .entry("assistant", json!({"text": "one"}))
+                .entry("user", json!({"text": "newest"})),
+        )
+        .expect("save entries");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME".to_owned(),
+            rules: String::new(),
+            rules_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: String::new(),
+        })
+        .expect("build prompt");
+
+    let transcript = prompt.document["transcript"]
+        .as_array()
+        .expect("transcript");
+    let marked = transcript
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.get("runtime_note").is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(marked.len(), 1, "one message carries the note: {transcript:?}");
+    let (index, carrier) = marked[0];
+    assert_eq!(carrier["role"], json!("user"));
+    assert_eq!(carrier["runtime_note"], json!("RUNTIME"));
+    assert_eq!(carrier["blocks"][0]["text"], json!("newest"));
+
+    let sent = prompt.request.messages.last().expect("newest request message");
+    assert_eq!(sent.role, Role::User);
+    assert!(
+        text_of(sent).ends_with("RUNTIME"),
+        "the request carries the note on the same message: {sent:?}"
+    );
+    assert_eq!(
+        prompt.document["transcript"][index]["role"],
+        json!(role_name(sent.role)),
+        "the marked transcript item is the message the provider received"
+    );
+}
+
+#[test]
+fn the_saved_document_marks_the_tool_result_that_carried_the_runtime_note() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("create conversation");
+    session
+        .save(
+            Save::new(&conversation.id)
+                .entry("user", json!({"text": "read it"}))
+                .entry(
+                    "assistant",
+                    json!([
+                        {"type": "text", "text": "calling"},
+                        {"type": "tool_call", "id": "call-1", "name": "read", "arguments": {"path": "a"}}
+                    ]),
+                )
+                .entry(
+                    "tool_result",
+                    json!([{"type": "tool_result", "call_id": "call-1", "content": "file body"}]),
+                ),
+        )
+        .expect("save entries");
+
+    let prompt = session
+        .build_prompt(PromptInput {
+            soul: "SOUL".to_owned(),
+            conversation_id: conversation.id.clone(),
+            model: "test-model".to_owned(),
+            tools: Vec::new(),
+            runtime_note: "RUNTIME".to_owned(),
+            rules: String::new(),
+            rules_version: 0,
+            recall: String::new(),
+            skills_index: String::new(),
+            guidance: String::new(),
+        })
+        .expect("build prompt");
+
+    let transcript = prompt.document["transcript"]
+        .as_array()
+        .expect("transcript");
+    let carrier = transcript.last().expect("newest transcript item");
+    assert_eq!(carrier["role"], json!("tool"));
+    assert_eq!(carrier["runtime_note"], json!("RUNTIME"));
+    assert_eq!(
+        carrier["blocks"][0]["content"],
+        json!("file body"),
+        "the note is a marker on the message, not a second result"
+    );
+    let sent = prompt.request.messages.last().expect("newest request message");
+    assert_eq!(sent.role, Role::Tool);
+    assert!(
+        sent.blocks.iter().any(|block| match block {
+            hearth_model::ContentBlock::ToolResult { content, .. } => content.ends_with("RUNTIME"),
+            _ => false,
+        }),
+        "the request carries the note on the same tool result: {sent:?}"
+    );
+}
+
+fn role_name(role: Role) -> &'static str {
+    match role {
+        Role::System => "system",
+        Role::User => "user",
+        Role::Assistant => "assistant",
+        Role::Tool => "tool",
+    }
 }
 
 #[test]

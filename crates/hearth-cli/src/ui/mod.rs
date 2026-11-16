@@ -1031,9 +1031,12 @@ mod tests {
             "request": {
                 "identity": "SOUL TEXT\nSECOND LINE",
                 "guidance": "PROJECT RULES",
-                "runtime": "RUNTIME NOTE",
                 "transcript": [
-                    {"role": "user", "blocks": [{"type": "text", "text": "please inspect"}]}
+                    {
+                        "role": "user",
+                        "runtime_note": "RUNTIME NOTE",
+                        "blocks": [{"type": "text", "text": "please inspect"}]
+                    }
                 ]
             },
             "prompt_hash": "abc123def456",
@@ -1050,7 +1053,7 @@ mod tests {
         for label in [
             "system · identity",
             "system · guidance",
-            "runtime note · newest input",
+            "runtime note",
             "user",
             "request · tools",
             "response",
@@ -1080,7 +1083,6 @@ mod tests {
                 "transcript": [
                     {"role": "user", "blocks": [{"type": "text", "text": "please inspect the whole session"}]}
                 ],
-                "runtime": "RUNTIME NOTE",
                 "tools": [
                     {
                         "name": "read_file",
