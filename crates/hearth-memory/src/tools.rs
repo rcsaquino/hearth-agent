@@ -602,23 +602,18 @@ mod tests {
     }
 
     #[test]
-    fn a_pronoun_is_refused_by_the_save_tool() {
+    fn a_pronoun_is_accepted_by_the_save_tool() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let error = tools
+        let saved = tools
             .call(
                 SAVE,
                 &json!({"content": "He likes apples", "subject": "bob"}),
             )
             .expect("call")
-            .expect_err("a pronoun has no antecedent");
-        assert_eq!(error.code, "invalid_input");
-        assert!(
-            error.message.to_ascii_lowercase().contains("he"),
-            "the refusal must name the pronoun: {}",
-            error.message
-        );
-        assert_eq!(service.count().expect("count"), 0);
+            .expect("a pronoun stores like any other word");
+        assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
+        assert_eq!(service.count().expect("count"), 1);
     }
 
     #[test]
@@ -638,45 +633,32 @@ mod tests {
     }
 
     #[test]
-    fn a_first_person_save_is_refused_and_the_retry_is_accepted() {
+    fn a_first_person_save_is_stored() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let error = tools
+        let saved = tools
             .call(SAVE, &json!({"content": "I prefer dark mode"}))
             .expect("call")
-            .expect_err("first person needs the user as its actor");
-        assert_eq!(error.code, "invalid_input");
-        let saved = tools
-            .call(SAVE, &json!({"content": "the user prefers dark mode"}))
-            .expect("call")
-            .expect("the retry is standalone");
+            .expect("first person stores as written");
         assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
     }
 
     #[test]
-    fn a_third_person_statement_beside_a_named_subject_is_refused() {
+    fn a_third_person_statement_stores_whatever_its_subject() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let error = tools
+        let saved = tools
             .call(
                 SAVE,
                 &json!({"content": "she manages the OR board", "subject": "alice"}),
             )
             .expect("call")
-            .expect_err("the subject is not a substitute for a named actor");
-        assert_eq!(error.code, "invalid_input");
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "alice manages the OR board", "subject": "alice"}),
-            )
-            .expect("call")
-            .expect("the named statement is accepted");
+            .expect("the subject does not change what content is allowed");
         assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
     }
 
     #[test]
-    fn a_rule_needs_no_actor() {
+    fn a_rule_is_stored_pinned() {
         let (_directory, service) = memory();
         let tools = registry(&service);
         let saved = tools
@@ -720,8 +702,12 @@ mod tests {
             "the schema must forbid padding: {description}"
         );
         assert!(
-            description.contains("pronoun"),
-            "the store refuses a pronoun, so the schema must warn: {description}"
+            !description.contains("pronoun"),
+            "the schema takes no position on pronouns: {description}"
+        );
+        assert!(
+            !description.contains("actor"),
+            "the schema no longer asks for a named actor: {description}"
         );
     }
 

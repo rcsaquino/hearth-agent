@@ -1434,15 +1434,16 @@ mod tests {
         );
     }
     #[test]
-    fn a_statement_with_a_pronoun_is_refused() {
+    fn a_statement_with_a_pronoun_is_stored() {
         let (_directory, session) = home();
+        let mut written = Vec::new();
         for content in [
             "He likes apples",
             "I prefer dark mode",
             "you should deploy on Friday",
             "we ship on Fridays",
         ] {
-            let error = insert(
+            let outcome = insert(
                 &session,
                 Pending {
                     item: NewMemory::new(content),
@@ -1450,18 +1451,14 @@ mod tests {
                 },
                 MemoryConfig::default().rules_max_tokens,
             )
-            .expect_err("a pronoun has no antecedent in a memory");
-            assert_eq!(error.code, Code::InvalidInput, "{content}");
-            assert!(
-                error.message.contains("memory content says"),
-                "the refusal must name the pronoun and the rule: {}",
-                error.message
-            );
+            .unwrap_or_else(|error| panic!("{content} must store: {error:?}"));
+            written.push(outcome.memory().content.clone());
         }
+        assert_eq!(written.len(), 4);
         assert_eq!(
             count(&session).expect("count"),
-            0,
-            "a refused write must save nothing"
+            4,
+            "a pronoun saves like any other word"
         );
     }
 
@@ -1477,13 +1474,13 @@ mod tests {
                 },
                 MemoryConfig::default().rules_max_tokens,
             )
-            .expect("a named actor is standalone");
+            .expect("a named statement stores");
         }
         assert_eq!(count(&session).expect("count"), 2);
     }
 
     #[test]
-    fn a_rule_needs_no_actor() {
+    fn a_pinned_rule_is_stored() {
         let (_directory, session) = home();
         insert(
             &session,
@@ -1495,6 +1492,6 @@ mod tests {
             },
             MemoryConfig::default().rules_max_tokens,
         )
-        .expect("an imperative rule has no pronoun");
+        .expect("an imperative rule stores");
     }
 }

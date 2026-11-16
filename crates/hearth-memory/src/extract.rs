@@ -479,8 +479,14 @@ mod tests {
     }
 
     #[test]
-    fn a_third_person_statement_without_a_name_is_dropped() {
-        assert!(candidates("Remember that he likes apples.").is_empty());
+    fn a_third_person_statement_without_a_name_is_kept() {
+        let found = candidates("Remember that he likes apples.");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, "he likes apples");
+        assert_eq!(
+            found[0].subject, "",
+            "a pronoun invents no subject of its own"
+        );
     }
 
     #[test]

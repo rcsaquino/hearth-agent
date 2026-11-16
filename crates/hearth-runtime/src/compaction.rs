@@ -365,14 +365,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_summary_instruction_asks_for_a_named_actor() {
+    fn the_summary_instruction_asks_for_a_standalone_statement() {
         assert!(
             SUMMARY_INSTRUCTION.contains("standalone"),
             "the compaction instruction must ask for a standalone statement: {SUMMARY_INSTRUCTION}"
         );
         assert!(
-            SUMMARY_INSTRUCTION.contains("pronoun"),
-            "the compaction instruction must forbid a pronoun: {SUMMARY_INSTRUCTION}"
+            !SUMMARY_INSTRUCTION.contains("pronoun"),
+            "the compaction instruction takes no position on pronouns: {SUMMARY_INSTRUCTION}"
         );
     }
 }
