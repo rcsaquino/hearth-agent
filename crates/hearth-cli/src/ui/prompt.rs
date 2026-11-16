@@ -28,13 +28,6 @@ const PAGE_LINES: usize = 15;
 const BODY_INDENT: usize = 2;
 /// One frame per 100 ms, which is the event loop's budget.
 const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
-/// The keys this tab answers, kept inside the card.
-const HINT_KEYS: [(&str, &str); 4] = [
-    ("f", "follow"),
-    ("s", "system"),
-    ("r", "raw"),
-    ("o", "refresh"),
-];
 /// The stable prefix layers, with the names a reader knows them by.
 const PREFIX_LAYERS: [(&str, &str); 5] = [
     ("identity", "SOUL.md"),
@@ -241,10 +234,9 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let busy = app.prompt.loading || running_tasks(app) > 0;
     let height = usize::from(inner.height);
-    let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 3);
-    let hint_rows = usize::from(height >= 1);
-    let busy_rows = usize::from(busy && height > header_rows + hint_rows);
-    let body_rows = height.saturating_sub(header_rows + hint_rows + busy_rows);
+    let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 2);
+    let busy_rows = usize::from(busy && height > header_rows + 1);
+    let body_rows = height.saturating_sub(header_rows + busy_rows);
     let header_area = Rect {
         height: header_rows as u16,
         ..inner
@@ -257,11 +249,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let busy_area = Rect {
         y: inner.y + (header_rows + body_rows) as u16,
         height: busy_rows as u16,
-        ..inner
-    };
-    let hint_area = Rect {
-        y: inner.y + (header_rows + body_rows + busy_rows) as u16,
-        height: hint_rows as u16,
         ..inner
     };
 
@@ -292,12 +279,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     if busy_rows > 0 {
         frame.render_widget(Paragraph::new(working_line()), busy_area);
-    }
-    if hint_rows > 0 {
-        frame.render_widget(
-            Paragraph::new(hint_line(usize::from(inner.width))),
-            hint_area,
-        );
     }
 }
 
@@ -395,18 +376,6 @@ fn spinner_frame() -> usize {
     static START: OnceLock<Instant> = OnceLock::new();
     let elapsed = START.get_or_init(Instant::now).elapsed().as_millis();
     (elapsed / 100) as usize % FRAMES.len()
-}
-
-fn hint_line(width: usize) -> Line<'static> {
-    let mut spans = vec![
-        Span::styled("[ ]", theme::text()),
-        Span::styled(" snapshots", theme::muted()),
-    ];
-    for (key, label) in HINT_KEYS {
-        spans.push(Span::styled(format!(" · {key}"), theme::text()));
-        spans.push(Span::styled(format!(" {label}"), theme::muted()));
-    }
-    Row::from_spans(spans).fit(width)
 }
 
 /// One block of a conversation, derived from the saved requests.
@@ -1006,11 +975,6 @@ impl Row {
             spans: Vec::new(),
             width: 0,
         }
-    }
-
-    fn from_spans(spans: Vec<Span<'static>>) -> Self {
-        let width = spans.iter().map(|span| span.content.as_ref().width()).sum();
-        Self { spans, width }
     }
 
     fn push(&mut self, text: impl Into<String>, style: Style) {
