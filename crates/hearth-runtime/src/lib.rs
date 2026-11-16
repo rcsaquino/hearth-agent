@@ -21,6 +21,7 @@ mod scheduler;
 pub mod service;
 pub mod skill_review;
 pub mod skills;
+pub mod spill;
 pub mod tool_groups;
 mod tools;
 

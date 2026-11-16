@@ -105,6 +105,43 @@ fn reads_spill_paths() {
 }
 
 #[test]
+fn a_missing_spill_root_reads_as_not_found() {
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let spill = home.path().join("tmp-spill");
+    fs::create_dir_all(&workspace).expect("create workspace");
+
+    let tool = FileTool::new(&workspace, &spill);
+    let error = tool
+        .call(&json!({"action": "read", "path": "spill/old.txt"}))
+        .expect_err("a missing spill root has no file");
+    assert_eq!(
+        error.code, "not_found",
+        "a wiped temp root must not break the root: {error:?}"
+    );
+}
+
+#[test]
+fn a_missing_spill_root_does_not_break_an_absolute_workspace_read() {
+    use hearth_tools::Workspace;
+
+    let home = TempDir::new().expect("temp home");
+    let workspace = home.path().join("workspace");
+    let spill = home.path().join("tmp-spill");
+    let media = home.path().join("media");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    fs::create_dir_all(&media).expect("create media");
+    fs::write(workspace.join("a.txt"), "alpha").expect("write file");
+
+    let view = Workspace::with_media(&workspace, &spill, &media);
+    let target = workspace.join("a.txt");
+    let text = view
+        .read_text(target.to_str().expect("utf8 path"))
+        .expect("an absolute workspace read must not need the spill root");
+    assert_eq!(text, "alpha");
+}
+
+#[test]
 fn runs_a_shell_command_and_captures_streams() {
     use hearth_tools::ShellTool;
     use std::time::Duration;

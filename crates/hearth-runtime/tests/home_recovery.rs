@@ -6,13 +6,12 @@ use serde_json::json;
 use tempfile::TempDir;
 
 /// The directories onboarding writes. A restored home must hold every one.
-const LAYOUT: [&str; 8] = [
+const LAYOUT: [&str; 7] = [
     "workspace",
     "skills",
     "skills/learned",
     "media/inbound",
     "media/outbound",
-    "spill",
     "logs",
     "backups",
 ];
@@ -71,6 +70,10 @@ fn restore_rebuilds_the_post_onboarding_layout() {
             "missing directory {directory}"
         );
     }
+    assert!(
+        !home.path().join("spill").exists(),
+        "spill belongs in the temp folder, not the home"
+    );
     let soul = std::fs::read_to_string(home.path().join("SOUL.md")).expect("SOUL.md");
     assert!(soul.contains("<identity>"), "soul was: {soul}");
     assert!(soul.contains("Hearth"), "soul was: {soul}");

@@ -79,7 +79,6 @@ fn init_writes_a_complete_home_silently() {
         "skills/learned",
         "media/inbound",
         "media/outbound",
-        "spill",
         "logs",
         "backups",
     ] {
@@ -88,6 +87,10 @@ fn init_writes_a_complete_home_silently() {
             "missing directory {directory}"
         );
     }
+    assert!(
+        !home.path().join("spill").exists(),
+        "init must not create a spill directory in the home"
+    );
     let soul = std::fs::read_to_string(home.path().join("SOUL.md")).expect("SOUL.md");
     assert!(soul.contains("<identity>"), "soul was: {soul}");
     assert!(

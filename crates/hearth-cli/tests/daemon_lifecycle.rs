@@ -84,7 +84,6 @@ fn a_home_with_only_settings_is_restored_by_the_daemon() {
         "skills/learned",
         "media/inbound",
         "media/outbound",
-        "spill",
         "logs",
         "backups",
     ] {
@@ -93,6 +92,10 @@ fn a_home_with_only_settings_is_restored_by_the_daemon() {
             "missing directory {directory}"
         );
     }
+    assert!(
+        !home.path().join("spill").exists(),
+        "a restored home must not carry the temp spill root"
+    );
     let soul = std::fs::read_to_string(home.path().join("SOUL.md")).expect("SOUL.md");
     assert!(soul.contains("<identity>"), "soul was: {soul}");
     assert!(

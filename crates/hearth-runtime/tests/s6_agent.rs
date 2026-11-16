@@ -88,6 +88,16 @@ fn agent_with(
     provider: Arc<dyn Provider>,
     tools: ToolRegistry,
 ) -> Agent {
+    agent_with_spill(home, &home.join("spill"), harness, provider, tools)
+}
+
+fn agent_with_spill(
+    home: &Path,
+    spill: &Path,
+    harness: &Harness,
+    provider: Arc<dyn Provider>,
+    tools: ToolRegistry,
+) -> Agent {
     Agent::new(
         harness.session().clone(),
         provider,
@@ -98,7 +108,7 @@ fn agent_with(
             owner: "test-owner".to_owned(),
             tools,
             home: home.to_path_buf(),
-            spill_dir: home.join("spill"),
+            spill_dir: spill.to_path_buf(),
             guidance: Guidance::default(),
         },
     )
@@ -535,9 +545,11 @@ fn a_large_file_read_spills_and_can_be_read_back() {
     fs::create_dir_all(workspace.join("notes")).expect("create notes");
     let full = format!("{}{}", "a".repeat(20_000), "TAIL");
     fs::write(workspace.join("notes/large.txt"), &full).expect("write file");
+    let spill = TempDir::new().expect("temp spill");
+    let spill_root = spill.path().join("hearth/spill");
     let tools = ToolRegistry::new(vec![Arc::new(FileTool::new(
         workspace.clone(),
-        home.path().join("spill"),
+        &spill_root,
     ))]);
     let provider = Arc::new(ScriptedProvider::new(vec![
         Ok(vec![
@@ -558,7 +570,7 @@ fn a_large_file_read_spills_and_can_be_read_back() {
         ]),
     ]));
 
-    let outcome = agent_with(home.path(), &harness, provider, tools)
+    let outcome = agent_with_spill(home.path(), &spill_root, &harness, provider, tools)
         .run_submission(&submission.id)
         .expect("run submission");
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
@@ -570,12 +582,18 @@ fn a_large_file_read_spills_and_can_be_read_back() {
     assert!(summary.contains("tool output truncated"), "{summary}");
     assert!(summary.contains("spill/call-1.txt"), "{summary}");
 
-    let spill_path = home.path().join("spill/call-1.txt");
+    let spill_path = spill_root.join("call-1.txt");
     assert!(spill_path.exists(), "spill file missing");
     assert_eq!(fs::read_to_string(&spill_path).expect("read spill"), full);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        let root_mode = fs::metadata(&spill_root)
+            .expect("spill root metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(root_mode, 0o700, "spill root mode was {root_mode:o}");
         let mode = fs::metadata(&spill_path)
             .expect("spill metadata")
             .permissions()
@@ -583,8 +601,12 @@ fn a_large_file_read_spills_and_can_be_read_back() {
             & 0o777;
         assert_eq!(mode, 0o600, "spill mode was {mode:o}");
     }
+    assert!(
+        !home.path().join("spill").exists(),
+        "the agent must write spill under its configured temp root"
+    );
 
-    let reader = FileTool::new(workspace, home.path().join("spill"));
+    let reader = FileTool::new(workspace, &spill_root);
     let read_back = reader
         .call(&json!({"action": "read", "path": "spill/call-1.txt"}))
         .expect("read spill through the tool");
