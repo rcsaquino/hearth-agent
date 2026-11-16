@@ -4,13 +4,16 @@
 //! read once. The home carries only durable state, so the root is under the
 //! system temp folder and may vanish between turns.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 /// The fixed segment below the temp base.
 const SPILL_ROOT: &str = "hearth/spill";
+/// The mode every spill directory is created and kept with.
+#[cfg(unix)]
+const PRIVATE_DIR: u32 = 0o700;
 
 /// The spill root for this process.
 pub fn root() -> PathBuf {
@@ -19,22 +22,105 @@ pub fn root() -> PathBuf {
 
 /// The spill root for one temp base value.
 ///
-/// The value is the environment's, not the process's, so a test can exercise an
-/// empty or relative `TMPDIR` without writing outside its own directory.
+/// An empty or relative `TMPDIR` is treated as unset, because either would put
+/// the root in the daemon's working directory instead of the temp folder.
 pub(crate) fn root_from(value: Option<OsString>) -> PathBuf {
-    let _ = value;
-    PathBuf::from("/tmp").join(SPILL_ROOT)
+    match value {
+        Some(value) if usable_base(&value) => PathBuf::from(value).join(SPILL_ROOT),
+        _ => PathBuf::from("/tmp").join(SPILL_ROOT),
+    }
+}
+
+fn usable_base(value: &OsStr) -> bool {
+    !value.is_empty() && Path::new(value).is_absolute()
 }
 
 /// Create the root privately, or refuse a root that is not safe to write.
 pub fn ensure_root(root: &Path) -> io::Result<()> {
-    fs::create_dir_all(root)
+    ensure_root_for(root, current_uid())
 }
 
-/// Create the root for a known owner.
+/// Create the root for a known owner, for the ownership check's test.
+#[cfg(test)]
 pub(crate) fn ensure_root_owned(root: &Path, owner: u32) -> io::Result<()> {
-    let _ = owner;
-    ensure_root(root)
+    ensure_root_for(root, Some(owner))
+}
+
+fn ensure_root_for(root: &Path, owner: Option<u32>) -> io::Result<()> {
+    let parent = root
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    if let Some(parent) = parent {
+        ensure_private_directory(parent, owner)?;
+    }
+    ensure_private_directory(root, owner)
+}
+
+/// Create one directory with mode 0700, or verify that the existing one is safe.
+fn ensure_private_directory(path: &Path, owner: Option<u32>) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("{} is a symlink, not a directory", path.display()),
+                ));
+            }
+            if !metadata.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} is not a directory", path.display()),
+                ));
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{MetadataExt, PermissionsExt};
+                if let Some(owner) = owner
+                    && metadata.uid() != owner
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("{} is not owned by the current user", path.display()),
+                    ));
+                }
+                fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIR))?;
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(PRIVATE_DIR);
+            }
+            builder.create(path)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIR))?;
+            }
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// The effective uid of this process, when the host can report it safely.
+///
+/// The kernel owns `/proc/<pid>` under the process's euid, so its metadata gives
+/// the owner without an `unsafe` libc call.
+#[cfg(unix)]
+fn current_uid() -> Option<u32> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata("/proc/self")
+        .ok()
+        .map(|metadata| metadata.uid())
+}
+
+#[cfg(not(unix))]
+fn current_uid() -> Option<u32> {
+    None
 }
 
 #[cfg(test)]
@@ -119,6 +205,6 @@ mod tests {
         ensure_root(&root).expect("create");
 
         let error = ensure_root_owned(&root, u32::MAX).expect_err("another owner must be refused");
-        assert!(error.to_string().contains("owner"), "{error}");
+        assert!(error.to_string().contains("owned"), "{error}");
     }
 }

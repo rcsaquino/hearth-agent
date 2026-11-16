@@ -12,13 +12,12 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// The folders onboarding writes and the daemon expects to exist.
-const HOME_DIRECTORIES: [&str; 8] = [
+const HOME_DIRECTORIES: [&str; 7] = [
     "workspace",
     "skills",
     "skills/learned",
     "media/inbound",
     "media/outbound",
-    "spill",
     "logs",
     "backups",
 ];

@@ -131,7 +131,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         Some(path) => home.join(path),
         None => home.join("workspace"),
     };
-    let spill = home.join("spill");
+    let spill = crate::spill::root();
     // Memory shares the conversation database, so opening it cannot fail on its
     // own: a broken database has already stopped startup.
     let mut memory = MemoryService::new(session.clone())

@@ -178,8 +178,7 @@ impl Workspace {
             return Ok(target);
         }
         let (root, relative) = self.split_read(path)?;
-        let root = fs::canonicalize(&root)
-            .map_err(|_| ToolError::invalid("missing_root", "the root does not exist"))?;
+        let root = fs::canonicalize(&root).map_err(|_| self.missing_root(path, &root))?;
         let target = fs::canonicalize(root.join(relative))
             .map_err(|_| ToolError::invalid("not_found", format!("not found: {path}")))?;
         if !target.starts_with(&root) {
@@ -189,19 +188,32 @@ impl Workspace {
     }
 
     fn read_roots(&self) -> Result<Vec<PathBuf>, ToolError> {
-        let mut roots = vec![
-            fs::canonicalize(&self.root).map_err(|_| {
-                ToolError::invalid("missing_root", "the workspace root does not exist")
-            })?,
-            fs::canonicalize(&self.spill)
-                .map_err(|_| ToolError::invalid("missing_root", "the spill root does not exist"))?,
-        ];
-        if let Some(media) = &self.media {
-            roots.push(fs::canonicalize(media).map_err(|_| {
-                ToolError::invalid("missing_root", "the media root does not exist")
-            })?);
+        let mut roots = vec![fs::canonicalize(&self.root).map_err(|_| {
+            ToolError::invalid("missing_root", "the workspace root does not exist")
+        })?];
+        // A wiped temp folder must not break an absolute read that lands under
+        // another root. The spill root is optional on every read.
+        if let Ok(spill) = fs::canonicalize(&self.spill) {
+            roots.push(spill);
+        }
+        if let Some(media) = &self.media
+            && let Ok(media) = fs::canonicalize(media)
+        {
+            roots.push(media);
         }
         Ok(roots)
+    }
+
+    /// The failure for a root that could not be resolved.
+    ///
+    /// A missing spill root is a missing file on that path, not a broken
+    /// workspace: the temp folder may vanish at any time.
+    fn missing_root(&self, path: &str, root: &Path) -> ToolError {
+        if root == self.spill {
+            ToolError::invalid("not_found", format!("not found: {path}"))
+        } else {
+            ToolError::invalid("missing_root", "the root does not exist")
+        }
     }
 
     fn resolve_write(&self, path: &str) -> Result<PathBuf, ToolError> {
@@ -263,8 +275,7 @@ impl Workspace {
 
     fn resolve_dir(&self, path: &str) -> Result<PathBuf, ToolError> {
         let (root, relative) = self.split_read(path)?;
-        let root = fs::canonicalize(&root)
-            .map_err(|_| ToolError::invalid("missing_root", "the root does not exist"))?;
+        let root = fs::canonicalize(&root).map_err(|_| self.missing_root(path, &root))?;
         let target = fs::canonicalize(root.join(relative))
             .map_err(|_| ToolError::invalid("not_found", format!("not found: {path}")))?;
         if !target.starts_with(&root) {

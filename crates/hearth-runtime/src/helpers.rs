@@ -664,7 +664,7 @@ impl HelperPool {
 
 fn write_report(path: &PathBuf, report: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        crate::spill::ensure_root(parent)?;
     }
     let mut options = OpenOptions::new();
     options.write(true).create(true).truncate(true);

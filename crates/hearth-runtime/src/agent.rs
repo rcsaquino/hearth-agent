@@ -895,7 +895,7 @@ impl Agent {
             return (content, false);
         }
         let name = sanitize_call_id(call_id);
-        if let Err(error) = fs::create_dir_all(&self.config.spill_dir) {
+        if let Err(error) = crate::spill::ensure_root(&self.config.spill_dir) {
             return (
                 format!("tool output was too large and the spill directory failed: {error}"),
                 true,
