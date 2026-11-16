@@ -128,10 +128,15 @@ fn select_block(prompt: &mut PromptView, step: isize) {
 }
 
 fn first_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
+    let top = if prompt.follow {
+        prompt.max_scroll.get()
+    } else {
+        prompt.scroll
+    };
     cache
         .blocks
         .iter()
-        .position(|block| block.line >= prompt.scroll)
+        .position(|block| block.line >= top)
         .unwrap_or(cache.blocks.len() - 1)
 }
 
