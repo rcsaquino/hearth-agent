@@ -176,8 +176,10 @@ Key invariants:
 - Memory is one table in `hearth.db`. Never overwrite a statement: close its
   window and point `superseded_by` at the replacement. Recall is three cheap
   channels (FTS5, subject, INT8 vectors behind a 0.40 floor) fused by RRF k=60,
-  ranked by a linear score over cheap features, then filled into a token budget.
-  No memory operation calls a model. The digest reports what it left out.
+  ranked by a linear score over cheap features, then filled to the 10-item cap.
+  No memory operation calls a model. Every new statement names its actor in the
+  content, and a pronoun is refused; existing rows still render. The digest
+  reports what it left out.
 - Optional tool groups are lazy. Their schemas enter a request only after
   `tool_search` selects them; the core prompt budget must not grow.
 - Every timestamp shown to the model or the person is ISO 8601 in

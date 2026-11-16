@@ -2657,3 +2657,32 @@ just after.
   matter.
 - This supersedes the "Stable `m_` id" row in SPEC 7.2 and the 34-character ids in
   the 2026-11-14 "Memory rebuilt as one store and a four-stage cascade" entry.
+
+## 2026-11-17: A memory must name its actor
+
+- `actor::pronoun` finds the first first, second, or third person pronoun in a
+  statement, split on non-alphanumeric boundaries so a contraction still counts.
+  `store::validate` refuses any content that carries one, with `invalid_input`,
+  and the error names the pronoun and the replacement: `the user` for first
+  person, the assistant's name for second, and the name from the message for
+  third. The store is the final gate for the tool, the extractor, the legacy
+  import, and a direct service write.
+- The check is deterministic and calls no model. A rewrite at write time would
+  cost tokens, add latency to a save, and could invent detail. The model already
+  has the message when it calls `memory_save`, so it can retry with a name.
+- `extract` rewrites first person (`my` to `the user's`, `me` to `the user`, and a
+  leading `I` or `we` with the verb agreed to the singular) and drops a candidate
+  whose remaining pronoun it cannot resolve. Third person is kept only when the
+  statement already names its subject, so `Alice likes apples` is stored and `he
+  likes apples` is not. `acceptable` runs the pronoun check on every candidate as
+  a second gate.
+- The `memory_save` content description asks for a standalone statement that
+  names its actor and forbids a pronoun. `SUMMARY_INSTRUCTION` asks the same for
+  each compaction statement. The four memory schemas measure 799 tokens, under
+  the 800-token budget; the save description lost redundant words to make room.
+- A rule keeps its imperative shape: `Never deploy on Friday` has no pronoun and
+  is accepted. A rule that does carry a pronoun is refused like any other
+  statement.
+- Existing rows are not rewritten, hidden, or deleted. A vague row still renders;
+  the owner can replace it with `supersedes` or remove it with `memory_forget`,
+  and the replacement is held to the new rule.

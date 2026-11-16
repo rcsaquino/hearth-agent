@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.49, plain-language edition
+**Status:** Draft 0.50, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.50 requires every stored memory to name its actor in the content. A
+statement with a pronoun is refused and names the pronoun, the extractor rewrites
+first person to `the user` and drops an unresolvable third person, and the
+`memory_save` schema and the compaction instruction ask for a standalone
+statement. A rule keeps its imperative shape and needs no actor. Existing rows
+are not rewritten and still render.
 
 Draft 0.49 gives a new memory a 12-character id: `m_` plus ten Crockford base32
 characters, which drop `I`, `L`, `O`, and `U`. `memory_recall` accepts an id in
@@ -1203,6 +1210,11 @@ One row is one statement the user would recognise as one thing they said.
 | `superseded_by` | The statement that replaced this one |
 | `created_at`, `updated_at`, `revision` | Bookkeeping |
 
+A memory is read with no conversation around it, so the actor is named in the
+content, not left as a pronoun. `the user` is the user, the assistant's own name
+is the assistant, and anyone else is a person's name. A write that still carries
+a pronoun is refused. Existing rows are not rewritten.
+
 There is **no importance score**. A stored importance is a number no one can
 calibrate, and it invites a write-time model call to produce it. Ranking is
 computed from evidence at read time instead.
@@ -1259,6 +1271,14 @@ Write rules:
   trimming. A longer write is refused, names its length and the limit, and saves
   nothing. A new memory fits its recall line whole; only a row written before
   the limit is clipped for display.
+- Every statement names its actor in the content: third person by the name from
+  the message, first person as `the user`, and second person as the assistant's
+  name or the user. A content that still carries a pronoun is refused with
+  `invalid_input` and names the pronoun. The store is the final gate for every
+  path, including a direct write and the legacy import. The extractor rewrites
+  first person and drops a candidate whose antecedent it cannot find. A rule is
+  an instruction, so an imperative such as `Never deploy on Friday` needs no
+  actor.
 
 ### 7.4 How memories come back
 
@@ -1350,6 +1370,9 @@ text moves.
   prefix and the Prompt tab names `rules` as the changed layer.
 - A statement that is not a rule cannot be pinned. Pinning a fact would repeat it
   on every turn, which is the rule's job.
+- A rule is an instruction, not a sentence about a person. An imperative such as
+  `Never deploy on Friday` is standalone without an actor and is accepted; a
+  pronoun is refused like any other content.
 - A pin belongs to the live statement. A write that names a rule as `supersedes`
   retires it: the window closes and the pin clears, so it leaves the block and
   stops spending the budget. An unpinned copy that does not name the row returns
@@ -1378,7 +1401,7 @@ Four verbs, and each one does one thing.
 
 There is no store selector, no id-prefix convention, and no tag array. An id is
 exact, never a prefix. The four
-schemas measure 776 tokens against 1,410 for the five they replace, and the
+schemas measure 799 tokens against 1,410 for the five they replace, and the
 saving is paid on every request.
 
 A bare `as_of` date means that whole local day in `identity.timezone`, so its
