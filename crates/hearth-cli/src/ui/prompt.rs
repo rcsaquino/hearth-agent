@@ -1620,7 +1620,8 @@ mod tests {
 
     #[test]
     fn a_saved_conversation_is_a_chat_of_labelled_blocks() {
-        let (_home, app) = prompt_app(conversation());
+        let (_home, mut app) = prompt_app(conversation());
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         let system = starting(&text, "▌ SYSTEM · SOUL.md");
         assert_eq!(system.len(), 1, "the identity is one context block: {text}");
@@ -1641,98 +1642,56 @@ mod tests {
         );
         assert!(
             text.contains(SOUL),
-            "the identity is open until the chat folds: {text}"
+            "the opened chat shows the whole identity: {text}"
         );
     }
 
     #[test]
-    fn enter_folds_and_opens_the_whole_chat() {
+    fn the_chat_starts_folded_and_enter_opens_it() {
         let (_home, mut app) = prompt_app(conversation());
         let text = rendered(&app, 100, 80);
         assert!(
-            text.contains("result line 29"),
-            "the saved view shows the whole tool result: {text}"
-        );
-        assert!(
-            !text.lines().any(|line| line.contains("hidden")),
-            "the saved view hides nothing: {text}"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let text = rendered(&app, 100, 80);
-        assert!(
             text.contains("package hearth-cli"),
-            "the first line of the tool result survives the fold: {text}"
+            "the first line of the tool result is the preview: {text}"
         );
         assert!(
             text.contains("result line 3"),
-            "the fifth wrapped line survives the fold: {text}"
+            "the fifth wrapped line survives the folded start: {text}"
         );
         assert!(
             !text.contains("result line 4"),
-            "the sixth wrapped line is hidden: {text}"
+            "the sixth wrapped line is hidden at the start: {text}"
         );
         assert!(
             text.lines().any(|line| line.contains("hidden")),
             "a folded section says what it hides: {text}"
         );
+        assert!(
+            !text.contains("result line 29"),
+            "the whole tool result waits for Enter: {text}"
+        );
+        assert!(text.contains(ANSWER), "the answer never folds: {text}");
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
             text.contains("result line 29"),
-            "enter opens the whole chat again: {text}"
+            "enter opens the whole chat: {text}"
         );
+        assert!(text.contains(ANSWER), "the answer stays visible: {text}");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("result line 3") && !text.contains("result line 4"),
+            "the next enter folds the chat again: {text}"
+        );
+        assert!(!text.contains("result line 29"), "{text}");
+        assert!(text.contains(ANSWER), "the answer stays visible: {text}");
     }
 
     #[test]
     fn thinking_is_its_own_block() {
-        let thoughts = (0..10)
-            .map(|index| format!("thought line {index}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let answers = (0..8)
-            .map(|index| format!("answer line {index}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let (_home, app) = prompt_app(vec![json!({
-            "request": {
-                "transcript": [
-                    {"role": "user", "blocks": [{"type": "text", "text": "a question"}]}
-                ]
-            },
-            "prompt_hash": "thinking-hash",
-            "requested_at": 1_700_000_000_000_000_i64,
-            "response": {
-                "entry_id": "entry-1",
-                "created_at": 1_700_000_005_000_000_i64,
-                "blocks": [
-                    {"type": "thinking", "text": thoughts},
-                    {"type": "text", "text": answers}
-                ],
-                "tokens_est": 20
-            },
-            "usage": Value::Null
-        })]);
-
-        let text = rendered(&app, 100, 80);
-        let thinking = line_of(&text, "▌ THINKING");
-        let thought = line_of(&text, "thought line 9");
-        let answer_header = line_of(&text, "▌ HEARTH");
-        let answer = line_of(&text, "answer line 7");
-        assert!(
-            thinking < thought && thought < answer_header && answer_header < answer,
-            "thinking owns its own block before the answer: {text}"
-        );
-        let header = text.lines().nth(thinking).expect("the thinking header");
-        assert!(
-            header.contains("turn 1"),
-            "the header carries its turn: {header}"
-        );
-    }
-
-    #[test]
-    fn thinking_folds_on_its_own_key() {
         let thoughts = (0..10)
             .map(|index| format!("thought line {index}"))
             .collect::<Vec<_>>()
@@ -1763,21 +1722,59 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
+        let thinking = line_of(&text, "▌ THINKING");
+        let thought = line_of(&text, "thought line 9");
+        let answer_header = line_of(&text, "▌ HEARTH");
+        let answer = line_of(&text, "answer line 7");
         assert!(
-            text.contains("thought line 9"),
-            "the chat fold must not fold thinking: {text}"
+            thinking < thought && thought < answer_header && answer_header < answer,
+            "thinking owns its own block before the answer: {text}"
         );
-        assert!(text.contains("answer line 7"), "{text}");
+        let header = text.lines().nth(thinking).expect("the thinking header");
+        assert!(
+            header.contains("turn 1"),
+            "the header carries its turn: {header}"
+        );
+    }
 
-        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+    #[test]
+    fn thinking_starts_folded_and_enter_toggles_it() {
+        let thoughts = (0..10)
+            .map(|index| format!("thought line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let answers = (0..8)
+            .map(|index| format!("answer line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_home, mut app) = prompt_app(vec![json!({
+            "request": {
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "a question"}]}
+                ]
+            },
+            "prompt_hash": "thinking-hash",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": {
+                "entry_id": "entry-1",
+                "created_at": 1_700_000_005_000_000_i64,
+                "blocks": [
+                    {"type": "thinking", "text": thoughts},
+                    {"type": "text", "text": answers}
+                ],
+                "tokens_est": 20
+            },
+            "usage": Value::Null
+        })]);
+
         let text = rendered(&app, 100, 80);
         assert!(
             text.contains("thought line 4"),
-            "the fifth thought survives the thinking fold: {text}"
+            "the folded start previews thinking: {text}"
         );
         assert!(
             !text.contains("thought line 5"),
-            "the sixth thought is hidden: {text}"
+            "the sixth thought waits for Enter: {text}"
         );
         assert!(
             text.lines().any(|line| line.contains("hidden")),
@@ -1785,22 +1782,45 @@ mod tests {
         );
         assert!(
             text.contains("answer line 7"),
-            "folding thinking must not fold the answer: {text}"
+            "thinking folds without folding the answer: {text}"
         );
-        assert!(text.contains("▌ THINKING"), "the header stays: {text}");
 
-        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
         assert!(
-            rendered(&app, 100, 80).contains("thought line 9"),
-            "t opens thinking again"
+            text.contains("thought line 9"),
+            "enter opens the whole thinking block: {text}"
+        );
+        assert!(
+            text.contains("answer line 7"),
+            "opening thinking leaves the answer visible: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("thought line 4") && !text.contains("thought line 5"),
+            "the next enter folds thinking again: {text}"
+        );
+        assert!(
+            text.contains("answer line 7"),
+            "folding thinking leaves the answer visible: {text}"
+        );
+
+        let before = rendered(&app, 100, 80);
+        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert_eq!(
+            rendered(&app, 100, 80),
+            before,
+            "t is an ordinary unbound key"
         );
     }
 
     #[test]
-    fn n_p_e_c_change_nothing() {
+    fn unbound_prompt_keys_change_nothing() {
         let (_home, mut app) = prompt_app(conversation());
         let before = rendered(&app, 100, 80);
-        for key in ['n', 'p', 'e', 'c'] {
+        for key in ['n', 'p', 'e', 'c', 't'] {
             app.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
             assert_eq!(
                 rendered(&app, 100, 80),
@@ -1822,12 +1842,16 @@ mod tests {
     fn a_short_section_survives_a_fold() {
         let (_home, mut app) = prompt_app(single_user("a short question"));
         let text = rendered(&app, 100, 40);
-        assert!(text.contains("a short question"), "{text}");
+        assert!(
+            text.contains("a short question"),
+            "a one-line message is not previewed away: {text}"
+        );
+        assert!(text.contains("▌ YOU"), "the header stays visible: {text}");
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 40);
         assert!(
             text.contains("a short question"),
-            "a one-line message is not previewed away: {text}"
+            "opening the chat leaves a short message whole: {text}"
         );
         assert!(text.contains("▌ YOU"), "the header stays visible: {text}");
 
@@ -1836,16 +1860,23 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let (_home, mut app) = prompt_app(single_user(&rows));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 40);
         assert!(
             text.contains("row 4"),
-            "the fifth line survives the fold: {text}"
+            "the fifth line survives the folded start: {text}"
         );
-        assert!(!text.contains("row 5"), "the sixth line is hidden: {text}");
+        assert!(
+            !text.contains("row 5"),
+            "the sixth line waits for Enter: {text}"
+        );
         assert!(
             text.lines().any(|line| line.contains("hidden")),
             "a folded section says what it hides: {text}"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(
+            rendered(&app, 100, 40).contains("row 5"),
+            "enter opens the whole section"
         );
     }
 
@@ -2080,34 +2111,47 @@ mod tests {
             text.contains("▌ THINKING"),
             "the live turn draws thinking as its own block: {text}"
         );
+        assert!(
+            text.contains("WEIGHING IT 4"),
+            "the folded start previews live thinking: {text}"
+        );
+        assert!(
+            !text.contains("WEIGHING IT 5"),
+            "the sixth live thought waits for Enter: {text}"
+        );
+        assert!(
+            text.lines().any(|line| line.contains("hidden")),
+            "live thinking says what it hides: {text}"
+        );
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
-            text.contains("STREAMING REPLY"),
-            "the chat fold never folds the turn being written: {text}"
+            text.contains("WEIGHING IT 9"),
+            "enter opens live thinking: {text}"
         );
         assert!(
-            text.contains("WEIGHING IT 9"),
-            "the chat fold must not fold live thinking: {text}"
+            text.contains("STREAMING REPLY"),
+            "opening thinking leaves the live reply visible: {text}"
         );
 
-        app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = rendered(&app, 100, 80);
         assert!(
             text.contains("WEIGHING IT 4") && !text.contains("WEIGHING IT 5"),
-            "the thinking key previews live thinking: {text}"
+            "the next enter folds live thinking: {text}"
         );
         assert!(
             text.contains("STREAMING REPLY"),
-            "folding live thinking must not fold the reply: {text}"
+            "folding thinking leaves the live reply visible: {text}"
         );
 
+        let before = rendered(&app, 100, 80);
         app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
-        let text = rendered(&app, 100, 80);
-        assert!(
-            text.contains("WEIGHING IT 9"),
-            "t opens live thinking again: {text}"
+        assert_eq!(
+            rendered(&app, 100, 80),
+            before,
+            "t does not move the live view"
         );
         app.apply_event(AppEvent::Live(json!({
             "kind": "run_settled",

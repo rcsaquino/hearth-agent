@@ -1316,19 +1316,34 @@ mod tests {
         })];
         let text = buffer_text(&app, 100, 120);
         assert!(
-            text.contains("identity line 11"),
-            "the whole identity is open until the chat folds: {text}"
+            text.contains("identity line 4"),
+            "the folded start previews the identity: {text}"
         );
         assert!(
-            text.contains("The path to read."),
-            "tool argument descriptions must be shown: {text}"
+            !text.contains("identity line 5"),
+            "the sixth identity line waits for Enter: {text}"
         );
         assert!(text.contains("MEMORY HIT"), "{text}");
         assert!(text.contains("please inspect the whole session"), "{text}");
         assert!(text.contains("the whole answer"), "{text}");
         assert!(
-            !text.contains("hidden"),
-            "an unfolded chat hides nothing: {text}"
+            text.lines().any(|line| line.contains("hidden")),
+            "the folded start says what it hides: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = buffer_text(&app, 100, 120);
+        assert!(
+            text.contains("identity line 11"),
+            "enter opens the whole identity: {text}"
+        );
+        assert!(
+            text.contains("The path to read."),
+            "tool argument descriptions must be shown: {text}"
+        );
+        assert!(
+            !text.lines().any(|line| line.contains("hidden")),
+            "an opened chat hides nothing: {text}"
         );
     }
 
@@ -1359,13 +1374,13 @@ mod tests {
             .lines()
             .find(|line| line.contains("follow") && line.contains("quit"))
             .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
-        for key in ["scroll", "fold", "follow", "thinking"] {
+        for key in ["scroll", "fold", "follow"] {
             assert!(
                 footer.contains(key),
                 "the footer is missing {key}: {footer}"
             );
         }
-        for gone in ["block", "all"] {
+        for gone in ["block", "all", "thinking"] {
             assert!(
                 !footer.contains(gone),
                 "the footer still names {gone}: {footer}"
@@ -1438,6 +1453,7 @@ mod tests {
             "response": json!(null),
             "usage": json!(null)
         })];
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = buffer_text(&app, 100, 24);
         for _ in 0..3 {
             app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
