@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.36, plain-language edition
+**Status:** Draft 0.37, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,12 @@
 ---
 
 ## A note on language
+
+Draft 0.37 stops reporting a zero rate for a skill that never ran. A user skill
+can never be counted, and a learned skill is uncounted until its first run, so
+both now show an em dash in the Skills tab; a percentage appears only once a use
+has been counted. A zero read as a measured failure and could not be told apart
+from a skill that failed every time.
 
 Draft 0.36 gives every saved request an outcome. An assistant entry answers it, a
 notice entry settles it without an answer and records the reason (a provider
@@ -1578,6 +1584,8 @@ Rules:
 - Every version is kept under `skills/learned/.history/`, and every change is
   appended to `skills/learned/CHANGELOG.md`.
 - The TUI Skills tab exposes the library read-only: bodies, history, and counts.
+  A skill with no counted use shows an em dash where its rate would be; a rate
+  appears only after a use has been counted.
   The `skill` tool loads a body by name, records the outcome, and can save or archive
   a skill.
 - The skills index is the only prompt component the skill loop writes. The Prompt

@@ -2385,3 +2385,14 @@ just after.
 - The budget refusal saves the prompt it never sent, so the audit has a request to
   attach its notice to. The crash recovery path reads the failed task's checkpoint
   and links its poison notice to the same request.
+
+## 2026-11-16: An uncounted skill has no rate
+
+- The Skills tab prints an em dash when `Skill.uses` is zero and a percentage
+  otherwise. A user skill can never leave zero, because `record_use` and
+  `record_outcome` resolve through `find_learned`, and a learned skill starts at
+  zero. Printing `0%` stated a measurement that did not exist and could not be
+  told apart from a skill that failed every run.
+- `Skill::success_rate` is unchanged: the index cap still sorts learned skills by
+  it, and a computed zero is the right value there. The dash is a display rule at
+  the render site, which already has `uses`.
