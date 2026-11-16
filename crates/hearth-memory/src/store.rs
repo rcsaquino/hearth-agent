@@ -33,13 +33,37 @@ pub const CONTENT_LIMIT: usize = 200;
 /// behind.
 const LIVE_RULES: &str = "pinned = 1 AND valid_to IS NULL";
 
+/// The alphabet for a generated id.
+///
+/// Crockford base32 drops `I`, `L`, `O`, and `U`, so a copied or retyped id is
+/// less likely to be wrong.
+const ID_ALPHABET: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
+/// The characters after the `m_` prefix.
+const ID_CHARS: usize = 10;
+/// How many taken ids one write retries before it fails.
+const ID_ATTEMPTS: usize = 8;
+
 fn new_id() -> String {
-    format!("m_{}", uuid::Uuid::new_v4().simple())
+    let bytes = uuid::Uuid::new_v4();
+    let mut value = 0u64;
+    for byte in &bytes.as_bytes()[..7] {
+        value = (value << 8) | u64::from(*byte);
+    }
+    let mut id = String::with_capacity(2 + ID_CHARS);
+    id.push_str("m_");
+    for index in (0..ID_CHARS).rev() {
+        let slot = ((value >> (index * 5)) & 0x1f) as usize;
+        id.push(ID_ALPHABET[slot] as char);
+    }
+    id
 }
 
 /// The canonical form of an id for lookup.
+///
+/// The tool trims its input, and this accepts either case so a copied id is not
+/// rejected for its case. It is an exact id, never a prefix.
 pub fn normalize_id(id: &str) -> String {
-    id.to_owned()
+    id.trim().to_ascii_lowercase()
 }
 
 /// The longest subject a write may store.
@@ -526,7 +550,16 @@ pub fn insert_many(
     })
 }
 
-#[cfg(test)]
+fn insert_in(
+    writer: &hearth_storage::Writer<'_>,
+    pending: Pending,
+    now: i64,
+    rules_budget: u64,
+) -> Result<WriteOutcome> {
+    let mut generate = new_id;
+    insert_with(writer, pending, now, rules_budget, &mut generate)
+}
+
 fn insert_with(
     writer: &hearth_storage::Writer<'_>,
     pending: Pending,
@@ -534,18 +567,9 @@ fn insert_with(
     rules_budget: u64,
     ids: &mut dyn FnMut() -> String,
 ) -> Result<WriteOutcome> {
-    let _ = ids;
-    insert_in(writer, pending, now, rules_budget)
-}
-
-fn insert_in(
-    writer: &hearth_storage::Writer<'_>,
-    pending: Pending,
-    now: i64,
-    rules_budget: u64,
-) -> Result<WriteOutcome> {
     let Pending { mut item, vector } = pending;
     validate(&item)?;
+    item.supersedes = item.supersedes.map(|id| normalize_id(&id));
     if item.pinned {
         check_rules_budget(
             writer,
@@ -556,7 +580,6 @@ fn insert_in(
     }
     item.content = item.content.trim().to_owned();
     item.subject = normalize(&item.subject);
-    let id = new_id();
     let digest = fingerprint(&item.content);
     let terms = crate::query::expansions(&item.content, &item.subject).join(" ");
     let valid_from = item.valid_from.unwrap_or(now);
@@ -628,6 +651,7 @@ fn insert_in(
 
     // A replacement ends when the new statement begins, not when the write
     // happened. One statement can be written weeks after the change it records.
+    let id = reserve_id(writer, ids)?;
     let supersedes = supersedes.or(earlier.map(|earlier| earlier.id));
     if let Some(previous) = &supersedes {
         let closed = writer.execute(
@@ -674,6 +698,31 @@ fn insert_in(
         [&id],
         map_memory,
     )?))
+}
+
+/// Reserve an id no row holds.
+///
+/// One writer thread owns every insert, so checking inside the write transaction
+/// is the same as catching the primary-key conflict. A taken id is retried with
+/// a fresh one; a row is never given an id that already exists.
+fn reserve_id(
+    writer: &hearth_storage::Writer<'_>,
+    ids: &mut dyn FnMut() -> String,
+) -> Result<String> {
+    for _ in 0..ID_ATTEMPTS {
+        let id = ids();
+        let taken = writer
+            .query_optional("SELECT 1 FROM memories WHERE id = ?", [&id], |row| {
+                row.get::<_, i64>(0)
+            })?
+            .is_some();
+        if !taken {
+            return Ok(id);
+        }
+    }
+    Err(MemoryError::unavailable(format!(
+        "memory id generation failed after {ID_ATTEMPTS} attempts."
+    )))
 }
 
 fn quantise(values: &[f32], dims: usize) -> Result<Vec<i8>> {
@@ -1381,5 +1430,4 @@ mod tests {
             Some(replaced.memory().id.as_str())
         );
     }
-
 }

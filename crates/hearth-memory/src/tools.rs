@@ -237,7 +237,7 @@ impl Tool for RecallTool {
                     },
                     "id": {
                         "type": "string",
-                        "description": "One statement's id."
+                        "description": "One statement's id, such as m_0123456789. Case does not matter."
                     },
                     "subject": {
                         "type": "string",
@@ -554,7 +554,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn a_recall_by_id_accepts_case_and_whitespace() {
         let (_directory, service) = memory();
@@ -572,7 +571,11 @@ mod tests {
             .call(RECALL, &json!({"id": typed}))
             .expect("call")
             .expect("result");
-        assert!(recalled.content.contains("OR board"), "{}", recalled.content);
+        assert!(
+            recalled.content.contains("OR board"),
+            "{}",
+            recalled.content
+        );
     }
 
     #[test]
