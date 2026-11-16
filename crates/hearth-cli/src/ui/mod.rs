@@ -1043,7 +1043,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_tab_renders_rows_and_full_detail() {
+    fn prompt_tab_reads_as_a_conversation() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         app.prompt.exchanges = vec![json!({
@@ -1053,7 +1053,7 @@ mod tests {
                 "transcript": [
                     {
                         "role": "user",
-                        "runtime_note": "RUNTIME NOTE",
+                        "runtime_note": "CLOCK NOTE",
                         "blocks": [{"type": "text", "text": "please inspect"}]
                     }
                 ]
@@ -1069,22 +1069,21 @@ mod tests {
             "usage": json!(null)
         })];
         let text = buffer_text(&app, 100, 100);
-        for label in [
-            "system · identity",
-            "system · guidance",
-            "runtime note",
-            "user",
-            "request · tools",
-            "response",
-        ] {
-            assert!(text.contains(label), "missing row {label}: {text}");
+        for label in ["system · identity", "system · guidance", "you", "hearth"] {
+            assert!(text.contains(label), "missing role {label}: {text}");
         }
         assert!(text.contains("SOUL TEXT"), "{text}");
         assert!(text.contains("SECOND LINE"), "{text}");
+        assert!(text.contains("CLOCK NOTE"), "{text}");
+        assert!(text.contains("the answer"), "{text}");
+        assert!(
+            !text.contains("SESSION"),
+            "the flat export header is gone: {text}"
+        );
     }
 
     #[test]
-    fn prompt_tab_renders_the_whole_session_like_an_export() {
+    fn prompt_tab_shows_the_whole_system_layers() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         let identity = (0..12)
@@ -1131,7 +1130,6 @@ mod tests {
             "usage": json!(null)
         })];
         let text = buffer_text(&app, 100, 120);
-        assert!(text.contains("SESSION"), "{text}");
         assert!(
             text.contains("identity line 11"),
             "the whole identity must be visible, not a collapsed preview: {text}"
@@ -1140,43 +1138,77 @@ mod tests {
             text.contains("The path to read."),
             "tool argument descriptions must be shown: {text}"
         );
+        assert!(text.contains("MEMORY HIT"), "{text}");
         assert!(text.contains("please inspect the whole session"), "{text}");
         assert!(text.contains("the whole answer"), "{text}");
         assert!(
             !text.contains("more · enter"),
-            "the export view must not collapse the session: {text}"
+            "the transcript must not collapse the session: {text}"
+        );
+    }
+
+    fn snapshot(model: &str, hash: &str, at: i64) -> serde_json::Value {
+        json!({
+            "request": {
+                "model": model,
+                "identity": "SOUL",
+                "guidance": "GUIDE",
+                "transcript": [
+                    {"role": "user", "blocks": [{"type": "text", "text": "hello"}]}
+                ]
+            },
+            "prompt_hash": hash,
+            "requested_at": at,
+            "response": json!(null),
+            "usage": json!(null)
+        })
+    }
+
+    #[test]
+    fn prompt_markers_name_every_saved_snapshot() {
+        let (_home, mut app) = initialized_app();
+        app.tab = Tab::Prompt;
+        app.prompt.exchanges = vec![
+            snapshot("newest", "newest-hash", 2),
+            snapshot("older", "older-hash", 1),
+        ];
+        let text = buffer_text(&app, 100, 40);
+        assert!(
+            text.contains("1 · 1970-01-01T00:00:00+00:00"),
+            "every saved snapshot keeps its marker: {text}"
+        );
+        assert!(text.contains("2 · 1970-01-01T00:00:00+00:00"), "{text}");
+        assert!(text.contains("newest-h"), "{text}");
+        assert!(text.contains("older-ha"), "{text}");
+        assert!(
+            text.contains("▸── 2 · "),
+            "the selected snapshot is marked: {text}"
         );
     }
 
     #[test]
-    fn prompt_brackets_navigate_older_snapshots_and_back() {
+    fn prompt_brackets_move_the_cursor_and_the_live_tail() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         app.prompt.exchanges = vec![
-            json!({
-                "request": {"model": "newest", "identity": "NEW SESSION"},
-                "prompt_hash": "newest",
-                "requested_at": 2,
-                "response": json!(null),
-                "usage": json!(null)
-            }),
-            json!({
-                "request": {"model": "older", "identity": "OLD SESSION"},
-                "prompt_hash": "older",
-                "requested_at": 1,
-                "response": json!(null),
-                "usage": json!(null)
-            }),
+            snapshot("newest", "newest-hash", 2),
+            snapshot("older", "older-hash", 1),
         ];
-        let text = buffer_text(&app, 100, 60);
-        assert!(text.contains("NEW SESSION"), "{text}");
+        let _ = buffer_text(&app, 100, 40);
         app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
-        let text = buffer_text(&app, 100, 60);
-        assert!(text.contains("OLD SESSION"), "{text}");
-        assert!(!text.contains("NEW SESSION"), "{text}");
+        assert_eq!(app.prompt.cursor, 1, "the bracket shows the older snapshot");
+        assert!(!app.prompt.follow, "an older snapshot pauses the live tail");
+        let text = buffer_text(&app, 100, 40);
+        assert!(
+            text.contains("▸── 1 · "),
+            "the older marker takes the emphasis: {text}"
+        );
         app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
-        let text = buffer_text(&app, 100, 60);
-        assert!(text.contains("NEW SESSION"), "{text}");
+        assert_eq!(app.prompt.cursor, 0, "the second bracket shows the newest");
+        assert!(
+            app.prompt.follow,
+            "the newest snapshot resumes the live tail"
+        );
     }
 
     #[test]
@@ -1240,7 +1272,6 @@ mod tests {
         for _ in 0..4 {
             app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         }
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = buffer_text(&app, 100, 24);
         let max = app.prompt.max_scroll.get();
         assert!(max > 0, "expected a scroll range");
@@ -1251,36 +1282,11 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
         assert!(app.prompt.raw);
         assert_eq!(app.prompt.scroll, 0);
-    }
-
-    #[test]
-    fn prompt_shows_only_the_latest_exchange() {
-        let (_home, mut app) = initialized_app();
-        app.tab = Tab::Prompt;
-        app.prompt.exchanges = vec![
-            json!({
-                "request": {"model": "newest", "identity": "new"},
-                "prompt_hash": "newest",
-                "requested_at": 2,
-                "response": json!(null),
-                "usage": json!(null)
-            }),
-            json!({
-                "request": {"model": "older", "identity": "old"},
-                "prompt_hash": "older",
-                "requested_at": 1,
-                "response": json!(null),
-                "usage": json!(null)
-            }),
-        ];
-        let text = buffer_text(&app, 100, 60);
-        assert!(text.contains("newest"), "{text}");
-        assert!(!text.contains("older"), "{text}");
-        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
-        let text = buffer_text(&app, 100, 60);
-        assert!(text.contains("newest"), "{text}");
-        assert!(!text.contains("older"), "{text}");
+        let text = buffer_text(&app, 100, 24);
+        assert!(
+            text.contains("prompt_hash"),
+            "the raw view dumps the saved request: {text}"
+        );
     }
 
     #[test]
@@ -1387,29 +1393,35 @@ mod tests {
     }
 
     #[test]
-    fn prompt_home_and_end_jump_between_items() {
+    fn prompt_home_and_end_reach_the_first_and_last_snapshot() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
-        app.prompt.exchanges = vec![json!({
-            "request": {
-                "identity": "SOUL",
-                "guidance": "GUIDE",
-                "transcript": [
-                    {"role": "user", "blocks": [{"type": "text", "text": "hello"}]}
-                ]
-            },
-            "prompt_hash": "hash",
-            "requested_at": 1,
-            "response": json!(null),
-            "usage": json!(null)
-        })];
-        let _ = buffer_text(&app, 100, 60);
-        assert_eq!(app.prompt.selected, 0);
+        let identity = (0..60)
+            .map(|index| format!("identity line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.prompt.exchanges = (0..3)
+            .map(|index| {
+                json!({
+                    "request": {
+                        "identity": identity,
+                        "guidance": "GUIDE",
+                        "transcript": [
+                            {"role": "user", "blocks": [{"type": "text", "text": "hello"}]}
+                        ]
+                    },
+                    "prompt_hash": format!("hash-{index}"),
+                    "requested_at": i64::from(index),
+                    "response": json!(null),
+                    "usage": json!(null)
+                })
+            })
+            .collect();
+        let _ = buffer_text(&app, 100, 24);
         app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
-        assert!(app.prompt.selected > 0, "End must select the last item");
-        assert_eq!(app.prompt.scroll, 0);
+        assert_eq!(app.prompt.selected, 2, "End reaches the last snapshot");
         app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-        assert_eq!(app.prompt.selected, 0);
+        assert_eq!(app.prompt.selected, 0, "Home reaches the first snapshot");
         assert_eq!(app.prompt.scroll, 0);
     }
 
