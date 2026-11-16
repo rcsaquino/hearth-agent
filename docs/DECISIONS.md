@@ -2546,3 +2546,37 @@ just after.
   state the person actually changes, and it costs a second flag and a cache-key
   member. Keeping the open start and making Enter fold both was rejected because
   the first screen stays a wall of context instead of an outline.
+
+## 2026-11-17: Spill lives in the temp folder
+
+- The spill root is `$TMPDIR/hearth/spill`, or `/tmp/hearth/spill` when `TMPDIR` is
+  unset, empty, or relative. A relative value would put a `spill/` folder in the
+  daemon's working directory, which is the same fault as an empty one.
+- `home::HOME_DIRECTORIES` no longer contains `spill`, so `init` and
+  `restore_home` stop creating it. The root is created on first use by
+  `spill::ensure_root`, which both `Agent::spill_output` and the helper report
+  write call. Nothing assumes it exists at startup.
+- `spill::ensure_root` creates the root and its `hearth` parent at mode `0700`.
+  It refuses a symlink, a path that is not a directory, and a directory not owned
+  by the current user, because `create_dir_all` would accept any of those and the
+  directory's owner could replace a file the model reads as tool output. The
+  effective uid comes from the metadata of `/proc/<pid>`, which the kernel owns
+  under that uid, so no `unsafe` libc call is needed.
+- `Workspace` treats a missing spill root as a missing file, not `missing_root`.
+  `Workspace::read_roots` skips a missing spill or media root, so a wiped `/tmp`
+  cannot break an absolute read that lands under the workspace. A write through
+  the tool to `spill/...` is still refused.
+- The model-facing text is unchanged: it still says `spill/<name>.txt`. The
+  keyword names the root, not the home.
+- One root is shared by every home, and spill names are call ids. Two daemons can
+  collide, and `files list spill/` lets one home's model enumerate another's
+  output. This is accepted for the single-home product model. Tests pass their own
+  `TempDir` as the root and never write to `/tmp/hearth`.
+- `/tmp` is tmpfs on the reference host and `systemd-tmpfiles` clears it, so a
+  spill may vanish. `packaging/hearth.service` is a user unit, which cannot use
+  most file-system namespaces, so `PrivateTmp` is not a present risk. If a future
+  unit enables one, the root is empty after every start and invisible to the TUI;
+  that is acceptable for scratch data.
+- The home-table row and the recovery list in SPEC 3.1 and 3.5 are removed, and
+  SPEC 9.4 names the temp root. This supersedes the `spill/` home row in the
+  2026-11-08 "M2b-3 tools, spill, and the tool loop" entry.

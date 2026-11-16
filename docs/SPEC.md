@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.45, plain-language edition
+**Status:** Draft 0.46, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.46 moves spill to the temp folder. Oversized tool output is written under
+`$TMPDIR/hearth/spill`, or `/tmp/hearth/spill` when `TMPDIR` is unset or empty.
+The home no longer carries a `spill/` folder, and a restored home does not create
+one. The root is created at mode `0700`, is refused when it is a symlink, is not a
+directory, or is owned by another user, and a missing root makes a spill read a
+not-found rather than a broken workspace.
 
 Draft 0.45 names an uncounted skill instead of drawing a dash. The Skills tab
 writes `(unused)` in the rate column for a user skill and a never-run learned
@@ -546,20 +553,16 @@ The default home is `~/.hearth`. `HEARTH_HOME` can move it.
 | `skills/learned/` | Learned skills, versions, and changelog. | Yes, but Hearth loses what it learned. |
 | `media/inbound/` | Downloaded Telegram attachments. | Yes, with the understanding that old references break. |
 | `media/outbound/` | Generated or staged files waiting to be sent. | Yes, after sending. |
-| `spill/` | Oversized tool results that did not fit in the prompt. | Yes. Old tool-result references break; nothing else does. |
 | `logs/` | Structured diagnostic logs. | Yes. They are rotated automatically. |
 | `backups/` | Database snapshots. | Keep the recent ones. |
 
-**Why `spill/` exists.** A tool can return more text than the model should read at
-once. The full result goes to `spill/<id>.txt`; the model sees the beginning, the
-end, the size, and the path, and reads more with `files` (9.4). Deleting spill only
-breaks old references.
-
-**Why `logs/` exists.** Logs record what Hearth did, when, and how long it took,
+**Why logs exist.** Logs record what Hearth did, when, and how long it took,
 without message bodies by default. They are diagnostics, never prompt input (13).
 
-Temporary work goes to `$TMPDIR/hearth-*`. It may vanish at any time. Nothing
-durable belongs there.
+Temporary work goes to `$TMPDIR/hearth-*`. Oversized tool output is the one current
+example: its root is `$TMPDIR/hearth/spill`, or `/tmp/hearth/spill` when `TMPDIR`
+is unset or empty. Temp data may vanish at any time, and nothing durable belongs
+there.
 
 `SOUL.md` is plain Markdown with three sections: Identity, Voice, and Rules.
 `HEARTH.md` holds the user's rules and workspace guidance; it is read on every run
@@ -637,10 +640,11 @@ be mode `0600`; the daemon refuses to start otherwise.
 
 If the home folder loses everything except a valid `settings.json`, the next daemon
 start restores the post-onboarding state: `workspace/`, `skills/`, `skills/learned/`,
-`media/inbound/`, `media/outbound/`, `spill/`, `logs/`, and `backups/` exist again,
+`media/inbound/`, `media/outbound/`, `logs/`, and `backups/` exist again,
 `SOUL.md` is written from `identity.agent_name`, and `HEARTH.md` is created empty.
 `hearth.db` is created and migrated on the same start. Nothing that still exists is
 overwritten, so a healthy home is left untouched and a restore is safe to repeat.
+The temp spill root is not part of the home and is created on first use.
 
 - The repair is idempotent and never rewrites an existing `SOUL.md` or `HEARTH.md`.
 - Only the daemon repairs, and only after it holds `hearth.lock`; the TUI still never
@@ -1539,8 +1543,11 @@ with confirmation tiers and Telegram buttons, is deferred to 1.1.
   resolved and checked after conversion to a real path, so a link cannot escape the
   folder.
 - Shell starts in the workspace but is not a sandbox.
-- Tool output above the inline cap is written to `spill/<id>.txt`. The model sees
-  head, tail, byte count, and path, and can read more with `files`.
+- Tool output above the inline cap is written to `spill/<id>.txt` under the temp
+  spill root (`$TMPDIR/hearth/spill`, or `/tmp/hearth/spill` when `TMPDIR` is unset
+  or empty). The model sees the size and the path, and can read more with `files`.
+  The root is created at mode `0700` and may vanish at any time; a missing spill
+  file reads as not found.
 - Tool results include duration and a stable call id.
 
 ### 9.5 Web search and fetch
