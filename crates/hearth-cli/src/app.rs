@@ -1,7 +1,7 @@
 //! The Hearth TUI application.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -124,64 +124,16 @@ impl LiveReply {
     }
 }
 
-/// How every block folds, until the reader overrides one.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum FoldMode {
-    #[default]
-    Default,
-    AllOpen,
-    AllClosed,
-}
-
-/// The fold state of the chat: one mode and the reader's own overrides.
-///
-/// An override maps a block key to open (`true`) or folded (`false`). `e` and
-/// `c` set the mode and clear the overrides, so a key press is one assignment
-/// instead of a walk over every block.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Folds {
-    mode: FoldMode,
-    overrides: BTreeMap<String, bool>,
-}
-
-impl Folds {
-    pub fn open(&self, key: &str, default: bool) -> bool {
-        self.overrides.get(key).copied().unwrap_or(match self.mode {
-            FoldMode::Default => default,
-            FoldMode::AllOpen => true,
-            FoldMode::AllClosed => false,
-        })
-    }
-
-    pub fn toggle(&mut self, key: &str, default: bool) {
-        let open = self.open(key, default);
-        self.overrides.insert(key.to_owned(), !open);
-    }
-
-    /// Every block opens, including the ones that arrive after this key.
-    pub fn open_all(&mut self) {
-        self.mode = FoldMode::AllOpen;
-        self.overrides.clear();
-    }
-
-    /// Every block folds to its header.
-    pub fn close_all(&mut self) {
-        self.mode = FoldMode::AllClosed;
-        self.overrides.clear();
-    }
-}
-
 pub struct PromptView {
     /// Newest-first prompt/response exchanges loaded by the worker.
     pub exchanges: Vec<Value>,
-    /// How each block folds.
-    pub folds: Folds,
-    /// The block the reader is on, by its stable key.
-    pub selected: Option<String>,
+    /// The whole chat folds to a preview of every section; Enter toggles.
+    pub collapsed: bool,
+    /// Thinking folds on its own, so an answer never hides with the chat; `t`
+    /// toggles.
+    pub thinking_collapsed: bool,
     pub scroll: usize,
     pub max_scroll: Cell<usize>,
-    /// Body rows available in the last draw, for revealing a selected block.
-    pub viewport: Cell<usize>,
     pub loading: bool,
     /// Follow the newest exchange and keep the tail of the document visible.
     pub follow: bool,
@@ -196,11 +148,10 @@ impl Default for PromptView {
     fn default() -> Self {
         Self {
             exchanges: Vec::new(),
-            folds: Folds::default(),
-            selected: None,
+            collapsed: false,
+            thinking_collapsed: false,
             scroll: 0,
             max_scroll: Cell::new(0),
-            viewport: Cell::new(0),
             loading: false,
             follow: true,
             pending: false,
@@ -1007,11 +958,8 @@ impl App {
     fn handle_prompt(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('f') => ui::prompt::toggle_follow(&mut self.prompt),
-            KeyCode::Char('e') => ui::prompt::expand_all(&mut self.prompt),
-            KeyCode::Char('c') => ui::prompt::collapse_all(&mut self.prompt),
-            KeyCode::Char('n') => ui::prompt::next_block(&mut self.prompt),
-            KeyCode::Char('p') => ui::prompt::previous_block(&mut self.prompt),
-            KeyCode::Enter => ui::prompt::toggle_block(&mut self.prompt),
+            KeyCode::Char('t') => ui::prompt::toggle_thinking(&mut self.prompt),
+            KeyCode::Enter => ui::prompt::toggle_fold(&mut self.prompt),
             KeyCode::Up | KeyCode::Char('k') => ui::prompt::scroll_up(&mut self.prompt, 1),
             KeyCode::Down | KeyCode::Char('j') => ui::prompt::scroll_down(&mut self.prompt, 1),
             KeyCode::PageUp => ui::prompt::page_up(&mut self.prompt),

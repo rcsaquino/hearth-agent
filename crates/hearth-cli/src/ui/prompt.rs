@@ -3,10 +3,7 @@
 //! The harness saves a full prompt for every request, so consecutive requests
 //! differ only in their tail. This view merges the saved requests into one chat:
 //! every context layer, recall, message, and answer becomes a block with a
-//! banded header, a gutted body, and one fold. `n`/`p` walk the blocks, Enter
-//! folds the one under the cursor, and `e`/`c` open or close them all. The turn
-//! being written is drawn below the cached document with its spinner on the
-//! header.
+//! banded header, a gutted body, and one fold.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -20,7 +17,7 @@ use ratatui::widgets::{Block as Card, Borders, Paragraph};
 use serde_json::Value;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::app::{App, Folds, LiveReply, PromptView};
+use crate::app::{App, LiveReply, PromptView};
 use crate::theme;
 use crate::ui::{count, short};
 
@@ -28,6 +25,8 @@ use crate::ui::{count, short};
 const PAGE_LINES: usize = 15;
 /// The bar and the space a block body sits behind.
 const BODY_INDENT: usize = 2;
+/// The body lines a folded section keeps.
+const PREVIEW_LINES: usize = 5;
 /// One frame per 100 ms, which is the event loop's budget.
 const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
@@ -118,124 +117,34 @@ pub(crate) fn toggle_follow(prompt: &mut PromptView) {
     }
 }
 
-/// Open every block, and every block that arrives after this key.
-pub(crate) fn expand_all(prompt: &mut PromptView) {
-    prompt.folds.open_all();
+/// Fold or open the whole chat.
+pub(crate) fn toggle_fold(prompt: &mut PromptView) {
+    prompt.collapsed = !prompt.collapsed;
 }
 
-/// Fold every block down to its header.
-pub(crate) fn collapse_all(prompt: &mut PromptView) {
-    prompt.folds.close_all();
-}
-
-/// Move the cursor to the next block.
-pub(crate) fn next_block(prompt: &mut PromptView) {
-    let Some((key, line)) = step(prompt, true) else {
-        return;
-    };
-    prompt.selected = Some(key);
-    reveal(prompt, line);
-}
-
-/// Move the cursor to the previous block.
-pub(crate) fn previous_block(prompt: &mut PromptView) {
-    let Some((key, line)) = step(prompt, false) else {
-        return;
-    };
-    prompt.selected = Some(key);
-    reveal(prompt, line);
-}
-
-/// Fold or open the block under the cursor, from the fold it was built with.
-pub(crate) fn toggle_block(prompt: &mut PromptView) {
-    let Some(key) = prompt.selected.clone() else {
-        return;
-    };
-    let default = {
-        let guard = prompt.cache.borrow();
-        let Some(cache) = guard.as_ref() else {
-            return;
-        };
-        match cache.blocks.iter().find(|block| block.key == key) {
-            Some(block) => block.default_open,
-            None => return,
-        }
-    };
-    prompt.folds.toggle(&key, default);
-}
-
-/// The block the cursor moves to: the neighbour of the selection, or the edge
-/// of the visible window when nothing is selected.
-fn step(prompt: &PromptView, forward: bool) -> Option<(String, usize)> {
-    let guard = prompt.cache.borrow();
-    let cache = guard.as_ref()?;
-    if cache.blocks.is_empty() {
-        return None;
-    }
-    let selected = prompt
-        .selected
-        .as_ref()
-        .and_then(|key| cache.blocks.iter().position(|block| &block.key == key));
-    let index = match (selected, forward) {
-        (Some(index), true) => (index + 1).min(cache.blocks.len() - 1),
-        (Some(index), false) => index.saturating_sub(1),
-        (None, true) => first_visible(prompt, cache),
-        (None, false) => last_visible(prompt, cache),
-    };
-    let block = &cache.blocks[index];
-    Some((block.key.clone(), block.line))
-}
-
-fn viewport_top(prompt: &PromptView) -> usize {
-    if prompt.follow {
-        prompt.max_scroll.get()
-    } else {
-        prompt.scroll
-    }
-}
-
-fn first_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
-    let top = viewport_top(prompt);
-    cache
-        .blocks
-        .iter()
-        .position(|block| block.line >= top)
-        .unwrap_or(cache.blocks.len() - 1)
-}
-
-fn last_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
-    let bottom = viewport_top(prompt).saturating_add(prompt.viewport.get().max(1) - 1);
-    cache
-        .blocks
-        .iter()
-        .rposition(|block| block.line <= bottom)
-        .unwrap_or(0)
-}
-
-/// Bring a block header on screen without moving a reader who already sees it.
-fn reveal(prompt: &mut PromptView, line: usize) {
-    let height = prompt.viewport.get().max(1);
-    let top = viewport_top(prompt);
-    if line < top {
-        prompt.scroll = line;
-        prompt.follow = false;
-    } else if line >= top.saturating_add(height) {
-        prompt.scroll = line.saturating_sub(height - 1);
-        prompt.follow = false;
-    }
+/// Fold or open thinking, saved or streaming.
+pub(crate) fn toggle_thinking(prompt: &mut PromptView) {
+    prompt.thinking_collapsed = !prompt.thinking_collapsed;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     /// The loaded requests, named by hash and answering entry.
     signature: String,
-    folds: Folds,
+    collapsed: bool,
+    thinking_collapsed: bool,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(exchanges: &[Value], folds: &Folds, width: u16, zone: &Zone) -> Self {
+    fn new(
+        exchanges: &[Value],
+        collapsed: bool,
+        thinking_collapsed: bool,
+        width: u16,
+        zone: &Zone,
+    ) -> Self {
         let mut signature = String::new();
         for exchange in exchanges {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
@@ -245,29 +154,19 @@ impl CacheKey {
         }
         Self {
             signature,
-            folds: folds.clone(),
+            collapsed,
+            thinking_collapsed,
             width,
             zone: zone.name().to_owned(),
         }
     }
 }
 
-/// One block header, at its line in the cached document.
-struct BlockSpan {
-    key: String,
-    line: usize,
-    /// The fold this block was built with, so Enter toggles the right way.
-    default_open: bool,
-    /// The header row in the selection emphasis.
-    selected: Line<'static>,
-}
-
-/// One built chat, kept until the loaded set, the folds, the width, or the
+/// One built chat, kept until the loaded set, the fold states, the width, or the
 /// zone change.
 pub(crate) struct PromptCache {
     key: CacheKey,
     summary: Summary,
-    blocks: Vec<BlockSpan>,
     lines: Vec<Line<'static>>,
 }
 
@@ -308,19 +207,14 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let key = CacheKey::new(
         &app.prompt.exchanges,
-        &app.prompt.folds,
+        app.prompt.collapsed,
+        app.prompt.thinking_collapsed,
         inner.width,
         &app.zone,
     );
     let mut slot = app.prompt.cache.borrow_mut();
     if slot.as_ref().is_none_or(|cache| cache.key != key) {
-        *slot = Some(build_cache(
-            &app.prompt.exchanges,
-            &key,
-            &app.prompt.folds,
-            width,
-            &app.zone,
-        ));
+        *slot = Some(build_cache(&app.prompt.exchanges, &key, width, &app.zone));
     }
     let cache = slot.as_mut().expect("prompt cache");
 
@@ -344,40 +238,27 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .prompt
         .live
         .as_ref()
-        .map(|live| live_lines(live, width))
+        .map(|live| live_lines(live, width, app.prompt.thinking_collapsed))
         .unwrap_or_default();
     let saved = cache.lines.len();
     let total = saved + live.len();
     let max_scroll = total.saturating_sub(body_rows);
     app.prompt.max_scroll.set(max_scroll);
-    app.prompt.viewport.set(body_rows);
     let scroll = if app.prompt.follow {
         max_scroll
     } else {
         app.prompt.scroll.min(max_scroll)
     };
     let end = (scroll + body_rows).min(total);
-    let selected = app
-        .prompt
-        .selected
-        .as_deref()
-        .and_then(|key| cache.blocks.iter().find(|block| block.key == key))
-        .map(|block| block.line);
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(end.saturating_sub(scroll));
-    for index in scroll..end {
-        if index >= saved {
-            lines.push(live[index - saved].clone());
-        } else if Some(index) == selected {
-            let block = cache
-                .blocks
-                .iter()
-                .find(|block| block.line == index)
-                .expect("a selected block has a line");
-            lines.push(block.selected.clone());
-        } else {
-            lines.push(cache.lines[index].clone());
-        }
-    }
+    let lines: Vec<Line<'static>> = (scroll..end)
+        .map(|index| {
+            if index < saved {
+                cache.lines[index].clone()
+            } else {
+                live[index - saved].clone()
+            }
+        })
+        .collect();
     frame.render_widget(Paragraph::new(lines), body);
 }
 
@@ -422,7 +303,7 @@ fn status_line(summary: &Summary, width: usize) -> Line<'static> {
 
 /// The turn being written, drawn below the saved chat with its spinner on the
 /// header and its thinking before its text.
-fn live_lines(live: &LiveReply, width: usize) -> Vec<Line<'static>> {
+fn live_lines(live: &LiveReply, width: usize, thinking_collapsed: bool) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from("")];
     let frame = FRAMES[spinner_frame(live.started)];
     lines.push(band_line(
@@ -446,6 +327,7 @@ fn live_lines(live: &LiveReply, width: usize) -> Vec<Line<'static>> {
             theme::THINK,
             None,
             width,
+            thinking_collapsed,
         ));
     }
     if !live.text.is_empty() {
@@ -456,6 +338,7 @@ fn live_lines(live: &LiveReply, width: usize) -> Vec<Line<'static>> {
             theme::TEXT,
             None,
             width,
+            false,
         ));
     }
     lines
@@ -469,17 +352,21 @@ fn body_block(
     fg: Color,
     bg: Option<Color>,
     width: usize,
+    preview: bool,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if !label.is_empty() {
         lines.push(label_line(label, accent, bg, width));
     }
     let inner = width.saturating_sub(BODY_INDENT).max(1);
+    let (rows, stub) = section_rows(text, inner, !preview);
     lines.extend(
-        wrap_text(text, inner)
-            .into_iter()
+        rows.into_iter()
             .map(|line| body_line(&line, accent, fg, bg, width)),
     );
+    if let Some(stub) = stub {
+        lines.push(body_line(&stub, accent, theme::FAINT, bg, width));
+    }
     lines
 }
 
@@ -521,13 +408,28 @@ enum Notice {
     NoReply,
 }
 
-/// How a block folds until the reader says otherwise.
+/// What a section obeys: the whole chat, nothing, or thinking alone.
 #[derive(Clone, Copy)]
-enum Policy {
-    Open,
-    Closed,
-    /// Open when the wrapped body has at most this many lines.
-    Fit(usize),
+enum Fold {
+    Chat,
+    Answer,
+    Thinking,
+}
+
+impl Fold {
+    fn open(self, collapsed: bool, thinking_collapsed: bool) -> bool {
+        match self {
+            Fold::Chat => !collapsed,
+            Fold::Answer => true,
+            Fold::Thinking => !thinking_collapsed,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Ink {
+    accent: Color,
+    fg: Color,
 }
 
 /// One run of a block body.
@@ -535,12 +437,11 @@ struct Part {
     /// A sub-panel label, such as a tool call or a result inside another block.
     label: Option<String>,
     text: String,
+    fold: Fold,
 }
 
 /// One block of the chat, derived from the saved requests.
 struct Block {
-    /// Stable while its source request is loaded.
-    key: String,
     /// The header label, uppercase.
     label: String,
     /// The right-aligned header meta, dropped first when the terminal is narrow.
@@ -548,9 +449,6 @@ struct Block {
     /// The clock note that rode on this message. It stays visible when folded.
     note: Option<String>,
     parts: Vec<Part>,
-    fold: Policy,
-    /// Show the first body line while folded.
-    preview: bool,
     /// The background band behind the header and body.
     bg: Option<Color>,
     /// The gutter and sub-panel label colour.
@@ -591,10 +489,6 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
         let turn = chat.summary.turns;
         let request = &exchange["request"];
         let at = exchange["requested_at"].as_i64().unwrap_or(0);
-        let hash = exchange["prompt_hash"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("@{at}"));
         let clock = zone.local(at).clock();
         let session = request["session_id"].as_str().unwrap_or("-").to_owned();
         if previous_session.as_ref() != Some(&session) {
@@ -624,13 +518,14 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
                 continue;
             }
             chat.entries.push(Entry::Block(Block {
-                key: format!("{hash}:ctx:{}", layer.part),
                 label: format!("SYSTEM · {}", layer.label),
                 meta: cost(token(request, layer.tokens)),
                 note: None,
-                parts: vec![Part { label: None, text }],
-                fold: Policy::Closed,
-                preview: false,
+                parts: vec![Part {
+                    label: None,
+                    text,
+                    fold: Fold::Chat,
+                }],
                 bg: Some(theme::CTX_BG),
                 accent: theme::MUTED,
                 fg: theme::MUTED,
@@ -645,16 +540,14 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
             .to_owned();
         if !recall.is_empty() && previous_recall.as_deref() != Some(recall.as_str()) {
             chat.entries.push(Entry::Block(Block {
-                key: format!("{hash}:memory"),
                 label: "MEMORY".to_owned(),
                 meta: cost(token(request, "recall")),
                 note: None,
                 parts: vec![Part {
                     label: None,
                     text: recall.clone(),
+                    fold: Fold::Chat,
                 }],
-                fold: Policy::Fit(6),
-                preview: false,
                 bg: Some(theme::CTX_BG),
                 accent: theme::GOOD,
                 fg: theme::MUTED,
@@ -675,7 +568,7 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
             chat.entries
                 .push(Entry::Notice(Notice::Rewritten(previous_sent.len() - kept)));
         }
-        for (index, message) in messages.iter().enumerate().skip(kept) {
+        for message in messages.iter().skip(kept) {
             let note = message["runtime_note"]
                 .as_str()
                 .filter(|note| !note.trim().is_empty())
@@ -683,7 +576,6 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
             let role = Role::parse(message["role"].as_str().unwrap_or_default());
             let blocks = message["blocks"].as_array().cloned().unwrap_or_default();
             chat.entries.push(Entry::Block(message_block(
-                format!("{hash}:m{index}"),
                 role,
                 &blocks,
                 &call_names,
@@ -701,7 +593,6 @@ fn derive(exchanges: &[Value], zone: &Zone) -> Chat {
             let blocks = response["blocks"].as_array().cloned().unwrap_or_default();
             let answered_at = response["created_at"].as_i64().unwrap_or(at);
             chat.entries.push(Entry::Block(response_block(
-                format!("{hash}:reply"),
                 &blocks,
                 &call_names,
                 turn,
@@ -791,7 +682,6 @@ fn remember_calls(calls: &mut BTreeMap<String, String>, message: &Value) {
 }
 
 fn message_block(
-    key: String,
     role: Role,
     blocks: &[Value],
     calls: &BTreeMap<String, String>,
@@ -799,61 +689,31 @@ fn message_block(
     turn: usize,
     clock: &str,
 ) -> Block {
-    let visible = visible(blocks);
-    let only_calls =
-        !visible.is_empty() && visible.iter().all(|block| block["type"] == "tool_call");
-    let failed = visible
+    let spoken = spoken(blocks);
+    let only_calls = !spoken.is_empty() && spoken.iter().all(|block| block["type"] == "tool_call");
+    let failed = spoken
         .iter()
         .any(|block| block["is_error"].as_bool() == Some(true));
-    let (label, bg, accent, fold, preview) = match role {
-        Role::User => (
-            "YOU".to_owned(),
-            Some(theme::USER_BG),
-            theme::ACCENT,
-            Policy::Fit(12),
-            false,
-        ),
-        Role::Assistant if only_calls => (
-            call_label(&visible),
-            Some(theme::TOOL_BG),
-            theme::WARN,
-            Policy::Open,
-            false,
-        ),
-        Role::Assistant => (
-            "HEARTH".to_owned(),
-            None,
-            theme::ACCENT,
-            Policy::Open,
-            false,
-        ),
+    let (label, bg, accent) = match role {
+        Role::User => ("YOU".to_owned(), Some(theme::USER_BG), theme::ACCENT),
+        Role::Assistant if only_calls => (call_label(&spoken), Some(theme::TOOL_BG), theme::WARN),
+        Role::Assistant => ("HEARTH".to_owned(), None, theme::ACCENT),
         Role::Tool => (
-            format!("TOOL RESULT · {}", result_name(&visible, calls)),
+            format!("TOOL RESULT · {}", result_name(&spoken, calls)),
             Some(if failed {
                 theme::TOOL_BAD_BG
             } else {
                 theme::TOOL_OK_BG
             }),
             if failed { theme::BAD } else { theme::GOOD },
-            Policy::Fit(8),
-            true,
         ),
-        Role::System => (
-            "SYSTEM".to_owned(),
-            None,
-            theme::MUTED,
-            Policy::Fit(8),
-            true,
-        ),
+        Role::System => ("SYSTEM".to_owned(), None, theme::MUTED),
     };
     Block {
-        key,
         label,
         meta: format!("turn {turn} · {clock}"),
         note,
-        parts: parts_of(&visible, role, calls),
-        fold,
-        preview,
+        parts: parts_of(blocks, role, calls),
         bg,
         accent,
         fg: theme::TEXT,
@@ -861,36 +721,31 @@ fn message_block(
 }
 
 fn response_block(
-    key: String,
     blocks: &[Value],
     calls: &BTreeMap<String, String>,
     turn: usize,
     clock: &str,
 ) -> Block {
-    let visible = visible(blocks);
-    let only_calls =
-        !visible.is_empty() && visible.iter().all(|block| block["type"] == "tool_call");
+    let spoken = spoken(blocks);
+    let only_calls = !spoken.is_empty() && spoken.iter().all(|block| block["type"] == "tool_call");
     let (label, bg, accent) = if only_calls {
-        (call_label(&visible), Some(theme::TOOL_BG), theme::WARN)
+        (call_label(&spoken), Some(theme::TOOL_BG), theme::WARN)
     } else {
         ("HEARTH".to_owned(), None, theme::ACCENT)
     };
     Block {
-        key,
         label,
         meta: format!("turn {turn} · {clock}"),
         note: None,
-        parts: parts_of(&visible, Role::Assistant, calls),
-        fold: Policy::Open,
-        preview: false,
+        parts: parts_of(blocks, Role::Assistant, calls),
         bg,
         accent,
         fg: theme::TEXT,
     }
 }
 
-/// The blocks a reader sees: thinking is never rendered.
-fn visible(blocks: &[Value]) -> Vec<Value> {
+/// The blocks that decide a message's label and error state.
+fn spoken(blocks: &[Value]) -> Vec<Value> {
     blocks
         .iter()
         .filter(|block| block["type"] != "thinking")
@@ -902,13 +757,24 @@ fn parts_of(blocks: &[Value], role: Role, calls: &BTreeMap<String, String>) -> V
     let mut parts = Vec::new();
     for block in blocks {
         let part = match block["type"].as_str().unwrap_or_default() {
+            "thinking" => Part {
+                label: Some("thinking".to_owned()),
+                text: block["text"].as_str().unwrap_or_default().to_owned(),
+                fold: Fold::Thinking,
+            },
             "text" => Part {
                 label: None,
                 text: block["text"].as_str().unwrap_or_default().to_owned(),
+                fold: if role == Role::Assistant {
+                    Fold::Answer
+                } else {
+                    Fold::Chat
+                },
             },
             "tool_call" => Part {
                 label: Some(format!("⚙ {}", block["name"].as_str().unwrap_or("tool"))),
                 text: arguments(&block["arguments"]),
+                fold: Fold::Chat,
             },
             "tool_result" => {
                 let name = call_name(block["call_id"].as_str(), calls);
@@ -917,6 +783,7 @@ fn parts_of(blocks: &[Value], role: Role, calls: &BTreeMap<String, String>) -> V
                     label: (role != Role::Tool)
                         .then(|| format!("{name} {}", if failed { "✗" } else { "✓" })),
                     text: block["content"].as_str().unwrap_or_default().to_owned(),
+                    fold: Fold::Chat,
                 }
             }
             "file" => Part {
@@ -925,10 +792,12 @@ fn parts_of(blocks: &[Value], role: Role, calls: &BTreeMap<String, String>) -> V
                     block["name"].as_str().unwrap_or("file")
                 )),
                 text: block["path"].as_str().unwrap_or("-").to_owned(),
+                fold: Fold::Chat,
             },
             "image" => Part {
                 label: Some("image".to_owned()),
                 text: block["path"].as_str().unwrap_or("-").to_owned(),
+                fold: Fold::Chat,
             },
             _ => continue,
         };
@@ -1059,15 +928,9 @@ fn cost(tokens: Option<u64>) -> String {
         .unwrap_or_default()
 }
 
-fn build_cache(
-    exchanges: &[Value],
-    key: &CacheKey,
-    folds: &Folds,
-    width: usize,
-    zone: &Zone,
-) -> PromptCache {
+fn build_cache(exchanges: &[Value], key: &CacheKey, width: usize, zone: &Zone) -> PromptCache {
     let chat = derive(exchanges, zone);
-    let mut painter = Painter::new(width, folds);
+    let mut painter = Painter::new(width, key.collapsed, key.thinking_collapsed);
     for entry in &chat.entries {
         match entry {
             Entry::Notice(notice) => painter.notice(notice),
@@ -1077,7 +940,6 @@ fn build_cache(
     PromptCache {
         key: key.clone(),
         summary: chat.summary,
-        blocks: painter.blocks,
         lines: painter.lines,
     }
 }
@@ -1085,47 +947,77 @@ fn build_cache(
 /// One row of a block body.
 enum Content {
     /// A sub-panel label, such as a tool call inside an assistant block.
-    Label(String),
-    Text(String),
-    /// The hidden-count stub under a folded block.
-    Stub(String),
+    Label(String, Ink),
+    Text(String, Ink),
+    /// The hidden-count stub under a folded section.
+    Stub(String, Ink),
     /// A blank row between two parts, so a panel band stays solid.
     Gap,
 }
 
-fn content(block: &Block, inner: usize) -> Vec<Content> {
+/// A section's wrapped rows, cut to the preview and a stub when it is folded.
+fn section_rows(text: &str, width: usize, open: bool) -> (Vec<String>, Option<String>) {
+    let mut rows = wrap_text(text, width);
+    if open || rows.len() <= PREVIEW_LINES {
+        return (rows, None);
+    }
+    let hidden = rows.len() - PREVIEW_LINES;
+    rows.truncate(PREVIEW_LINES);
+    let stub = if hidden == 1 {
+        "… 1 line hidden".to_owned()
+    } else {
+        format!("… {hidden} lines hidden")
+    };
+    (rows, Some(stub))
+}
+
+fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: bool) -> Vec<Content> {
     let mut rows = Vec::new();
-    for (index, part) in block.parts.iter().enumerate() {
+    for part in &block.parts {
         if part.label.is_none() && part.text.trim().is_empty() {
             continue;
         }
-        if index > 0 && !rows.is_empty() {
+        if !rows.is_empty() {
             rows.push(Content::Gap);
         }
+        let ink = match part.fold {
+            Fold::Thinking => Ink {
+                accent: theme::THINK,
+                fg: theme::THINK,
+            },
+            Fold::Chat | Fold::Answer => Ink {
+                accent: block.accent,
+                fg: block.fg,
+            },
+        };
         if let Some(label) = &part.label {
-            rows.push(Content::Label(label.clone()));
+            rows.push(Content::Label(label.clone(), ink));
         }
-        rows.extend(wrap_text(&part.text, inner).into_iter().map(Content::Text));
+        let open = part.fold.open(collapsed, thinking_collapsed);
+        let (lines, stub) = section_rows(&part.text, inner, open);
+        rows.extend(lines.into_iter().map(|line| Content::Text(line, ink)));
+        if let Some(stub) = stub {
+            rows.push(Content::Stub(stub, ink));
+        }
     }
     rows
 }
 
 /// The chat, drawn as lines with a fixed width.
-struct Painter<'a> {
+struct Painter {
     width: usize,
-    folds: &'a Folds,
+    collapsed: bool,
+    thinking_collapsed: bool,
     lines: Vec<Line<'static>>,
-    /// The block headers, in document order.
-    blocks: Vec<BlockSpan>,
 }
 
-impl<'a> Painter<'a> {
-    fn new(width: usize, folds: &'a Folds) -> Self {
+impl Painter {
+    fn new(width: usize, collapsed: bool, thinking_collapsed: bool) -> Self {
         Self {
             width: width.max(1),
-            folds,
+            collapsed,
+            thinking_collapsed,
             lines: Vec::new(),
-            blocks: Vec::new(),
         }
     }
 
@@ -1159,53 +1051,26 @@ impl<'a> Painter<'a> {
 
     fn block(&mut self, block: &Block) {
         let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        let rows = content(block, inner);
-        let default_open = match block.fold {
-            Policy::Open => true,
-            Policy::Closed => rows.is_empty(),
-            Policy::Fit(lines) => rows.len() <= lines,
-        };
-        let open = self.folds.open(&block.key, default_open);
+        let rows = content(block, inner, self.collapsed, self.thinking_collapsed);
         self.gap();
-        let line = self.lines.len();
-        let lead = format!("▌ {}", block.label);
         let label_style = tinted(block.accent, block.bg).add_modifier(Modifier::BOLD);
         let header = band_line(
-            vec![Span::styled(lead.clone(), label_style)],
+            vec![Span::styled(format!("▌ {}", block.label), label_style)],
             &block.meta,
             faded(block.bg),
             self.width,
             fill(block.bg),
         );
-        // The selection only changes the band, so the row still opens with its
-        // own label and the draw can swap it in without rebuilding.
-        let selected = band_line(
-            vec![Span::styled(lead, theme::selected())],
-            &block.meta,
-            theme::selected(),
-            self.width,
-            theme::panel_fill(theme::SELECT_BG),
-        );
         self.lines.push(header);
         if rows.is_empty() {
-            self.content(block, &Content::Text("(empty)".to_owned()));
-        } else if open {
-            for row in &rows {
-                self.content(block, row);
-            }
-        } else {
-            let shown = usize::from(block.preview);
-            if shown == 1 {
-                self.content(block, &rows[0]);
-            }
-            let hidden = rows.len() - shown;
-            let stub = if hidden == 1 {
-                "… 1 line hidden · enter to open".to_owned()
-            } else {
-                format!("… {hidden} lines hidden · enter to open")
+            let ink = Ink {
+                accent: block.accent,
+                fg: block.fg,
             };
-            for line in wrap_text(&stub, inner) {
-                self.content(block, &Content::Stub(line));
+            self.row(block, &Content::Text("(empty)".to_owned(), ink));
+        } else {
+            for row in &rows {
+                self.row(block, row);
             }
         }
         // The note reads as the last line of the message it rode on, and it
@@ -1213,20 +1078,14 @@ impl<'a> Painter<'a> {
         if let Some(note) = &block.note {
             self.note(block, note);
         }
-        self.blocks.push(BlockSpan {
-            key: block.key.clone(),
-            line,
-            default_open,
-            selected,
-        });
     }
 
-    fn content(&mut self, block: &Block, row: &Content) {
+    fn row(&mut self, block: &Block, row: &Content) {
         let line = match row {
-            Content::Label(text) => label_line(text, block.accent, block.bg, self.width),
-            Content::Text(text) => body_line(text, block.accent, block.fg, block.bg, self.width),
-            Content::Stub(text) => {
-                body_line(text, block.accent, theme::FAINT, block.bg, self.width)
+            Content::Label(text, ink) => label_line(text, ink.accent, block.bg, self.width),
+            Content::Text(text, ink) => body_line(text, ink.accent, ink.fg, block.bg, self.width),
+            Content::Stub(text, ink) => {
+                body_line(text, ink.accent, theme::FAINT, block.bg, self.width)
             }
             Content::Gap => body_line("", block.accent, block.fg, block.bg, self.width),
         };
