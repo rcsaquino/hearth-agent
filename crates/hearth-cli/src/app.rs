@@ -3,7 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -106,6 +106,24 @@ pub struct SkillsView {
     pub version: Option<usize>,
 }
 
+/// The assistant turn being written right now.
+pub struct LiveReply {
+    pub thinking: String,
+    pub text: String,
+    /// When the turn began, so its spinner starts at the first frame.
+    pub started: Instant,
+}
+
+impl LiveReply {
+    fn new() -> Self {
+        Self {
+            thinking: String::new(),
+            text: String::new(),
+            started: Instant::now(),
+        }
+    }
+}
+
 pub struct PromptView {
     /// Newest-first prompt/response exchanges loaded by the worker.
     pub exchanges: Vec<Value>,
@@ -124,6 +142,8 @@ pub struct PromptView {
     pub follow: bool,
     /// A refresh arrived while one was already running.
     pub pending: bool,
+    /// The turn the model is writing, cleared when its run settles.
+    pub live: Option<LiveReply>,
     pub(crate) cache: RefCell<Option<crate::ui::prompt::PromptCache>>,
 }
 
@@ -140,6 +160,7 @@ impl Default for PromptView {
             loading: false,
             follow: true,
             pending: false,
+            live: None,
             cache: RefCell::new(None),
         }
     }
@@ -1084,6 +1105,49 @@ impl App {
         self.workers.spawn_prompt(self.home.clone());
     }
 
+    fn on_live(&mut self, value: Value) {
+        let kind = value["kind"].as_str().unwrap_or_default().to_owned();
+        match kind.as_str() {
+            "text_delta" => {
+                self.live_turn()
+                    .text
+                    .push_str(value["data"]["text"].as_str().unwrap_or_default());
+                return;
+            }
+            "thinking_delta" => {
+                self.live_turn()
+                    .thinking
+                    .push_str(value["data"]["text"].as_str().unwrap_or_default());
+                return;
+            }
+            "turn_started" => self.prompt.live = Some(LiveReply::new()),
+            "run_settled" => self.prompt.live = None,
+            _ => {}
+        }
+        // The saved document changes when a request blob is written, and when a
+        // run settles with its answer already stored.
+        let refresh = kind == "run_settled"
+            || (kind == "task_step" && value["data"]["phase"].as_str() == Some("request"));
+        // A reader who is on the last row is following the feed, even when
+        // it is paused; an event must not move the window away from it.
+        let following = !self.activity_paused
+            || self.activity_selected + 1 >= crate::ui::activity::row_count(&self.events);
+        self.events.push_back(value);
+        while self.events.len() > MAX_EVENTS {
+            self.events.pop_front();
+        }
+        if following {
+            self.activity_selected = crate::ui::activity::row_count(&self.events).saturating_sub(1);
+        }
+        if refresh && self.tab == Tab::Prompt {
+            self.refresh_prompt();
+        }
+    }
+
+    fn live_turn(&mut self) -> &mut LiveReply {
+        self.prompt.live.get_or_insert_with(LiveReply::new)
+    }
+
     pub fn drain_events(&mut self) {
         while let Some(event) = self.workers.try_recv() {
             self.apply_event(event);
@@ -1109,27 +1173,7 @@ impl App {
                     }
                 }
             },
-            AppEvent::Live(value) => {
-                let agent_message = matches!(
-                    value["kind"].as_str().unwrap_or_default(),
-                    "assistant_reply" | "run_settled"
-                );
-                // A reader who is on the last row is following the feed, even when
-                // it is paused; an event must not move the window away from it.
-                let following = !self.activity_paused
-                    || self.activity_selected + 1 >= crate::ui::activity::row_count(&self.events);
-                self.events.push_back(value);
-                while self.events.len() > MAX_EVENTS {
-                    self.events.pop_front();
-                }
-                if following {
-                    self.activity_selected =
-                        crate::ui::activity::row_count(&self.events).saturating_sub(1);
-                }
-                if agent_message && self.tab == Tab::Prompt {
-                    self.refresh_prompt();
-                }
-            }
+            AppEvent::Live(value) => self.on_live(value),
             AppEvent::Models(result) => self.onboarding.models_loaded(result),
             AppEvent::Doctor(result) => {
                 self.doctor.running = false;

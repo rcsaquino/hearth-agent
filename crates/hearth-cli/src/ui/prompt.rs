@@ -3,10 +3,10 @@
 //! The harness saves a full prompt for every request, so consecutive requests
 //! differ only in their tail. This view merges the saved requests into a single
 //! transcript and prints each request's delta under a bare rule. `s` hides the
-//! system layers, and a spinner says when a turn is in flight.
+//! system layers, long message blocks fold, and the turn being written is drawn
+//! at the tail with its spinner on the message label.
 
 use std::collections::BTreeSet;
-use std::sync::OnceLock;
 use std::time::Instant;
 
 use hearth_runtime::Zone;
@@ -18,7 +18,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use serde_json::Value;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::app::{App, PromptView};
+use crate::app::{App, LiveReply, PromptView};
 use crate::theme;
 use crate::ui::{count, short};
 
@@ -220,11 +220,9 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let inner = card.inner(area);
     frame.render_widget(card, area);
 
-    let busy = app.prompt.loading || running_tasks(app) > 0;
     let height = usize::from(inner.height);
     let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 2);
-    let busy_rows = usize::from(busy && height > header_rows + 1);
-    let body_rows = height.saturating_sub(header_rows + busy_rows);
+    let body_rows = height.saturating_sub(header_rows);
     let header_area = Rect {
         height: header_rows as u16,
         ..inner
@@ -232,11 +230,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let body = Rect {
         y: inner.y + header_rows as u16,
         height: body_rows as u16,
-        ..inner
-    };
-    let busy_area = Rect {
-        y: inner.y + (header_rows + body_rows) as u16,
-        height: busy_rows as u16,
         ..inner
     };
 
@@ -247,7 +240,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         );
     }
 
-    if app.prompt.exchanges.is_empty() {
+    if app.prompt.exchanges.is_empty() && app.prompt.live.is_none() {
         let message = if app.prompt.loading {
             vec![Line::styled("Loading saved prompts...", theme::warn())]
         } else {
@@ -255,7 +248,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 Line::styled("No session yet.", theme::muted()),
                 Line::from(""),
                 Line::styled(
-                    "Send Hearth a message. This view refreshes after every reply.",
+                    "Send Hearth a message. This view refreshes after every request.",
                     theme::faint(),
                 ),
             ]
@@ -263,10 +256,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         frame.render_widget(Paragraph::new(message), body);
     } else if body_rows > 0 {
         draw_transcript(app, frame, body);
-    }
-
-    if busy_rows > 0 {
-        frame.render_widget(Paragraph::new(working_line()), busy_area);
     }
 }
 
@@ -291,17 +280,16 @@ fn header_line(app: &App, width: usize) -> Line<'static> {
     row.fit(width)
 }
 
-fn running_tasks(app: &App) -> u64 {
-    app.status
-        .as_ref()
-        .and_then(|status| status["tasks_running"].as_u64())
-        .unwrap_or(0)
-}
-
 fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
     let width = usize::from(area.width);
     let height = usize::from(area.height);
     app.prompt.viewport.set(height);
+    let live = app
+        .prompt
+        .live
+        .as_ref()
+        .map(|live| live_lines(live, width))
+        .unwrap_or_default();
     let key = CacheKey::new(
         &app.prompt.exchanges,
         area.width,
@@ -320,7 +308,8 @@ fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
     }
     let cache = slot.as_mut().expect("prompt cache");
 
-    let total = cache.lines.len();
+    let saved = cache.lines.len();
+    let total = saved + live.len();
     let max_scroll = total.saturating_sub(height);
     app.prompt.max_scroll.set(max_scroll);
     let scroll = if app.prompt.follow {
@@ -335,28 +324,49 @@ fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
         .as_ref()
         .and_then(|key| cache.blocks.iter().find(|block| &block.key == key));
     let lines: Vec<Line<'static>> = (scroll..end)
-        .map(|index| match selected {
-            Some(block) if block.line == index => block.selected.clone(),
-            _ => cache.lines[index].clone(),
+        .map(|index| {
+            if index >= saved {
+                return live[index - saved].clone();
+            }
+            match selected {
+                Some(block) if block.line == index => block.selected.clone(),
+                _ => cache.lines[index].clone(),
+            }
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn working_line() -> Line<'static> {
-    Line::from(vec![
-        Span::styled(
-            format!(" {} ", FRAMES[spinner_frame()]),
-            theme::accent_style(),
-        ),
-        Span::styled("working", theme::muted()),
-    ])
+/// The turn being written, drawn below the saved document with its spinner on
+/// the first label.
+fn live_lines(live: &LiveReply, width: usize) -> Vec<Line<'static>> {
+    let mut painter = Painter::new(width);
+    painter.message_start(Role::Assistant);
+    let frame = spinner_frame(live.started);
+    let mut spinning = true;
+    if !live.thinking.is_empty() {
+        painter.live_part("thinking", theme::think(), &live.thinking, Some(frame));
+        spinning = false;
+    }
+    if !live.text.is_empty() {
+        let frame = spinning.then_some(frame);
+        painter.live_part(
+            Role::Assistant.label(),
+            Role::Assistant.style(),
+            &live.text,
+            frame,
+        );
+        spinning = false;
+    }
+    if spinning {
+        painter.live_label(Role::Assistant.label(), Role::Assistant.style(), frame);
+    }
+    painter.message_end();
+    painter.lines
 }
 
-fn spinner_frame() -> usize {
-    static START: OnceLock<Instant> = OnceLock::new();
-    let elapsed = START.get_or_init(Instant::now).elapsed().as_millis();
-    (elapsed / 100) as usize % FRAMES.len()
+fn spinner_frame(started: Instant) -> usize {
+    (started.elapsed().as_millis() / 100) as usize % FRAMES.len()
 }
 
 /// One block of a conversation, derived from the saved requests.
@@ -923,6 +933,28 @@ impl Painter {
                 selected: self.selected_label(label),
             });
         }
+    }
+
+    /// One part of the live turn. The spinner replaces the role bar on the
+    /// label that is being written.
+    fn live_part(&mut self, label: &str, style: Style, text: &str, frame: Option<usize>) {
+        self.gap();
+        match frame {
+            Some(frame) => self.live_label(label, style, frame),
+            None => self.role_label(label, style),
+        }
+        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
+        let wrapped = wrap_text(text, inner);
+        self.body_lines(&wrapped, style);
+    }
+
+    fn live_label(&mut self, label: &str, style: Style, frame: usize) {
+        let lead = self.gutter.unwrap_or(style);
+        let body = clip(label, self.width.saturating_sub(BODY_INDENT));
+        self.push(Line::from(vec![
+            Span::styled(format!("{} ", FRAMES[frame]), lead),
+            Span::styled(body, style),
+        ]));
     }
 
     /// The bar and label that open a message part.
@@ -1814,10 +1846,7 @@ mod tests {
             !text.contains("working"),
             "a scheduled task is not this conversation's turn: {text}"
         );
-        assert_eq!(
-            app.prompt.follow, true,
-            "a status poll must not move the reader"
-        );
+        assert!(app.prompt.follow, "a status poll must not move the reader");
     }
 
     #[test]
