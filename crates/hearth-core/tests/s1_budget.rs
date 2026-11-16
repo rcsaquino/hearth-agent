@@ -72,7 +72,6 @@ fn an_image_carries_its_provider_cost() {
     );
 }
 
-
 #[test]
 fn the_counts_are_read_back_from_a_saved_document() {
     use serde_json::json;

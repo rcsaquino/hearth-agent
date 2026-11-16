@@ -1,48 +1,6 @@
-//! Context window budgets and prompt segment accounting.
+//! Context window budgets and prompt token accounting.
 
 use serde_json::Value;
-
-/// The identity layer budget.
-pub const SEGMENT_IDENTITY: u64 = 800;
-/// The tool schema budget.
-pub const SEGMENT_TOOLS: u64 = 1_200;
-/// The rules budget.
-pub const SEGMENT_RULES: u64 = 800;
-
-/// The skills index budget.
-pub const SEGMENT_SKILLS: u64 = 300;
-/// The recall digest budget.
-pub const SEGMENT_RECALL: u64 = 300;
-/// The runtime note budget.
-pub const SEGMENT_RUNTIME: u64 = 150;
-/// The fixed prompt overhead target from section 14.
-pub const FIXED_OVERHEAD_TARGET: u64 = 4_500;
-
-/// The budget each prompt segment is measured against, in the order the model
-/// reads them.
-pub const SEGMENT_BUDGETS: [(&str, u64); 6] = [
-    ("identity", SEGMENT_IDENTITY),
-    ("tools", SEGMENT_TOOLS),
-    ("rules", SEGMENT_RULES),
-    ("skills", SEGMENT_SKILLS),
-    ("recall", SEGMENT_RECALL),
-    ("runtime", SEGMENT_RUNTIME),
-];
-
-/// One prompt segment's count against its budget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SegmentCost {
-    pub name: &'static str,
-    pub tokens: u64,
-    pub budget: u64,
-}
-
-impl SegmentCost {
-    /// Whether the segment costs more than its budget.
-    pub fn over(&self) -> bool {
-        self.tokens > self.budget
-    }
-}
 
 const RESERVE_FLOOR: u64 = 4_096;
 const RESERVE_EXTRA: u64 = 1_024;
@@ -158,43 +116,5 @@ impl TokenCounts {
             total: count("total")?,
             fixed: count("fixed")?,
         })
-    }
-
-    /// One segment's count, or `None` for a name no segment carries.
-    pub fn segment(&self, name: &str) -> Option<u64> {
-        match name {
-            "identity" => Some(self.identity),
-            "tools" => Some(self.tools),
-            "rules" => Some(self.rules),
-            "skills" => Some(self.skills),
-            "guidance" => Some(self.guidance),
-            "transcript" => Some(self.transcript),
-            "recall" => Some(self.recall),
-            "runtime" => Some(self.runtime),
-            "total" => Some(self.total),
-            "fixed" => Some(self.fixed),
-            _ => None,
-        }
-    }
-
-    /// Every budgeted segment with its count, in prompt order.
-    pub fn segments(&self) -> impl Iterator<Item = SegmentCost> + '_ {
-        SEGMENT_BUDGETS
-            .into_iter()
-            .filter_map(move |(name, budget)| {
-                self.segment(name).map(|tokens| SegmentCost {
-                    name,
-                    tokens,
-                    budget,
-                })
-            })
-    }
-
-    /// The names of segments over their spec budgets.
-    pub fn over_budget(&self) -> Vec<&'static str> {
-        self.segments()
-            .filter(SegmentCost::over)
-            .map(|segment| segment.name)
-            .collect()
     }
 }

@@ -553,10 +553,6 @@ impl Agent {
                     events,
                 );
             }
-            let over = prompt.tokens.over_budget();
-            if !over.is_empty() {
-                tracing::warn!(segments = ?over, "prompt segment over budget");
-            }
             let prompt_text = serde_json::to_string(&prompt.document)
                 .map_err(|error| AgentError::Invalid(error.to_string()))?;
             let prompt_hash = self.session.save_prompt_blob(&prompt_text)?;

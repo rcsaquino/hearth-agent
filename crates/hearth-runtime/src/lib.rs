@@ -30,7 +30,7 @@ pub use daemon::{DaemonError, daemon};
 pub use doctor::{DoctorError, doctor_with};
 pub use effect_worker::EffectWorker;
 pub use events::{EventBus, EventSink, NoopSink, RunEvent};
-pub use hearth_core::{SegmentCost, TokenCounts, Zone, cache_hit_rate};
+pub use hearth_core::{TokenCounts, Zone, cache_hit_rate};
 pub use helpers::{HelperConfig, HelperControls, HelperPool, TaskTool};
 pub use home::{HomeError, HomeRestore, restore_home};
 pub use init::{InitError, InitOptions, InitReport, init};

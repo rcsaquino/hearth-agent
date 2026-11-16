@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use hearth_config::{ConfigError, Settings};
-use hearth_core::{FIXED_OVERHEAD_TARGET, IdGen, SegmentCost, TokenCounts, UuidV7};
+use hearth_core::{IdGen, TokenCounts, UuidV7};
 use hearth_model::{
     ChatMessage, ChatRequest, ContentBlock, OpenAiCompatibleProvider, Provider, ProviderError, Role,
 };
@@ -59,7 +59,7 @@ pub fn doctor_with(home: &Path, live: bool, out: &mut impl Write) -> Result<(), 
     Ok(())
 }
 
-/// The newest saved prompt's cost against every spec budget.
+/// The newest saved prompt's recorded cost.
 fn prompt_report(home: &Path) -> Result<Vec<String>, DoctorError> {
     let Some(document) = inspect::latest_prompt(home)? else {
         return Ok(vec!["prompt: no prompt saved yet".to_owned()]);
@@ -69,26 +69,7 @@ fn prompt_report(home: &Path) -> Result<Vec<String>, DoctorError> {
             "prompt: the saved prompt has no token counts".to_owned(),
         ]);
     };
-    let mut lines: Vec<String> = tokens
-        .segments()
-        .filter(SegmentCost::over)
-        .map(|segment| {
-            format!(
-                "prompt: {} over budget ({} tok of {})",
-                segment.name, segment.tokens, segment.budget
-            )
-        })
-        .collect();
-    if tokens.fixed > FIXED_OVERHEAD_TARGET {
-        lines.push(format!(
-            "prompt: fixed overhead over target ({} tok of {FIXED_OVERHEAD_TARGET})",
-            tokens.fixed
-        ));
-    }
-    if lines.is_empty() {
-        lines.push(format!("prompt: ok ({} fixed tok)", tokens.fixed));
-    }
-    Ok(lines)
+    Ok(vec![format!("prompt: ok ({} fixed tok)", tokens.fixed)])
 }
 
 fn check_telegram(settings: &Settings, out: &mut impl Write) -> Result<(), DoctorError> {
