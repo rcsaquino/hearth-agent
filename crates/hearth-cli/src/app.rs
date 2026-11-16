@@ -1548,7 +1548,7 @@ mod tests {
     }
 
     #[test]
-    fn a_live_refresh_follows_the_newest_exchange() {
+    fn a_live_refresh_loads_the_newest_exchange() {
         let home = TempDir::new().expect("temp home");
         let mut app = App::new(home.path().to_path_buf());
         app.screen = Screen::Dashboard;
@@ -1563,13 +1563,13 @@ mod tests {
             json!({"prompt_hash": "old", "request": {"model": "old"}}),
         ])));
         assert_eq!(
-            app.prompt.cursor, 0,
-            "live follow must move to the newly saved exchange"
+            app.prompt.exchanges[0]["prompt_hash"], "new",
+            "a live refresh must load the newest exchange first"
         );
     }
 
     #[test]
-    fn a_paused_older_snapshot_survives_a_refresh() {
+    fn a_paused_reader_keeps_its_place_on_refresh() {
         let home = TempDir::new().expect("temp home");
         let mut app = App::new(home.path().to_path_buf());
         app.screen = Screen::Dashboard;
@@ -1578,16 +1578,20 @@ mod tests {
             json!({"prompt_hash": "newest", "request": {"model": "newest"}}),
             json!({"prompt_hash": "older", "request": {"model": "older"}}),
         ];
-        app.prompt.cursor = 1;
         app.prompt.follow = false;
+        app.prompt.scroll = 6;
         app.apply_event(AppEvent::Prompt(Ok(vec![
             json!({"prompt_hash": "newer", "request": {"model": "newer"}}),
             json!({"prompt_hash": "newest", "request": {"model": "newest"}}),
             json!({"prompt_hash": "older", "request": {"model": "older"}}),
         ])));
         assert_eq!(
-            app.prompt.cursor, 2,
-            "a paused reader must stay on the same saved snapshot"
+            app.prompt.scroll, 6,
+            "a paused reader must keep their line after a refresh"
+        );
+        assert!(
+            !app.prompt.follow,
+            "a refresh must not resume the live tail under a paused reader"
         );
     }
 

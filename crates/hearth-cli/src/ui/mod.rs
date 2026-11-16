@@ -1074,10 +1074,13 @@ mod tests {
         assert!(text.contains("SOUL TEXT"), "{text}");
         assert!(text.contains("SECOND LINE"), "{text}");
         assert!(text.contains("CLOCK NOTE"), "{text}");
-        assert!(text.contains("the answer"), "{text}");
         assert!(
-            text.contains("snapshot 1 of 1"),
-            "the header names the snapshot: {text}"
+            text.contains("the answer"),
+            "the answer stays visible: {text}"
+        );
+        assert!(
+            !text.contains("snapshot"),
+            "the header keeps no snapshot count: {text}"
         );
     }
 
@@ -1171,23 +1174,23 @@ mod tests {
         let text = buffer_text(&app, 120, 40);
         let footer = text
             .lines()
-            .find(|line| line.contains("snapshots") && line.contains("quit"))
+            .find(|line| line.contains("follow") && line.contains("quit"))
             .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
-        for key in ["[ ]", "follow", "system", "raw"] {
+        for key in ["scroll", "follow", "system"] {
             assert!(
                 footer.contains(key),
                 "the footer is missing {key}: {footer}"
             );
         }
         assert_eq!(
-            text.matches(" snapshots").count(),
+            text.matches(" follow").count(),
             1,
             "the prompt tab shows one legend: {text}"
         );
     }
 
     #[test]
-    fn prompt_markers_name_every_saved_snapshot() {
+    fn saved_requests_keep_a_boundary_without_snapshot_vocabulary() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         app.prompt.exchanges = vec![
@@ -1196,45 +1199,38 @@ mod tests {
         ];
         let text = buffer_text(&app, 100, 40);
         assert!(
-            text.contains("1 · 1970-01-01T00:00:00+00:00"),
-            "every saved snapshot keeps its marker: {text}"
+            !text.contains("snapshot"),
+            "the separator keeps no snapshot vocabulary: {text}"
         );
-        assert!(text.contains("2 · 1970-01-01T00:00:00+00:00"), "{text}");
-        assert!(text.contains("newest-h"), "{text}");
-        assert!(text.contains("older-ha"), "{text}");
+        assert!(!text.contains("newest-h"), "{text}");
+        assert!(!text.contains("older-ha"), "{text}");
         assert!(
-            text.contains("▸── 2 · "),
-            "the selected snapshot is marked: {text}"
+            !text.contains("1970-01-01T00:00:00"),
+            "the separator keeps no timestamp: {text}"
         );
         assert!(
             text.contains("no reply saved"),
-            "a snapshot with no answer says so: {text}"
+            "a request with no answer says so: {text}"
         );
     }
 
     #[test]
-    fn prompt_brackets_move_the_cursor_and_the_live_tail() {
+    fn the_inspector_keys_are_gone() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         app.prompt.exchanges = vec![
             snapshot("newest", "newest-hash", 2),
             snapshot("older", "older-hash", 1),
         ];
-        let _ = buffer_text(&app, 100, 40);
-        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
-        assert_eq!(app.prompt.cursor, 1, "the bracket shows the older snapshot");
-        assert!(!app.prompt.follow, "an older snapshot pauses the live tail");
-        let text = buffer_text(&app, 100, 40);
-        assert!(
-            text.contains("▸── 1 · "),
-            "the older marker takes the emphasis: {text}"
-        );
-        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
-        assert_eq!(app.prompt.cursor, 0, "the second bracket shows the newest");
-        assert!(
-            app.prompt.follow,
-            "the newest snapshot resumes the live tail"
-        );
+        let before = buffer_text(&app, 100, 40);
+        for key in ['[', ']', 'r', 'o'] {
+            app.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+            assert_eq!(
+                buffer_text(&app, 100, 40),
+                before,
+                "{key} must no longer change the view"
+            );
+        }
     }
 
     #[test]
@@ -1276,7 +1272,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_scroll_stops_at_the_end_and_resets_on_raw_toggle() {
+    fn prompt_scroll_stops_at_the_end() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
         let body = (0..60)
@@ -1305,14 +1301,6 @@ mod tests {
             app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
         }
         assert_eq!(app.prompt.scroll, max);
-        app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
-        assert!(app.prompt.raw);
-        assert_eq!(app.prompt.scroll, 0);
-        let text = buffer_text(&app, 100, 24);
-        assert!(
-            text.contains("prompt_hash"),
-            "the raw view dumps the saved request: {text}"
-        );
     }
 
     #[test]

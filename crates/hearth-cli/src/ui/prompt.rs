@@ -1351,7 +1351,7 @@ mod tests {
     }
 
     #[test]
-    fn two_snapshots_of_one_conversation_do_not_repeat_the_history() {
+    fn saved_requests_are_separated_without_snapshot_vocabulary() {
         let (_home, app) = prompt_app(conversation());
         let text = rendered(&app, 100, 60);
         assert_eq!(
@@ -1364,21 +1364,30 @@ mod tests {
             1,
             "the earlier tool result is not repeated: {text}"
         );
+        let question = line_of(&text, QUESTION);
+        let answer = line_of(&text, ANSWER);
+        let rule = text
+            .lines()
+            .enumerate()
+            .find(|(index, line)| {
+                *index > question
+                    && *index < answer
+                    && !line.trim().is_empty()
+                    && line.trim().chars().all(|character| character == '─')
+            })
+            .map(|(index, _)| index);
         assert!(
-            text.contains("1 · 2023-11-14T22:13:20+00:00"),
-            "the oldest snapshot marker is present: {text}"
+            rule.is_some(),
+            "a bare rule marks where the next request begins: {text}"
+        );
+        assert!(!text.contains("snapshot"), "no snapshot vocabulary: {text}");
+        assert!(
+            !text.contains("aaaaaa") && !text.contains("bbbbbb"),
+            "no request hashes: {text}"
         );
         assert!(
-            text.contains("2 · 2023-11-14T22:13:30+00:00"),
-            "the newest snapshot marker is present: {text}"
-        );
-        assert!(
-            text.contains("aaaaaaaa"),
-            "the marker carries the short request hash: {text}"
-        );
-        assert!(
-            text.contains("▸── 2 · "),
-            "the newest snapshot is the selected one: {text}"
+            !text.contains("22:13:20") && !text.contains("22:13:30"),
+            "no marker stamps: {text}"
         );
     }
 
@@ -1472,41 +1481,30 @@ mod tests {
     }
 
     #[test]
-    fn brackets_move_the_viewport_to_the_previous_and_next_snapshot_marker() {
-        let (_home, mut app) = prompt_app(long_conversation());
-        let _ = rendered(&app, 100, 24);
-        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
-        let text = rendered(&app, 100, 24);
+    fn the_header_names_the_model_session_and_numbers() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 100, 30);
+        assert!(text.contains("test-model"), "{text}");
+        assert!(text.contains("session session-"), "{text}");
+        assert!(text.contains("620 tok"), "{text}");
+        assert!(text.contains("prefix prefix-o"), "{text}");
         assert!(
-            text.lines().nth(2).unwrap_or_default().contains("▸── 2 · "),
-            "the older marker moves to the top of the viewport: {text}"
-        );
-        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
-        let text = rendered(&app, 100, 24);
-        assert!(
-            text.lines().nth(2).unwrap_or_default().contains("▸── 1 · "),
-            "the oldest marker moves to the top of the viewport: {text}"
-        );
-        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
-        let text = rendered(&app, 100, 24);
-        assert!(
-            text.lines().nth(2).unwrap_or_default().contains("▸── 2 · "),
-            "the newer marker moves to the top of the viewport: {text}"
+            !text.contains("snapshot"),
+            "the header keeps no snapshot count: {text}"
         );
     }
 
     #[test]
-    fn the_header_names_the_snapshot_and_the_numbers_at_a_glance() {
+    fn the_header_carries_the_newest_request_when_it_arrives() {
         let (_home, mut app) = prompt_app(conversation());
         let text = rendered(&app, 100, 30);
-        assert!(text.contains("test-model"), "{text}");
-        assert!(text.contains("session session-"), "{text}");
-        assert!(text.contains("snapshot 2 of 2"), "{text}");
         assert!(text.contains("620 tok"), "{text}");
-        assert!(text.contains("prefix prefix-o"), "{text}");
-        app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
+        app.prompt.exchanges[0]["request"]["tokens"]["total"] = json!(999);
         let text = rendered(&app, 100, 30);
-        assert!(text.contains("snapshot 1 of 2"), "{text}");
+        assert!(
+            text.contains("999 tok"),
+            "the header follows the newest saved request: {text}"
+        );
     }
 
     #[test]
