@@ -27,8 +27,10 @@ const PAGE_LINES: usize = 15;
 const BODY_INDENT: usize = 2;
 /// The body lines a folded section keeps.
 const PREVIEW_LINES: usize = 5;
-/// One frame per 100 ms, which is the event loop's budget.
-const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+/// The clockwise flux spinner: a full braille cell with one dot missing, and
+/// the gap steps one dot per 100 ms, which is the event loop's budget. One turn
+/// takes 800 ms.
+const FRAMES: [&str; 8] = ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣽", "⣻"];
 
 /// One stable prompt layer: its hash in `prefix_parts`, its saved text, its
 /// token key, and the name a reader knows it by.
@@ -122,29 +124,17 @@ pub(crate) fn toggle_fold(prompt: &mut PromptView) {
     prompt.collapsed = !prompt.collapsed;
 }
 
-/// Fold or open thinking, saved or streaming.
-pub(crate) fn toggle_thinking(prompt: &mut PromptView) {
-    prompt.thinking_collapsed = !prompt.thinking_collapsed;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     /// The loaded requests, named by hash and answering entry.
     signature: String,
     collapsed: bool,
-    thinking_collapsed: bool,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(
-        exchanges: &[Value],
-        collapsed: bool,
-        thinking_collapsed: bool,
-        width: u16,
-        zone: &Zone,
-    ) -> Self {
+    fn new(exchanges: &[Value], collapsed: bool, width: u16, zone: &Zone) -> Self {
         let mut signature = String::new();
         for exchange in exchanges {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
@@ -155,7 +145,6 @@ impl CacheKey {
         Self {
             signature,
             collapsed,
-            thinking_collapsed,
             width,
             zone: zone.name().to_owned(),
         }
@@ -208,7 +197,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let key = CacheKey::new(
         &app.prompt.exchanges,
         app.prompt.collapsed,
-        app.prompt.thinking_collapsed,
         inner.width,
         &app.zone,
     );
@@ -219,7 +207,8 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let cache = slot.as_mut().expect("prompt cache");
 
     // The header is drawn after the cache so it can name what the chat holds.
-    let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 2);
+    // The status row keeps one blank row between itself and the chat.
+    let header_rows = usize::from(!app.prompt.exchanges.is_empty() && height >= 2) * 2;
     let body_rows = height.saturating_sub(header_rows);
     if header_rows > 0 {
         let row = Rect { height: 1, ..inner };
@@ -238,7 +227,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .prompt
         .live
         .as_ref()
-        .map(|live| live_lines(live, width, app.prompt.thinking_collapsed))
+        .map(|live| live_lines(live, width, app.prompt.collapsed))
         .unwrap_or_default();
     let saved = cache.lines.len();
     let total = saved + live.len();
@@ -301,24 +290,11 @@ fn status_line(summary: &Summary, width: usize) -> Line<'static> {
     row.fit(width)
 }
 
-/// The turn being written, drawn below the saved chat with its spinner on the
-/// header and its thinking before its text.
-fn live_lines(live: &LiveReply, width: usize, thinking_collapsed: bool) -> Vec<Line<'static>> {
+/// The turn being written, drawn below the saved chat with its thinking before
+/// its text and its working row last, so the tail holds the spinner while the
+/// text grows above it.
+fn live_lines(live: &LiveReply, width: usize, collapsed: bool) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from("")];
-    let frame = FRAMES[spinner_frame(live.started)];
-    lines.push(band_line(
-        vec![
-            Span::styled(format!("{frame} "), theme::accent_style()),
-            Span::styled(
-                "HEARTH".to_owned(),
-                theme::accent_style().add_modifier(Modifier::BOLD),
-            ),
-        ],
-        "streaming",
-        theme::faint(),
-        width,
-        Style::default(),
-    ));
     if !live.thinking.is_empty() {
         lines.extend(body_block(
             "thinking",
@@ -327,7 +303,7 @@ fn live_lines(live: &LiveReply, width: usize, thinking_collapsed: bool) -> Vec<L
             theme::THINK,
             None,
             width,
-            thinking_collapsed,
+            collapsed,
         ));
     }
     if !live.text.is_empty() {
@@ -341,7 +317,28 @@ fn live_lines(live: &LiveReply, width: usize, thinking_collapsed: bool) -> Vec<L
             false,
         ));
     }
+    lines.push(Line::from(""));
+    lines.push(working_line(live, width));
+    lines.push(Line::from(""));
     lines
+}
+
+/// The spinner and the label that says what the live turn is doing.
+fn working_line(live: &LiveReply, width: usize) -> Line<'static> {
+    let frame = FRAMES[spinner_frame(live.started)];
+    band_line(
+        vec![
+            Span::styled(format!("{frame} "), theme::accent_style()),
+            Span::styled(
+                "WORKING".to_owned(),
+                theme::accent_style().add_modifier(Modifier::BOLD),
+            ),
+        ],
+        "streaming",
+        theme::faint(),
+        width,
+        Style::default(),
+    )
 }
 
 /// A sub-panel label and its wrapped body, as one block's rows.
@@ -421,11 +418,10 @@ enum Fold {
 }
 
 impl Fold {
-    fn open(self, collapsed: bool, thinking_collapsed: bool) -> bool {
+    fn open(self, collapsed: bool) -> bool {
         match self {
-            Fold::Chat => !collapsed,
             Fold::Answer => true,
-            Fold::Thinking => !thinking_collapsed,
+            Fold::Chat | Fold::Thinking => !collapsed,
         }
     }
 }
@@ -934,7 +930,7 @@ fn cost(tokens: Option<u64>) -> String {
 
 fn build_cache(exchanges: &[Value], key: &CacheKey, width: usize, zone: &Zone) -> PromptCache {
     let chat = derive(exchanges, zone);
-    let mut painter = Painter::new(width, key.collapsed, key.thinking_collapsed);
+    let mut painter = Painter::new(width, key.collapsed);
     for entry in &chat.entries {
         match entry {
             Entry::Notice(notice) => painter.notice(notice),
@@ -975,7 +971,7 @@ fn section_rows(text: &str, width: usize, open: bool) -> (Vec<String>, Option<St
     (rows, Some(stub))
 }
 
-fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: bool) -> Vec<Content> {
+fn content(block: &Block, inner: usize, collapsed: bool) -> Vec<Content> {
     let mut rows = Vec::new();
     for part in &block.parts {
         if part.label.is_none() && part.text.trim().is_empty() {
@@ -997,7 +993,7 @@ fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: boo
         if let Some(label) = &part.label {
             rows.push(Content::Label(label.clone(), ink));
         }
-        let open = part.fold.open(collapsed, thinking_collapsed);
+        let open = part.fold.open(collapsed);
         let (lines, stub) = section_rows(&part.text, inner, open);
         rows.extend(lines.into_iter().map(|line| Content::Text(line, ink)));
         if let Some(stub) = stub {
@@ -1011,16 +1007,14 @@ fn content(block: &Block, inner: usize, collapsed: bool, thinking_collapsed: boo
 struct Painter {
     width: usize,
     collapsed: bool,
-    thinking_collapsed: bool,
     lines: Vec<Line<'static>>,
 }
 
 impl Painter {
-    fn new(width: usize, collapsed: bool, thinking_collapsed: bool) -> Self {
+    fn new(width: usize, collapsed: bool) -> Self {
         Self {
             width: width.max(1),
             collapsed,
-            thinking_collapsed,
             lines: Vec::new(),
         }
     }
@@ -1055,7 +1049,7 @@ impl Painter {
 
     fn block(&mut self, block: &Block) {
         let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        let rows = content(block, inner, self.collapsed, self.thinking_collapsed);
+        let rows = content(block, inner, self.collapsed);
         self.gap();
         let label_style = tinted(block.accent, block.bg).add_modifier(Modifier::BOLD);
         let header = band_line(
