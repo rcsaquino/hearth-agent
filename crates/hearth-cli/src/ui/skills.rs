@@ -51,6 +51,13 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         let height = inner.height.max(1) as usize;
         let start = activity::list_start(app.skills.selected, app.skills.skills.len(), height);
+        let label_width = app
+            .skills
+            .skills
+            .iter()
+            .map(|skill| skill.name.chars().count() + skill.scope.as_str().len() + 3)
+            .max()
+            .unwrap_or(0);
         let mut lines = Vec::new();
         for (index, skill) in app
             .skills
@@ -63,9 +70,8 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             let selected = index == app.skills.selected;
             let marker = if selected { "▶ " } else { "  " };
             let label = format!(
-                "{marker}{} [{}] {:>4}",
-                skill.name,
-                skill.scope.as_str(),
+                "{marker}{:<label_width$} {:>8}",
+                format!("{} [{}]", skill.name, skill.scope.as_str()),
                 rate(skill)
             );
             lines.push(if selected {
@@ -103,10 +109,10 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 /// The rate column. A skill with no counted use has no measured rate, so it
-/// shows a dash instead of a zero that reads as a failure.
+/// says so instead of showing a zero that reads as a failure.
 fn rate(skill: &hearth_runtime::skills::Skill) -> String {
     if skill.uses == 0 {
-        "—".to_owned()
+        "(unused)".to_owned()
     } else {
         format!("{:.0}%", skill.success_rate() * 100.0)
     }
