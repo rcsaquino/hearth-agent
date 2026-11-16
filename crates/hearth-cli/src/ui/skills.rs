@@ -2,8 +2,8 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::text::Line;
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::theme;
@@ -14,26 +14,12 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(4)])
         .split(area);
-    let summary = match (&app.skills.stats, app.skills.version) {
-        (_, Some(index)) => {
-            let version = app.skills.versions.get(index).copied().unwrap_or(0);
-            let all: Vec<String> = app
-                .skills
-                .versions
-                .iter()
-                .map(|version| format!("v{version}"))
-                .collect();
-            format!(
-                "history {version} of {} · {} · up/down to read, esc to leave",
-                app.skills.versions.last().copied().unwrap_or(version),
-                all.join(" ")
-            )
-        }
-        (Some(stats), None) => format!(
+    let summary = match &app.skills.stats {
+        Some(stats) => format!(
             "{} skills · active {} · learned {}",
             stats.total, stats.active, stats.learned
         ),
-        (None, None) => "Skills".to_owned(),
+        None => "Skills".to_owned(),
     };
     frame.render_widget(
         Paragraph::new(Line::styled(summary, theme::muted())),
@@ -56,7 +42,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         );
     } else if app.skills.skills.is_empty() {
         frame.render_widget(
-            Paragraph::new("No skills yet. Press n to write one, or let Hearth learn one.")
+            Paragraph::new("No skills yet. Write one in skills/, or let Hearth learn one.")
                 .wrap(Wrap { trim: false }),
             inner,
         );
@@ -112,7 +98,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             );
         }
     }
-    new_skill_prompt(app, frame, area);
 }
 
 /// The rate column. A skill with no counted use has no measured rate, so it
@@ -123,39 +108,4 @@ fn rate(skill: &hearth_runtime::skills::Skill) -> String {
     } else {
         format!("{:.0}%", skill.success_rate() * 100.0)
     }
-}
-
-fn new_skill_prompt(app: &App, frame: &mut Frame, area: Rect) {
-    let Some(input) = &app.skills.new_name else {
-        return;
-    };
-    let width = area.width.saturating_sub(10).min(60);
-    let height = 6;
-    let popup = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    };
-    frame.render_widget(Clear, popup);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme::border_focus())
-        .title(theme::heading(" New user skill "));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-    let lines = vec![
-        Line::styled(" Name", theme::muted()),
-        Line::from(vec![
-            Span::styled(" › ", theme::accent_style()),
-            Span::styled(format!(" {} ", input.value), theme::field_focus()),
-        ]),
-        Line::from(""),
-        Line::styled(
-            " Letters, numbers, spaces, - or _. Enter creates, Esc cancels.",
-            theme::faint(),
-        ),
-    ];
-    frame.render_widget(Paragraph::new(lines), inner);
-    frame.set_cursor_position((inner.x + 4 + input.cursor as u16, inner.y + 1));
 }

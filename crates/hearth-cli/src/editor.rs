@@ -12,7 +12,6 @@ pub enum EditorKind {
     Settings,
     Soul,
     Guidance,
-    Skill { name: String },
 }
 
 /// One open editor and the save behavior attached to it.

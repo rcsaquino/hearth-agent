@@ -16,12 +16,12 @@ use serde_json::Value;
 use hearth_config::{Daemon, SETTINGS_FILE, Settings};
 use hearth_runtime::Zone;
 use hearth_runtime::inspect::MemoryRecord;
-use hearth_runtime::skills::{Skill, SkillLibrary, SkillScope, SkillStats};
+use hearth_runtime::skills::{Skill, SkillLibrary, SkillStats};
 
 pub use crate::daemon_client::DaemonState;
 use crate::daemon_client::{self, Ownership};
 use crate::editor::{self, EditorKind, OpenEditor, TextEditor};
-use crate::onboarding::{Action, Onboarding, TextInput};
+use crate::onboarding::{Action, Onboarding};
 use crate::settings_form::{FormAction, SettingsForm};
 use crate::ui;
 pub(crate) use crate::workers::AppEvent;
@@ -92,7 +92,6 @@ pub struct DoctorView {
 
 pub struct SkillsView {
     pub library: SkillLibrary,
-    pub new_name: Option<TextInput>,
     pub skills: Vec<Skill>,
     pub selected: usize,
     pub body: Option<String>,
@@ -100,10 +99,6 @@ pub struct SkillsView {
     pub max_scroll: Cell<usize>,
     pub stats: Option<SkillStats>,
     pub error: Option<String>,
-    /// Versions of the selected learned skill, oldest first.
-    pub versions: Vec<u64>,
-    /// The version being read, as an index into `versions`.
-    pub version: Option<usize>,
 }
 
 /// The assistant turn being written right now.
@@ -303,9 +298,6 @@ impl App {
             max_scroll: Cell::new(0),
             stats: None,
             error: None,
-            new_name: None,
-            versions: Vec::new(),
-            version: None,
         };
         Self {
             home,
@@ -580,19 +572,6 @@ impl App {
                 self.settings.message =
                     Some("File saved. Restart Hearth to apply prompt changes.".to_owned());
             }
-            EditorKind::Skill { name } => {
-                self.skills.reload();
-                if let Some(index) = self
-                    .skills
-                    .skills
-                    .iter()
-                    .position(|skill| skill.name == name)
-                {
-                    self.skills.selected = index;
-                    self.skills.body = self.skills.library.load_body(&name).ok().flatten();
-                }
-                self.settings.message = Some("Skill saved.".to_owned());
-            }
         }
     }
 
@@ -830,62 +809,17 @@ impl App {
     }
 
     fn handle_skills(&mut self, key: KeyEvent) {
-        if self.skills.new_name.is_some() {
-            match key.code {
-                KeyCode::Enter => self.create_user_skill(),
-                KeyCode::Esc => {
-                    self.skills.new_name = None;
-                    self.skills.error = None;
-                }
-                _ => {
-                    if let Some(input) = &mut self.skills.new_name
-                        && input.handle(key)
-                    {
-                        self.skills.error = None;
-                    }
-                }
-            }
-            return;
-        }
-        if self.skills.version.is_some() {
-            match key.code {
-                KeyCode::Up => {
-                    if let Some(version) = &mut self.skills.version {
-                        *version = version.saturating_sub(1);
-                    }
-                    self.skills.load_selected();
-                }
-                KeyCode::Down => {
-                    if let Some(version) = &mut self.skills.version {
-                        *version = (*version + 1).min(self.skills.versions.len() - 1);
-                    }
-                    self.skills.load_selected();
-                }
-                KeyCode::Esc => self.skills.leave_history(),
-                KeyCode::PageUp => self.skills.scroll = self.skills.scroll.saturating_sub(15),
-                KeyCode::PageDown => {
-                    self.skills.scroll =
-                        (self.skills.scroll + 15).min(self.skills.max_scroll.get());
-                }
-                KeyCode::Char('v') => self.skills.leave_history(),
-                _ => {}
-            }
-            return;
-        }
         match key.code {
             KeyCode::Up => {
                 self.skills.selected = self.skills.selected.saturating_sub(1);
-                self.skills.leave_history();
                 self.skills.load_selected();
             }
             KeyCode::Down => {
                 if self.skills.selected + 1 < self.skills.skills.len() {
                     self.skills.selected += 1;
                 }
-                self.skills.leave_history();
                 self.skills.load_selected();
             }
-            KeyCode::Char('v') => self.skills.show_history(),
             KeyCode::Enter => self.skills.load_selected(),
             KeyCode::PageUp => self.skills.scroll = self.skills.scroll.saturating_sub(15),
             KeyCode::PageDown => {
@@ -893,63 +827,8 @@ impl App {
             }
             KeyCode::Home => self.skills.scroll = 0,
             KeyCode::End => self.skills.scroll = self.skills.max_scroll.get(),
-            KeyCode::Char('n') => {
-                self.skills.new_name = Some(TextInput::new(false));
-                self.skills.error = None;
-            }
-            KeyCode::Char('e') => {
-                let skill = self.skills.skills.get(self.skills.selected).cloned();
-                match skill {
-                    Some(skill) if skill.scope == SkillScope::User => self.open_editor(
-                        EditorKind::Skill {
-                            name: skill.name.clone(),
-                        },
-                        skill.path.clone(),
-                        &format!("skills/{}.md", skill.name),
-                    ),
-                    Some(_) => {
-                        self.settings.message = Some(
-                            "Learned skills are managed by Hearth. Edit a user skill instead."
-                                .to_owned(),
-                        );
-                    }
-                    None => {}
-                }
-            }
             _ => {}
         }
-    }
-
-    fn create_user_skill(&mut self) {
-        let Some(input) = self.skills.new_name.take() else {
-            return;
-        };
-        let name = slug(&input.value);
-        if name.is_empty() {
-            self.skills.error = Some("Give the skill a name with letters or numbers.".to_owned());
-            self.skills.new_name = Some(input);
-            return;
-        }
-        let path = self.home.join("skills").join(format!("{name}.md"));
-        if path.exists() {
-            self.skills.error = Some(format!("A skill named {name} already exists."));
-            self.skills.new_name = Some(input);
-            return;
-        }
-        let title = input.value.trim();
-        let title = if title.is_empty() {
-            name.replace('-', " ")
-        } else {
-            title.to_owned()
-        };
-        let text = format!(
-            "# {title}\n\nDescribe when Hearth should use this skill.\n\n## Steps\n\n1. Write the first step here.\n"
-        );
-        let editor = TextEditor::from_text(path, format!("skills/{name}.md"), text);
-        self.editor = Some(OpenEditor {
-            kind: EditorKind::Skill { name },
-            text: editor,
-        });
     }
 
     fn handle_prompt(&mut self, key: KeyEvent) {
@@ -1328,62 +1207,12 @@ impl SkillsView {
     }
 
     pub(crate) fn load_selected(&mut self) {
-        let skill = self.skills.get(self.selected);
-        let version = self
-            .version
-            .and_then(|index| self.versions.get(index).copied());
-        self.body = match (skill, version) {
-            (Some(skill), Some(version)) => self
-                .library
-                .version_body(&skill.name, version)
-                .ok()
-                .flatten(),
-            (Some(skill), None) => self.library.load_body(&skill.name).ok().flatten(),
-            _ => None,
-        };
+        self.body = self
+            .skills
+            .get(self.selected)
+            .and_then(|skill| self.library.load_body(&skill.name).ok().flatten());
         self.scroll = 0;
     }
-
-    /// Show the preserved versions of the selected learned skill.
-    pub(crate) fn show_history(&mut self) {
-        self.version = None;
-        self.versions.clear();
-        let Some(skill) = self.skills.get(self.selected) else {
-            return;
-        };
-        if skill.scope != SkillScope::Learned {
-            return;
-        }
-        if let Ok(versions) = self.library.history(&skill.name)
-            && !versions.is_empty()
-        {
-            self.version = Some(versions.len() - 1);
-            self.versions = versions;
-            self.load_selected();
-        }
-    }
-
-    pub(crate) fn leave_history(&mut self) {
-        if self.version.take().is_some() {
-            self.versions.clear();
-            self.load_selected();
-        }
-    }
-}
-
-fn slug(text: &str) -> String {
-    let mut slug = String::new();
-    let mut separator = false;
-    for character in text.trim().chars() {
-        if character.is_ascii_alphanumeric() {
-            slug.push(character.to_ascii_lowercase());
-            separator = false;
-        } else if matches!(character, ' ' | '-' | '_') && !slug.is_empty() && !separator {
-            slug.push('-');
-            separator = true;
-        }
-    }
-    slug.trim_end_matches('-').to_owned()
 }
 
 fn compact_settings_text(text: &str) -> Result<String, String> {

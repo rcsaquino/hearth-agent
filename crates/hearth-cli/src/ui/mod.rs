@@ -166,14 +166,7 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
             ("↑↓", "scroll"),
             ("q", "quit"),
         ]),
-        Tab::Skills => theme::hints(&[
-            ("↑↓", "select"),
-            ("v", "history"),
-            ("pgup/pgdn", "scroll"),
-            ("e", "edit user skill"),
-            ("n", "new skill"),
-            ("q", "quit"),
-        ]),
+        Tab::Skills => theme::hints(&[("↑↓", "select"), ("pgup/pgdn", "scroll"), ("q", "quit")]),
         Tab::Prompt => theme::hints(&[
             ("↑↓", "scroll"),
             ("↵", "fold"),
@@ -250,7 +243,7 @@ fn help(frame: &mut Frame) {
         Line::styled("  Make it yours", theme::accent_style()),
         Line::from("    Settings   every option is shown; r resets a row"),
         Line::from("               edit SOUL.md and HEARTH.md from Settings"),
-        Line::from("    Skills     e edits your own skill files"),
+        Line::from("    Skills     read the library Hearth can call on"),
         Line::from("    Memory     press / to search saved memories"),
         Line::from(""),
         Line::styled(
@@ -466,66 +459,6 @@ mod tests {
         assert_eq!(
             app.activity_selected, 2,
             "a paused feed whose selection is the last row follows the newest row"
-        );
-    }
-
-    #[test]
-    fn the_skills_tab_reads_a_preserved_version() {
-        let (home, mut app) = initialized_app();
-        let library = hearth_runtime::skills::SkillLibrary::new(home.path());
-        for revision in 0..2 {
-            library
-                .save_learned(hearth_runtime::skills::SkillSave {
-                    name: "triage".to_owned(),
-                    description: "Triage a request".to_owned(),
-                    body: format!(
-                        "## When to use\n\nWhen triage is needed.\n\n## Steps\n\nRevision {revision}.\n\n## Pitfalls\n\nNone."
-                    ),
-                    evidence: Vec::new(),
-                })
-                .expect("learned skill");
-        }
-        app.tab = crate::app::Tab::Skills;
-        app.skills.reload();
-        app.skills.selected = 0;
-        app.skills.load_selected();
-        assert!(
-            app.skills
-                .body
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Revision 1")
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
-        assert_eq!(app.skills.versions, vec![1, 2]);
-        assert!(
-            app.skills
-                .body
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Revision 1")
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert!(
-            app.skills
-                .body
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Revision 0"),
-            "the preserved version must be readable: {:?}",
-            app.skills.body
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(app.skills.version.is_none());
-        assert!(
-            app.skills
-                .body
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Revision 1")
         );
     }
 
@@ -955,28 +888,6 @@ mod tests {
         assert!(value.get("identity").is_none(), "{text}");
         assert!(value.get("agent").is_none(), "{text}");
         assert_eq!(value["models"]["model"], "fake-model");
-    }
-
-    #[test]
-    fn skills_tab_creates_a_new_user_skill() {
-        let (_home, mut app) = initialized_app();
-        app.tab = Tab::Skills;
-        app.skills.reload();
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        {
-            let input = app.skills.new_name.as_mut().expect("name input");
-            input.value = "Research Notes".to_owned();
-            input.cursor = input.value.chars().count();
-        }
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(app.editor.is_some());
-        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-        assert!(
-            app.skills
-                .skills
-                .iter()
-                .any(|skill| skill.name == "research-notes")
-        );
     }
 
     #[test]
