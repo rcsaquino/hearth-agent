@@ -1047,8 +1047,14 @@ mod tests {
             },
             "usage": json!(null)
         })];
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let text = buffer_text(&app, 100, 100);
-        for label in ["system · identity", "system · guidance", "you", "hearth"] {
+        for label in [
+            "▌ SYSTEM · SOUL.md",
+            "▌ SYSTEM · guidance",
+            "▌ YOU",
+            "▌ HEARTH",
+        ] {
             assert!(text.contains(label), "missing role {label}: {text}");
         }
         assert!(text.contains("SOUL TEXT"), "{text}");
@@ -1111,10 +1117,11 @@ mod tests {
             },
             "usage": json!(null)
         })];
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let text = buffer_text(&app, 100, 120);
         assert!(
             text.contains("identity line 11"),
-            "the whole identity must be visible, not a collapsed preview: {text}"
+            "the whole identity is opened by expand all: {text}"
         );
         assert!(
             text.contains("The path to read."),
@@ -1124,8 +1131,8 @@ mod tests {
         assert!(text.contains("please inspect the whole session"), "{text}");
         assert!(text.contains("the whole answer"), "{text}");
         assert!(
-            !text.contains("more · enter"),
-            "the system layers are shown in full: {text}"
+            !text.contains("hidden"),
+            "expand all leaves nothing folded: {text}"
         );
     }
 
@@ -1156,7 +1163,7 @@ mod tests {
             .lines()
             .find(|line| line.contains("follow") && line.contains("quit"))
             .unwrap_or_else(|| panic!("the footer must name the tab keys: {text}"));
-        for key in ["scroll", "block", "toggle", "follow", "system"] {
+        for key in ["scroll", "block", "fold", "all", "follow"] {
             assert!(
                 footer.contains(key),
                 "the footer is missing {key}: {footer}"
@@ -1233,6 +1240,7 @@ mod tests {
             "response": json!(null),
             "usage": json!(null)
         })];
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let _ = buffer_text(&app, 100, 24);
         for _ in 0..3 {
             app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -1411,6 +1419,7 @@ mod tests {
                 })
             })
             .collect();
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         let _ = buffer_text(&app, 100, 24);
         app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
         assert_eq!(

@@ -1209,6 +1209,8 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::style::Color;
     use serde_json::{Value, json};
     use tempfile::TempDir;
 
@@ -1226,8 +1228,8 @@ mod tests {
         (home, app)
     }
 
-    /// Render the Prompt tab alone at a fixed width, one string per screen row.
-    fn rendered(app: &App, width: u16, height: u16) -> String {
+    /// Draw the Prompt tab alone and keep the cells, so a test can read styles.
+    fn draw(app: &App, width: u16, height: u16) -> Buffer {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal
@@ -1236,10 +1238,14 @@ mod tests {
                 render(app, frame, area);
             })
             .expect("draw");
-        let buffer = terminal.backend().buffer();
+        terminal.backend().buffer().clone()
+    }
+
+    /// The card border is not part of what the reader sees inside it.
+    fn rendered(app: &App, width: u16, height: u16) -> String {
+        let buffer = draw(app, width, height);
         let mut text = String::new();
         for row in 0..height {
-            // The card border is not part of what the reader sees inside it.
             for column in 1..width.saturating_sub(1) {
                 text.push_str(buffer[(column, row)].symbol());
             }
@@ -1248,7 +1254,6 @@ mod tests {
         text
     }
 
-    /// Rows whose visible text starts with `label`.
     fn starting(text: &str, label: &str) -> Vec<usize> {
         text.lines()
             .enumerate()
@@ -1261,6 +1266,23 @@ mod tests {
         text.lines()
             .position(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("missing {needle} in\n{text}"))
+    }
+
+    /// The first row whose visible text opens with `label`.
+    fn row_of(buffer: &Buffer, width: u16, label: &str) -> u16 {
+        (0..buffer.area.height)
+            .find(|row| {
+                let text: String = (1..width.saturating_sub(1))
+                    .map(|column| buffer[(column, *row)].symbol())
+                    .collect();
+                text.starts_with(label)
+            })
+            .unwrap_or_else(|| panic!("missing row {label}"))
+    }
+
+    fn header_bg(buffer: &Buffer, width: u16, label: &str) -> Option<Color> {
+        let row = row_of(buffer, width, label);
+        buffer[(1, row)].style().bg
     }
 
     fn request(transcript: Value, total: u64) -> Value {
@@ -1305,6 +1327,14 @@ mod tests {
         })
     }
 
+    fn long_result() -> String {
+        let mut lines = vec!["package hearth-cli".to_owned()];
+        for index in 0..30 {
+            lines.push(format!("result line {index}"));
+        }
+        lines.join("\n")
+    }
+
     /// Two saved requests of one conversation, newest first.
     fn conversation() -> Vec<Value> {
         let user = json!({
@@ -1322,7 +1352,7 @@ mod tests {
         let result = json!({
             "role": "tool",
             "runtime_note": "CLOCK NOTE eight seconds past",
-            "blocks": [{"type": "tool_result", "call_id": "c1", "content": "package hearth-cli"}]
+            "blocks": [{"type": "tool_result", "call_id": "c1", "content": long_result()}]
         });
         let newest = json!({
             "request": request(json!([user.clone(), answered, result]), 620),
@@ -1351,196 +1381,17 @@ mod tests {
         vec![newest, oldest]
     }
 
-    /// A body of `lines` distinct lines, named so tests can find one.
-    fn block_body(name: &str, lines: usize) -> String {
-        (0..lines)
-            .map(|index| format!("{name} line {index}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    #[test]
-    fn a_long_block_collapses_to_a_stub_and_opens_with_enter() {
-        let body = block_body("BODY", 40);
-        let identity = block_body("IDENTITY", 40);
-        let mut exchanges = vec![json!({
-            "request": request(
-                json!([{"role": "user", "blocks": [{"type": "text", "text": body}]}]),
-                500
-            ),
-            "prompt_hash": "hash-collapse",
-            "requested_at": 1,
+    /// One saved request with no prefix layers, so the chat holds one block.
+    fn single_user(message: &str) -> Vec<Value> {
+        vec![json!({
+            "request": {
+                "transcript": [{"role": "user", "blocks": [{"type": "text", "text": message}]}]
+            },
+            "prompt_hash": "only-hash",
+            "requested_at": 1_700_000_000_000_000_i64,
             "response": Value::Null,
             "usage": Value::Null
-        })];
-        exchanges[0]["request"]["identity"] = json!(identity);
-        let (_home, mut app) = prompt_app(exchanges);
-        let _ = rendered(&app, 100, 40);
-        let lines = cache_lines(&app);
-        assert!(
-            lines.iter().any(|line| line.contains("BODY line 0")),
-            "a collapsed block keeps its first line as a preview: {lines:?}"
-        );
-        assert!(
-            !lines.iter().any(|line| line.contains("BODY line 39")),
-            "the long body is collapsed: {lines:?}"
-        );
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("hidden") && line.contains("enter")),
-            "the stub names the hidden lines and the key: {lines:?}"
-        );
-        assert!(
-            lines.iter().any(|line| line.contains("IDENTITY line 39")),
-            "a system layer is not a message block: {lines:?}"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let _ = rendered(&app, 100, 80);
-        let lines = cache_lines(&app);
-        assert!(
-            lines.iter().any(|line| line.contains("BODY line 39")),
-            "enter opens the selected block: {lines:?}"
-        );
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let _ = rendered(&app, 100, 40);
-        let lines = cache_lines(&app);
-        assert!(
-            !lines.iter().any(|line| line.contains("BODY line 39")),
-            "enter closes it again: {lines:?}"
-        );
-    }
-
-    #[test]
-    fn the_block_cursor_starts_in_the_visible_tail() {
-        let transcript: Vec<Value> = (0..20)
-            .map(|index| {
-                let body = block_body(&format!("BLOCK {index}"), 30);
-                json!({"role": "user", "blocks": [{"type": "text", "text": body}]})
-            })
-            .collect();
-        let exchanges = vec![json!({
-            "request": request(Value::Array(transcript), 500),
-            "prompt_hash": "hash-tail",
-            "requested_at": 1,
-            "response": Value::Null,
-            "usage": Value::Null
-        })];
-        let (_home, mut app) = prompt_app(exchanges);
-        let _ = rendered(&app, 100, 24);
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        let text = rendered(&app, 100, 24);
-        assert!(
-            !text.contains("BLOCK 0 line 0"),
-            "n starts at the block in the visible tail, not the document top: {text}"
-        );
-    }
-
-    #[test]
-    fn the_block_cursor_is_highlighted() {
-        let alpha = block_body("ALPHA", 30);
-        let beta = block_body("BETA", 30);
-        let exchanges = vec![json!({
-            "request": request(
-                json!([
-                    {"role": "user", "blocks": [{"type": "text", "text": alpha}]},
-                    {"role": "user", "blocks": [{"type": "text", "text": beta}]}
-                ]),
-                500
-            ),
-            "prompt_hash": "hash-highlight",
-            "requested_at": 1,
-            "response": Value::Null,
-            "usage": Value::Null
-        })];
-        let (_home, mut app) = prompt_app(exchanges);
-        let _ = rendered(&app, 100, 40);
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        let backend = TestBackend::new(100, 80);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        terminal
-            .draw(|frame| {
-                let area = frame.area();
-                render(&app, frame, area);
-            })
-            .expect("draw");
-        let buffer = terminal.backend().buffer();
-        let labels: Vec<u16> = (0..80)
-            .filter(|row| {
-                let text: String = (1..99)
-                    .map(|column| buffer[(column, *row)].symbol())
-                    .collect();
-                text.starts_with("▌ you")
-            })
-            .collect();
-        assert_eq!(labels.len(), 2, "both long blocks keep their label");
-        assert_eq!(
-            buffer[(3, labels[0])].style().bg,
-            Some(theme::SELECT_BG),
-            "the first long block is highlighted after n"
-        );
-        assert_ne!(
-            buffer[(3, labels[1])].style().bg,
-            Some(theme::SELECT_BG),
-            "only the selected block is highlighted"
-        );
-    }
-
-    #[test]
-    fn n_and_p_move_the_block_cursor() {
-        let alpha = block_body("ALPHA", 30);
-        let beta = block_body("BETA", 30);
-        let exchanges = vec![json!({
-            "request": request(
-                json!([
-                    {"role": "user", "blocks": [{"type": "text", "text": alpha}]},
-                    {"role": "user", "blocks": [{"type": "text", "text": beta}]}
-                ]),
-                500
-            ),
-            "prompt_hash": "hash-cursor",
-            "requested_at": 1,
-            "response": Value::Null,
-            "usage": Value::Null
-        })];
-        let (_home, mut app) = prompt_app(exchanges);
-        let _ = rendered(&app, 100, 40);
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let _ = rendered(&app, 100, 40);
-        let lines = cache_lines(&app);
-        assert!(
-            lines.iter().any(|line| line.contains("ALPHA line 29")),
-            "the first long block opens: {lines:?}"
-        );
-        assert!(
-            !lines.iter().any(|line| line.contains("BETA line 29")),
-            "the second block stays closed: {lines:?}"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let _ = rendered(&app, 100, 40);
-        let lines = cache_lines(&app);
-        assert!(
-            lines.iter().any(|line| line.contains("BETA line 29")),
-            "n reaches the next long block: {lines:?}"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let _ = rendered(&app, 100, 40);
-        let lines = cache_lines(&app);
-        assert!(
-            !lines.iter().any(|line| line.contains("ALPHA line 29")),
-            "p returns to the first block and enter closes it: {lines:?}"
-        );
-        assert!(
-            lines.iter().any(|line| line.contains("BETA line 29")),
-            "the second block stays open: {lines:?}"
-        );
+        })]
     }
 
     fn cache_lines(app: &App) -> Vec<String> {
@@ -1559,129 +1410,193 @@ mod tests {
     }
 
     #[test]
-    fn a_user_message_reads_differently_from_a_system_layer() {
+    fn a_saved_conversation_is_a_chat_of_labelled_blocks() {
         let (_home, app) = prompt_app(conversation());
-        let text = rendered(&app, 100, 60);
-        let system = starting(&text, "system · identity");
+        let text = rendered(&app, 100, 80);
+        let system = starting(&text, "▌ SYSTEM · SOUL.md");
+        assert_eq!(system.len(), 1, "the identity is one context block: {text}");
+        assert_eq!(starting(&text, "▌ MEMORY").len(), 1, "{text}");
+        assert_eq!(starting(&text, "▌ YOU").len(), 1, "{text}");
         assert_eq!(
-            system.len(),
+            starting(&text, "▌ TOOL CALL · read_file").len(),
             1,
-            "the identity layer belongs to the conversation once: {text}"
+            "the tool call is its own block: {text}"
         );
-        let user = starting(&text, "▌ you");
-        assert_eq!(
-            user.len(),
-            1,
-            "the merged transcript shows the question once: {text}"
-        );
-        assert!(system[0] < user[0], "the system layers come first: {text}");
-        assert!(text.contains(SOUL), "the identity body is visible: {text}");
-        assert!(text.contains("PROJECT RULES"), "{text}");
-        assert!(text.contains("MEMORY HIT"), "{text}");
+        let result = starting(&text, "▌ TOOL RESULT · read_file");
+        assert_eq!(result.len(), 1, "the tool result is its own block: {text}");
+        let answer = starting(&text, "▌ HEARTH");
+        assert_eq!(answer.len(), 1, "the answer is its own block: {text}");
         assert!(
-            starting(&text, "▌ hearth").len() == 1,
-            "the answer is labelled as Hearth: {text}"
+            system[0] < line_of(&text, QUESTION) && line_of(&text, QUESTION) < result[0],
+            "blocks follow the order the model saw: {text}"
+        );
+        assert!(!text.contains(SOUL), "a context body starts folded: {text}");
+    }
+
+    #[test]
+    fn e_expands_every_block_and_c_collapses_every_block() {
+        let (_home, mut app) = prompt_app(conversation());
+        let folded = rendered(&app, 100, 80);
+        assert!(!folded.contains(SOUL), "context starts folded: {folded}");
+        assert!(
+            !folded.contains("result line 29"),
+            "the long tool result starts folded: {folded}"
+        );
+        assert!(
+            folded.contains("hidden") && folded.to_lowercase().contains("enter"),
+            "a folded block names what it hides and the key: {folded}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
+        let open = rendered(&app, 100, 120);
+        assert!(open.contains(SOUL), "e opens every block: {open}");
+        assert!(
+            open.contains("result line 29"),
+            "e opens the tool result: {open}"
+        );
+        assert!(open.contains(ANSWER), "the answer is still there: {open}");
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        let closed = rendered(&app, 100, 80);
+        assert!(
+            !closed.contains(QUESTION) && !closed.contains(ANSWER),
+            "c folds messages too: {closed}"
+        );
+        assert!(
+            !closed.contains("result line 0") && !closed.contains(SOUL),
+            "c folds tool and context bodies: {closed}"
+        );
+        for label in [
+            "▌ SYSTEM · SOUL.md",
+            "▌ YOU",
+            "▌ TOOL RESULT · read_file",
+            "▌ HEARTH",
+        ] {
+            assert!(
+                closed.contains(label),
+                "c keeps every header visible: missing {label} in {closed}"
+            );
+        }
+    }
+
+    #[test]
+    fn n_and_p_move_a_cursor_over_every_block() {
+        let (_home, mut app) = prompt_app(conversation());
+        let _ = rendered(&app, 100, 80);
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        let _ = rendered(&app, 100, 80);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        let buffer = draw(&app, 100, 80);
+        assert_eq!(
+            header_bg(&buffer, 100, "▌ SYSTEM · SOUL.md"),
+            Some(theme::SELECT_BG),
+            "n selects the first block in the document"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        let buffer = draw(&app, 100, 80);
+        assert_eq!(
+            header_bg(&buffer, 100, "▌ SYSTEM · guidance"),
+            Some(theme::SELECT_BG),
+            "n reaches the next block"
+        );
+        assert_ne!(
+            header_bg(&buffer, 100, "▌ SYSTEM · SOUL.md"),
+            Some(theme::SELECT_BG),
+            "only the current block is selected"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("PROJECT RULES"),
+            "enter opens the selected block: {text}"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains(SOUL),
+            "p returns to the first block and enter opens it: {text}"
         );
     }
 
     #[test]
-    fn a_message_is_enclosed_by_a_role_bar() {
-        let (_home, app) = prompt_app(vec![json!({
-            "request": request(
-                json!([
-                    {"role": "user", "blocks": [{"type": "text", "text": "FIRST QUESTION"}]},
-                    {"role": "assistant", "blocks": [{"type": "text", "text": "FIRST ANSWER"}]},
-                    {"role": "user", "blocks": [{"type": "text", "text": "SECOND QUESTION"}]}
-                ]),
-                500
-            ),
-            "prompt_hash": "hash-bar",
-            "requested_at": 1,
-            "response": {
-                "entry_id": "entry-bar",
-                "created_at": 2,
-                "blocks": [
-                    {"type": "thinking", "text": "A LONG THOUGHT"},
-                    {"type": "text", "text": "SECOND ANSWER"}
-                ],
-                "tokens_est": 3
-            },
-            "usage": Value::Null
-        })]);
-        let text = rendered(&app, 100, 60);
-        let row = |needle: &str| -> String {
-            text.lines()
-                .find(|line| line.contains(needle))
-                .unwrap_or_else(|| panic!("missing {needle}: {text}"))
-                .to_owned()
-        };
-        assert!(row("▌ you").starts_with("▌ you"), "{text}");
-        assert!(row("FIRST QUESTION").starts_with("▏ "), "{text}");
-        assert!(row("FIRST ANSWER").starts_with("▏ "), "{text}");
-        assert!(row("▌ thinking").starts_with("▌ thinking"), "{text}");
-        assert!(row("A LONG THOUGHT").starts_with("▏ "), "{text}");
-        assert!(row("▌ hearth").starts_with("▌ hearth"), "{text}");
-        assert!(row("SECOND ANSWER").starts_with("▏ "), "{text}");
-        let system = row(SOUL);
+    fn a_short_message_is_a_foldable_block() {
+        let (_home, mut app) = prompt_app(single_user("a short question"));
+        let text = rendered(&app, 100, 40);
+        assert!(text.contains("a short question"), "{text}");
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text = rendered(&app, 100, 40);
         assert!(
-            !system.starts_with('▌') && !system.starts_with('▏'),
-            "a system layer is not a message: {system:?}"
+            !text.contains("a short question"),
+            "enter folds a short message too: {text}"
         );
-
-        let thought = line_of(&text, "A LONG THOUGHT");
-        let answer = line_of(&text, "SECOND ANSWER");
+        assert!(text.contains("▌ YOU"), "the header stays visible: {text}");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
-            text.lines()
-                .skip(thought + 1)
-                .take(answer - thought - 1)
-                .any(|line| line.trim_end() == "▏"),
-            "the bar continues across two parts of one message: {text}"
+            rendered(&app, 100, 40).contains("a short question"),
+            "enter opens it again"
         );
+    }
 
-        let first_answer = line_of(&text, "FIRST ANSWER");
-        let second_label = text
+    #[test]
+    fn a_block_header_carries_its_turn_and_local_time() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 100, 80);
+        let user = text
             .lines()
-            .enumerate()
-            .skip(first_answer)
-            .find(|(_, line)| line.starts_with("▌ you"))
-            .map(|(index, _)| index)
-            .expect("the second question keeps its label");
+            .find(|line| line.starts_with("▌ YOU"))
+            .expect("the user header");
+        assert!(user.contains("turn 1"), "the header names its turn: {user}");
+        assert!(
+            user.contains("22:13:20"),
+            "the header names the request time in the configured zone: {user}"
+        );
+        let answer = text
+            .lines()
+            .find(|line| line.starts_with("▌ HEARTH"))
+            .expect("the answer header");
+        assert!(answer.contains("turn 2"), "{answer}");
+        assert!(
+            answer.contains("22:13:35"),
+            "the answer names the response time: {answer}"
+        );
+    }
+
+    #[test]
+    fn user_and_tool_blocks_are_panels_and_assistant_text_is_not() {
+        let (_home, app) = prompt_app(conversation());
+        let buffer = draw(&app, 100, 80);
+        let user = header_bg(&buffer, 100, "▌ YOU");
+        let tool = header_bg(&buffer, 100, "▌ TOOL RESULT");
+        let assistant = header_bg(&buffer, 100, "▌ HEARTH");
+        assert!(user.is_some(), "the user block is a banded panel");
+        assert!(tool.is_some(), "the tool block is a banded panel");
+        assert_ne!(user, tool, "user and tool panels read differently");
         assert_eq!(
-            text.lines()
-                .nth(second_label - 1)
-                .unwrap_or_default()
-                .trim(),
-            "",
-            "a blank line separates one message from the next: {text}"
+            assistant,
+            Some(Color::Reset),
+            "assistant text sits on the page, like a chat"
         );
     }
 
     #[test]
-    fn tool_calls_and_results_sit_between_the_question_and_the_answer() {
+    fn the_status_row_names_model_turns_messages_and_tokens() {
         let (_home, app) = prompt_app(conversation());
-        let text = rendered(&app, 100, 60);
-        let question = line_of(&text, QUESTION);
-        let call = line_of(&text, "tool call · read_file");
-        let result = line_of(&text, "tool result");
-        let answer = line_of(&text, ANSWER);
-        assert!(
-            question < call && call < result && result < answer,
-            "the turn must read question, call, result, answer: {text}"
-        );
-        assert!(
-            text.contains("Cargo.toml"),
-            "the arguments are shown: {text}"
-        );
-        assert!(
-            text.contains("package hearth-cli"),
-            "the result body is shown: {text}"
-        );
+        let text = rendered(&app, 100, 40);
+        for expected in ["test-model", "2 turns", "4 messages", "620 tok"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
     }
 
     #[test]
-    fn saved_requests_are_separated_without_snapshot_vocabulary() {
+    fn the_saved_transcript_is_merged_without_repeats() {
         let (_home, app) = prompt_app(conversation());
-        let text = rendered(&app, 100, 60);
+        let text = rendered(&app, 100, 120);
         assert_eq!(
             text.matches(QUESTION).count(),
             1,
@@ -1692,278 +1607,16 @@ mod tests {
             1,
             "the earlier tool result is not repeated: {text}"
         );
-        let question = line_of(&text, QUESTION);
-        let answer = line_of(&text, ANSWER);
-        let rule = text
-            .lines()
-            .enumerate()
-            .find(|(index, line)| {
-                *index > question
-                    && *index < answer
-                    && !line.trim().is_empty()
-                    && line.trim().chars().all(|character| character == '─')
-            })
-            .map(|(index, _)| index);
-        assert!(
-            rule.is_some(),
-            "a bare rule marks where the next request begins: {text}"
-        );
-        assert!(!text.contains("snapshot"), "no snapshot vocabulary: {text}");
-        assert!(
-            !text.contains("aaaaaa") && !text.contains("bbbbbb"),
-            "no request hashes: {text}"
-        );
-        assert!(
-            !text.contains("22:13:20") && !text.contains("22:13:30"),
-            "no marker stamps: {text}"
-        );
-    }
-
-    #[test]
-    fn the_runtime_note_renders_under_the_message_that_carried_it() {
-        let (_home, app) = prompt_app(conversation());
-        let text = rendered(&app, 100, 60);
-        assert!(
-            !text.contains("system · CLOCK") && !text.contains("runtime note"),
-            "the note is not a system message of its own: {text}"
-        );
-        let first = starting(&text, "▌ you")[0];
-        let note = line_of(&text, "CLOCK NOTE seven seconds past");
-        let call = line_of(&text, "tool call · read_file");
-        assert!(
-            first < note && note < call,
-            "the note sits under the question it rode with: {text}"
-        );
-        let result = starting(&text, "▌ tool result")[0];
-        let second = line_of(&text, "CLOCK NOTE eight seconds past");
-        let answer = line_of(&text, ANSWER);
-        assert!(
-            result < second && second < answer,
-            "the note sits under the tool result it rode with: {text}"
-        );
-    }
-
-    /// True when a line opens with one of the spinner frames and `label`.
-    fn spun(text: &str, label: &str) -> bool {
-        text.lines().any(|line| {
-            FRAMES
-                .iter()
-                .any(|frame| line.starts_with(&format!("{frame} {label}")))
-        })
-    }
-
-    #[test]
-    fn the_live_turn_is_drawn_after_the_saved_answer() {
-        let (_home, mut app) = prompt_app(conversation());
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "turn_started",
-            "data": {"turn": 1}
-        })));
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "text_delta",
-            "data": {"text": "STREAMING REPLY"}
-        })));
-        let text = rendered(&app, 100, 60);
-        let answer = line_of(&text, ANSWER);
-        let live = line_of(&text, "STREAMING REPLY");
-        assert!(
-            live > answer,
-            "the live reply sits after the saved answer: {text}"
-        );
-        assert!(
-            text.lines().skip(live).any(|line| line.starts_with("▏ ")),
-            "the live body keeps the message bar: {text}"
-        );
-        assert!(
-            spun(&text, "hearth"),
-            "the spinner sits on the live message label: {text}"
-        );
-        assert!(
-            !text.contains("working"),
-            "the detached working line is gone: {text}"
-        );
-    }
-
-    #[test]
-    fn the_live_turn_shows_its_thinking_before_its_text() {
-        let (_home, mut app) = prompt_app(conversation());
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "turn_started",
-            "data": {"turn": 1}
-        })));
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "thinking_delta",
-            "data": {"text": "WEIGHING IT"}
-        })));
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "text_delta",
-            "data": {"text": "STREAMING REPLY"}
-        })));
-        let text = rendered(&app, 100, 60);
-        assert!(
-            line_of(&text, "WEIGHING IT") < line_of(&text, "STREAMING REPLY"),
-            "thinking comes before the text it precedes: {text}"
-        );
-        assert!(
-            spun(&text, "thinking"),
-            "the spinner marks the first live part: {text}"
+        assert_eq!(
+            text.matches("▌ TOOL CALL · read_file").count(),
+            1,
+            "the call is stored once: {text}"
         );
         assert_eq!(
-            text.matches("▌ hearth").count(),
-            2,
-            "the saved answer and the live text both carry the role label: {text}"
+            text.matches(ANSWER).count(),
+            1,
+            "the answer is stored once: {text}"
         );
-    }
-
-    #[test]
-    fn a_new_turn_drops_the_previous_live_text() {
-        let (_home, mut app) = prompt_app(conversation());
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "text_delta",
-            "data": {"text": "OLD STREAM"}
-        })));
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "turn_started",
-            "data": {"turn": 2}
-        })));
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "text_delta",
-            "data": {"text": "NEW STREAM"}
-        })));
-        let text = rendered(&app, 100, 60);
-        assert!(
-            !text.contains("OLD STREAM"),
-            "a new turn does not inherit the last turn's text: {text}"
-        );
-        assert!(text.contains("NEW STREAM"), "{text}");
-    }
-
-    #[test]
-    fn a_settled_run_removes_the_live_text() {
-        let (_home, mut app) = prompt_app(conversation());
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "text_delta",
-            "data": {"text": "STREAMING REPLY"}
-        })));
-        assert!(
-            rendered(&app, 100, 60).contains("STREAMING REPLY"),
-            "the partial reply is visible while it streams"
-        );
-        app.apply_event(AppEvent::Live(json!({
-            "kind": "run_settled",
-            "data": {"status": "done"}
-        })));
-        assert!(
-            !rendered(&app, 100, 60).contains("STREAMING REPLY"),
-            "the saved document replaces the live turn"
-        );
-    }
-
-    #[test]
-    fn a_refresh_alone_does_not_animate_working() {
-        let (_home, mut app) = prompt_app(conversation());
-        app.prompt.loading = true;
-        let text = rendered(&app, 100, 24);
-        assert!(!text.contains("working"), "a reload is not a turn: {text}");
-        assert!(
-            !spun(&text, "hearth"),
-            "a reload draws no spinner on a message: {text}"
-        );
-        app.prompt.loading = false;
-        app.status = Some(json!({"tasks_running": 2}));
-        let text = rendered(&app, 100, 24);
-        assert!(
-            !text.contains("working"),
-            "a scheduled task is not this conversation's turn: {text}"
-        );
-        assert!(
-            text.contains(ANSWER),
-            "a status poll must not replace the conversation: {text}"
-        );
-    }
-
-    #[test]
-    fn the_s_key_collapses_the_system_layers_and_shows_them_again() {
-        let (_home, mut app) = prompt_app(conversation());
-        assert!(rendered(&app, 80, 60).contains(SOUL));
-        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-        let hidden = rendered(&app, 80, 60);
-        assert!(
-            !hidden.contains(SOUL),
-            "the system bodies are hidden: {hidden}"
-        );
-        assert!(
-            hidden.contains("identity, guidance, rules, skills index, tools"),
-            "the summary line names the stable layers: {hidden}"
-        );
-        assert!(
-            !hidden.contains("MEMORY HIT"),
-            "the recall body is hidden with the system layers: {hidden}"
-        );
-        assert!(
-            hidden.contains("system · memory") && hidden.contains("70 tok"),
-            "the recall keeps its one-line cost: {hidden}"
-        );
-        let summary = hidden
-            .lines()
-            .find(|line| line.contains("identity, guidance, rules, skills index, tools"))
-            .expect("the summary line");
-        assert!(
-            summary.contains("tok"),
-            "the summary names the cost: {hidden}"
-        );
-        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-        assert!(
-            rendered(&app, 80, 60).contains(SOUL),
-            "the second press shows the layers again"
-        );
-    }
-
-    #[test]
-    fn the_header_names_the_model_session_and_numbers() {
-        let (_home, app) = prompt_app(conversation());
-        let text = rendered(&app, 100, 30);
-        assert!(text.contains("test-model"), "{text}");
-        assert!(text.contains("session session-"), "{text}");
-        assert!(text.contains("620 tok"), "{text}");
-        assert!(text.contains("prefix prefix-o"), "{text}");
-        assert!(
-            !text.contains("snapshot"),
-            "the header keeps no snapshot count: {text}"
-        );
-    }
-
-    #[test]
-    fn the_header_carries_the_newest_request_when_it_arrives() {
-        let (_home, mut app) = prompt_app(conversation());
-        let text = rendered(&app, 100, 30);
-        assert!(text.contains("620 tok"), "{text}");
-        app.prompt.exchanges[0]["request"]["tokens"]["total"] = json!(999);
-        let text = rendered(&app, 100, 30);
-        assert!(
-            text.contains("999 tok"),
-            "the header follows the newest saved request: {text}"
-        );
-    }
-
-    #[test]
-    fn a_new_conversation_starts_a_fresh_transcript() {
-        let mut exchanges = conversation();
-        let mut newest = exchanges[0].clone();
-        newest["request"]["session_id"] = json!("session-two");
-        newest["request"]["transcript"] = json!([
-            {"role": "user", "blocks": [{"type": "text", "text": "a different conversation"}]}
-        ]);
-        exchanges.insert(0, newest);
-        let (_home, app) = prompt_app(exchanges);
-        let text = rendered(&app, 100, 60);
-        assert!(text.contains("conversation · session-"), "{text}");
-        assert!(text.contains("a different conversation"), "{text}");
-        assert!(
-            !text.contains("history rewritten"),
-            "a new conversation is not a rewritten one: {text}"
-        );
-        assert_eq!(text.matches(QUESTION).count(), 1, "{text}");
     }
 
     #[test]
@@ -1988,18 +1641,248 @@ mod tests {
             }),
         );
         let (_home, app) = prompt_app(exchanges);
-        let text = rendered(&app, 100, 60);
-        let rewritten = line_of(&text, "history rewritten");
+        let text = rendered(&app, 100, 80);
+        let lowered = text.to_lowercase();
+        let rewritten = line_of(&lowered, "rewritten");
         let fresh = line_of(&text, "a fresh start");
         assert!(
             rewritten < fresh,
             "the note comes before the rewritten conversation: {text}"
         );
-        assert!(text.contains("earlier messages dropped"), "{text}");
+        assert!(lowered.contains("earlier messages dropped"), "{text}");
     }
 
     #[test]
-    fn a_realistic_transcript_fits_eighty_and_one_hundred_and_twenty_columns() {
+    fn the_runtime_note_sits_under_the_message_that_carried_it() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 100, 120);
+        let question = line_of(&text, QUESTION);
+        let note = line_of(&text, "CLOCK NOTE seven seconds past");
+        let call = line_of(&text, "TOOL CALL · read_file");
+        assert!(
+            question < note && note < call,
+            "the note sits under the question it rode with: {text}"
+        );
+        let result = line_of(&text, "TOOL RESULT · read_file");
+        let second = line_of(&text, "CLOCK NOTE eight seconds past");
+        let answer = line_of(&text, ANSWER);
+        assert!(
+            result < second && second < answer,
+            "the note sits under the tool result it rode with: {text}"
+        );
+    }
+
+    /// True when a line opens with one of the spinner frames and `label`.
+    fn spun(text: &str, label: &str) -> bool {
+        text.lines().any(|line| {
+            FRAMES
+                .iter()
+                .any(|frame| line.starts_with(&format!("{frame} {label}")))
+        })
+    }
+
+    #[test]
+    fn the_live_turn_is_a_streaming_block_after_the_saved_chat() {
+        let (_home, mut app) = prompt_app(conversation());
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "turn_started",
+            "data": {"turn": 1}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "thinking_delta",
+            "data": {"text": "WEIGHING IT"}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "STREAMING REPLY"}
+        })));
+        let text = rendered(&app, 100, 80);
+        let answer = line_of(&text, ANSWER);
+        let live = line_of(&text, "STREAMING REPLY");
+        assert!(
+            live > answer,
+            "the live block sits after the saved answer: {text}"
+        );
+        assert!(
+            line_of(&text, "WEIGHING IT") < live,
+            "thinking comes before the text it precedes: {text}"
+        );
+        assert!(text.contains("streaming"), "{text}");
+        assert!(
+            spun(&text, "HEARTH"),
+            "the spinner sits on the live block header: {text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.contains("STREAMING REPLY"),
+            "collapse all never folds the turn being written: {text}"
+        );
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "run_settled",
+            "data": {"status": "done"}
+        })));
+        assert!(
+            !rendered(&app, 100, 80).contains("STREAMING REPLY"),
+            "the saved document replaces the live turn"
+        );
+    }
+
+    #[test]
+    fn a_new_turn_drops_the_previous_live_text() {
+        let (_home, mut app) = prompt_app(conversation());
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "OLD STREAM"}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "turn_started",
+            "data": {"turn": 2}
+        })));
+        app.apply_event(AppEvent::Live(json!({
+            "kind": "text_delta",
+            "data": {"text": "NEW STREAM"}
+        })));
+        let text = rendered(&app, 100, 80);
+        assert!(
+            !text.contains("OLD STREAM"),
+            "a new turn does not inherit the last turn's text: {text}"
+        );
+        assert!(text.contains("NEW STREAM"), "{text}");
+    }
+
+    #[test]
+    fn a_refresh_alone_does_not_animate() {
+        let (_home, mut app) = prompt_app(conversation());
+        app.prompt.loading = true;
+        let text = rendered(&app, 100, 24);
+        assert!(!spun(&text, "HEARTH"), "a reload is not a turn: {text}");
+        app.prompt.loading = false;
+        app.status = Some(json!({"tasks_running": 2}));
+        let text = rendered(&app, 100, 24);
+        assert!(
+            text.contains(ANSWER),
+            "a status poll must not replace the conversation: {text}"
+        );
+    }
+
+    #[test]
+    fn a_new_conversation_starts_a_fresh_transcript() {
+        let mut exchanges = conversation();
+        let mut newest = exchanges[0].clone();
+        newest["request"]["session_id"] = json!("session-two");
+        newest["request"]["transcript"] = json!([
+            {"role": "user", "blocks": [{"type": "text", "text": "a different conversation"}]}
+        ]);
+        exchanges.insert(0, newest);
+        let (_home, app) = prompt_app(exchanges);
+        let text = rendered(&app, 100, 80);
+        assert!(
+            text.to_lowercase().contains("conversation · session-"),
+            "{text}"
+        );
+        assert!(text.contains("a different conversation"), "{text}");
+        assert!(
+            !text.to_lowercase().contains("rewritten"),
+            "a new conversation is not a rewritten one: {text}"
+        );
+        assert_eq!(text.matches(QUESTION).count(), 1, "{text}");
+    }
+
+    #[test]
+    fn a_request_with_no_saved_reply_says_so() {
+        let mut exchanges = conversation();
+        exchanges[0]["response"] = Value::Null;
+        let (_home, app) = prompt_app(exchanges);
+        let text = rendered(&app, 100, 80);
+        assert!(text.contains("no reply saved"), "{text}");
+    }
+
+    #[test]
+    fn a_response_with_thinking_is_not_reprinted_by_the_next_request() {
+        let user = json!({
+            "role": "user",
+            "blocks": [{"type": "text", "text": QUESTION}]
+        });
+        let oldest = json!({
+            "request": request(json!([user.clone()]), 480),
+            "prompt_hash": "thinking-one",
+            "requested_at": 1_700_000_000_000_000_i64,
+            "response": {
+                "entry_id": "entry-thinking",
+                "created_at": 1_700_000_005_000_000_i64,
+                "blocks": [
+                    {"type": "thinking", "text": "A PRIVATE THOUGHT"},
+                    {"type": "text", "text": "FIRST ANSWER"}
+                ],
+                "tokens_est": 8
+            },
+            "usage": Value::Null
+        });
+        let newest = json!({
+            "request": request(
+                json!([
+                    user,
+                    {"role": "assistant", "blocks": [{"type": "text", "text": "FIRST ANSWER"}]},
+                    {"role": "user", "blocks": [{"type": "text", "text": "SECOND QUESTION"}]}
+                ]),
+                560
+            ),
+            "prompt_hash": "thinking-two",
+            "requested_at": 1_700_000_010_000_000_i64,
+            "response": Value::Null,
+            "usage": Value::Null
+        });
+        let (_home, app) = prompt_app(vec![newest, oldest]);
+        let text = rendered(&app, 100, 80);
+        let lowered = text.to_lowercase();
+        assert_eq!(
+            text.matches("FIRST ANSWER").count(),
+            1,
+            "the answered turn is not reprinted without its thinking: {text}"
+        );
+        assert!(
+            !lowered.contains("rewritten"),
+            "a thinking block is not a rewritten history: {text}"
+        );
+        assert!(text.contains("SECOND QUESTION"), "{text}");
+    }
+
+    #[test]
+    fn memory_is_shown_again_only_when_it_changes() {
+        let mut exchanges = conversation();
+        exchanges[0]["request"]["recall"] = json!("FRESH MEMORY");
+        let (_home, app) = prompt_app(exchanges);
+        let text = rendered(&app, 100, 120);
+        assert_eq!(
+            text.matches("MEMORY HIT").count(),
+            1,
+            "the unchanged recall is not repeated: {text}"
+        );
+        assert_eq!(
+            text.matches("FRESH MEMORY").count(),
+            1,
+            "the changed recall is shown at its request: {text}"
+        );
+        assert!(
+            line_of(&text, "MEMORY HIT") < line_of(&text, "FRESH MEMORY"),
+            "recall follows the request order: {text}"
+        );
+    }
+
+    #[test]
+    fn the_card_carries_no_key_legend() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 120, 40);
+        assert!(
+            !text.contains("e/c") && !text.contains("n/p"),
+            "the card must not repeat the key legend: {text}"
+        );
+    }
+
+    #[test]
+    fn a_realistic_chat_fits_eighty_and_one_hundred_and_twenty_columns() {
         for width in [80u16, 120] {
             let (_home, app) = prompt_app(conversation());
             let text = rendered(&app, width, 80);
@@ -2009,27 +1892,18 @@ mod tests {
                     "line {line:?} does not fit {width} columns"
                 );
             }
-            for expected in ["system · identity", "you", "tool call · read_file", ANSWER] {
+            for expected in [
+                "▌ SYSTEM · SOUL.md",
+                "▌ YOU",
+                "▌ TOOL RESULT · read_file",
+                ANSWER,
+            ] {
                 assert!(
                     text.contains(expected),
                     "width {width} is missing {expected}: {text}"
                 );
             }
         }
-    }
-
-    #[test]
-    fn the_tab_leaves_the_key_legend_to_the_footer() {
-        let (_home, app) = prompt_app(conversation());
-        let text = rendered(&app, 120, 80);
-        assert!(
-            !text.contains("snapshots ·"),
-            "the card must not repeat the key legend: {text}"
-        );
-        assert!(
-            !text.contains("f follow"),
-            "the footer owns the tab keys: {text}"
-        );
     }
 
     #[test]
