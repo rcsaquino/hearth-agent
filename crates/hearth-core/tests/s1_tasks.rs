@@ -1215,6 +1215,9 @@ fn a_second_interruption_is_reported_to_the_person() {
             2,
         )
         .expect("submit");
+    let hash = session
+        .save_prompt_blob(r#"{"model":"fake-model","session_id":"crash"}"#)
+        .expect("prompt blob");
     for attempt in 0..2 {
         session
             .begin_submission(&submitted.submission.id)
@@ -1234,6 +1237,13 @@ fn a_second_interruption_is_reported_to_the_person() {
             .claim_task_by_id(&task.id, &format!("daemon:{attempt}"), 60_000_000)
             .expect("claim")
             .expect("claimed");
+        session
+            .checkpoint_task(
+                &task.id,
+                &format!("daemon:{attempt}"),
+                json!({"turn": 0, "prompt_hash": hash}),
+            )
+            .expect("checkpoint");
         session.recover_interrupted().expect("recovery");
     }
 
@@ -1254,4 +1264,10 @@ fn a_second_interruption_is_reported_to_the_person() {
         "the notice must explain the stop: {}",
         notice.content
     );
+    assert_eq!(
+        notice.prompt_hash.as_deref(),
+        Some(hash.as_str()),
+        "the notice points at the request the crash cut off"
+    );
+    assert_eq!(notice.content["reason"], "interrupted");
 }
