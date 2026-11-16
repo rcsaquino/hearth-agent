@@ -2635,3 +2635,25 @@ just after.
   139 to 97. The id's fixed cost was most of the difference. A bullet was rejected
   because it adds characters to every row and marks no boundary the newline does
   not already mark.
+
+## 2026-11-17: A memory id is twelve Crockford characters
+
+- `store::new_id` returns `m_` plus ten characters of Crockford base32 (50 bits)
+  from a v4 UUID. The alphabet drops `I`, `L`, `O`, and `U`, so a copied or
+  retyped id is less likely to be wrong. Existing 34-character ids are not
+  rewritten, because `superseded_by`, `memory_vectors.memory_id`, and saved
+  transcripts still point at them.
+- `store::normalize_id` trims and lowercases before `get`, `forget`, and a
+  `supersedes` target. The lookup is exact; a prefix is not an id.
+- `store::reserve_id` checks the generated id inside the write transaction and
+  retries a taken id up to eight times. One writer thread owns every insert, so
+  the check is the same as catching the primary-key conflict and no row can share
+  an id.
+- The recall tool keeps one id per row at the end of the line, the digest carries
+  an id only on a clipped row, and the rules block carries none. A new id costs 12
+  characters instead of 34, so a 20-row `memory_recall` answer drops by about 121
+  estimated tokens.
+- The `memory_recall` schema names the 12-character shape and says case does not
+  matter.
+- This supersedes the "Stable `m_` id" row in SPEC 7.2 and the 34-character ids in
+  the 2026-11-14 "Memory rebuilt as one store and a four-stage cascade" entry.

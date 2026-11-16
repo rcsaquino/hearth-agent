@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.48, plain-language edition
+**Status:** Draft 0.49, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,12 @@
 ---
 
 ## A note on language
+
+Draft 0.49 gives a new memory a 12-character id: `m_` plus ten Crockford base32
+characters, which drop `I`, `L`, `O`, and `U`. `memory_recall` accepts an id in
+either case with surrounding whitespace, and a prefix is not an id. An existing
+34-character id keeps working, because `superseded_by`, `memory_vectors.memory_id`,
+and saved transcripts point at it.
 
 Draft 0.48 makes each memory row a delimited header. A line is
 `kind | subject | age: statement`, the kind is always present, an empty subject is
@@ -1187,7 +1193,7 @@ One row is one statement the user would recognise as one thing they said.
 
 | Field | Notes |
 |---|---|
-| `id` | Stable `m_` id |
+| `id` | Stable `m_` id: ten Crockford base32 characters, excluding `I`, `L`, `O`, and `U` |
 | `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, or `fact` |
 | `content` | One standalone statement; a write is capped at 200 characters |
 | `subject` | The normalised person, project, or thing it is about |
@@ -1311,7 +1317,9 @@ newline is the row boundary, and a statement cannot contain one.
 A whole row carries no id, because the statement is shown whole. A row clipped at
 200 characters appends its id after the ellipsis, because `memory_recall(id)` is
 the only way to read the rest. The recall tool always ends a row with its id,
-because that is where addressing belongs.
+because that is where addressing belongs. A new id is `m_` plus ten Crockford
+base32 characters; an older 34-character id keeps working. `memory_recall` accepts
+an id in either case with surrounding whitespace, and a prefix is not an id.
 
 The coverage line is the part that makes recall honest. For each subject the
 message named, the store counts what it holds and reports the difference. A digest
@@ -1368,7 +1376,8 @@ Four verbs, and each one does one thing.
 | `memory_forget` | Remove one statement permanently |
 | `memory_transcript` | Search the saved conversation record, or read one citation |
 
-There is no store selector, no id-prefix convention, and no tag array. The four
+There is no store selector, no id-prefix convention, and no tag array. An id is
+exact, never a prefix. The four
 schemas measure 776 tokens against 1,410 for the five they replace, and the
 saving is paid on every request.
 
