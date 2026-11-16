@@ -208,7 +208,7 @@ impl Tool for SaveTool {
                 "\nrelated: {} ({:.2} overlap) {}. Pass supersedes=\"{}\" if this replaces it.",
                 neighbour.id,
                 overlap,
-                digest::line(&neighbour, now),
+                digest::tool_line(&neighbour, now),
                 neighbour.id
             ));
         }
@@ -341,7 +341,7 @@ impl Tool for RecallTool {
         }
         let mut lines: Vec<String> = selected
             .iter()
-            .map(|memory| digest::line(memory, now))
+            .map(|memory| digest::tool_line(memory, now))
             .collect();
         let hidden = found.len().saturating_sub(selected.len());
         if hidden > 0 {

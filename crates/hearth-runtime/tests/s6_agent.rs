@@ -1296,7 +1296,7 @@ fn a_full_recall_is_not_shrunk_for_the_context_budget() {
     for index in 0..10 {
         seed_memory(
             &memory,
-            &format!("project fact {index} about Atlas"),
+            &format!("project fact {index} about Atlas {}", "x".repeat(120)),
             "atlas",
         );
     }

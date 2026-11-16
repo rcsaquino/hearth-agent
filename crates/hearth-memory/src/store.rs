@@ -33,12 +33,10 @@ pub const CONTENT_LIMIT: usize = 200;
 /// behind.
 const LIVE_RULES: &str = "pinned = 1 AND valid_to IS NULL";
 
-/// The shape of a generated id, for costing a row that does not exist yet.
-pub const ID_SAMPLE: &str = "m_00000000000000000000000000000000";
-
 fn new_id() -> String {
     format!("m_{}", uuid::Uuid::new_v4().simple())
 }
+
 /// The longest subject a write may store.
 pub const SUBJECT_LIMIT: usize = 120;
 /// How similar two statements about one subject must be to count as the same.

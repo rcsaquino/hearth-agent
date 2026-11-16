@@ -46,8 +46,13 @@ fn replacing_a_rule_changes_the_prefix() {
         .expect("first prompt");
 
     // Replacing the rule must invalidate the cached prefix.
-    let first = memory.rules().expect("rules");
-    let first_id = first.text.split(':').next().expect("id").to_owned();
+    let first = memory.recent(None, 10).expect("rules");
+    let first_id = first
+        .iter()
+        .find(|memory| memory.content == "Use metric units")
+        .expect("the rule row")
+        .id
+        .clone();
     memory
         .write(
             NewMemory::new("Use metric units and Celsius only")

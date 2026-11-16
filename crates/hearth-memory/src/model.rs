@@ -81,6 +81,19 @@ impl Kind {
             Self::Rule => 0.4,
         }
     }
+
+    /// The shortest unambiguous name for a kind in a recall row.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Rule => "rule",
+            Self::Preference => "pref",
+            Self::Person => "person",
+            Self::Decision => "decision",
+            Self::Commitment => "commit",
+            Self::Episode => "episode",
+            Self::Fact => "fact",
+        }
+    }
 }
 
 impl fmt::Display for Kind {

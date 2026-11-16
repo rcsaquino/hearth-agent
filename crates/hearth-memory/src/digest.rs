@@ -8,13 +8,13 @@
 //!
 //! **Recall** sits immediately before the newest user message, the one place in
 //! the prompt that is never cached. Every token there is paid in full on every
-//! turn, so a recall line is terse: identity, subject, age, statement. Coverage
-//! is stated explicitly, because a digest that silently shows six of fourteen
-//! facts teaches the model that six is all there is.
+//! turn, so a recall line is terse: kind, subject, age, statement. Coverage is
+//! stated explicitly, because a digest that silently shows six of fourteen facts
+//! teaches the model that six is all there is.
 
 use std::collections::BTreeMap;
 
-use crate::model::Memory;
+use crate::model::{Kind, Memory};
 
 /// Longest statement shown in one recall line.
 ///
@@ -45,13 +45,20 @@ impl Coverage {
     }
 }
 
-fn clip(text: &str, limit: usize) -> String {
+/// One statement cut to a display limit, and whether anything was cut.
+struct Clipped {
+    text: String,
+    truncated: bool,
+}
+
+fn clip(text: &str, limit: usize) -> Clipped {
     let flattened = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut clipped: String = flattened.chars().take(limit).collect();
-    if flattened.chars().count() > limit {
-        clipped.push('…');
+    let truncated = flattened.chars().count() > limit;
+    let mut text: String = flattened.chars().take(limit).collect();
+    if truncated {
+        text.push('…');
     }
-    clipped
+    Clipped { text, truncated }
 }
 
 fn age(updated_at: i64, now: i64) -> String {
@@ -64,47 +71,56 @@ fn age(updated_at: i64, now: i64) -> String {
     }
 }
 
-/// The shortest unambiguous name for a kind.
-fn kind_code(memory: &Memory) -> &'static str {
-    use crate::model::Kind;
-    match memory.kind {
-        Kind::Rule => "rule",
-        Kind::Preference => "pref",
-        Kind::Person => "person",
-        Kind::Decision => "decision",
-        Kind::Commitment => "commit",
-        Kind::Episode => "episode",
-        Kind::Fact => "fact",
-    }
+/// Where a row needs its id to be addressable.
+#[derive(Clone, Copy)]
+enum Addressing {
+    /// Only a clipped statement needs the id, because the tool is the only way
+    /// to read the rest.
+    OnClip,
+    /// The recall tool is where addressing belongs, so every row carries its id.
+    Always,
 }
 
 /// One line of the recall digest.
 pub fn line(memory: &Memory, now: i64) -> String {
-    let mut line = String::with_capacity(LINE_CHARS + 32);
-    line.push_str(&memory.id);
-    line.push(' ');
-    if memory.kind != crate::model::Kind::Fact {
-        line.push_str(kind_code(memory));
-        line.push(' ');
-    }
-    if !memory.subject.is_empty() {
-        line.push_str(&memory.subject);
-        line.push(' ');
-    }
-    line.push_str(&age(memory.updated_at, now));
-    line.push_str(": ");
-    line.push_str(&clip(&memory.content, LINE_CHARS));
-    line
+    render(memory, now, Addressing::OnClip)
 }
 
 /// One line of the recall tool output.
 pub fn tool_line(memory: &Memory, now: i64) -> String {
-    line(memory, now)
+    render(memory, now, Addressing::Always)
 }
 
 /// Whether a line is a memory row rather than a coverage or rules notice.
 pub fn is_memory_line(line: &str) -> bool {
-    line.starts_with("m_")
+    let code = line.split(" | ").next().unwrap_or_default();
+    Kind::ALL.iter().any(|kind| kind.code() == code)
+}
+
+fn render(memory: &Memory, now: i64, addressing: Addressing) -> String {
+    let statement = clip(&memory.content, LINE_CHARS);
+    let subject = if memory.subject.is_empty() {
+        "-"
+    } else {
+        memory.subject.as_str()
+    };
+    let mut line = format!(
+        "{} | {} | {}: {}",
+        memory.kind.code(),
+        subject,
+        age(memory.updated_at, now),
+        statement.text
+    );
+    let id = match addressing {
+        Addressing::Always => Some(memory.id.as_str()),
+        Addressing::OnClip if statement.truncated => Some(memory.id.as_str()),
+        Addressing::OnClip => None,
+    };
+    if let Some(id) = id {
+        line.push(' ');
+        line.push_str(id);
+    }
+    line
 }
 
 /// Render the recall digest.
@@ -169,10 +185,7 @@ fn coverage_lines(items: &[Memory], coverage: &Coverage) -> Vec<String> {
 /// not reorder the rest and the prefix hash only moves when the text moves. The
 /// tags belong to the prompt layer.
 pub fn rules_body(rules: &[Memory], max_tokens: u64) -> String {
-    let lines: Vec<String> = rules
-        .iter()
-        .map(|rule| rule_line(&rule.id, &rule.content))
-        .collect();
+    let lines: Vec<String> = rules.iter().map(|rule| rule_line(&rule.content)).collect();
     fill_rule_lines(&lines, max_tokens).1
 }
 
@@ -183,9 +196,9 @@ pub fn rules_body(rules: &[Memory], max_tokens: u64) -> String {
 pub fn rules_fit(existing: &[&Memory], content: &str, max_tokens: u64) -> bool {
     let mut lines: Vec<String> = existing
         .iter()
-        .map(|rule| rule_line(&rule.id, &rule.content))
+        .map(|rule| rule_line(&rule.content))
         .collect();
-    lines.push(rule_line(crate::store::ID_SAMPLE, content));
+    lines.push(rule_line(content));
     fill_rule_lines(&lines, max_tokens).0 == lines.len()
 }
 
@@ -193,7 +206,7 @@ pub fn rules_fit(existing: &[&Memory], content: &str, max_tokens: u64) -> bool {
 pub fn rules_cost(existing: &[&Memory]) -> u64 {
     let text = existing
         .iter()
-        .map(|rule| rule_line(&rule.id, &rule.content))
+        .map(|rule| rule_line(&rule.content))
         .collect::<Vec<_>>()
         .join("\n");
     cost_of_chars(text.chars().count() as u64)
@@ -249,23 +262,16 @@ fn cost_of_chars(chars: u64) -> u64 {
     hearth_model::estimate_tokens_chars(chars).max(0) as u64
 }
 
-/// The token cost of rendering a rule line.
-#[cfg(test)]
-pub fn rule_cost(memory: &Memory) -> u64 {
-    hearth_model::estimate_tokens(&rule_line(&memory.id, &memory.content)).max(1) as u64
-}
-
 /// The token cost of a rule line that does not exist yet.
 ///
-/// The write-time check and the render must measure the same line, so the
-/// placeholder id has the shape of a real one.
+/// The write-time check and the render must measure the same line.
 #[cfg(test)]
 pub fn rule_cost_text(content: &str) -> u64 {
-    hearth_model::estimate_tokens(&rule_line(crate::store::ID_SAMPLE, content)).max(1) as u64
+    hearth_model::estimate_tokens(&rule_line(content)).max(1) as u64
 }
 
-fn rule_line(id: &str, content: &str) -> String {
-    format!("{}: {}", id, clip(content, RULE_CHARS))
+fn rule_line(content: &str) -> String {
+    clip(content, RULE_CHARS).text
 }
 
 #[cfg(test)]

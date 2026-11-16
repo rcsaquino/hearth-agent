@@ -1011,7 +1011,7 @@ mod tests {
             )
             .expect("retire");
         let service = service.with_config(MemoryConfig {
-            rules_max_tokens: crate::digest::rule_cost(&rule),
+            rules_max_tokens: crate::digest::rules_cost(&[&rule]),
             ..MemoryConfig::default()
         });
         service
@@ -1019,9 +1019,11 @@ mod tests {
             .expect("the retired rule must not hold the budget");
         let error = service
             .write(
-                NewMemory::new("Keep release notes short.")
-                    .kind(Kind::Rule)
-                    .pinned(true),
+                NewMemory::new(
+                    "Keep every release note short enough to read in one sitting and cite each change.",
+                )
+                .kind(Kind::Rule)
+                .pinned(true),
             )
             .expect_err("the live rule holds the budget");
         assert_eq!(error.code, Code::RulesFull);
