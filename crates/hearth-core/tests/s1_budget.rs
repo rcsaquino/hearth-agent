@@ -89,3 +89,44 @@ fn an_image_carries_its_provider_cost() {
         entry.tokens_est
     );
 }
+
+#[test]
+fn every_segment_carries_the_budget_it_is_measured_against() {
+    let counts = TokenCounts::new(900, 1_300, 10, 400, 0, 50, 10, 200);
+    let segments: Vec<(String, u64, u64)> = counts
+        .segments()
+        .map(|segment| (segment.name.to_owned(), segment.tokens, segment.budget))
+        .collect();
+    assert_eq!(
+        segments,
+        vec![
+            ("identity".to_owned(), 900, 800),
+            ("tools".to_owned(), 1_300, 1_200),
+            ("rules".to_owned(), 10, 800),
+            ("skills".to_owned(), 400, 300),
+            ("recall".to_owned(), 10, 300),
+            ("runtime".to_owned(), 200, 150),
+        ],
+        "the report names every segment with its spec budget"
+    );
+    assert_eq!(
+        counts.over_budget(),
+        vec!["identity", "tools", "skills", "runtime"]
+    );
+}
+
+#[test]
+fn the_counts_are_read_back_from_a_saved_document() {
+    use serde_json::json;
+
+    let document = json!({"tokens": {
+        "identity": 12, "tools": 34, "rules": 56, "skills": 78, "guidance": 90,
+        "transcript": 111, "recall": 22, "runtime": 33, "total": 436, "fixed": 303
+    }});
+    let counts = TokenCounts::from_document(&document).expect("counts");
+    assert_eq!(counts.identity, 12);
+    assert_eq!(counts.guidance, 90);
+    assert_eq!(counts.total, 436);
+    assert_eq!(counts.fixed, 303);
+    assert!(TokenCounts::from_document(&json!({"model": "m"})).is_none());
+}

@@ -2047,6 +2047,34 @@ mod tests {
     }
 
     #[test]
+    fn a_prompt_segment_over_budget_is_named() {
+        let (_home, app) = prompt_app(conversation());
+        let text = rendered(&app, 100, 80);
+        assert!(
+            !text.contains("over budget"),
+            "a prompt within every budget says nothing: {text}"
+        );
+
+        let mut exchanges = conversation();
+        for exchange in &mut exchanges {
+            exchange["request"]["tokens"]["identity"] = json!(3_200);
+        }
+        let (_home, app) = prompt_app(exchanges);
+        let text = rendered(&app, 100, 80);
+        assert!(text.contains("identity over budget"), "{text}");
+        assert!(text.contains("3,200 tok of 800"), "{text}");
+        assert!(
+            line_of(&text, "identity over budget") < line_of(&text, "▌ SYSTEM · SOUL.md"),
+            "the notice sits with the layer it names: {text}"
+        );
+        assert_eq!(
+            text.matches("identity over budget").count(),
+            1,
+            "an unchanged layer is reported once: {text}"
+        );
+    }
+
+    #[test]
     fn a_request_with_no_saved_reply_says_so() {
         let mut exchanges = conversation();
         exchanges[0]["response"] = Value::Null;
