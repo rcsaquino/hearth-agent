@@ -2166,9 +2166,10 @@ force-pushing, which is the approval named above and not a step in this change.
   two columns the body indent already spent, so wrapping width is unchanged.
 - A message block whose wrapped body exceeds 12 lines starts folded to its first
   line plus a stub naming the hidden count. `n` and `p` move a block cursor over
-  the long blocks and Enter opens or closes the selected one. Tab is not used
-  because it already switches sections. System layers keep the `s` group fold
-  and are never selected one block at a time.
+  the long blocks and Enter opens or closes the selected one. The first `n`
+  while following starts at the first long block in the visible tail, not at the
+  document top. Tab is not used because it already switches sections. System
+  layers keep the `s` group fold and are never selected one block at a time.
 - Block keys are the request's prompt hash plus the message index and the block
   index, so an older block keeps its key when a refresh appends a newer request.
   The set of open keys is part of the render cache key; the selected key is not,

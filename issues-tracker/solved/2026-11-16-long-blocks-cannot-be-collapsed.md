@@ -61,9 +61,14 @@ intact. The open-key set is in `CacheKey`; the selected key is not, because the
 draw swaps in a prebuilt emphasized label row. Moving the cursor or toggling a
 fold therefore rebuilds only when a fold actually changes.
 
+The first `n` while following starts at the first long block in the visible tail,
+not at the document top, so pressing it does not throw the reader to the start of
+a long session.
+
 Commits: `2bc2396` (collapse tests), `c74e120` (highlight test), `4e1f92b`
-(feat). `2bc2396` failed on the old always-full body; `c74e120` failed because `n`
-selected nothing. Verified by `cargo test -p hearth-cli --lib` and
-`./scripts/ci.sh`. A tmux capture of the running TUI shows the folded tool result
-with the `30 lines hidden` stub, the highlighted `▌ tool result` label after `n`,
-and the full body after Enter.
+(feat), `ad84ba6` (visible-tail test), `d00170d` (fix). `2bc2396` failed on the
+old always-full body; `c74e120` failed because `n` selected nothing; `ad84ba6`
+failed because the first `n` jumped to the document top. Verified by
+`cargo test -p hearth-cli --lib` and `./scripts/ci.sh`. A tmux capture of the
+running TUI shows the folded tool result with the `30 lines hidden` stub, the
+highlighted `▌ tool result` label after `n`, and the full body after Enter.
