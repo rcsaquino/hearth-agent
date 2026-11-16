@@ -194,8 +194,10 @@ pub fn list_memories(home: &Path, limit: usize) -> Result<Vec<MemoryRecord>, Ins
     let mut statement = connection.prepare(
         "SELECT id, content, kind, subject, source_kind, created_at, updated_at, revision, \
          (pinned = 1 AND valid_to IS NULL), (valid_to IS NOT NULL) \
-         FROM memories ORDER BY (pinned = 1 AND valid_to IS NULL) DESC, updated_at DESC, \
-         rowid DESC LIMIT ?",
+         FROM memories ORDER BY \
+         CASE WHEN pinned = 1 AND valid_to IS NULL THEN 0 \
+              WHEN valid_to IS NULL THEN 1 ELSE 2 END, \
+         updated_at DESC, rowid DESC LIMIT ?",
     )?;
     let rows = statement.query_map((limit as i64,), |row| {
         Ok(MemoryRecord {
