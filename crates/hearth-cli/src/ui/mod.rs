@@ -703,8 +703,8 @@ mod tests {
         app.status = Some(json!({
             "model": "fake-model",
             "memory_items": 12,
-            "standing_bullets": 3,
-            "standing_characters": 812,
+            "rules_bullets": 3,
+            "rules_characters": 812,
             "rules_version": 347690056787881111_u64,
         }));
         let text = buffer_text(&app, 130, 34);
