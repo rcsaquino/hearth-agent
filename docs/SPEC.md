@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.44, plain-language edition
+**Status:** Draft 0.45, plain-language edition
 **Date:** 2026-11-16
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,12 @@
 ---
 
 ## A note on language
+
+Draft 0.45 names an uncounted skill instead of drawing a dash. The Skills tab
+writes `(unused)` in the rate column for a user skill and a never-run learned
+skill, widens the column to eight characters, and pads the label so a percentage
+and `(unused)` end at the same edge. A counted skill keeps its percentage, and
+`Skill::success_rate` and the sort and archive logic do not change.
 
 Draft 0.44 gives the Prompt tab one fold state, folded at the start. The first
 screen is a five-line preview of every foldable section, thinking included.
@@ -56,7 +62,8 @@ Draft 0.37 stops reporting a zero rate for a skill that never ran. A user skill
 can never be counted, and a learned skill is uncounted until its first run, so
 both now show an em dash in the Skills tab; a percentage appears only once a use
 has been counted. A zero read as a measured failure and could not be told apart
-from a skill that failed every time.
+from a skill that failed every time. (Draft 0.45 replaced the dash with
+`(unused)`.)
 
 Draft 0.36 gives every saved request an outcome. An assistant entry answers it, a
 notice entry settles it without an answer and records the reason (a provider
@@ -1633,8 +1640,10 @@ Rules:
 - The TUI Skills tab exposes the library read-only: bodies and counts, with no
   key that edits, creates, or walks versions. A skill is read where it lives, and
   the library changes by editing the files or through Hearth's own skill loop.
-  A skill with no counted use shows an em dash where its rate would be; a rate
-  appears only after a use has been counted. `[` and `]` cycle the list through
+  A skill with no counted use shows `(unused)` in the rate column; the column is
+  eight characters wide and the label is padded to the widest row, so a
+  percentage and `(unused)` end at the same edge. A rate appears only after a use
+  has been counted. `[` and `]` cycle the list through
   both scopes, user only, and learned only. The header names the mode, the empty
   state names the mode it is empty in, and the selection and body stay on a row
   that is still listed.

@@ -2410,14 +2410,19 @@ just after.
 
 ## 2026-11-16: An uncounted skill has no rate
 
-- The Skills tab prints an em dash when `Skill.uses` is zero and a percentage
-  otherwise. A user skill can never leave zero, because `record_use` and
-  `record_outcome` resolve through `find_learned`, and a learned skill starts at
-  zero. Printing `0%` stated a measurement that did not exist and could not be
-  told apart from a skill that failed every run.
+- The Skills tab prints `(unused)` when `Skill.uses` is zero and a percentage
+  otherwise. The rate field is eight characters wide and the name and scope are
+  padded to the widest row, so a percentage and `(unused)` end at the same edge.
+  A user skill can never leave zero, because `record_use` and `record_outcome`
+  resolve through `find_learned`, and a learned skill starts at zero. Printing
+  `0%` stated a measurement that did not exist and could not be told apart from
+  a skill that failed every run.
 - `Skill::success_rate` is unchanged: the index cap still sorts learned skills by
-  it, and a computed zero is the right value there. The dash is a display rule at
-  the render site, which already has `uses`.
+  it, and a computed zero is the right value there. The placeholder is a display
+  rule at the render site, which already has `uses`.
+- The em dash this replaced read as missing data, a divider, or a glyph that
+  failed to render, and the tab has no legend that explains it. `(unused)` states
+  the fact in place and keeps the distinction the dash was chosen for.
 
 ## 2026-11-16: The Skills tab only reads
 
