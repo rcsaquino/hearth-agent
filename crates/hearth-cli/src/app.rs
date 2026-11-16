@@ -1,7 +1,7 @@
 //! The Hearth TUI application.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -111,8 +111,14 @@ pub struct PromptView {
     pub exchanges: Vec<Value>,
     /// Show the system layers in the transcript.
     pub show_system: bool,
+    /// The long message blocks the reader has opened.
+    pub expanded: BTreeSet<String>,
+    /// The long block the reader is on, by its stable key.
+    pub selected_block: Option<String>,
     pub scroll: usize,
     pub max_scroll: Cell<usize>,
+    /// Body rows available in the last draw, for revealing a selected block.
+    pub viewport: Cell<usize>,
     pub loading: bool,
     /// Follow the newest exchange and keep the tail of the document visible.
     pub follow: bool,
@@ -126,8 +132,11 @@ impl Default for PromptView {
         Self {
             exchanges: Vec::new(),
             show_system: true,
+            expanded: BTreeSet::new(),
+            selected_block: None,
             scroll: 0,
             max_scroll: Cell::new(0),
+            viewport: Cell::new(0),
             loading: false,
             follow: true,
             pending: false,
@@ -934,6 +943,9 @@ impl App {
         match key.code {
             KeyCode::Char('f') => ui::prompt::toggle_follow(&mut self.prompt),
             KeyCode::Char('s') => self.prompt.show_system = !self.prompt.show_system,
+            KeyCode::Char('n') => ui::prompt::next_block(&mut self.prompt),
+            KeyCode::Char('p') => ui::prompt::previous_block(&mut self.prompt),
+            KeyCode::Enter => ui::prompt::toggle_block(&mut self.prompt),
             KeyCode::Up | KeyCode::Char('k') => ui::prompt::scroll_up(&mut self.prompt, 1),
             KeyCode::Down | KeyCode::Char('j') => ui::prompt::scroll_down(&mut self.prompt, 1),
             KeyCode::PageUp => ui::prompt::page_up(&mut self.prompt),

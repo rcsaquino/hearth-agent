@@ -176,7 +176,8 @@ fn footer(app: &App, frame: &mut Frame, area: Rect) {
         ]),
         Tab::Prompt => theme::hints(&[
             ("↑↓", "scroll"),
-            ("pgup/pgdn", "page"),
+            ("n/p", "block"),
+            ("↵", "toggle"),
             ("f", "follow"),
             ("s", "system"),
             ("q", "quit"),
@@ -1254,16 +1255,16 @@ mod tests {
     fn prompt_scroll_stops_at_the_end() {
         let (_home, mut app) = initialized_app();
         app.tab = Tab::Prompt;
-        let body = (0..60)
-            .map(|index| format!("line {index}"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let transcript: Vec<serde_json::Value> = (0..40)
+            .map(|index| {
+                json!({
+                    "role": "user",
+                    "blocks": [{"type": "text", "text": format!("line {index}")}]
+                })
+            })
+            .collect();
         app.prompt.exchanges = vec![json!({
-            "request": {
-                "transcript": [
-                    {"role": "user", "blocks": [{"type": "text", "text": body}]}
-                ]
-            },
+            "request": {"transcript": transcript},
             "prompt_hash": "abc123def456",
             "requested_at": 1_700_000_000_000_000_i64,
             "response": json!(null),

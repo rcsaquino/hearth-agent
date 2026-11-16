@@ -5,6 +5,7 @@
 //! transcript and prints each request's delta under a bare rule. `s` hides the
 //! system layers, and a spinner says when a turn is in flight.
 
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -23,6 +24,8 @@ use crate::ui::{count, short};
 
 /// Body lines moved by PageUp and PageDown.
 const PAGE_LINES: usize = 15;
+/// Message blocks longer than this start folded.
+const COLLAPSE_LINES: usize = 12;
 /// Message and layer bodies sit this far under their label.
 const BODY_INDENT: usize = 2;
 /// One frame per 100 ms, which is the event loop's budget.
@@ -80,17 +83,95 @@ pub(crate) fn toggle_follow(prompt: &mut PromptView) {
     }
 }
 
+/// Move the block cursor down one long message block.
+pub(crate) fn next_block(prompt: &mut PromptView) {
+    select_block(prompt, 1);
+}
+
+/// Move the block cursor up one long message block.
+pub(crate) fn previous_block(prompt: &mut PromptView) {
+    select_block(prompt, -1);
+}
+
+/// Fold or unfold the block under the cursor.
+pub(crate) fn toggle_block(prompt: &mut PromptView) {
+    let Some(key) = prompt.selected_block.clone() else {
+        return;
+    };
+    if !prompt.expanded.remove(&key) {
+        prompt.expanded.insert(key);
+    }
+}
+
+fn select_block(prompt: &mut PromptView, step: isize) {
+    let selection = {
+        let guard = prompt.cache.borrow();
+        let Some(cache) = guard.as_ref() else {
+            return;
+        };
+        if cache.blocks.is_empty() {
+            return;
+        }
+        let index = match prompt
+            .selected_block
+            .as_ref()
+            .and_then(|key| cache.blocks.iter().position(|block| &block.key == key))
+        {
+            Some(index) if step > 0 => (index + 1).min(cache.blocks.len() - 1),
+            Some(index) => index.saturating_sub(1),
+            None => first_visible(prompt, cache),
+        };
+        (cache.blocks[index].key.clone(), cache.blocks[index].line)
+    };
+    prompt.selected_block = Some(selection.0);
+    reveal(prompt, selection.1);
+}
+
+fn first_visible(prompt: &PromptView, cache: &PromptCache) -> usize {
+    cache
+        .blocks
+        .iter()
+        .position(|block| block.line >= prompt.scroll)
+        .unwrap_or(cache.blocks.len() - 1)
+}
+
+/// Keep the selected block on screen without moving a reader who already sees it.
+fn reveal(prompt: &mut PromptView, line: usize) {
+    let height = prompt.viewport.get().max(1);
+    let top = if prompt.follow {
+        prompt.max_scroll.get()
+    } else {
+        prompt.scroll
+    };
+    prompt.scroll = if line < top {
+        line
+    } else if line >= top.saturating_add(height) {
+        line.saturating_sub(height - 1)
+    } else {
+        top
+    };
+    prompt.follow = false;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     /// The loaded requests, named by hash and answering entry.
     signature: String,
     show_system: bool,
+    /// The long blocks the reader has opened, sorted by key.
+    expanded: Vec<String>,
     width: u16,
     zone: String,
 }
 
 impl CacheKey {
-    fn new(exchanges: &[Value], width: u16, show_system: bool, zone: &Zone) -> Self {
+    fn new(
+        exchanges: &[Value],
+        width: u16,
+        show_system: bool,
+        expanded: &BTreeSet<String>,
+        zone: &Zone,
+    ) -> Self {
         let mut signature = String::new();
         for exchange in exchanges {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
@@ -101,15 +182,26 @@ impl CacheKey {
         Self {
             signature,
             show_system,
+            expanded: expanded.iter().cloned().collect(),
             width,
             zone: zone.name().to_owned(),
         }
     }
 }
 
-/// One built document, kept until the loaded set or the view flags change.
+/// One long message block, at the line of its label.
+struct BlockSpan {
+    key: String,
+    line: usize,
+    /// The label row in the selection emphasis.
+    selected: Line<'static>,
+}
+
+/// One built document, kept until the loaded set, the open blocks, or the
+/// view flags change.
 pub(crate) struct PromptCache {
     key: CacheKey,
+    blocks: Vec<BlockSpan>,
     lines: Vec<Line<'static>>,
 }
 
@@ -209,15 +301,22 @@ fn running_tasks(app: &App) -> u64 {
 fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
     let width = usize::from(area.width);
     let height = usize::from(area.height);
+    app.prompt.viewport.set(height);
     let key = CacheKey::new(
         &app.prompt.exchanges,
         area.width,
         app.prompt.show_system,
+        &app.prompt.expanded,
         &app.zone,
     );
     let mut slot = app.prompt.cache.borrow_mut();
     if slot.as_ref().is_none_or(|cache| cache.key != key) {
-        *slot = Some(build_cache(&app.prompt.exchanges, &key, width));
+        *slot = Some(build_cache(
+            &app.prompt.exchanges,
+            &key,
+            &app.prompt.expanded,
+            width,
+        ));
     }
     let cache = slot.as_mut().expect("prompt cache");
 
@@ -230,7 +329,17 @@ fn draw_transcript(app: &App, frame: &mut Frame, area: Rect) {
         app.prompt.scroll.min(max_scroll)
     };
     let end = (scroll + height).min(total);
-    let lines: Vec<Line<'static>> = cache.lines[scroll..end].to_vec();
+    let selected = app
+        .prompt
+        .selected_block
+        .as_ref()
+        .and_then(|key| cache.blocks.iter().find(|block| &block.key == key));
+    let lines: Vec<Line<'static>> = (scroll..end)
+        .map(|index| match selected {
+            Some(block) if block.line == index => block.selected.clone(),
+            _ => cache.lines[index].clone(),
+        })
+        .collect();
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -261,13 +370,21 @@ enum Entry {
     /// A different conversation starts here.
     Conversation { id: String },
     /// A message that reached the model.
-    Message { role: Role, blocks: Vec<Value> },
+    Message {
+        /// Stable name for the blocks this message prints.
+        key: String,
+        role: Role,
+        blocks: Vec<Value>,
+    },
     /// The clock note that rode on the message before it.
     Runtime { note: String },
     /// Compaction dropped messages this view has already shown.
     Rewritten { dropped: usize },
     /// What the model answered.
-    Response { blocks: Option<Vec<Value>> },
+    Response {
+        key: String,
+        blocks: Option<Vec<Value>>,
+    },
 }
 
 struct SystemPart {
@@ -322,6 +439,7 @@ fn derive(exchanges: &[Value]) -> Vec<Entry> {
     let mut previous_session: Option<String> = None;
     for (position, exchange) in exchanges.iter().rev().enumerate() {
         let request = &exchange["request"];
+        let hash = exchange["prompt_hash"].as_str().unwrap_or("-");
         let session = request["session_id"].as_str().unwrap_or("-").to_owned();
         let new_session = previous_session
             .as_deref()
@@ -366,8 +484,9 @@ fn derive(exchanges: &[Value]) -> Vec<Entry> {
                 dropped: previous_sent.len() - kept,
             });
         }
-        for message in &messages[kept..] {
+        for (index, message) in messages.iter().enumerate().skip(kept) {
             entries.push(Entry::Message {
+                key: format!("{hash}:{index}"),
                 role: Role::parse(message["role"].as_str().unwrap_or_default()),
                 blocks: message["blocks"].as_array().cloned().unwrap_or_default(),
             });
@@ -380,6 +499,7 @@ fn derive(exchanges: &[Value]) -> Vec<Entry> {
             }
         }
         entries.push(Entry::Response {
+            key: format!("{hash}:reply"),
             blocks: response_blocks(&exchange["response"]),
         });
         previous_sent = sent_messages(&transcript, &exchange["response"]);
@@ -541,28 +661,41 @@ fn token(document: &Value, name: &str) -> Option<u64> {
     document["tokens"][name].as_u64()
 }
 
-fn build_cache(exchanges: &[Value], key: &CacheKey, width: usize) -> PromptCache {
+fn build_cache(
+    exchanges: &[Value],
+    key: &CacheKey,
+    expanded: &BTreeSet<String>,
+    width: usize,
+) -> PromptCache {
     let mut painter = Painter::new(width);
     for entry in derive(exchanges) {
-        push_entry(&mut painter, &entry, key.show_system);
+        push_entry(&mut painter, &entry, key.show_system, expanded);
     }
     PromptCache {
         key: key.clone(),
+        blocks: painter.blocks,
         lines: painter.lines,
     }
 }
 
-fn push_entry(painter: &mut Painter, entry: &Entry, show_system: bool) {
+fn push_entry(
+    painter: &mut Painter,
+    entry: &Entry,
+    show_system: bool,
+    expanded: &BTreeSet<String>,
+) {
     match entry {
         Entry::Divider => painter.divider(),
         Entry::System { parts, tokens } => push_system(painter, parts, *tokens, show_system),
         Entry::Recall { text, tokens } => push_recall(painter, text, *tokens, show_system),
         Entry::Conversation { id } => painter.conversation(id),
-        Entry::Message { role, blocks } => push_blocks(painter, *role, blocks),
+        Entry::Message { key, role, blocks } => {
+            push_blocks(painter, key, *role, blocks, expanded);
+        }
         Entry::Runtime { note } => painter.note(note),
         Entry::Rewritten { dropped } => painter.rewritten(*dropped),
-        Entry::Response { blocks } => match blocks {
-            Some(blocks) => push_blocks(painter, Role::Assistant, blocks),
+        Entry::Response { key, blocks } => match blocks {
+            Some(blocks) => push_blocks(painter, key, Role::Assistant, blocks, expanded),
             None => painter.faint("no reply saved"),
         },
     }
@@ -609,49 +742,80 @@ fn push_recall(painter: &mut Painter, text: &str, tokens: u64, show: bool) {
     }
 }
 
-fn push_blocks(painter: &mut Painter, role: Role, blocks: &[Value]) {
+fn push_blocks(
+    painter: &mut Painter,
+    key: &str,
+    role: Role,
+    blocks: &[Value],
+    expanded: &BTreeSet<String>,
+) {
     painter.message_start(role);
     if blocks.is_empty() {
         painter.label(role.label(), role.style(), "");
         painter.body("(empty)", theme::faint());
     }
-    for block in blocks {
+    for (index, block) in blocks.iter().enumerate() {
+        let key = format!("{key}/{index}");
         match block["type"].as_str().unwrap_or_default() {
-            "thinking" => {
-                painter.label("thinking", theme::think(), "");
-                painter.body(block["text"].as_str().unwrap_or_default(), theme::think());
-            }
-            "text" => {
-                painter.label(role.label(), role.style(), "");
-                painter.body(block["text"].as_str().unwrap_or_default(), role.style());
-            }
+            "thinking" => painter.part(
+                &key,
+                "thinking",
+                theme::think(),
+                block["text"].as_str().unwrap_or_default(),
+                theme::think(),
+                expanded,
+            ),
+            "text" => painter.part(
+                &key,
+                role.label(),
+                role.style(),
+                block["text"].as_str().unwrap_or_default(),
+                role.style(),
+                expanded,
+            ),
             "tool_call" => {
                 let name = block["name"].as_str().unwrap_or("tool");
-                painter.label(&format!("tool call · {name}"), theme::warn(), "");
                 let arguments = block
                     .get("arguments")
                     .map(|arguments| arguments.to_string())
                     .unwrap_or_default();
-                painter.body(&arguments, theme::muted());
+                painter.part(
+                    &key,
+                    &format!("tool call · {name}"),
+                    theme::warn(),
+                    &arguments,
+                    theme::muted(),
+                    expanded,
+                );
             }
             "tool_result" => {
                 let failed = block["is_error"].as_bool().unwrap_or(false);
                 let style = if failed { theme::bad() } else { theme::good() };
-                painter.label("tool result", style, "");
-                painter.body(block["content"].as_str().unwrap_or_default(), style);
-            }
-            "file" => {
-                painter.label(
-                    &format!("file · {}", block["name"].as_str().unwrap_or("file")),
-                    theme::faint(),
-                    "",
+                painter.part(
+                    &key,
+                    "tool result",
+                    style,
+                    block["content"].as_str().unwrap_or_default(),
+                    style,
+                    expanded,
                 );
-                painter.body(block["path"].as_str().unwrap_or("-"), theme::muted());
             }
-            "image" => {
-                painter.label("image", theme::faint(), "");
-                painter.body(block["path"].as_str().unwrap_or("-"), theme::muted());
-            }
+            "file" => painter.part(
+                &key,
+                &format!("file · {}", block["name"].as_str().unwrap_or("file")),
+                theme::faint(),
+                block["path"].as_str().unwrap_or("-"),
+                theme::muted(),
+                expanded,
+            ),
+            "image" => painter.part(
+                &key,
+                "image",
+                theme::faint(),
+                block["path"].as_str().unwrap_or("-"),
+                theme::muted(),
+                expanded,
+            ),
             _ => {}
         }
     }
@@ -667,6 +831,8 @@ const BODY_LEAD: &str = "▏";
 struct Painter {
     width: usize,
     lines: Vec<Line<'static>>,
+    /// The long message blocks, in document order.
+    blocks: Vec<BlockSpan>,
     /// The role bar while a message is open, and nothing outside one.
     gutter: Option<Style>,
     /// A blank separator is already in the document.
@@ -678,6 +844,7 @@ impl Painter {
         Self {
             width: width.max(1),
             lines: Vec::new(),
+            blocks: Vec::new(),
             gutter: None,
             gap_open: false,
         }
@@ -711,12 +878,8 @@ impl Painter {
     /// A role or layer label, with its cost against the right edge.
     fn label(&mut self, text: &str, style: Style, meta: &str) {
         self.gap();
-        if let Some(gutter) = self.gutter {
-            let body = clip(text, self.width.saturating_sub(LEAD.width()));
-            self.push(Line::from(vec![
-                Span::styled(LEAD.to_owned(), gutter),
-                Span::styled(body, style),
-            ]));
+        if self.gutter.is_some() {
+            self.role_label(text, style);
             return;
         }
         let mut row = Row::new();
@@ -727,6 +890,58 @@ impl Painter {
         }
         let line = row.fit(self.width);
         self.push(line);
+    }
+
+    /// A message block: its label, its body, and a stub when folded.
+    fn part(
+        &mut self,
+        key: &str,
+        label: &str,
+        label_style: Style,
+        text: &str,
+        body_style: Style,
+        expanded: &BTreeSet<String>,
+    ) {
+        self.gap();
+        let line = self.lines.len();
+        self.role_label(label, label_style);
+        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
+        let wrapped = wrap_text(text, inner);
+        let long = wrapped.len() > COLLAPSE_LINES;
+        if long && !expanded.contains(key) {
+            self.body_lines(&wrapped[..1], body_style);
+            let hidden = wrapped.len() - 1;
+            let stub = wrap_text(&format!("… {hidden} lines hidden · enter to open"), inner);
+            self.body_lines(&stub, theme::faint());
+        } else {
+            self.body_lines(&wrapped, body_style);
+        }
+        if long {
+            self.blocks.push(BlockSpan {
+                key: key.to_owned(),
+                line,
+                selected: self.selected_label(label),
+            });
+        }
+    }
+
+    /// The bar and label that open a message part.
+    fn role_label(&mut self, text: &str, style: Style) {
+        let lead = self.gutter.unwrap_or(style);
+        let body = clip(text, self.width.saturating_sub(BODY_INDENT));
+        self.push(Line::from(vec![
+            Span::styled(LEAD.to_owned(), lead),
+            Span::styled(body, style),
+        ]));
+    }
+
+    /// The same label row drawn in the selection emphasis.
+    fn selected_label(&self, text: &str) -> Line<'static> {
+        let body = clip(text, self.width.saturating_sub(BODY_INDENT));
+        Line::styled(
+            clip(&format!("{LEAD}{body}"), self.width),
+            theme::selected(),
+        )
     }
 
     /// One line that names what it leaves out, with its cost inline.
@@ -741,13 +956,18 @@ impl Painter {
 
     /// A wrapped body under its label, with a hanging indent.
     fn body(&mut self, text: &str, style: Style) {
+        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
+        let lines = wrap_text(text, inner);
+        self.body_lines(&lines, style);
+    }
+
+    fn body_lines(&mut self, lines: &[String], style: Style) {
         let gutter = self.gutter;
         let indent = " ".repeat(BODY_INDENT);
-        let inner = self.width.saturating_sub(BODY_INDENT).max(1);
-        for line in wrap_text(text, inner) {
+        for line in lines {
             match gutter {
                 Some(bar) => {
-                    let body = clip(&line, self.width.saturating_sub(BODY_INDENT));
+                    let body = clip(line, self.width.saturating_sub(BODY_INDENT));
                     self.push(Line::from(vec![
                         Span::styled(format!("{BODY_LEAD} "), bar),
                         Span::styled(body, style),
@@ -1139,7 +1359,7 @@ mod tests {
             "a system layer is not a message block: {lines:?}"
         );
 
-        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = rendered(&app, 100, 80);
         let lines = cache_lines(&app);
@@ -1207,7 +1427,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_moves_the_block_cursor_and_shift_tab_moves_it_back() {
+    fn n_and_p_move_the_block_cursor() {
         let alpha = block_body("ALPHA", 30);
         let beta = block_body("BETA", 30);
         let exchanges = vec![json!({
@@ -1225,7 +1445,7 @@ mod tests {
         })];
         let (_home, mut app) = prompt_app(exchanges);
         let _ = rendered(&app, 100, 40);
-        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = rendered(&app, 100, 40);
         let lines = cache_lines(&app);
@@ -1238,22 +1458,22 @@ mod tests {
             "the second block stays closed: {lines:?}"
         );
 
-        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = rendered(&app, 100, 40);
         let lines = cache_lines(&app);
         assert!(
             lines.iter().any(|line| line.contains("BETA line 29")),
-            "tab reaches the next long block: {lines:?}"
+            "n reaches the next long block: {lines:?}"
         );
 
-        app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = rendered(&app, 100, 40);
         let lines = cache_lines(&app);
         assert!(
             !lines.iter().any(|line| line.contains("ALPHA line 29")),
-            "shift-tab returns to the first block and enter closes it: {lines:?}"
+            "p returns to the first block and enter closes it: {lines:?}"
         );
         assert!(
             lines.iter().any(|line| line.contains("BETA line 29")),
