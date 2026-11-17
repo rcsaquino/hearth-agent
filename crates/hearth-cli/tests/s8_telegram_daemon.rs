@@ -387,6 +387,60 @@ fn the_daemon_answers_a_telegram_message() {
     assert!(session.latest_usage().expect("usage").is_some());
 }
 
+#[test]
+fn a_poisoned_submission_does_not_block_the_next_chat() {
+    use hearth_core::{Harness, SubmissionStatus};
+
+    let (provider_base, provider_thread) = fake_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let bad_id = {
+        let harness = Harness::open(home.path()).expect("harness");
+        let session = harness.session();
+        let bad = session
+            .create_conversation("Bad address", "telegram", "not-a-target")
+            .expect("bad conversation");
+        let bad_submission = session
+            .submit(&bad.id, "tg:bad:1", "input", json!({"text": "stuck"}))
+            .expect("bad submission");
+        thread::sleep(Duration::from_millis(2));
+        let good = session
+            .create_conversation("Good address", "telegram", "42:0")
+            .expect("good conversation");
+        session
+            .submit(&good.id, "tg:good:1", "input", json!({"text": "hello"}))
+            .expect("good submission");
+        bad_submission.submission.id
+    };
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let answer = wait_for_answer(&telegram_state);
+    assert!(answer.contains("Telegram answer"), "answer was {answer:?}");
+
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let session = harness.session();
+    let bad = session
+        .submission_by_id(&bad_id)
+        .expect("lookup")
+        .expect("bad submission");
+    assert_eq!(bad.status, SubmissionStatus::Unanswered);
+    let history = session
+        .history(&bad.conversation_id)
+        .expect("bad conversation history");
+    assert!(
+        history.iter().any(|entry| entry.kind == "notice"),
+        "the person must learn the message was not answered"
+    );
+}
+
 fn wait_for_rich_count(state: &TelegramState, count: usize) -> Vec<String> {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
