@@ -581,7 +581,7 @@ fn text_blocks(blocks: &[ContentBlock]) -> String {
             _ => None,
         })
         .collect::<Vec<_>>()
-        .join("")
+        .join("\n")
 }
 
 fn file_note(name: &str, path: &str) -> String {
