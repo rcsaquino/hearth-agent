@@ -441,6 +441,66 @@ fn a_poisoned_submission_does_not_block_the_next_chat() {
     );
 }
 
+#[test]
+fn the_daemon_delivers_an_answer_whose_effect_was_never_written() {
+    use hearth_core::{Harness, Save, SubmissionStatus};
+
+    let (provider_base, provider_thread) = fake_provider_answers(vec![]);
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let submission_id = {
+        let harness = Harness::open(home.path()).expect("harness");
+        let session = harness.session();
+        let conversation = session
+            .create_conversation("Stranded", "telegram", "42:0")
+            .expect("conversation");
+        let submitted = session
+            .submit(&conversation.id, "tg:42:stalled", "input", json!({"text": "hi"}))
+            .expect("submit");
+        session
+            .begin_submission(&submitted.submission.id)
+            .expect("begin");
+        let answer = session
+            .save(Save::new(&conversation.id).entry(
+                "assistant",
+                json!([{"type": "text", "text": "Lost answer"}]),
+            ))
+            .expect("answer entry");
+        let entry_id = answer.entry_ids[0].clone();
+        session
+            .settle(
+                &submitted.submission.id,
+                SubmissionStatus::Done,
+                Some(&entry_id),
+            )
+            .expect("settle");
+        submitted.submission.id
+    };
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let answer = wait_for_answer(&telegram_state);
+    assert!(
+        answer.contains("Lost answer"),
+        "the settled answer was not delivered: {answer:?}"
+    );
+
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let effect = harness
+        .session()
+        .effect_by_key("telegram.send", &format!("tg:{submission_id}"))
+        .expect("effect lookup")
+        .expect("the derived delivery effect exists");
+    assert_eq!(effect.status, hearth_core::EffectStatus::Done);
+}
+
 fn wait_for_rich_count(state: &TelegramState, count: usize) -> Vec<String> {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
