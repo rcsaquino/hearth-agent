@@ -17,7 +17,7 @@ abbreviation, a decimal, or a repeated punctuation mark is not a boundary. The
 extractor names `user` for a remembered first person, classifies a favourite as
 a preference before the possessive clause, and composes both relation orders the
 same way. The store compares synonyms, spelling variants, and negation only for
-duplicates; stored content and fingerprints do not change. An automatic extract
+duplicates. Stored content and fingerprints do not change. An automatic extract
 cannot replace a stronger subject, a non-fact, or a pinned row. The digest
 collapses canonical duplicates and says how many it hid.
 
@@ -1297,7 +1297,7 @@ Write rules:
 - A near duplicate about the same subject is refused the same way, which is what
   stops eight weeks of "ordered pad thai" from becoming eight rows. A duplicate
   is judged by token containment. The comparison folds common spelling variants
-  and the preference verbs `prefer`, `like`, and `love`; it runs only for the
+  and the preference verbs `prefer`, `like`, and `love`. It runs only for the
   duplicate decision, so stored content and the fingerprint keep the words the
   caller wrote. A negation is never a duplicate of its affirmative form. A
   statement that swaps its own non-empty subject is never a duplicate, but a
@@ -1306,7 +1306,7 @@ Write rules:
 - One surface fact has one identity. The extractor names `user` for a remembered
   first person, classifies `my favourite ...` as a preference, and writes both
   relation orders as `Alice is the user's sister`. An automatic extract cannot
-  replace a subjectful, non-`fact`, or pinned row with a weaker one; it returns
+  replace a subjectful, non-`fact`, or pinned row with a weaker one. It returns
   the earlier row instead.
 - A pinned rule must fit the rules budget; a write that would overflow it is
   refused with the current rules listed, so the model can replace one.

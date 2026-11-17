@@ -96,7 +96,7 @@ abbreviation.
 `store::validate` counts the statements and returns an `invalid_input` message
 that names the count and asks the caller to split the write. The 200-character
 limit, NUL check, subject limit, pin rules, and secret check are unchanged.
-Existing compound rows are not split or rewritten; the consolidation audit
+Existing compound rows are not split or rewritten. The consolidation audit
 reports them.
 
 `memory_save` no longer appends `Pass supersedes=...` to a related row. It says
