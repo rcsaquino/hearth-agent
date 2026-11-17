@@ -362,8 +362,8 @@ mod tests {
 /// The ceiling for the always-loaded tool schemas.
 ///
 /// One memory tool replaced four. The shared subject, kind, and limit fields and
-/// one envelope took the memory family from 811 to 485 tokens. The registry
-/// measures 1,287 tokens, and 1,453 with image, speech to text, and text to
+/// one envelope took the memory family from 811 to 491 tokens. The registry
+/// measures 1,294 tokens, and 1,459 with image, speech to text, and text to
 /// speech all configured, so the guard covers the widest run rather than the
 /// smallest. It sits just above the measured total so a single tool growing a
 /// sprawling schema is caught.
@@ -372,7 +372,7 @@ const CORE_SCHEMA_TOKEN_BUDGET: i64 = 1_470;
 
 /// The memory tool's share of the core schema budget.
 ///
-/// The tool measures 485 tokens. The guard sits just above the measured total so
+/// The tool measures 491 tokens. The guard sits just above the measured total so
 /// one action growing a sprawling schema is caught.
 #[cfg(test)]
 const MEMORY_SCHEMA_TOKEN_BUDGET: i64 = 500;

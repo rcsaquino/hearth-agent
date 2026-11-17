@@ -2873,8 +2873,8 @@ just after.
   `id` serves recall and forget. `query` serves recall and transcript. The
   content, kind, id, and subject descriptions are unchanged, and each action
   runs the same handler code as the tool it replaces.
-- The combined schema measures 485 tokens, down from 811 for the four. The core
-  set measures 1,287 tokens, and 1,453 with every media service configured, so
+- The combined schema measures 491 tokens, down from 811 for the four. The core
+  set measures 1,294 tokens, and 1,459 with every media service configured, so
   the core guard moves from 1,800 to 1,470 and the memory guard from 820 to 500.
 - `replay_safe` reads the action. A replayed `save` or `forget` is refused like
   `shell` and `message`, because it changes the store. A replayed `recall` or

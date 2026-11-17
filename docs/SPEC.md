@@ -12,8 +12,8 @@
 
 Draft 0.56 makes memory one tool with four actions, the same shape as `files`.
 The `memory` tool takes a required `action`: `save`, `recall`, `forget`, or
-`transcript`. The four separate tools are gone. The schema measures 485 tokens,
-down from 811, and the core set measures 1,287 tokens, or 1,453 with every media
+`transcript`. The four separate tools are gone. The schema measures 491 tokens,
+down from 811, and the core set measures 1,294 tokens, or 1,459 with every media
 service configured, against a 1,470 guard. The handlers, the store, and the
 status key `memory_recall` do not change.
 
@@ -1468,7 +1468,7 @@ One tool, four actions, and each action does one thing.
 related: `subject`, `kind`, and `limit` serve both `save` and `recall`, `id`
 serves `recall` and `forget`, and `query` serves `recall` and `transcript`. There
 is no store selector, no id-prefix convention, and no tag array. An id is exact,
-never a prefix. The one schema measures 485 tokens against 811 for the four it
+never a prefix. The one schema measures 491 tokens against 811 for the four it
 replaced, and the saving is paid on every request.
 
 A bare `as_of` date means that whole local day in `identity.timezone`, so its
@@ -2343,7 +2343,7 @@ install contains nothing personal.
 | Helper depth | 2 | 5.4 |
 | Helper retention | 30 days or newest 25 runs | 5.4 |
 | ETA reminder | 1 second after expectation | 5.4 |
-| Core tool schemas | 8 tools, 1,287 tokens, or 1,453 with media | 9.1 |
+| Core tool schemas | 8 tools, 1,294 tokens, or 1,459 with media | 9.1 |
 | Skills index | 50 active | 9.6 |
 | Skill review | 04:30 in `identity.timezone`, 0 to 3 new skills | 9.6 |
 | Learned skills | `skills/learned/` | 9.6 |
