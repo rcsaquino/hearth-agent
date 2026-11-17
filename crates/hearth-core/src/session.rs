@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
-    Commit, CommitRecord, Conversation, Document, Effect, EffectStatus, Entry, NewEntry,
+    Commit, CommitRecord, Conversation, Effect, EffectStatus, Entry, NewEntry,
     NewSubmission, NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult,
     TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
 };
@@ -178,22 +178,6 @@ impl Session {
                 return Err(CoreError::ConversationNotFound(conversation_id.clone()));
             }
 
-            for document in &save.documents {
-                let found: Option<i64> = writer.query_optional(
-                    "SELECT version FROM documents WHERE conversation_id = ? AND kind = ?",
-                    (conversation_id.as_str(), document.kind.as_str()),
-                    |row| row.get(0),
-                )?;
-                let expected = document.expected.map(|version| version as i64);
-                if found != expected {
-                    return Err(CoreError::DocumentVersion {
-                        kind: document.kind.clone(),
-                        expected: document.expected,
-                        found: found.map(|version| version as u64),
-                    });
-                }
-            }
-
             let seq = next_sequence(writer)?;
             for (entry, id) in save.entries.iter().zip(entry_ids.iter()) {
                 let content_value = crate::secrets::redact_value(&entry.content);
@@ -216,44 +200,6 @@ impl Session {
                         now,
                     ),
                 )?;
-            }
-
-            for document in &save.documents {
-                let json = redacted_json(&document.json)?;
-                match document.expected {
-                    None => {
-                        writer.execute(
-                            "INSERT INTO documents (conversation_id, kind, version, json, updated_at) \
-                             VALUES (?, ?, 1, ?, ?)",
-                            (
-                                conversation_id.as_str(),
-                                document.kind.as_str(),
-                                json.as_str(),
-                                now,
-                            ),
-                        )?;
-                    }
-                    Some(version) => {
-                        let changed = writer.execute(
-                            "UPDATE documents SET version = version + 1, json = ?, updated_at = ? \
-                             WHERE conversation_id = ? AND kind = ? AND version = ?",
-                            (
-                                json.as_str(),
-                                now,
-                                conversation_id.as_str(),
-                                document.kind.as_str(),
-                                version as i64,
-                            ),
-                        )?;
-                        if changed != 1 {
-                            return Err(CoreError::DocumentVersion {
-                                kind: document.kind.clone(),
-                                expected: Some(version),
-                                found: None,
-                            });
-                        }
-                    }
-                }
             }
 
             for submission in &save.submissions {
@@ -1580,33 +1526,6 @@ impl Session {
         crate::prompt::build_for(self, input)
     }
 
-    /// Read one document.
-    pub fn document(
-        &self,
-        conversation_id: &str,
-        kind: &str,
-    ) -> Result<Option<Document>, CoreError> {
-        let raw: Option<(i64, String, i64)> = self.storage.read(|reader| {
-            reader.query_optional(
-                "SELECT version, json, updated_at FROM documents \
-                 WHERE conversation_id = ? AND kind = ?",
-                (conversation_id, kind),
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-        })?;
-        match raw {
-            Some((version, json, updated_at)) => Ok(Some(Document {
-                conversation_id: conversation_id.to_owned(),
-                kind: kind.to_owned(),
-                version: version as u64,
-                json: serde_json::from_str(&json)
-                    .map_err(|error| CoreError::Corrupt(error.to_string()))?,
-                updated_at,
-            })),
-            None => Ok(None),
-        }
-    }
-
     /// Read one submission by its request id.
     pub fn submission_by_request_id(
         &self,
@@ -2731,126 +2650,6 @@ impl Session {
                     }
                 }
                 Ok(report)
-            })
-    }
-
-    /// Fork a conversation at a chosen entry.
-    pub fn fork(&self, conversation_id: &str, entry_id: &str) -> Result<Conversation, CoreError> {
-        let now = self.clock.now_micros();
-        let ids = Arc::clone(&self.ids);
-        let source_id = conversation_id.to_owned();
-        let chosen = entry_id.to_owned();
-
-        self.storage
-            .write(move |writer| -> Result<Conversation, CoreError> {
-                let conversation_sql = format!("{CONVERSATION_SELECT} WHERE id = ?");
-                let source: Option<RawConversation> =
-                    writer.query_optional(&conversation_sql, (source_id.as_str(),), |row| {
-                        Ok(RawConversation {
-                            id: row.get(0)?,
-                            parent_id: row.get(1)?,
-                            parent_entry_id: row.get(2)?,
-                            title: row.get(3)?,
-                            transport: row.get(4)?,
-                            transport_key: row.get(5)?,
-                            created_at: row.get(6)?,
-                            updated_at: row.get(7)?,
-                            archived: row.get(8)?,
-                        })
-                    })?;
-                let source =
-                    source.ok_or_else(|| CoreError::ConversationNotFound(source_id.clone()))?;
-
-                let entry_sql =
-                    format!("{ENTRY_SELECT} WHERE conversation_id = ? ORDER BY seq, rowid");
-                let rows: Vec<RawEntry> =
-                    writer.query(&entry_sql, (source_id.as_str(),), |row| {
-                        Ok(RawEntry {
-                            id: row.get(0)?,
-                            conversation_id: row.get(1)?,
-                            seq: row.get(2)?,
-                            kind: row.get(3)?,
-                            content_json: row.get(4)?,
-                            tokens_est: row.get(5)?,
-                            source: row.get(6)?,
-                            prompt_hash: row.get(7)?,
-                            created_at: row.get(8)?,
-                        })
-                    })?;
-                let mut entries = Vec::with_capacity(rows.len());
-                for row in rows {
-                    entries.push(row.into_entry()?);
-                }
-                let cut = entries
-                    .iter()
-                    .position(|entry| entry.id == chosen)
-                    .ok_or_else(|| CoreError::EntryNotFound(chosen.clone(), source_id.clone()))?;
-                let copied: Vec<Entry> = entries.into_iter().take(cut + 1).collect();
-
-                let fork = Conversation {
-                    id: ids.new_id(),
-                    parent_id: Some(source.id.clone()),
-                    parent_entry_id: Some(chosen.clone()),
-                    title: crate::secrets::redact_secrets(&source.title),
-                    transport: source.transport.clone(),
-                    transport_key: source.transport_key.clone(),
-                    created_at: now,
-                    updated_at: now,
-                    archived: false,
-                };
-
-                writer.execute(
-                    "INSERT INTO conversations (id, parent_id, parent_entry_id, title, transport, \
-                 transport_key, created_at, updated_at, archived) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
-                    (
-                        fork.id.as_str(),
-                        fork.parent_id.as_deref(),
-                        fork.parent_entry_id.as_deref(),
-                        fork.title.as_str(),
-                        fork.transport.as_str(),
-                        fork.transport_key.as_str(),
-                        fork.created_at,
-                        fork.updated_at,
-                    ),
-                )?;
-
-                let seq = record_commit(writer, now, Some(fork.id.as_str()), None, "fork")?;
-                for entry in &copied {
-                    let id = ids.new_id();
-                    let content = redacted_json(&entry.content)?;
-                    writer.execute(
-                        "INSERT INTO entries (id, conversation_id, seq, kind, content_json, \
-                     tokens_est, source, prompt_hash, created_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            id.as_str(),
-                            fork.id.as_str(),
-                            seq,
-                            entry.kind.as_str(),
-                            content.as_str(),
-                            entry.tokens_est,
-                            entry.source.as_deref(),
-                            entry.prompt_hash.as_deref(),
-                            entry.created_at,
-                        ),
-                    )?;
-                }
-
-                let documents: Vec<(String, i64, String)> = writer.query(
-                    "SELECT kind, version, json FROM documents WHERE conversation_id = ?",
-                    (source_id.as_str(),),
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )?;
-                for (kind, version, json) in documents {
-                    writer.execute(
-                        "INSERT INTO documents (conversation_id, kind, version, json, updated_at) \
-                         VALUES (?, ?, ?, ?, ?)",
-                        (fork.id.as_str(), kind.as_str(), version, json.as_str(), now),
-                    )?;
-                }
-
-                Ok(fork)
             })
     }
 

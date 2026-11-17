@@ -20,6 +20,22 @@ fn a_fresh_database_reaches_the_current_schema_version() {
 }
 
 #[test]
+fn the_retired_documents_table_is_gone() {
+    let (_directory, path) = database();
+    let storage = Storage::open(&path).expect("open storage");
+    let tables: i64 = storage
+        .read(|reader| {
+            reader.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'documents'",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .expect("table lookup");
+    assert_eq!(tables, 0);
+}
+
+#[test]
 fn reopening_the_database_is_idempotent() {
     let (_directory, path) = database();
     {

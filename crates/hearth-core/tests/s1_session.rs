@@ -29,77 +29,6 @@ fn a_save_appends_entries_in_order() {
 }
 
 #[test]
-fn a_document_create_and_update_increments_the_version() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("create conversation");
-
-    session
-        .save(Save::new(&conversation.id).document("agent", None, json!({"model": "one"})))
-        .expect("create document");
-    let first = session
-        .document(&conversation.id, "agent")
-        .expect("read document")
-        .expect("document exists");
-    assert_eq!(first.version, 1);
-    assert_eq!(first.json["model"], "one");
-
-    session
-        .save(Save::new(&conversation.id).document("agent", Some(1), json!({"model": "two"})))
-        .expect("update document");
-    let second = session
-        .document(&conversation.id, "agent")
-        .expect("read document")
-        .expect("document exists");
-    assert_eq!(second.version, 2);
-    assert_eq!(second.json["model"], "two");
-}
-
-#[test]
-fn a_stale_document_version_aborts_the_whole_save() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("create conversation");
-
-    session
-        .save(Save::new(&conversation.id).document("agent", None, json!({"model": "one"})))
-        .expect("create document");
-
-    let error = session
-        .save(
-            Save::new(&conversation.id)
-                .entry("user", json!({"text": "lost"}))
-                .document("agent", Some(0), json!({"model": "bad"})),
-        )
-        .expect_err("stale version must fail");
-    assert!(matches!(
-        error,
-        hearth_core::CoreError::DocumentVersion { .. }
-    ));
-
-    assert!(
-        session
-            .history(&conversation.id)
-            .expect("history")
-            .is_empty()
-    );
-    let document = session
-        .document(&conversation.id, "agent")
-        .expect("read document")
-        .expect("document exists");
-    assert_eq!(document.version, 1);
-
-    let commit = session
-        .save(Save::new(&conversation.id).entry("user", json!({"text": "kept"})))
-        .expect("save after failure");
-    assert_eq!(commit.seq, 2);
-}
-
-#[test]
 fn two_entries_in_one_save_share_the_sequence_and_keep_order() {
     let (_home, harness) = harness();
     let session = harness.session();
@@ -236,36 +165,6 @@ fn a_submission_settles_once_and_keeps_its_first_ending() {
 }
 
 #[test]
-fn a_fork_copies_entries_up_to_the_chosen_entry_and_links_the_parent() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("create conversation");
-
-    session
-        .save(Save::new(&conversation.id).entry("user", json!({"n": 1})))
-        .expect("first save");
-    session
-        .save(Save::new(&conversation.id).entry("assistant", json!({"n": 2})))
-        .expect("second save");
-    let history = session.history(&conversation.id).expect("history");
-    let chosen = &history[1];
-
-    let fork = session.fork(&conversation.id, &chosen.id).expect("fork");
-    assert_eq!(fork.parent_id.as_deref(), Some(conversation.id.as_str()));
-    assert_eq!(fork.parent_entry_id.as_deref(), Some(chosen.id.as_str()));
-
-    let fork_history = session.history(&fork.id).expect("fork history");
-    assert_eq!(fork_history.len(), 2);
-    assert_eq!(fork_history[0].content["n"], 1);
-    assert_eq!(fork_history[1].content["n"], 2);
-    assert_eq!(fork_history[0].seq, fork_history[1].seq);
-    assert_ne!(fork_history[0].id, history[0].id);
-    assert_eq!(session.history(&conversation.id).expect("source").len(), 2);
-}
-
-#[test]
 fn reopening_the_harness_preserves_the_records() {
     let home = TempDir::new().expect("temp home");
     let (conversation_id, submission_id) = {
@@ -276,9 +175,7 @@ fn reopening_the_harness_preserves_the_records() {
             .expect("create conversation");
         session
             .save(
-                Save::new(&conversation.id)
-                    .entry("user", json!({"n": 1}))
-                    .document("agent", None, json!({"model": "one"})),
+                Save::new(&conversation.id).entry("user", json!({"n": 1})),
             )
             .expect("save");
         let submitted = session
@@ -290,11 +187,6 @@ fn reopening_the_harness_preserves_the_records() {
     let harness = Harness::open(home.path()).expect("reopen harness");
     let session = harness.session();
     assert_eq!(session.history(&conversation_id).expect("history").len(), 2);
-    let document = session
-        .document(&conversation_id, "agent")
-        .expect("read document")
-        .expect("document exists");
-    assert_eq!(document.version, 1);
     let submission = session
         .submission_by_request_id("req-1")
         .expect("read submission")
@@ -356,59 +248,6 @@ fn a_save_to_an_unknown_conversation_is_rejected() {
         error,
         hearth_core::CoreError::ConversationNotFound(_)
     ));
-}
-
-#[test]
-fn creating_an_existing_document_without_a_version_is_rejected() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("create conversation");
-    session
-        .save(Save::new(&conversation.id).document("agent", None, json!({"v": 1})))
-        .expect("create document");
-
-    let error = session
-        .save(Save::new(&conversation.id).document("agent", None, json!({"v": 2})))
-        .expect_err("duplicate create must fail");
-    assert!(matches!(
-        error,
-        hearth_core::CoreError::DocumentVersion {
-            expected: None,
-            found: Some(1),
-            ..
-        }
-    ));
-    assert_eq!(
-        session
-            .document(&conversation.id, "agent")
-            .expect("read document")
-            .expect("document exists")
-            .version,
-        1
-    );
-}
-
-#[test]
-fn a_fork_at_an_entry_from_another_conversation_is_rejected() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let first = session
-        .create_conversation("First", "local", "local:1")
-        .expect("first conversation");
-    let second = session
-        .create_conversation("Second", "local", "local:2")
-        .expect("second conversation");
-    let commit = session
-        .save(Save::new(&first.id).entry("user", json!({"n": 1})))
-        .expect("save");
-    let entry_id = &commit.entry_ids[0];
-
-    let error = session
-        .fork(&second.id, entry_id)
-        .expect_err("foreign entry must fail");
-    assert!(matches!(error, hearth_core::CoreError::EntryNotFound(..)));
 }
 
 #[test]
@@ -564,45 +403,6 @@ fn a_settlement_cannot_use_an_answer_entry_from_another_conversation() {
         .expect("submission exists");
     assert!(after.settled_at.is_none());
     assert_eq!(after.status, SubmissionStatus::Queued);
-}
-
-#[test]
-fn a_fork_copies_the_current_documents() {
-    let (_home, harness) = harness();
-    let session = harness.session();
-    let conversation = session
-        .create_conversation("Test", "local", "local:1")
-        .expect("create conversation");
-    session
-        .save(Save::new(&conversation.id).document("agent", None, json!({"model": "one"})))
-        .expect("create document");
-    session
-        .save(Save::new(&conversation.id).document("agent", Some(1), json!({"model": "two"})))
-        .expect("update document");
-    session
-        .save(Save::new(&conversation.id).entry("user", json!({"text": "fork here"})))
-        .expect("save entry");
-    let entry = session
-        .history(&conversation.id)
-        .expect("history")
-        .pop()
-        .expect("entry");
-
-    let fork = session
-        .fork(&conversation.id, &entry.id)
-        .expect("fork conversation");
-
-    let document = session
-        .document(&fork.id, "agent")
-        .expect("read fork document")
-        .expect("fork document exists");
-    assert_eq!(document.version, 2);
-    assert_eq!(document.json["model"], "two");
-    let source = session
-        .document(&conversation.id, "agent")
-        .expect("read source document")
-        .expect("source document exists");
-    assert_eq!(source.version, 2);
 }
 
 #[test]

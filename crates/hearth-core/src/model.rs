@@ -31,16 +31,6 @@ pub struct Entry {
     pub created_at: i64,
 }
 
-/// A small mutable JSON record attached to a conversation.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Document {
-    pub conversation_id: String,
-    pub kind: String,
-    pub version: u64,
-    pub json: Value,
-    pub updated_at: i64,
-}
-
 /// A message handed in with a receipt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Submission {
@@ -289,14 +279,6 @@ pub struct NewEntry {
     pub prompt_hash: Option<String>,
 }
 
-/// A document change in a save.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DocumentWrite {
-    pub kind: String,
-    pub expected: Option<u64>,
-    pub json: Value,
-}
-
 /// A submission to insert in a save.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSubmission {
@@ -328,7 +310,6 @@ pub struct MetaWrite {
 pub struct Save {
     pub(crate) conversation_id: String,
     pub(crate) entries: Vec<NewEntry>,
-    pub(crate) documents: Vec<DocumentWrite>,
     pub(crate) submissions: Vec<NewSubmission>,
     pub(crate) settles: Vec<Settle>,
     pub(crate) effects: Vec<EffectIntent>,
@@ -343,7 +324,6 @@ impl Save {
         Self {
             conversation_id: conversation_id.into(),
             entries: Vec::new(),
-            documents: Vec::new(),
             submissions: Vec::new(),
             settles: Vec::new(),
             effects: Vec::new(),
@@ -367,16 +347,6 @@ impl Save {
     /// Append a fully described entry.
     pub fn entry_with(mut self, entry: NewEntry) -> Self {
         self.entries.push(entry);
-        self
-    }
-
-    /// Write a document. `None` creates it; `Some(version)` updates that version.
-    pub fn document(mut self, kind: impl Into<String>, expected: Option<u64>, json: Value) -> Self {
-        self.documents.push(DocumentWrite {
-            kind: kind.into(),
-            expected,
-            json,
-        });
         self
     }
 

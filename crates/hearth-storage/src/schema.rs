@@ -28,3 +28,6 @@ pub const MIGRATION_0009: &str = include_str!("../migrations/0009.sql");
 
 /// Migration 0010 indexes the subject list in its longest-first read order.
 pub const MIGRATION_0010: &str = include_str!("../migrations/0010.sql");
+
+/// Migration 0011 drops the unused document table.
+pub const MIGRATION_0011: &str = include_str!("../migrations/0011.sql");

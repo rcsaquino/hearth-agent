@@ -14,12 +14,6 @@ pub enum CoreError {
     EntryNotFound(String, String),
     #[error("submission {0} not found")]
     SubmissionNotFound(String),
-    #[error("document {kind} version mismatch: expected {expected:?}, found {found:?}")]
-    DocumentVersion {
-        kind: String,
-        expected: Option<u64>,
-        found: Option<u64>,
-    },
     #[error("meta {key} value mismatch: expected {expected:?}, found {found:?}")]
     MetaVersion {
         key: String,

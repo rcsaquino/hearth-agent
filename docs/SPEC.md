@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.52, plain-language edition
+**Status:** Draft 0.53, plain-language edition
 **Date:** 2026-11-17
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -10,7 +10,10 @@
 
 ## A note on language
 
-Draft 0.52 makes the settings schema strict. `identity.soul_file`,
+Draft 0.53 removes the document record and the conversation fork. Neither had a
+production caller. Migration 0011 drops the `documents` table; the conversation
+parent columns stay because helpers use them. Draft 0.52 makes the settings
+schema strict. `identity.soul_file`,
 `models.pricing`, `tasks.eta_reminder_minutes`, and the `https` fetch alias are
 rejected like any unknown key. The TUI no longer writes a `daemon` section on
 startup. Draft 0.51 drops the actor rule. A memory is stored in whatever words it was
@@ -496,7 +499,7 @@ tested and reasoned about alone. The names are literal.
 | Crate | Job |
 |---|---|
 | `hearth-config` | Reads, validates, and reloads `settings.json`. Interpolates environment variables. |
-| `hearth-core` | The permanent record: entries, saves, documents, submissions, tasks, scheduler, and prompt assembly. |
+| `hearth-core` | The permanent record: entries, saves, submissions, tasks, scheduler, and prompt assembly. |
 | `hearth-storage` | Owns SQLite connections, migrations, full-text search, and backups. |
 | `hearth-model` | Talks to providers: streaming, tool calls, retries, token estimates, and the media clients (image, transcription, speech). |
 | `hearth-memory` | Statements, rules, retrieval, ranking, the digest, and four tools. |
@@ -732,18 +735,15 @@ These are the guarantees the rest of the design protects.
 
 ### 4.3 What is recorded
 
-**In plain terms.** The record has six kinds: conversations, entries, documents,
-submissions, tasks, and effects. Each has a small set of fields and a few invariants.
+**In plain terms.** The record has five kinds: conversations, entries, submissions,
+tasks, and effects. Each has a small set of fields and a few invariants.
 
 IDs are time-ordered UUIDv7. Times are UTC microseconds, displayed in the configured
 timezone. The exact columns are in `SCHEMA.md`; this section states what must hold.
 
-- **Conversation.** One chat and its metadata. It can be forked at an entry.
+- **Conversation.** One chat and its metadata.
 - **Entry.** One permanent line. Append-only; a reset is an entry, not a deletion.
   The model sees the newest reset or summary marker onward.
-- **Document.** Small mutable JSON. Every write supplies the expected version, and a
-  mismatch aborts the save. Kinds: `agent`, `provider`, `live`, `usage`,
-  `memory_state`, `transport`.
 - **Submission.** A message with a receipt. A duplicate `request_id` returns the
   original and never starts a second run. A submission whose content carries no
   request is refused, so every new turn has something to answer.
@@ -762,24 +762,22 @@ The steps:
 
 1. Begin a database transaction (a group of changes that either all succeed or all
    fail).
-2. Check the expected version of every document being changed.
-3. Append entries.
-4. Update documents.
-5. Update tasks and submissions.
-6. Insert or update memory rows.
-7. Record effect intents, meaning "we are about to do this."
-8. Increase the save sequence.
-9. Commit.
-10. Publish the committed state to watchers.
-11. Run effect intents outside the transaction.
+2. Append entries.
+3. Update tasks and submissions.
+4. Insert or update memory rows.
+5. Record effect intents, meaning "we are about to do this."
+6. Increase the save sequence.
+7. Commit.
+8. Publish the committed state to watchers.
+9. Run effect intents outside the transaction.
 
 Publication happens only after SQLite reports success. Watchers include Telegram
 delivery, command-line views, and the task scheduler. They receive a read-only
 copy. If publication itself fails, the next process re-derives pending work from
 the database; it does not rewrite the save.
 
-**For builders.** A save is one SQLite transaction across `entries`, `documents`,
-`tasks`, `submissions`, `effects`, and memory rows. `PRAGMA synchronous=FULL` is the
+**For builders.** A save is one SQLite transaction across `entries`, `tasks`,
+`submissions`, `effects`, and memory rows. `PRAGMA synchronous=FULL` is the
 default. `NORMAL` is allowed by configuration for lower latency, with the documented
 loss window: a power failure can lose the last few transactions, but cannot corrupt
 the database.
@@ -1928,7 +1926,7 @@ ordinary, inspectable, and backed up by copying it in a consistent way.
 ### 11.2 Tables
 
 The exact schema is in `SCHEMA.md`. The tables are `meta`, `commits`,
-`conversations`, `entries`, `prompt_blobs`, `documents`, `submissions`, `tasks`,
+`conversations`, `entries`, `prompt_blobs`, `submissions`, `tasks`,
 `effects`, `usage_events`, `telegram_updates`, `memories`, `memories_fts`, and
 `memory_vectors`.
 
@@ -2086,7 +2084,7 @@ a whole answer end to end. S7 checks crash recovery. S8 checks the commands.
 
 | Seam | Public boundary | Catches | Misses |
 |---|---|---|---|
-| S1 Core session | `Harness` and `Session` API: save, submit, resume, fork | Atomicity, visibility, submission endings, turn ordering | Rendering, provider behavior |
+| S1 Core session | `Harness` and `Session` API: save, submit, resume | Atomicity, visibility, submission endings, turn ordering | Rendering, provider behavior |
 | S2 Storage contract | `Storage` trait with one conformance suite over memory and SQLite | Backend divergence, migrations, idempotent replay, sequence monotonicity | Scheduler policy, UI |
 | S3 Provider adapter | `Provider` trait driven by recorded streaming fixtures and a fake HTTP server | Protocol errors, tool-call assembly, retries, usage mapping, cache hints | Live provider quirks, real latency |
 | S4 Memory and skills | `Memory` and `Skills` APIs: save, search, update, forget, consolidate; skill lifecycle | Retrieval ranking, provenance, supersession, budget, decay, promotion, quarantine | Human relevance judgment |
@@ -2201,7 +2199,7 @@ remembers and only affordable when memory carries the load.
 | Milestone | Scope | What you get | Exit criteria |
 |---|---|---|---|
 | M0 Foundation | Workspace, config, logging, SQLite migrations, lock, command-line skeleton, test harness | A project that builds, validates settings, and has its first seam tests | First seam tests pass red-green; `hearth doctor` passes; invalid settings rejected |
-| M1 Durable core | Entries, saves, documents, tasks, submissions, recovery; fake provider | Work that survives a kill | Crash recovery suite passes |
+| M1 Durable core | Entries, saves, tasks, submissions, recovery; fake provider | Work that survives a kill | Crash recovery suite passes |
 | M2 Agent loop | Provider, streaming, tool loop, files, shell, web, message, local chat, live watch | A local agent that can answer and use tools | End-to-end answer with tools; usage ledger accurate; a tool-using run can be watched live |
 | M3 Telegram | Polling, authorization, dedupe, attachments, final replies | The agent in your pocket | Single-user end to end; replay causes no duplicates |
 | M4 Memory v1 | Standing memory, full-text search, tools, extraction, provenance, consolidation skeleton | An agent that remembers the basics | Recall evaluation baseline; no secret stores |

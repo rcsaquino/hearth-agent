@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
 /// The schema version this build understands.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 pub use backup::{snapshot, verify};
 pub use storage::{Reader, Storage, Writer};
@@ -87,7 +87,7 @@ fn configure(connection: &Connection) -> Result<(), StorageError> {
 }
 
 /// Every migration, as the version it upgrades and the version it produces.
-const MIGRATIONS: [(i64, &str, i64); 10] = [
+const MIGRATIONS: [(i64, &str, i64); 11] = [
     (0, schema::MIGRATION_0001, 1),
     (1, schema::MIGRATION_0002, 2),
     (2, schema::MIGRATION_0003, 3),
@@ -98,6 +98,7 @@ const MIGRATIONS: [(i64, &str, i64); 10] = [
     (7, schema::MIGRATION_0008, 8),
     (8, schema::MIGRATION_0009, 9),
     (9, schema::MIGRATION_0010, 10),
+    (10, schema::MIGRATION_0011, 11),
 ];
 
 /// Apply every migration the database is missing.

@@ -10,8 +10,8 @@ IDs are time-ordered UUIDv7 (unique identifiers that sort by creation time) unle
 noted. Times are stored in UTC microseconds and displayed in the configured
 timezone.
 
-**Conversation.** One chat and its metadata. A conversation can be forked at a
-chosen entry to start a related branch.
+**Conversation.** One chat and its metadata. Helper conversations record where
+they started in `parent_id` and `parent_entry_id`.
 
 | Field | Notes |
 |---|---|
@@ -116,7 +116,6 @@ keys.
 - `entries`: the transcript.
 - `prompt_blobs`: full prompt text, deduplicated by hash, for debugging.
 - `entries_fts`: FTS5 index over `entries.content_json` for history search.
-- `documents`: small versioned JSON state per conversation.
 - `submissions`: messages handed in and their endings.
 - `tasks`: resumable work.
 - `effects`: outside actions and their outcomes.

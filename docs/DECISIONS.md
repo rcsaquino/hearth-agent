@@ -2729,3 +2729,11 @@ just after.
   under `web.fetch.providers`.
 - The TUI no longer writes a `daemon` section when one is absent. `save_daemon`
   and the service install path remain the only writers of that section.
+
+## 2026-11-17: Remove the document record and the fork
+
+- `documents`, `Document`, `DocumentWrite`, `Save::document`, `Session::document`,
+  `Session::fork`, and `CoreError::DocumentVersion` had no production caller. They
+  are removed, and migration 0011 drops the `documents` table.
+- The conversation `parent_id` and `parent_entry_id` columns stay: helper
+  conversations use them for provenance.

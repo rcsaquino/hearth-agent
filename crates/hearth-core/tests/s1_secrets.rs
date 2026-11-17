@@ -79,7 +79,6 @@ fn the_record_stores_no_credential_shaped_text() {
         .save(
             Save::new(&conversation.id)
                 .entry("assistant", json!({"text": "token=abcdefghijk"}))
-                .document("agent", None, json!({"note": "Bearer abcdefghijkl"}))
                 .effect(EffectIntent::new(
                     "file_write",
                     "secret-effect",
@@ -110,12 +109,6 @@ fn the_record_stores_no_credential_shaped_text() {
         .join(" ");
     assert!(!record.contains("sk-test"));
     assert!(!record.contains("abcdefghijk"));
-
-    let document = session
-        .document(&conversation.id, "agent")
-        .expect("document")
-        .expect("document exists");
-    assert!(!document.json.to_string().contains("abcdefghijkl"));
 
     let effect = session
         .effect(&effect_id)

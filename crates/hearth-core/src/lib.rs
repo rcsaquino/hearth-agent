@@ -1,4 +1,4 @@
-//! Hearth core: the permanent record, saves, documents, submissions, and forks.
+//! Hearth core: the permanent record, saves, submissions, and tasks.
 
 mod budget;
 mod clock;
@@ -23,10 +23,9 @@ pub use guidance::{
     AGENTS_GUIDANCE_FILE, Guidance, GuidanceFile, HEARTH_GUIDANCE_FILE, load as load_guidance,
 };
 pub use model::{
-    Commit, CommitRecord, Conversation, Document, DocumentWrite, Effect, EffectIntent,
-    EffectStatus, Entry, NewEntry, NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission,
-    SubmissionStatus, SubmitResult, TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent,
-    UsageTotals, cache_hit_rate,
+    Commit, CommitRecord, Conversation, Effect, EffectIntent, EffectStatus, Entry, NewEntry,
+    NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission, SubmissionStatus, SubmitResult,
+    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals, cache_hit_rate,
 };
 pub use prompt::{Prompt, PromptInput, build as build_prompt, parse_blocks, prefix_cause};
 pub use session::{Harness, PROMPT_BLOB_RETENTION_MICROS, Session};
