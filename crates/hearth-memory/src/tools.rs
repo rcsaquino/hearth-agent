@@ -758,8 +758,38 @@ mod tests {
             .expect("call")
             .expect("result");
         assert!(
-            second.content.contains("Pass supersedes"),
-            "the write must teach the model to replace: {}",
+            second.content.contains("not a duplicate"),
+            "a neighbour is not a replacement: {}",
+            second.content
+        );
+        assert!(
+            !second.content.contains("Pass supersedes"),
+            "a non-replacing statement must not recommend supersedes: {}",
+            second.content
+        );
+    }
+
+    #[test]
+    fn a_subjectless_statement_beside_a_related_one_names_the_neighbour() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        tools
+            .call(
+                SAVE,
+                &json!({"content": "Alice manages the OR board", "subject": "alice"}),
+            )
+            .expect("call")
+            .expect("result");
+        let second = tools
+            .call(
+                SAVE,
+                &json!({"content": "the OR board needs two approvals"}),
+            )
+            .expect("call")
+            .expect("result");
+        assert!(
+            second.content.contains("related"),
+            "a subjectless write must still name its neighbour: {}",
             second.content
         );
     }

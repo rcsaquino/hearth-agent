@@ -925,6 +925,18 @@ mod tests {
         (directory, session)
     }
 
+    fn write(session: &Session, item: NewMemory) -> WriteOutcome {
+        insert(
+            session,
+            Pending {
+                item,
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("write")
+    }
+
     #[test]
     fn the_subject_list_stops_at_its_limit_longest_first() {
         let (_directory, session) = home();
@@ -1525,4 +1537,149 @@ mod tests {
         )
         .expect("an imperative rule stores");
     }
+
+    #[test]
+    fn a_synonym_about_the_same_subject_is_refused() {
+        let (_directory, session) = home();
+        let first = write(
+            &session,
+            NewMemory::new("the user prefers dark mode")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        assert!(first.created());
+        let second = write(
+            &session,
+            NewMemory::new("the user likes dark mode")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        assert!(!second.created(), "a synonym must not become a second row");
+        assert_eq!(second.memory().id, first.memory().id);
+        assert_eq!(count(&session).expect("count"), 1);
+    }
+
+    #[test]
+    fn a_spelling_variant_about_the_same_subject_is_refused() {
+        let (_directory, session) = home();
+        let first = write(
+            &session,
+            NewMemory::new("the user's favorite color is blue")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        assert!(first.created());
+        let second = write(
+            &session,
+            NewMemory::new("the user's favourite colour is blue")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        assert!(!second.created(), "a spelling variant is the same statement");
+        assert_eq!(count(&session).expect("count"), 1);
+    }
+
+    #[test]
+    fn a_negation_is_not_a_duplicate_of_its_affirmative() {
+        let (_directory, session) = home();
+        write(
+            &session,
+            NewMemory::new("the user prefers dark mode")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        let negated = write(
+            &session,
+            NewMemory::new("the user does not prefer dark mode")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        assert!(
+            negated.created(),
+            "a negation states the opposite and must stay current"
+        );
+        assert_eq!(count(&session).expect("count"), 2);
+    }
+
+    #[test]
+    fn a_subjectless_write_is_checked_against_the_store() {
+        let (_directory, session) = home();
+        let first = write(
+            &session,
+            NewMemory::new("the user prefers dark mode")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        assert!(first.created());
+        let second = write(&session, NewMemory::new("the user prefers dark mode please"));
+        assert!(
+            !second.created(),
+            "the near check must not depend on both subjects being set"
+        );
+        assert_eq!(count(&session).expect("count"), 1);
+    }
+
+    #[test]
+    fn an_older_duplicate_is_found_beyond_the_subjectless_window() {
+        let (_directory, session) = home();
+        let first = write(
+            &session,
+            NewMemory::new("ordered pad thai on friday").subject("thai place"),
+        );
+        assert!(first.created());
+        for index in 0..70 {
+            write(
+                &session,
+                NewMemory::new(format!("ordered duck on monday number {index}"))
+                    .subject("thai place"),
+            );
+        }
+        let again = write(
+            &session,
+            NewMemory::new("ordered pad thai on friday again").subject("thai place"),
+        );
+        assert!(
+            !again.created(),
+            "a same-subject duplicate must be found however old it is"
+        );
+        assert_eq!(again.memory().id, first.memory().id);
+    }
+
+    #[test]
+    fn an_automatic_extract_cannot_weaken_a_stored_row() {
+        let (_directory, session) = home();
+        let preference = write(
+            &session,
+            NewMemory::new("the user prefers dark mode")
+                .kind(Kind::Preference)
+                .subject("user"),
+        );
+        let extracted = write(
+            &session,
+            NewMemory::new("the user prefers dark mode")
+                .source(Source::Extract)
+                .subject(""),
+        );
+        assert!(!extracted.created());
+        assert_eq!(extracted.memory().id, preference.memory().id);
+        assert_eq!(extracted.memory().kind, Kind::Preference);
+        assert_eq!(extracted.memory().subject, "user");
+        assert_eq!(count(&session).expect("count"), 1);
+    }
+
+    #[test]
+    fn a_subjectless_write_still_reports_a_related_neighbour() {
+        let (_directory, session) = home();
+        write(
+            &session,
+            NewMemory::new("Alice manages the OR board").subject("alice"),
+        );
+        let neighbour = related(&session, "", "Alice manages the OR board and budget", "none")
+            .expect("related");
+        assert!(
+            neighbour.is_some(),
+            "an empty subject must not hide a neighbour"
+        );
+    }
+
 }

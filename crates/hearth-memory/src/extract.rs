@@ -443,7 +443,35 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, Kind::Person);
         assert_eq!(found[0].subject, "alice");
-        assert_eq!(found[0].content, "the user's sister is Alice");
+        assert_eq!(found[0].content, "Alice is the user's sister");
+    }
+
+    #[test]
+    fn both_relation_orders_produce_the_same_candidate() {
+        let possessive = candidates("My sister is Alice.");
+        let relation = candidates("Alice is my sister.");
+        assert_eq!(possessive.len(), 1);
+        assert_eq!(relation.len(), 1);
+        assert_eq!(possessive[0], relation[0]);
+    }
+
+    #[test]
+    fn a_remembered_preference_names_the_same_subject_as_a_stated_one() {
+        let stated = candidates("I prefer dark mode.");
+        let remembered = candidates("Remember that I prefer dark mode.");
+        assert_eq!(stated.len(), 1);
+        assert_eq!(remembered.len(), 1);
+        assert_eq!(stated[0].content, remembered[0].content);
+        assert_eq!(stated[0].subject, remembered[0].subject);
+    }
+
+    #[test]
+    fn a_favourite_is_a_preference_not_a_fact() {
+        let found = candidates("My favorite color is blue.");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].kind, Kind::Preference);
+        assert_eq!(found[0].subject, "user");
+        assert_eq!(found[0].content, "the user's favorite color is blue");
     }
 
     #[test]
