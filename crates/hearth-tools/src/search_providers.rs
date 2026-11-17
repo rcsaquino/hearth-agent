@@ -9,6 +9,8 @@ use crate::search::{SearchError, SearchProvider, SearchResult};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const SNIPPET_CHARS: usize = 800;
+/// A successful response is a JSON or SSE document, not an error message.
+const SUCCESS_BODY_BYTES: usize = 4 * 1024 * 1024;
 
 /// Exa: keyless MCP by default, REST when an API key is present.
 pub struct ExaSearch {
@@ -220,8 +222,8 @@ fn parse_rpc(text: &str) -> Option<Value> {
 
 fn response_text(response: Response, label: &str) -> Result<String, SearchError> {
     let status = response.status();
-    let text = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
     if !status.is_success() {
+        let text = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
         let retryable = status.as_u16() == 429 || status.is_server_error();
         return Err(SearchError {
             message: format!(
@@ -232,7 +234,7 @@ fn response_text(response: Response, label: &str) -> Result<String, SearchError>
             retryable,
         });
     }
-    Ok(text)
+    Ok(crate::body::snippet(response, SUCCESS_BODY_BYTES))
 }
 
 fn client() -> Result<Client, SearchError> {
