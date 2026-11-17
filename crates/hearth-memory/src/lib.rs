@@ -482,21 +482,31 @@ impl MemoryService {
         };
         let model = embedder.model().to_owned();
         let dims = embedder.dims();
-        let pending = store::pending_vectors(&self.inner.session, &model, dims, 256)?;
         let mut indexed = 0;
-        for memory in pending {
-            match embedder.embed(&memory.content) {
-                Ok(values) => {
-                    let vector = store::VectorWrite {
-                        model: model.clone(),
-                        dims,
-                        values,
-                    };
-                    if store::set_vector(&self.inner.session, &memory.id, &vector).is_ok() {
-                        indexed += 1;
+        'backfill: loop {
+            let pending = store::pending_vectors(&self.inner.session, &model, dims, 256)?;
+            if pending.is_empty() {
+                break;
+            }
+            let mut written = 0;
+            for memory in pending {
+                match embedder.embed(&memory.content) {
+                    Ok(values) => {
+                        let vector = store::VectorWrite {
+                            model: model.clone(),
+                            dims,
+                            values,
+                        };
+                        if store::set_vector(&self.inner.session, &memory.id, &vector).is_ok() {
+                            indexed += 1;
+                            written += 1;
+                        }
                     }
+                    Err(_) => break 'backfill,
                 }
-                Err(_) => break,
+            }
+            if written == 0 {
+                break;
             }
         }
         if indexed > 0 {
