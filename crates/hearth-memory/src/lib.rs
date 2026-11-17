@@ -681,6 +681,41 @@ mod tests {
         assert!(!old.is_current(), "the replaced rule must retire");
     }
 
+    struct ConstantEmbedding;
+
+    impl EmbeddingProvider for ConstantEmbedding {
+        fn model(&self) -> &str {
+            "fake-model"
+        }
+
+        fn dims(&self) -> usize {
+            4
+        }
+
+        fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+            Ok(vec![1.0, 0.0, 0.0, 0.0])
+        }
+    }
+
+    #[test]
+    fn the_backfill_indexes_every_pending_memory() {
+        let (_directory, service) = service();
+        for index in 0..300 {
+            seed(&service, &format!("fact number {index}"), "topic");
+        }
+        let service = service.with_embedder(Arc::new(ConstantEmbedding));
+
+        let indexed = service.index_pending_vectors().expect("backfill");
+
+        assert_eq!(indexed, 300, "every pending row gets a vector");
+        assert!(
+            store::pending_vectors(&service.inner.session, "fake-model", 4, 1)
+                .expect("pending")
+                .is_empty(),
+            "no row is left for a later pass"
+        );
+    }
+
     #[test]
     fn the_memory_default_rules_budget_is_800() {
         assert_eq!(MemoryConfig::default().rules_max_tokens, 800);
