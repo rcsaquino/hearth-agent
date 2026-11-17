@@ -1364,6 +1364,43 @@ fn recovery_requeues_a_running_submission_with_no_claimed_task() {
 }
 
 #[test]
+fn recovery_requeues_a_running_submission_with_no_task() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Crash", "telegram", "42:0")
+        .expect("conversation");
+    let submitted = session
+        .submit_telegram(
+            &conversation.id,
+            "tg:42:11",
+            json!({"text": "hello"}),
+            hearth_core::TelegramUpdate {
+                update_id: 11,
+                chat_id: 42,
+                message_id: 11,
+            },
+            12,
+        )
+        .expect("submit");
+    session
+        .begin_submission(&submitted.submission.id)
+        .expect("begin");
+
+    let report = session.recover_interrupted().expect("recovery");
+
+    assert_eq!(report.requeued, 1);
+    assert_eq!(
+        session
+            .submission_by_id(&submitted.submission.id)
+            .expect("submission")
+            .expect("row")
+            .status,
+        hearth_core::SubmissionStatus::Queued
+    );
+}
+
+#[test]
 fn a_second_interruption_is_reported_to_the_person() {
     let (_home, harness, _clock) = harness();
     let session = harness.session();

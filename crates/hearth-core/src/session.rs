@@ -2554,6 +2554,54 @@ impl Session {
                         )?;
                     }
                 }
+                let stranded: Vec<(String, String)> = writer.query(
+                    "SELECT id, conversation_id FROM submissions WHERE status = 'running'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                for (submission_id, conversation_id) in stranded {
+                    let task_status: Option<String> = writer.query_optional(
+                        "SELECT status FROM tasks WHERE kind = 'generation' \
+                         AND json_extract(input_json, '$.submission_id') = ? \
+                         ORDER BY created_at DESC LIMIT 1",
+                        (submission_id.as_str(),),
+                        |row| row.get(0),
+                    )?;
+                    if task_status.as_deref() == Some("running") {
+                        continue;
+                    }
+                    if matches!(task_status.as_deref(), Some("pending") | Some("asleep")) {
+                        writer.execute(
+                            "UPDATE tasks SET status = 'failed', result_json = ?, \
+                             terminal_at = ?, lease_owner = NULL, lease_until = NULL, \
+                             next_wake_at = NULL, updated_at = ? \
+                             WHERE kind = 'generation' AND status IN ('pending', 'asleep') \
+                             AND json_extract(input_json, '$.submission_id') = ?",
+                            (
+                                serde_json::json!({"error": "interrupted"}).to_string(),
+                                now,
+                                now,
+                                submission_id.as_str(),
+                            ),
+                        )?;
+                    }
+                    let changed = writer.execute(
+                        "UPDATE submissions SET status = 'queued', answer_entry_id = NULL, \
+                         error_json = NULL, settled_at = NULL \
+                         WHERE id = ? AND status = 'running'",
+                        (submission_id.as_str(),),
+                    )?;
+                    if changed == 1 {
+                        record_commit(
+                            writer,
+                            now,
+                            Some(conversation_id.as_str()),
+                            None,
+                            "submission.recover",
+                        )?;
+                        report.requeued += 1;
+                    }
+                }
                 Ok(report)
             })
     }
