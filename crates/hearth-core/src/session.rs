@@ -1869,20 +1869,30 @@ impl Session {
             )
         })?;
         let keep = retention_runs as usize;
+        let mut stale = Vec::new();
         let mut conversations = Vec::new();
-        for (index, (_id, conversation_id, created_at)) in rows.into_iter().enumerate() {
+        for (index, (id, conversation_id, created_at)) in rows.into_iter().enumerate() {
             if index < keep || created_at >= cutoff {
                 continue;
             }
+            stale.push(id);
             if let Some(conversation_id) = conversation_id {
                 conversations.push(conversation_id);
             }
         }
-        if conversations.is_empty() {
+        if stale.is_empty() {
             return Ok(0);
         }
-        let count = conversations.len();
+        let count = stale.len();
         self.storage.write(move |writer| -> Result<(), CoreError> {
+            for id in &stale {
+                writer.execute(
+                    "UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?",
+                    (id.as_str(),),
+                )?;
+                writer.execute("DELETE FROM effects WHERE task_id = ?", (id.as_str(),))?;
+                writer.execute("DELETE FROM tasks WHERE id = ? AND kind = 'helper'", (id.as_str(),))?;
+            }
             for conversation_id in &conversations {
                 writer.execute(
                     "UPDATE conversations SET archived = 1 WHERE id = ?",

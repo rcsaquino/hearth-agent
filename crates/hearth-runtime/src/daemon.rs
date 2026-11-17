@@ -30,7 +30,10 @@ use crate::compaction::Compactor;
 use crate::events::EventBus;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
-use crate::maintenance::{BACKUP_KIND, BackupHandler, SKILL_REVIEW_KIND, ensure_maintenance_tasks};
+use crate::maintenance::{
+    BACKUP_KIND, BackupHandler, HELPER_RETENTION_KIND, HelperRetentionHandler, SKILL_REVIEW_KIND,
+    ensure_maintenance_tasks,
+};
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
 use crate::skill_review::{SkillReviewHandler, SkillReviewer};
 use crate::skills::SkillLibrary;
@@ -110,13 +113,6 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
     // The lease pass also wakes tasks whose sleep ended while the process was
     // down, which is how a due reminder becomes claimable again.
     let woken = session.recover_tasks()?;
-    if let Ok(pruned) = session.prune_helpers(
-        settings.tasks.retention_days,
-        settings.tasks.retention_runs,
-        session.now_micros(),
-    ) {
-        tracing::info!(pruned, "helper retention complete");
-    }
     tracing::info!(
         requeued = recovery.requeued + woken.requeued,
         woken = woken.woken,
@@ -417,6 +413,15 @@ impl TelegramRuntime {
                 .register(
                     BACKUP_KIND,
                     Arc::new(BackupHandler::new(home.to_path_buf(), session.clone())),
+                )
+                .register(
+                    HELPER_RETENTION_KIND,
+                    Arc::new(HelperRetentionHandler::new(
+                        home.to_path_buf(),
+                        session.clone(),
+                        settings.tasks.retention_days,
+                        settings.tasks.retention_runs,
+                    )),
                 ),
         );
         let scheduler = Scheduler::new(
@@ -425,7 +430,12 @@ impl TelegramRuntime {
             format!("scheduler:{}", std::process::id()),
         );
         let zone = Zone::resolve(&hearth_config::identity_timezone(home));
-        ensure_maintenance_tasks(&session, &zone)?;
+        ensure_maintenance_tasks(
+            &session,
+            &zone,
+            settings.tasks.retention_days,
+            settings.tasks.retention_runs,
+        )?;
         let helper_config = Arc::new(HelperConfig {
             settings: Arc::clone(&settings),
             session: session.clone(),
@@ -563,10 +573,24 @@ fn maintenance_scheduler(
             .register(
                 BACKUP_KIND,
                 Arc::new(BackupHandler::new(home.to_path_buf(), session.clone())),
+            )
+            .register(
+                HELPER_RETENTION_KIND,
+                Arc::new(HelperRetentionHandler::new(
+                    home.to_path_buf(),
+                    session.clone(),
+                    settings.tasks.retention_days,
+                    settings.tasks.retention_runs,
+                )),
             ),
     );
     let zone = Zone::resolve(&hearth_config::identity_timezone(home));
-    ensure_maintenance_tasks(&session, &zone)?;
+    ensure_maintenance_tasks(
+            &session,
+            &zone,
+            settings.tasks.retention_days,
+            settings.tasks.retention_runs,
+        )?;
     Ok(Scheduler::new(
         session,
         registry,

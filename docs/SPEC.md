@@ -928,8 +928,10 @@ helper gets:
 - no chat history, so its prompt stays small.
 
 The defaults are four helpers at once, two levels deep (a helper
-may spawn one more), and retention of 30 days or the newest 25 runs. When a helper
-settles, the user gets one notice with the outcome and the report path. If it runs
+may spawn one more), and retention of 30 days or the newest 25 runs. A nightly
+sweep deletes older helper task records and archives their conversations; the
+entries and report file stay part of the record. When a helper settles, the user
+gets one notice with the outcome and the report path. If it runs
 past its expected duration plus the configured delay, one reminder is sent. A kill cancels the task, aborts any in-flight request, and settles silently.
 
 The child runs like any conversation. Its final message is the report: it is saved
