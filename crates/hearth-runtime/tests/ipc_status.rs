@@ -247,5 +247,18 @@ fn status_reports_the_memory_breakdown_and_the_last_audit() {
     assert_eq!(status["memory"]["audit"]["canonical_closed"], 1, "{status}");
     assert_eq!(status["memory"]["audit"]["near_duplicates"], 0, "{status}");
     assert_eq!(status["memory_items"], 3, "{status}");
+    let state = hearth_runtime::inspect::memory_state(home.path()).expect("memory state");
+    assert_eq!(
+        status["memory"]["pinned"].as_u64(),
+        Some(state.counts.pinned as u64)
+    );
+    assert_eq!(
+        status["memory"]["active"].as_u64(),
+        Some(state.counts.active as u64)
+    );
+    assert_eq!(
+        status["memory"]["retired"].as_u64(),
+        Some(state.counts.retired as u64)
+    );
     assert!(status["last_consolidation"].as_str().is_some(), "{status}");
 }
