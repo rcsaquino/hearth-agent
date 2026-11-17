@@ -101,7 +101,7 @@ keys.
 |---|---|
 | `id` | UUIDv7 |
 | `task_id` | |
-| `kind` | `telegram.send`, `http`, `shell`, `file_write`, `tts`, and so on |
+| `kind` | `telegram.send`, `http`, `shell`, `tts`, and so on |
 | `key` | Idempotency key, unique per kind |
 | `payload` | JSON |
 | `status` | `intent`, `started`, `done`, `failed`, `unknown` |

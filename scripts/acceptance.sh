@@ -13,7 +13,7 @@ export HEARTH_PUBLIC_DENYLIST="$deny_list"
 echo "== build =="
 cargo build -p hearth-cli >/dev/null
 
-echo "== crash points: before_commit, after_commit, mid_stream, during_effect =="
+echo "== crash points: before_commit, after_commit, mid_stream =="
 cargo test -p hearth-eval --test s7_crash
 
 echo "== reminders and scheduler =="

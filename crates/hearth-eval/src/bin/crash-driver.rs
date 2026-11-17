@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use hearth_core::{Guidance, Harness, Save};
 use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent};
-use hearth_runtime::{Agent, AgentConfig, EffectWorker};
+use hearth_runtime::{Agent, AgentConfig};
 use hearth_tools::ToolRegistry;
 use serde_json::json;
 
@@ -18,9 +18,8 @@ fn main() -> Result<()> {
     match args.get(1).map(String::as_str) {
         Some("save") => save(&args),
         Some("submit") => submit(&args),
-        Some("effects") => effects(&args),
         Some("agent") => agent(&args),
-        _ => bail!("usage: crash-driver save|submit|effects|agent <arguments>"),
+        _ => bail!("usage: crash-driver save|submit|agent <arguments>"),
     }
 }
 
@@ -45,17 +44,6 @@ fn submit(args: &[String]) -> Result<()> {
             .session()
             .submit(conversation, request_id, "input", json!({"text": "hello"}))?;
     println!("created={}", result.created);
-    Ok(())
-}
-
-fn effects(args: &[String]) -> Result<()> {
-    let home = home(args)?;
-    let workspace = PathBuf::from(args.get(3).context("missing workspace path")?);
-    let harness = Harness::open(&home)?;
-    let worker = EffectWorker::new(harness.session().clone(), workspace);
-    let recovered = worker.recover_started()?;
-    let processed = worker.run_once()?;
-    println!("recovered={recovered} processed={processed}");
     Ok(())
 }
 

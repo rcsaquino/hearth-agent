@@ -5,7 +5,6 @@ mod browser;
 mod documents;
 mod fetch;
 mod file_tool;
-mod file_write;
 mod media;
 mod search;
 mod search_providers;
@@ -20,7 +19,6 @@ pub use fetch::{
     TinyFishFetch, WebFetchTool,
 };
 pub use file_tool::FileTool;
-pub use file_write::FileWrite;
 pub use media::MediaTool;
 pub use search::{SearchError, SearchProvider, SearchResult, WebSearchTool};
 pub use search_providers::{

@@ -27,7 +27,6 @@ use thiserror::Error;
 
 use crate::agent::{Agent, AgentConfig, AgentError, RunOutcome};
 use crate::compaction::Compactor;
-use crate::effect_worker::EffectWorker;
 use crate::events::EventBus;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
@@ -216,8 +215,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             }
         });
     }
-    let effect_worker = EffectWorker::new(session.clone(), workspace.clone());
-    let recovered = effect_worker.recover_started()?;
+    let recovered = recover_started_effects(&session)?;
     tracing::info!(recovered, "effect recovery complete");
 
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -235,17 +233,6 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         Arc::clone(&ipc_shutdown),
     )?;
     tracing::info!(socket = %ipc::socket_path(home).display(), "daemon socket ready");
-
-    let effect_shutdown = Arc::clone(&shutdown);
-    let effect_handle = thread::spawn(move || {
-        while !effect_shutdown.load(Ordering::Relaxed) {
-            if let Err(error) = effect_worker.run_once() {
-                tracing::error!(%error, "effect worker iteration failed");
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
-    tracing::info!("effect worker started");
 
     let repair_shutdown = Arc::clone(&shutdown);
     let repair_home = home.to_path_buf();
@@ -307,9 +294,6 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         if handle.join().is_err() {
             tracing::error!("telegram thread panicked");
         }
-    }
-    if effect_handle.join().is_err() {
-        tracing::error!("effect worker panicked");
     }
     ipc_shutdown.store(true, Ordering::Relaxed);
     if socket_handle.join().is_err() {
@@ -497,6 +481,38 @@ impl TelegramRuntime {
             helpers,
         })
     }
+}
+
+/// Mark or fail effects that were running when the previous process died.
+///
+/// A Telegram send becomes unknown because at-most-once delivery must not repeat
+/// it. No other effect kind has a producer.
+fn recover_started_effects(session: &Session) -> Result<usize, CoreError> {
+    let effects = session.started_effects()?;
+    let mut changed = 0;
+    for effect in effects {
+        if effect.kind == "telegram.send" {
+            session.mark_effect_unknown(&effect.id, json!({"error": "delivery interrupted"}))?;
+            tracing::warn!(
+                effect = %effect.id,
+                kind = %effect.kind,
+                "telegram delivery interrupted"
+            );
+        } else {
+            session.fail_effect(
+                &effect.id,
+                json!({"error": "unsupported effect kind during recovery", "retryable": false}),
+                false,
+            )?;
+            tracing::warn!(
+                effect = %effect.id,
+                kind = %effect.kind,
+                "effect failed during recovery"
+            );
+        }
+        changed += 1;
+    }
+    Ok(changed)
 }
 
 /// The scheduler a daemon runs when it has no Telegram transport.
