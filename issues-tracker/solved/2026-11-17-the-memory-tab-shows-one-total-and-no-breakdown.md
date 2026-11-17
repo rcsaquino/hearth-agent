@@ -127,7 +127,7 @@ does.
 
 The Memory tab title is now `Memory · N pinned · N active · N retired`. The
 figures come from `inspect::memory_state`, which counts through a read-only
-connection with `store::breakdown`, not from the 1,000-row page. A search adds a
+connection with `store::breakdown_on`, not from the 1,000-row page. A search adds a
 separate `N match` clause; it never restates the three store figures. A zero
 figure is printed as `0 retired`, not omitted. A row that was pinned before its
 window closed counts as retired, because the SQL is `valid_to IS NULL AND pinned`
@@ -146,7 +146,7 @@ Verified by `memory_tab_shows_pinned_active_and_retired_totals`,
 `a_zero_retired_count_is_still_shown`,
 `a_retired_pinned_row_counts_as_retired`, and
 `memory_tab_marks_a_report_candidate` in `crates/hearth-cli/src/ui/mod.rs`; by
-`memory_state_counts_the_store_not_the_loaded_page`, which writes 1,007 rows
+`memory_state_counts_the_store_not_the_loaded_page`, which writes 1,008 rows
 through a 1,000-row page; and by
 `status_reports_the_memory_breakdown_and_the_last_audit` for the payload.
 `./scripts/ci.sh` passes.

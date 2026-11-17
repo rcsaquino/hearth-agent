@@ -71,7 +71,7 @@ pub fn normalize_id(id: &str) -> String {
 pub const SUBJECT_LIMIT: usize = 120;
 /// How similar two statements about one subject must be to count as the same.
 const MERGE_SIMILARITY: f32 = 0.85;
-/// How many same-subject rows a write compares against.
+/// How many subjectless rows a write compares against.
 const MERGE_WINDOW: i64 = 64;
 
 pub(crate) const COLUMNS: &str = "id, kind, content, subject, pinned, source_kind, source_entry, \
