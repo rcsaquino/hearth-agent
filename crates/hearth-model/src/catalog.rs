@@ -8,6 +8,7 @@ use serde_json::Value;
 pub const CATALOG_URL: &str = "https://models.dev/api.json";
 
 const CATALOG_TIMEOUT: Duration = Duration::from_secs(20);
+const CATALOG_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 /// The facts Hearth uses from one provider's model entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,9 +127,8 @@ pub fn fetch(url: &str) -> Result<Catalog, CatalogError> {
             "the catalog returned {status}"
         )));
     }
-    let text = response
-        .text()
-        .map_err(|error| CatalogError::Transport(error.to_string()))?;
+    let text = crate::body::capped(response, CATALOG_BODY_BYTES)
+        .map_err(CatalogError::Transport)?;
     Catalog::parse(&text)
 }
 

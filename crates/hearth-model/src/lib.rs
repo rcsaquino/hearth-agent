@@ -1,5 +1,6 @@
 //! Provider-neutral chat types and the OpenAI-compatible adapter.
 
+mod body;
 mod catalog;
 mod estimate;
 mod media;

@@ -27,6 +27,7 @@ pub struct OpenAiCompatibleProvider {
 const MAX_ATTEMPTS: u32 = 3;
 const BASE_DELAY: Duration = Duration::from_millis(500);
 const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(15);
+const MODEL_LIST_BODY_BYTES: usize = 4 * 1024 * 1024;
 
 fn backoff(attempt: u32) -> Duration {
     BASE_DELAY.saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1)))
@@ -48,7 +49,7 @@ pub fn list_models(base_url: &str, api_key: &str) -> Result<Vec<String>, Provide
         .map_err(|error| ProviderError::Transport(error.to_string()))?;
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().unwrap_or_default();
+        let body = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
         let message: String = body.chars().take(200).collect();
         return Err(ProviderError::Request {
             status: status.as_u16(),
@@ -56,8 +57,9 @@ pub fn list_models(base_url: &str, api_key: &str) -> Result<Vec<String>, Provide
             retryable: false,
         });
     }
-    let body: Value = response
-        .json()
+    let text = crate::body::capped(response, MODEL_LIST_BODY_BYTES)
+        .map_err(ProviderError::Protocol)?;
+    let body: Value = serde_json::from_str(&text)
         .map_err(|error| ProviderError::Protocol(format!("model list is not JSON: {error}")))?;
     let items = body
         .get("data")
@@ -324,7 +326,7 @@ impl Provider for OpenAiCompatibleProvider {
                             .to_ascii_lowercase()
                             .starts_with("text/event-stream")
                         {
-                            let body = response.text().unwrap_or_default();
+                            let body = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
                             let snippet: String = body.chars().take(200).collect();
                             return Err(ProviderError::Protocol(format!(
                                 "provider returned {content_type:?} instead of an event stream: {snippet}"
@@ -333,7 +335,7 @@ impl Provider for OpenAiCompatibleProvider {
                         return Ok(Box::new(OpenAiStream::new(response)));
                     }
                     let retryable = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504);
-                    let message = response.text().unwrap_or_default();
+                    let message = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
                     let error = ProviderError::Request {
                         status: status.as_u16(),
                         message,
