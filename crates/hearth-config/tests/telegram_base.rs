@@ -58,3 +58,19 @@ fn a_missing_telegram_base_url_is_allowed() {
     assert!(settings.telegram.as_ref().unwrap().base_url.is_none());
     settings.validate_for_run().expect("valid settings");
 }
+
+#[test]
+fn a_home_without_telegram_cannot_run() {
+    let mut value = base();
+    value
+        .as_object_mut()
+        .expect("settings object")
+        .remove("telegram");
+    let error = settings(value)
+        .validate_for_run()
+        .expect_err("Telegram is required to run");
+    assert!(
+        error.to_string().contains("telegram"),
+        "error was {error}"
+    );
+}
