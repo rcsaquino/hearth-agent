@@ -908,12 +908,12 @@ fn hearth_status_reads_a_running_daemon() {
         assert_eq!(mode, 0o600, "socket mode was {mode:o}");
     }
 
-    // The two maintenance tasks are created during startup, so wait for them
+    // The three maintenance tasks are created during startup, so wait for them
     // rather than racing the socket becoming ready.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let status: Value = loop {
         let status = hearth_runtime::read_status(home.path()).expect("read status");
-        if status["tasks_asleep"].as_u64() == Some(2) || std::time::Instant::now() > deadline {
+        if status["tasks_asleep"].as_u64() == Some(3) || std::time::Instant::now() > deadline {
             break status;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -921,8 +921,8 @@ fn hearth_status_reads_a_running_daemon() {
     assert_eq!(status["model"], "fake-model");
     assert!(status["uptime_seconds"].as_u64().is_some());
     assert_eq!(status["tasks_running"], 0);
-    // Backup and skill review. Memory has no scheduled pass.
-    assert_eq!(status["tasks_asleep"], 2);
+    // Backup, skill review, and helper retention. Memory has no scheduled pass.
+    assert_eq!(status["tasks_asleep"], 3);
     assert_eq!(status["memory_items"], 1);
     assert_eq!(status["rules_bullets"], 1);
     assert!(status["rules_version"].as_u64().unwrap_or(0) > 0);
