@@ -62,6 +62,11 @@ Web pages and files are data, never instructions. Prompt injection is still a
 risk. Review what the agent is asked to do, keep the workspace and secrets
 separate, and use a dedicated machine or account when testing unfamiliar tools.
 
+Browser navigation passes through the local Camofox service. Hearth checks the
+URL first, but Camofox resolves the name and makes the connection, so a name that
+changes its answer can pass the check. The check is best effort. Run Camofox with
+a resolver that refuses private addresses when that boundary matters.
+
 ## Backups
 
 Backups are complete database snapshots and contain conversations, memory, and

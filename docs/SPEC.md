@@ -1625,14 +1625,17 @@ HTTPS fetch.
   scraping, no cookies, and no MCP client beyond Exa's search endpoint.
 - **Fetch order.** `web.fetch.order` defaults to `["jina", "http"]`. The allowed
   providers are `jina`, `http`, `https`, `tinyfish`, `firecrawl`, and `deepseek`.
-  `http` and `https` name the same direct fetcher; if both appear, the first is
-  used. Jina, `http`, and `https` need no key; the other three are skipped without
-  one.
+  `http` is the one direct fetcher. Jina and `http` need no key; the other three
+  are skipped without one.
 - **Fetch providers.** Jina Reader returns readable Markdown. TinyFish, Firecrawl,
   and DeepSeek return extracted page text. The direct fetcher extracts HTML to text
   and PDFs to text, follows at most 3 redirects, caps the page at 2 MB, and refuses
   private and link-local addresses. Every fetch provider validates the target URL
   before it is used.
+- **Browser navigation.** Hearth checks the URL before it hands it to the local
+  Camofox service, but Camofox resolves the name and makes the connection. A name
+  that changes its answer between the check and the connection can pass. The check
+  is best effort; the Camofox process and its network are the boundary.
 - **Untrusted content.** Fetch output is labeled as untrusted web content. The
   model treats it as data, never as instructions.
 - If every search or fetch provider fails, the tool returns the first error and the

@@ -2744,3 +2744,13 @@ just after.
   report. No code walks `media/inbound` or `media/outbound`, and deleting a file
   the record still references would break a transcript that cannot be rewritten.
   The operator removes old media when disk or backup size matters.
+
+## 2026-11-17: Browser navigation is best effort
+
+- The direct fetch client filters addresses at connect time with
+  `hearth_model::net::public_resolver`. Camofox makes its own connection, so
+  Hearth cannot apply that resolver to a browser tab.
+- The URL check before `POST /tabs` stays, but SPEC 9.5 and SECURITY.md say it is
+  best effort and that the local Camofox process and its resolver are the
+  boundary. Pinning the resolved address would require a Camofox API that accepts
+  an address and a Host override, which it does not have.

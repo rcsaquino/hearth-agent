@@ -83,9 +83,9 @@ impl BrowserTool {
     }
 
     fn open(&self, url: &str) -> Result<ToolOutput, ToolError> {
-        // The same guard the fetch tool enforces: a page the model names may not
-        // reach the host itself or a reserved address. The shell tool remains the
-        // deliberate way to reach them.
+        // The same guard the fetch tool enforces, but Camofox resolves the name
+        // again when it connects, so this is best effort. SPEC 9.5 and SECURITY.md
+        // name the Camofox process as the boundary.
         let parsed = reqwest::Url::parse(url)
             .map_err(|error| ToolError::invalid("invalid_url", error.to_string()))?;
         crate::fetch::validate_target(&parsed, false)
