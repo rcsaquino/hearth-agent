@@ -432,7 +432,7 @@ fn daemon_recovers_an_expired_task_lease() {
         let session = harness.session();
         let task = session
             .create_task(NewTask::new(
-                "test.recovery",
+                "helper",
                 1,
                 "start",
                 serde_json::json!({"step": 1}),
@@ -467,12 +467,21 @@ fn daemon_recovers_an_expired_task_lease() {
     assert_eq!(task.status, TaskStatus::Pending);
     assert!(task.lease_owner.is_none());
     assert!(task.lease_until.is_none());
-    let commit = harness
+    let commits: Vec<String> = harness
         .session()
-        .latest_commit()
-        .expect("latest commit")
-        .expect("a commit exists");
-    assert_eq!(commit.kind, "task.recover");
+        .storage()
+        .read(|reader| {
+            reader.query(
+                "SELECT kind FROM commits WHERE task_id = ?",
+                (task_id.as_str(),),
+                |row| row.get(0),
+            )
+        })
+        .expect("commits");
+    assert!(
+        commits.iter().any(|kind| kind == "task.recover"),
+        "the recovery commit is recorded: {commits:?}"
+    );
 }
 
 fn seed_effect(home: &Path, kind: &str, key: &str, payload: serde_json::Value) -> String {
