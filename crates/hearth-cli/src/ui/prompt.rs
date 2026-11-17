@@ -140,6 +140,8 @@ impl CacheKey {
             signature.push_str(exchange["prompt_hash"].as_str().unwrap_or("-"));
             signature.push(':');
             signature.push_str(exchange["response"]["entry_id"].as_str().unwrap_or("-"));
+            signature.push(':');
+            signature.push_str(&exchange["notice"].to_string());
             signature.push('|');
         }
         Self {
