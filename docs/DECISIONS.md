@@ -2737,3 +2737,10 @@ just after.
   are removed, and migration 0011 drops the `documents` table.
 - The conversation `parent_id` and `parent_entry_id` columns stay: helper
   conversations use them for provenance.
+
+## 2026-11-17: Media is operator managed
+
+- The SPEC no longer promises age-based media pruning or a broken-reference
+  report. No code walks `media/inbound` or `media/outbound`, and deleting a file
+  the record still references would break a transcript that cannot be rewritten.
+  The operator removes old media when disk or backup size matters.

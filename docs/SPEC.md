@@ -1935,7 +1935,9 @@ The exact schema is in `SCHEMA.md`. The tables are `meta`, `commits`,
 ### 11.3 Backups and retention
 
 - Nightly `VACUUM INTO backups/hearth-YYYYMMDD.db`; keep 7 daily and 4 weekly. Memory lives in that database, so the snapshot is the whole store. The date, and the 03:00 slot that takes it, are local to `identity.timezone`.
-- Media can be pruned by age, with missing references reported.
+- Media is operator managed. Hearth never deletes a file under `media/`; an
+  operator who wants a smaller backup removes old inbound and outbound files by
+  hand.
 - The Doctor tab verifies integrity, schema version, lock state, settings, and
   provider credentials without printing secrets.
 
