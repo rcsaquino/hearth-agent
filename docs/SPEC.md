@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.51, plain-language edition
-**Date:** 2026-11-16
+**Status:** Draft 0.52, plain-language edition
+**Date:** 2026-11-17
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -10,7 +10,10 @@
 
 ## A note on language
 
-Draft 0.51 drops the actor rule. A memory is stored in whatever words it was
+Draft 0.52 makes the settings schema strict. `identity.soul_file`,
+`models.pricing`, `tasks.eta_reminder_minutes`, and the `https` fetch alias are
+rejected like any unknown key. The TUI no longer writes a `daemon` section on
+startup. Draft 0.51 drops the actor rule. A memory is stored in whatever words it was
 written in. The store no longer refuses a pronoun, the extractor no longer drops
 a statement its rewrite cannot resolve, and neither the `memory_save` schema nor
 the compaction instruction mentions one. The agent picks its own wording, and a
@@ -1870,16 +1873,13 @@ Optional overrides, only when needed:
 - `web.search.parallel` is 1 to 3, `web.search.results` is 1 to 20, and
   `web.search.max_results` is 1 to 50. A provider with no key is skipped, not an
   error.
-- `web.fetch.order` must be a non-empty list of `jina`, `http`, `https`, `tinyfish`,
-  `firecrawl`, or `deepseek`; unknown names are rejected. `http` and `https` are
-  aliases for one direct fetcher; the picker shows only Direct HTTP and `https`
-  remains accepted for existing files. A fetch provider with no key is skipped
-  except `jina`, `http`, and `https`. Provider names under `web.fetch.providers`
-  follow the same list.
+- `web.fetch.order` must be a non-empty list of `jina`, `http`, `tinyfish`,
+  `firecrawl`, or `deepseek`; unknown names are rejected. `http` is the one direct
+  fetcher. A fetch provider with no key is skipped except `jina` and `http`.
+  Provider names under `web.fetch.providers` follow the same list.
 - `tasks.max_concurrent` is 1 to 8, `tasks.max_depth` is 1 or 2, and the retention
   values are positive. `tasks.eta_reminder_seconds` is a non-negative delay after the
-  expected finish; the default is 1 and the old `eta_reminder_minutes` key is accepted
-  but ignored.
+  expected finish; the default is 1.
 - `identity.timezone` is an IANA zone name. Every timestamp Hearth shows the person
   or the model is ISO 8601 with the offset in force at that instant, such as
   `2026-02-14T09:41:05+08:00`, and the nightly backup and skill-review slots are

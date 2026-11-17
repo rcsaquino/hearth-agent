@@ -1333,15 +1333,12 @@ fn load_dashboard(
         );
     }
     match hearth_config::load(home) {
-        Ok(mut settings) => {
+        Ok(settings) => {
             let banner = settings
                 .validate_for_run()
                 .err()
                 .map(|error| error.to_string());
-            let daemon = migrate_daemon(home, &settings);
-            // Keep the in-memory view in step with a migrated daemon section so
-            // a later settings save does not think the start mode changed.
-            settings.daemon = daemon.clone();
+            let daemon = settings.daemon.clone();
             (
                 Screen::Dashboard,
                 Some(settings),
@@ -1364,29 +1361,6 @@ fn load_dashboard(
             Some(error.to_string()),
         ),
     }
-}
-
-fn migrate_daemon(home: &std::path::Path, settings: &Settings) -> Daemon {
-    let has_section = std::fs::read_to_string(home.join(SETTINGS_FILE))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|value| value.get("daemon").cloned())
-        .is_some();
-    if has_section {
-        return settings.daemon.clone();
-    }
-    let installed = daemon_client::unit_installed(home);
-    if !installed {
-        return settings.daemon.clone();
-    }
-    let daemon = Daemon {
-        start: "login".to_owned(),
-        keep_running: true,
-    };
-    let _ = hearth_config::save_daemon(home, &daemon);
-    // The unit is already installed. Never rewrite it from whatever binary
-    // happens to open the TUI; a test or ad-hoc build must not capture the unit.
-    daemon
 }
 
 fn cycle_start(daemon: &mut Daemon) {

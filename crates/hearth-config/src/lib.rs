@@ -72,7 +72,6 @@ pub fn load(home: &Path) -> Result<Settings, ConfigError> {
     };
     let mut value: Value = serde_json::from_str(&text)?;
     expand_value(&mut value);
-    strip_legacy(&mut value);
     let settings = settings_from_value(value)?;
     settings.validate()?;
     Ok(settings)
@@ -195,16 +194,6 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
         let _ = fs::remove_file(&temp);
     }
     result.map_err(ConfigError::Write)
-}
-
-/// Remove settings that no longer exist but old files may still contain.
-fn strip_legacy(value: &mut Value) {
-    if let Some(identity) = value.get_mut("identity").and_then(Value::as_object_mut) {
-        identity.remove("soul_file");
-    }
-    if let Some(models) = value.get_mut("models").and_then(Value::as_object_mut) {
-        models.remove("pricing");
-    }
 }
 
 /// Replace every `${NAME}` with the value of environment variable `NAME`.

@@ -232,7 +232,7 @@ impl WebFetch {
 fn is_fetch_provider(name: &str) -> bool {
     matches!(
         name,
-        "jina" | "http" | "https" | "tinyfish" | "firecrawl" | "deepseek"
+        "jina" | "http" | "tinyfish" | "firecrawl" | "deepseek"
     )
 }
 

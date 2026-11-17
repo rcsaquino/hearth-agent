@@ -322,7 +322,7 @@ fn build_fetch_providers(
             .filter(|key| hearth_config::is_resolved(key));
         match name.as_str() {
             "jina" => providers.push(Arc::new(JinaFetch::new("https://r.jina.ai", key)?)),
-            "http" | "https" => {
+            "http" => {
                 if !direct_added {
                     providers.push(Arc::new(HttpFetch::production("http")?));
                     direct_added = true;
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn the_fetch_chain_follows_the_order_and_keeps_direct_once() {
         let fetch = configured(
-            &["jina", "tinyfish", "http", "firecrawl", "https", "deepseek"],
+            &["jina", "tinyfish", "http", "firecrawl", "deepseek"],
             &[("tinyfish", "t"), ("firecrawl", "f"), ("deepseek", "d")],
         );
         let chain = build_fetch_providers(&fetch).expect("fetch chain");

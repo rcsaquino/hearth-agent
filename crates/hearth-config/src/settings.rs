@@ -167,8 +167,6 @@ pub struct Tasks {
     pub retention_runs: u32,
     #[serde(default = "default_eta_reminder_seconds")]
     pub eta_reminder_seconds: u32,
-    #[serde(default)]
-    pub eta_reminder_minutes: Option<u32>,
 }
 
 impl Default for Tasks {
@@ -179,7 +177,6 @@ impl Default for Tasks {
             retention_days: default_retention_days(),
             retention_runs: default_retention_runs(),
             eta_reminder_seconds: default_eta_reminder_seconds(),
-            eta_reminder_minutes: None,
         }
     }
 }
@@ -513,11 +510,6 @@ pub fn compact_settings(value: &Value) -> Value {
 }
 
 fn compact_value(value: &Value, default: Option<&Value>, path: &[String]) -> Option<Value> {
-    if path == ["identity", "soul_file"]
-        || (path.len() >= 2 && path[0] == "models" && path[1] == "pricing")
-    {
-        return None;
-    }
     match value {
         Value::Object(object) => {
             let mut compact = Map::new();

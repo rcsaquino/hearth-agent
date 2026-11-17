@@ -2719,3 +2719,13 @@ just after.
   it.
 - This supersedes the 2026-11-17 "A memory must name its actor" entry, which
   stands as the record of why the rule was tried.
+
+## 2026-11-17: Remove the settings compatibility shims
+
+- `identity.soul_file`, `models.pricing`, and `tasks.eta_reminder_minutes` are no
+  longer stripped or ignored at load. An unknown key is a schema error, the same as
+  a typo.
+- `https` is no longer an alias for the direct fetcher in `web.fetch.order` or
+  under `web.fetch.providers`.
+- The TUI no longer writes a `daemon` section when one is absent. `save_daemon`
+  and the service install path remain the only writers of that section.

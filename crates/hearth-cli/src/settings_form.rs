@@ -153,17 +153,7 @@ impl SettingsForm {
         if !document.is_object() {
             return Err("settings.json must contain a JSON object.".to_owned());
         }
-        let mut document = with_defaults(document);
-        normalize_fetch_aliases(&mut document);
-        if let Some(tasks) = document.get_mut("tasks").and_then(Value::as_object_mut) {
-            tasks.remove("eta_reminder_minutes");
-        }
-        if let Some(identity) = document.get_mut("identity").and_then(Value::as_object_mut) {
-            identity.remove("soul_file");
-        }
-        if let Some(models) = document.get_mut("models").and_then(Value::as_object_mut) {
-            models.remove("pricing");
-        }
+        let document = with_defaults(document);
         let mut defaults = hearth_config::default_settings_value();
         let mut catalog_key = None;
         if let (Some(base_url), Some(model)) = (
@@ -816,34 +806,6 @@ impl SettingsForm {
             }
         }
     }
-}
-
-fn normalize_fetch_aliases(document: &mut Value) {
-    let Some(order) = document
-        .get_mut("web")
-        .and_then(|web| web.get_mut("fetch"))
-        .and_then(|fetch| fetch.get_mut("order"))
-        .and_then(Value::as_array_mut)
-    else {
-        return;
-    };
-    let mut seen: Vec<String> = Vec::new();
-    order.retain_mut(|value| {
-        let Some(name) = value.as_str().map(str::to_owned) else {
-            return true;
-        };
-        let name = if name == "https" {
-            "http".to_owned()
-        } else {
-            name
-        };
-        let duplicate = seen.iter().any(|seen| seen == &name);
-        if !duplicate {
-            seen.push(name.clone());
-            *value = Value::String(name);
-        }
-        !duplicate
-    });
 }
 
 fn with_defaults(mut document: Value) -> Value {
