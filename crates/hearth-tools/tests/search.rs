@@ -209,6 +209,37 @@ fn brave_maps_web_results() {
 }
 
 #[test]
+fn a_large_successful_search_response_is_not_cut() {
+    let results: Vec<Value> = (0..10)
+        .map(|index| {
+            json!({
+                "title": format!("Result {index}"),
+                "url": format!("https://brave.example/{index}"),
+                "description": "x".repeat(1_000),
+            })
+        })
+        .collect();
+    let payload = json!({"web": {"results": results}});
+    assert!(payload.to_string().len() > 8 * 1024, "the body exceeds the error cap");
+    let server = serve(json_reply(payload));
+    let provider: Arc<dyn SearchProvider> = Arc::new(
+        BraveSearch::new(server.base.clone(), "brave-key".to_owned()).expect("brave provider"),
+    );
+    let tool = WebSearchTool::new(vec![provider], 3, 10, 10);
+
+    let output = tool
+        .call(&json!({"queries": ["rust"]}))
+        .expect("search call");
+    let value: Value = serde_json::from_str(&output.content).expect("json output");
+    assert_eq!(
+        value["results"].as_array().expect("results").len(),
+        10,
+        "every result in a valid response survives"
+    );
+    server.thread.join().expect("server thread");
+}
+
+#[test]
 fn deepseek_maps_results() {
     let server = serve(json_reply(json!({
         "results": [{
