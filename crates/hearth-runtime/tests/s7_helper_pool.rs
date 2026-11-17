@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use hearth_config::Settings;
-use hearth_core::{ContextBudget, Harness};
+use hearth_core::{ContextBudget, Harness, NewTask, TaskStatus};
 use hearth_memory::MemoryService;
 use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent};
 use hearth_runtime::{
@@ -187,6 +187,43 @@ fn seed_helper(
         )
         .expect("task");
     (helper.id, task.id)
+}
+
+#[test]
+fn a_malformed_helper_task_is_finished_as_failed() {
+    let home = TempDir::new().expect("home");
+    let harness = Harness::open(home.path()).expect("harness");
+    let session = harness.session();
+    let missing_conversation = session
+        .create_task(NewTask::new("helper", 1, "run", json!({"brief": "orphan"})))
+        .expect("task");
+    let helper = session
+        .create_conversation("Helper", "helper", "helper:malformed")
+        .expect("helper conversation");
+    let missing_brief = session
+        .create_task(NewTask::new("helper", 1, "run", json!({})).conversation(&helper.id))
+        .expect("task");
+    let config = helper_config(
+        &home,
+        session,
+        Arc::new(ScriptedProvider::new("unused")),
+        sender_for("http://127.0.0.1:1"),
+        Arc::new(MemoryService::new(session.clone())),
+    );
+    let pool = HelperPool::new(config, Arc::new(HelperControls::new()));
+
+    assert!(pool.run_once().expect("first run"));
+    assert!(pool.run_once().expect("second run"));
+
+    for id in [missing_conversation.id, missing_brief.id] {
+        let task = session.task(&id).expect("read").expect("task");
+        assert_eq!(
+            task.status,
+            TaskStatus::Failed,
+            "a malformed helper must not stay running"
+        );
+        assert!(task.result.is_some(), "the reason must be recorded");
+    }
 }
 
 #[test]
