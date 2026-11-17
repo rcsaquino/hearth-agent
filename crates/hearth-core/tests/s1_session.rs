@@ -524,3 +524,32 @@ fn queued_submissions_returns_only_queued_in_order() {
         vec![second.id.as_str(), third.id.as_str()]
     );
 }
+
+#[test]
+fn a_submission_names_the_user_entry_it_answers() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "local", "local:1")
+        .expect("conversation");
+
+    let submission = session
+        .submit(
+            &conversation.id,
+            "req-link",
+            "input",
+            json!({"text": "remember the release checklist"}),
+        )
+        .expect("submit")
+        .submission;
+    let entry_id = submission
+        .user_entry_id
+        .expect("the submission must name its user entry");
+    let entry = session
+        .entry(&entry_id)
+        .expect("entry lookup")
+        .expect("the linked entry must exist");
+    assert_eq!(entry.kind, "user");
+    assert_eq!(entry.content["text"], "remember the release checklist");
+    assert_eq!(entry.id, entry_id);
+}
