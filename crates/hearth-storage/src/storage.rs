@@ -1,5 +1,6 @@
 //! Session-facing storage boundary: one writer thread and a read pool.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Condvar, Mutex};
@@ -57,7 +58,13 @@ impl Storage {
     {
         let (done, result) = mpsc::channel::<Result<T, E>>();
         let job: Job = Box::new(move |connection| {
-            let outcome = run_transaction::<T, E, F>(connection, run);
+            // The transaction rolls back as it unwinds. Catching here keeps the
+            // writer thread alive for the next job and tells the caller that
+            // this write failed instead of reporting a closed storage.
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                run_transaction::<T, E, F>(connection, run)
+            }))
+            .unwrap_or_else(|_| Err(E::from(StorageError::Panicked)));
             let _ = done.send(outcome);
         });
 

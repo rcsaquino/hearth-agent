@@ -28,6 +28,8 @@ pub enum StorageError {
     Integrity(String),
     #[error("storage writer is closed")]
     Closed,
+    #[error("a storage write panicked and was rolled back")]
+    Panicked,
     #[error("storage lock is poisoned")]
     Poisoned,
 }
