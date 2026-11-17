@@ -31,7 +31,7 @@ pub struct EntryHit {
 }
 
 impl EntryHit {
-    /// The citation a caller can pass back to `memory_transcript`.
+    /// The citation a caller can pass back to the `memory` tool with `action = transcript`.
     pub fn reference(&self) -> String {
         format!("{}#{}", self.conversation_id, self.seq)
     }

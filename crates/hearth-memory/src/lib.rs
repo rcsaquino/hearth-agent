@@ -53,7 +53,7 @@ pub use errors::{Code, MemoryError, Result};
 pub use extract::{Candidate, candidates};
 pub use model::{Kind, Memory, NewMemory, Source, WriteOutcome};
 pub use store::{Breakdown, CONTENT_LIMIT, breakdown_on, fingerprint};
-pub use tools::{FORGET, RECALL, SAVE, TRANSCRIPT, ToolMemory};
+pub use tools::{FORGET, MEMORY, RECALL, SAVE, TRANSCRIPT, ToolMemory};
 pub use transcript::{EntryHit, TranscriptRead};
 
 /// How much of the prompt memory may occupy.
@@ -1235,10 +1235,10 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_set_is_four_tools() {
+    fn the_tool_set_is_one_memory_tool() {
         let (_directory, service) = service();
         let names: Vec<String> = service.tools().iter().map(|t| t.spec().name).collect();
-        assert_eq!(names, vec![FORGET, RECALL, SAVE, TRANSCRIPT]);
+        assert_eq!(names, vec![MEMORY]);
     }
     #[test]
     fn an_existing_row_still_renders() {
@@ -1262,25 +1262,5 @@ mod tests {
             "recall must not hide an existing row: {}",
             recall.digest
         );
-    }
-}
-
-#[cfg(test)]
-mod memory_tool_shape_tests {
-    use super::*;
-    use hearth_core::Harness;
-    use tempfile::TempDir;
-
-    #[test]
-    fn the_memory_tool_set_is_one_tool() {
-        let directory = TempDir::new().expect("temp home");
-        let harness = Harness::open(directory.path()).expect("harness");
-        let service = MemoryService::new(harness.session().clone());
-        let names: Vec<String> = service
-            .tools()
-            .iter()
-            .map(|tool| tool.spec().name)
-            .collect();
-        assert_eq!(names, vec!["memory"]);
     }
 }

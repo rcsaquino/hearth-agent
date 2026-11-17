@@ -760,7 +760,7 @@ impl Agent {
                     "arguments": preview(&call.arguments.to_string()),
                 }),
             );
-            let outcome = if replay && !replay_safe(&call.name) {
+            let outcome = if replay && !replay_safe(&call.name, &call.arguments) {
                 Some(Err(ToolError::invalid(
                     "not_replayed",
                     format!(
@@ -1015,14 +1015,19 @@ impl Drop for Reservation<'_> {
 /// Whether a pending call may run again after a crash.
 ///
 /// A tool that acts outside the database has no effect row and no idempotency
-/// key, so replaying it can run a command or send a message twice. Those calls
-/// are answered with a not-replayed result instead, and the model decides
-/// whether to issue them again.
-fn replay_safe(name: &str) -> bool {
-    !matches!(
-        name,
-        "shell" | "message" | "schedule" | "media" | "task" | "skill" | "memory_save"
-    )
+/// key, so replaying it can run a command or send a message twice. The memory
+/// tool is safe only for its read actions; a save or a forget is replayed only
+/// when the model asks. Those calls are answered with a not-replayed result
+/// instead, and the model decides whether to issue them again.
+fn replay_safe(name: &str, arguments: &Value) -> bool {
+    match name {
+        "memory" => !matches!(
+            arguments.get("action").and_then(Value::as_str),
+            Some("save" | "forget")
+        ),
+        "shell" | "message" | "schedule" | "media" | "task" | "skill" => false,
+        _ => true,
+    }
 }
 
 fn pending_calls(history: &[Entry]) -> Vec<ToolCall> {

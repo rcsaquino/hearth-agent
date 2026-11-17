@@ -1,13 +1,13 @@
 //! The free safety net for statements the user asked Hearth to keep.
 //!
-//! The agent's own `memory_save` call is the primary write path. This exists
+//! The agent's own `memory` save is the primary write path. This exists
 //! because "remember that ..." is a promise, and a model that forgets to call a
 //! tool has broken it. The extractor is therefore narrow on purpose: four
 //! phrasings where the user's intent is not in doubt.
 //!
 //! It never calls a model, so it costs no tokens and no latency. It runs after
 //! the reply has been delivered, and a wrong candidate is cheap to repair: it
-//! appears in the next recall digest, the agent sees it, and one `memory_forget`
+//! appears in the next recall digest, the agent sees it, and one `memory` forget
 //! removes it. Precision is still worth more than recall here, because a noisy
 //! store spends the user's tokens on every turn from then on.
 

@@ -190,13 +190,13 @@ fn coverage_lines(items: &[&Memory], coverage: &Coverage) -> Vec<String> {
     if !remaining.is_empty() {
         remaining.sort();
         lines.push(format!(
-            "more: {} | memory_recall(subject) for the rest",
+            "more: {} | memory(recall, subject) for the rest",
             remaining.join(", ")
         ));
     }
     if !earlier.is_empty() {
         lines.push(format!(
-            "earlier: {} | memory_recall(as_of) for what was true then",
+            "earlier: {} | memory(recall, as_of) for what was true then",
             earlier.join(", ")
         ));
     }
@@ -395,10 +395,10 @@ mod tests {
     fn only_a_memory_row_starts_with_a_kind() {
         assert!(is_memory_line("fact | alice | now: a statement"));
         assert!(!is_memory_line(
-            "more: alice 3 | memory_recall(subject) for the rest"
+            "more: alice 3 | memory(recall, subject) for the rest"
         ));
         assert!(!is_memory_line(
-            "earlier: alice 2 | memory_recall(as_of) for what was true then"
+            "earlier: alice 2 | memory(recall, as_of) for what was true then"
         ));
         assert!(!is_memory_line("2 more rules were not shown."));
     }

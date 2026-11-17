@@ -361,22 +361,21 @@ mod tests {
 
 /// The ceiling for the always-loaded tool schemas.
 ///
-/// Four memory tools replaced five, and each schema lost a store selector, an id
-/// prefix convention, and a tag array. Measured at 767 tokens for the memory
-/// family against 1,410 for the five it replaced. The registry measures 1,611
-/// tokens, and 1,776 with image, speech to text, and text to speech all
-/// configured, so the guard covers the widest run rather than the smallest. It
-/// sits just above the measured total so a single tool growing a sprawling schema
-/// is caught.
+/// One memory tool replaced four. The shared subject, kind, and limit fields and
+/// one envelope took the memory family from 811 to 485 tokens. The registry
+/// measures 1,287 tokens, and 1,453 with image, speech to text, and text to
+/// speech all configured, so the guard covers the widest run rather than the
+/// smallest. It sits just above the measured total so a single tool growing a
+/// sprawling schema is caught.
 #[cfg(test)]
-const CORE_SCHEMA_TOKEN_BUDGET: i64 = 1_800;
+const CORE_SCHEMA_TOKEN_BUDGET: i64 = 1_470;
 
-/// The memory family's share of the core schema budget.
+/// The memory tool's share of the core schema budget.
 ///
-/// The family measures 811 tokens. The guard sits just above the measured total
-/// so a single tool growing a sprawling schema is caught.
+/// The tool measures 485 tokens. The guard sits just above the measured total so
+/// one action growing a sprawling schema is caught.
 #[cfg(test)]
-const MEMORY_SCHEMA_TOKEN_BUDGET: i64 = 820;
+const MEMORY_SCHEMA_TOKEN_BUDGET: i64 = 500;
 
 #[cfg(test)]
 mod core_budget_tests {
@@ -455,10 +454,7 @@ mod core_budget_tests {
             "shell",
             "web_search",
             "web_fetch",
-            "memory_save",
-            "memory_recall",
-            "memory_forget",
-            "memory_transcript",
+            "memory",
             "message",
             "schedule",
             "skill",
@@ -477,12 +473,12 @@ mod core_budget_tests {
         let memory_tokens: i64 = tools
             .specs()
             .iter()
-            .filter(|spec| spec.name.starts_with("memory_"))
+            .filter(|spec| spec.name == "memory")
             .map(|spec| schema_tokens(std::slice::from_ref(spec)))
             .sum();
         assert!(
             memory_tokens <= MEMORY_SCHEMA_TOKEN_BUDGET,
-            "the four memory schemas use {memory_tokens} tokens"
+            "the memory schema uses {memory_tokens} tokens"
         );
     }
 
@@ -508,18 +504,6 @@ mod core_budget_tests {
         assert!(
             tokens <= CORE_SCHEMA_TOKEN_BUDGET,
             "core tool schemas with media use {tokens} tokens"
-        );
-    }
-
-    #[test]
-    fn the_memory_family_is_one_tool() {
-        let home = tempfile::TempDir::new().expect("temp home");
-        let tools = full_core_tools(home.path(), &settings());
-        let names: Vec<String> = tools.specs().into_iter().map(|spec| spec.name).collect();
-        assert!(names.iter().any(|name| name == "memory"), "{names:?}");
-        assert!(
-            !names.iter().any(|name| name.starts_with("memory_")),
-            "{names:?}"
         );
     }
 }

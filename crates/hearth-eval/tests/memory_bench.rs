@@ -6,7 +6,7 @@
 //! * **Automatic recall** is what the digest put in front of the model. It is what
 //!   the model gets for free.
 //! * **Reachability** is automatic recall, or the expected statement appearing in
-//!   one `memory_recall` call. It is the honest form of "nothing is lost": a miss
+//!   one `memory` recall call. It is the honest form of "nothing is lost": a miss
 //!   in the digest is recoverable in one turn.
 //!
 //! Both are printed with the category they came from, so a regression names the

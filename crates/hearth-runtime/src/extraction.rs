@@ -1,6 +1,6 @@
 //! The post-turn memory net.
 //!
-//! The agent's own `memory_save` call is the primary write path. This runs after
+//! The agent's own `memory` save is the primary write path. This runs after
 //! the answer is delivered and catches the four phrasings where the user's
 //! durable intent is not in doubt, at a cost of a few microseconds and no tokens.
 //!

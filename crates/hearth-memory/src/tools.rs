@@ -1,12 +1,11 @@
-//! The memory tools.
+//! The memory tool.
 //!
-//! Four verbs, not one dispatcher. Each does one thing to one kind of object, so
-//! the model never has to choose a store, remember an id prefix, or discover that
-//! a parameter was wrong for a different mode. That is worth more than the
-//! handful of tokens a combined schema would save: a tool the model uses
-//! correctly on the first call is the cheapest tool there is.
+//! One tool with four actions: `save`, `recall`, `forget`, and `transcript`.
+//! The shape mirrors `files`, so the model has one name and one schema to read.
+//! `action` is required, the related fields are shared, and each action names
+//! the fields it uses.
 //!
-//! The write result carries one extra signal. When a new statement lands beside
+//! The save result carries one extra signal. When a new statement lands beside
 //! an existing one about the same subject, the reply names the neighbour and its
 //! overlap, so the model can replace it on the same turn instead of leaving two
 //! contradictory facts for a later question to trip over.
@@ -22,12 +21,18 @@ use crate::errors::{Code, MemoryError};
 use crate::model::{Kind, Memory, NewMemory};
 use crate::{MemoryService, digest, store};
 
-pub const SAVE: &str = "memory_save";
-pub const RECALL: &str = "memory_recall";
-pub const FORGET: &str = "memory_forget";
-pub const TRANSCRIPT: &str = "memory_transcript";
+/// The tool name.
+pub const MEMORY: &str = "memory";
+/// Store one statement.
+pub const SAVE: &str = "save";
+/// Search or read statements.
+pub const RECALL: &str = "recall";
+/// Delete one statement permanently.
+pub const FORGET: &str = "forget";
+/// Search the saved conversation record.
+pub const TRANSCRIPT: &str = "transcript";
 
-/// Everything the tools need.
+/// Everything the tool needs.
 ///
 /// `source` is the entry this run's writes came from. It lives on the tool set
 /// rather than on the service, because the service is shared with the helper
@@ -40,22 +45,11 @@ pub struct ToolMemory {
     pub zone: Zone,
 }
 
-/// Build the four tools.
+/// Build the memory tool.
 pub fn build(memory: &ToolMemory) -> Vec<Arc<dyn Tool>> {
-    vec![
-        Arc::new(ForgetTool {
-            memory: memory.clone(),
-        }),
-        Arc::new(RecallTool {
-            memory: memory.clone(),
-        }),
-        Arc::new(SaveTool {
-            memory: memory.clone(),
-        }),
-        Arc::new(TranscriptTool {
-            memory: memory.clone(),
-        }),
-    ]
+    vec![Arc::new(MemoryTool {
+        memory: memory.clone(),
+    })]
 }
 
 fn failure(error: MemoryError) -> ToolError {
@@ -111,50 +105,88 @@ fn limit(value: &Value, default: i64) -> i64 {
         .clamp(1, 50)
 }
 
-struct SaveTool {
+struct MemoryTool {
     memory: ToolMemory,
 }
 
-impl Tool for SaveTool {
+impl Tool for MemoryTool {
     fn spec(&self) -> ToolSpec {
         spec(
-            SAVE,
-            "Store one durable statement about the user or their world: a preference, a person, \
-             a decision, a commitment, or a fact. Use it when the user says something lasting. \
-             Give `subject` the person, project, or thing it is about; that is what makes it \
-             findable. To replace a stored statement, pass its id as `supersedes`; history is \
-             kept. Pin only a rule obeyed every turn.",
+            MEMORY,
+            "Read or change memory. `action` selects the operation: `save` stores one durable \
+             statement, `recall` searches or reads by id, subject, or time, `forget` deletes one \
+             statement permanently, and `transcript` searches the saved conversation record.",
             json!({
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [SAVE, RECALL, FORGET, TRANSCRIPT]
+                    },
                     "content": {
                         "type": "string",
-                        "description": "One standalone statement of at most 200 characters, understandable without prior context. Clarify references when necessary to avoid ambiguity, but do not add unnecessary details."
+                        "description": "For save. One standalone statement of at most 200 characters, understandable without prior context. Clarify references when necessary to avoid ambiguity, but do not add unnecessary details."
                     },
                     "kind": {
                         "type": "string",
                         "enum": ["rule", "preference", "person", "decision", "commitment", "episode", "fact"],
-                        "description": "Defaults to fact."
+                        "description": "For save or recall. On save it defaults to fact. On recall it filters."
                     },
                     "subject": {
                         "type": "string",
-                        "description": "The person, project, or thing it is about, such as alice or the board."
+                        "description": "For save or recall. The person, project, or thing it is about, such as alice or the board."
                     },
                     "supersedes": {
                         "type": "string",
-                        "description": "The id of the statement this one replaces."
+                        "description": "For save. The id of the statement this one replaces."
                     },
                     "pin": {
                         "type": "boolean",
-                        "description": "Injects a rule into every request. Only for kind rule."
+                        "description": "For save. Injects a rule into every request. Only for kind rule."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "For recall or transcript. Words to search for."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "For recall or forget. One statement's id, such as m_0123456789. Case does not matter."
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "description": "For recall. RFC3339 or YYYY-MM-DD. Reads what was true then; a bare date means that whole local day."
+                    },
+                    "reference": {
+                        "type": "string",
+                        "description": "For transcript. A conversation#seq citation."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "For recall or transcript. At most 50. Recall defaults to 20 and transcript to 10."
                     }
                 },
-                "required": ["content"]
+                "required": ["action"]
             }),
         )
     }
 
     fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
+        let action = required(arguments, "action")?;
+        match action.as_str() {
+            SAVE => self.save(arguments),
+            RECALL => self.recall(arguments),
+            FORGET => self.forget(arguments),
+            TRANSCRIPT => self.transcript(arguments),
+            other => Err(ToolError::invalid(
+                "unknown_action",
+                format!("unknown memory action: {other}"),
+            )),
+        }
+    }
+}
+
+impl MemoryTool {
+    fn save(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
         let content = required(arguments, "content")?;
         let kind = match optional(arguments, "kind") {
             Some(value) => value
@@ -212,53 +244,8 @@ impl Tool for SaveTool {
         }
         Ok(text(reply))
     }
-}
 
-struct RecallTool {
-    memory: ToolMemory,
-}
-
-impl Tool for RecallTool {
-    fn spec(&self) -> ToolSpec {
-        spec(
-            RECALL,
-            "Search memory. With no arguments it lists the newest statements. `id` returns one \
-             statement in full. `subject` returns everything about a person, project, or thing. \
-             `as_of` reads what was true at that instant. Use it before answering a question \
-             about the user's world, and whenever the recall digest says more exists.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Keywords to search for."
-                    },
-                    "id": {
-                        "type": "string",
-                        "description": "One statement's id, such as m_0123456789. Case does not matter."
-                    },
-                    "subject": {
-                        "type": "string",
-                        "description": "Everything about this person, project, or thing."
-                    },
-                    "kind": {
-                        "type": "string",
-                        "enum": ["rule", "preference", "person", "decision", "commitment", "episode", "fact"]
-                    },
-                    "as_of": {
-                        "type": "string",
-                        "description": "RFC3339 or YYYY-MM-DD. Reads what was true then; a bare date means that whole local day."
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "At most 50. Defaults to 20."
-                    }
-                }
-            }),
-        )
-    }
-
-    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
+    fn recall(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
         let at = match optional(arguments, "as_of") {
             Some(value) => Some(parse_instant(&value, &self.memory.zone)?),
             None => None,
@@ -350,103 +337,14 @@ impl Tool for RecallTool {
         }
         Ok(text(lines.join("\n")))
     }
-}
 
-/// Parse an RFC3339 instant or a date.
-fn parse_instant(value: &str, zone: &Zone) -> Result<i64, ToolError> {
-    if let Ok(instant) =
-        time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
-    {
-        return Ok(instant.unix_timestamp_nanos().div_euclid(1_000) as i64);
-    }
-    let date = time::Date::parse(
-        value,
-        time::macros::format_description!("[year]-[month]-[day]"),
-    )
-    .map_err(|_| {
-        ToolError::invalid(
-            "invalid_input",
-            "as_of must be an RFC3339 instant or a YYYY-MM-DD date.",
-        )
-    })?;
-    let utc_midnight = date
-        .midnight()
-        .assume_utc()
-        .unix_timestamp_nanos()
-        .div_euclid(1_000) as i64;
-    // The date names the whole local day, and the store predicate is
-    // start-inclusive and end-exclusive, so the boundary is the next day's start.
-    Ok(date
-        .next_day()
-        .and_then(|next| {
-            let year = i16::try_from(next.year()).ok()?;
-            zone.day_start(year, next.month().into(), next.day())
-        })
-        .unwrap_or(utc_midnight))
-}
-
-struct ForgetTool {
-    memory: ToolMemory,
-}
-
-impl Tool for ForgetTool {
-    fn spec(&self) -> ToolSpec {
-        spec(
-            FORGET,
-            "Delete one statement permanently. Prefer `memory_save` with `supersedes` when a fact \
-             changed, because the old version is worth keeping as history. Delete when the \
-             statement was wrong, private, or never true.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "The statement's id."
-                    }
-                },
-                "required": ["id"]
-            }),
-        )
-    }
-
-    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
+    fn forget(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
         let id = required(arguments, "id")?;
         self.memory.service.forget(&id).map_err(failure)?;
         Ok(text(format!("forgotten {id}")))
     }
-}
 
-struct TranscriptTool {
-    memory: ToolMemory,
-}
-
-impl Tool for TranscriptTool {
-    fn spec(&self) -> ToolSpec {
-        spec(
-            TRANSCRIPT,
-            "Search the saved conversation record, or read one entry by its conversation#seq \
-             reference. Use it for what was literally said in an earlier conversation.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Words to search for."
-                    },
-                    "reference": {
-                        "type": "string",
-                        "description": "A conversation#seq citation."
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "At most 50. Defaults to 10."
-                    }
-                }
-            }),
-        )
-    }
-
-    fn call(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
+    fn transcript(&self, arguments: &Value) -> Result<ToolOutput, ToolError> {
         if let Some(reference) = optional(arguments, "reference") {
             let entry = self
                 .memory
@@ -482,6 +380,51 @@ impl Tool for TranscriptTool {
     }
 }
 
+/// Parse an RFC3339 instant or a date.
+fn parse_instant(value: &str, zone: &Zone) -> Result<i64, ToolError> {
+    if let Ok(instant) =
+        time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+    {
+        return Ok(instant.unix_timestamp_nanos().div_euclid(1_000) as i64);
+    }
+    let date = time::Date::parse(
+        value,
+        time::macros::format_description!("[year]-[month]-[day]"),
+    )
+    .map_err(|_| {
+        ToolError::invalid(
+            "invalid_input",
+            "as_of must be an RFC3339 instant or a YYYY-MM-DD date.",
+        )
+    })?;
+    let utc_midnight = date
+        .midnight()
+        .assume_utc()
+        .unix_timestamp_nanos()
+        .div_euclid(1_000) as i64;
+    // The date names the whole local day, and the store predicate is
+    // start-inclusive and end-exclusive, so the boundary is the next day's start.
+    Ok(date
+        .next_day()
+        .and_then(|next| {
+            let year = i16::try_from(next.year()).ok()?;
+            zone.day_start(year, next.month().into(), next.day())
+        })
+        .unwrap_or(utc_midnight))
+}
+
+#[cfg(test)]
+fn call(
+    tools: &hearth_tools::ToolRegistry,
+    action: &str,
+    mut arguments: Value,
+) -> Result<hearth_tools::ToolOutput, hearth_tools::ToolError> {
+    arguments["action"] = json!(action);
+    tools
+        .call(MEMORY, &arguments)
+        .expect("the memory tool is registered")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +450,45 @@ mod tests {
     }
 
     #[test]
+    fn the_memory_tool_is_one_tool_with_four_actions() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let spec = tools
+            .specs()
+            .into_iter()
+            .find(|spec| spec.name == MEMORY)
+            .expect("the memory tool");
+        assert_eq!(spec.parameters["required"], json!(["action"]));
+        assert_eq!(
+            spec.parameters["properties"]["action"]["enum"],
+            json!([SAVE, RECALL, FORGET, TRANSCRIPT])
+        );
+    }
+
+    #[test]
+    fn the_memory_tool_requires_an_action() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let error = tools
+            .call(MEMORY, &json!({"content": "a statement"}))
+            .expect("call")
+            .expect_err("action is required");
+        assert!(error.message.contains("action is required"), "{error:?}");
+    }
+
+    #[test]
+    fn an_unknown_memory_action_is_refused() {
+        let (_directory, service) = memory();
+        let tools = registry(&service);
+        let error = tools
+            .call(MEMORY, &json!({"action": "rename"}))
+            .expect("call")
+            .expect_err("unknown action");
+        assert_eq!(error.code, "unknown_action");
+        assert!(error.message.contains("rename"), "{error:?}");
+    }
+
+    #[test]
     fn a_kind_filter_applies_before_the_limit() {
         let (_directory, service) = memory();
         service
@@ -519,10 +501,7 @@ mod tests {
         }
         let tools = registry(&service);
 
-        let reply = tools
-            .call(RECALL, &json!({"kind": "rule"}))
-            .expect("call")
-            .expect("result");
+        let reply = call(&tools, RECALL, json!({"kind": "rule"})).expect("result");
 
         assert!(
             reply.content.contains("never deploy on friday"),
@@ -535,18 +514,15 @@ mod tests {
     fn a_recall_line_keeps_its_id_for_addressing() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
-            )
-            .expect("call")
-            .expect("result");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+        )
+        .expect("result");
         let id = saved.content.split_whitespace().nth(1).expect("id");
-        let recalled = tools
-            .call(RECALL, &json!({"query": "who runs the OR board"}))
-            .expect("call")
-            .expect("result");
+        let recalled =
+            call(&tools, RECALL, json!({"query": "who runs the OR board"})).expect("result");
         let row = recalled
             .content
             .lines()
@@ -560,19 +536,15 @@ mod tests {
     fn a_saved_statement_can_be_recalled_by_id() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
-            )
-            .expect("call")
-            .expect("result");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+        )
+        .expect("result");
         assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
         let id = saved.content.split_whitespace().nth(1).expect("id");
-        let recalled = tools
-            .call(RECALL, &json!({"id": id}))
-            .expect("call")
-            .expect("result");
+        let recalled = call(&tools, RECALL, json!({"id": id})).expect("result");
         assert!(
             recalled.content.contains("OR board"),
             "{}",
@@ -584,19 +556,15 @@ mod tests {
     fn a_recall_by_id_accepts_case_and_whitespace() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
-            )
-            .expect("call")
-            .expect("result");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+        )
+        .expect("result");
         let id = saved.content.split_whitespace().nth(1).expect("id");
         let typed = format!("  {}  ", id.to_uppercase());
-        let recalled = tools
-            .call(RECALL, &json!({"id": typed}))
-            .expect("call")
-            .expect("result");
+        let recalled = call(&tools, RECALL, json!({"id": typed})).expect("result");
         assert!(
             recalled.content.contains("OR board"),
             "{}",
@@ -608,23 +576,16 @@ mod tests {
     fn a_forget_by_id_accepts_case_and_whitespace() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "Alice manages the OR board.", "subject": "alice"}),
-            )
-            .expect("call")
-            .expect("result");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "Alice manages the OR board.", "subject": "alice"}),
+        )
+        .expect("result");
         let id = saved.content.split_whitespace().nth(1).expect("id");
         let typed = format!("  {}  ", id.to_uppercase());
-        tools
-            .call(FORGET, &json!({"id": typed}))
-            .expect("call")
-            .expect("result");
-        let error = tools
-            .call(RECALL, &json!({"id": id}))
-            .expect("call")
-            .expect_err("the row is gone");
+        call(&tools, FORGET, json!({"id": typed})).expect("result");
+        let error = call(&tools, RECALL, json!({"id": id})).expect_err("the row is gone");
         assert!(error.message.contains("does not exist"), "{error:?}");
     }
 
@@ -632,13 +593,12 @@ mod tests {
     fn a_pronoun_is_accepted_by_the_save_tool() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "He likes apples", "subject": "bob"}),
-            )
-            .expect("call")
-            .expect("a pronoun stores like any other word");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "He likes apples", "subject": "bob"}),
+        )
+        .expect("a pronoun stores like any other word");
         assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
         assert_eq!(service.count().expect("count"), 1);
     }
@@ -651,10 +611,12 @@ mod tests {
             ("Bob likes apples", "bob"),
             ("the user likes apples", "user"),
         ] {
-            tools
-                .call(SAVE, &json!({"content": content, "subject": subject}))
-                .expect("call")
-                .expect("a named actor is standalone");
+            call(
+                &tools,
+                SAVE,
+                json!({"content": content, "subject": subject}),
+            )
+            .expect("a named actor is standalone");
         }
         assert_eq!(service.count().expect("count"), 2);
     }
@@ -663,9 +625,7 @@ mod tests {
     fn a_first_person_save_is_stored() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(SAVE, &json!({"content": "I prefer dark mode"}))
-            .expect("call")
+        let saved = call(&tools, SAVE, json!({"content": "I prefer dark mode"}))
             .expect("first person stores as written");
         assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
     }
@@ -674,13 +634,12 @@ mod tests {
     fn a_third_person_statement_stores_whatever_its_subject() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "she manages the OR board", "subject": "alice"}),
-            )
-            .expect("call")
-            .expect("the subject does not change what content is allowed");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "she manages the OR board", "subject": "alice"}),
+        )
+        .expect("the subject does not change what content is allowed");
         assert!(saved.content.starts_with("saved m_"), "{}", saved.content);
     }
 
@@ -688,13 +647,12 @@ mod tests {
     fn a_rule_is_stored_pinned() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "Never deploy on Friday", "kind": "rule", "pin": true}),
-            )
-            .expect("call")
-            .expect("an imperative rule is standalone");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "Never deploy on Friday", "kind": "rule", "pin": true}),
+        )
+        .expect("an imperative rule is standalone");
         assert!(saved.content.contains("pinned"), "{}", saved.content);
     }
 
@@ -702,7 +660,7 @@ mod tests {
         let spec = service
             .tools()
             .iter()
-            .find(|tool| tool.spec().name == SAVE)
+            .find(|tool| tool.spec().name == MEMORY)
             .expect("save tool")
             .spec();
         spec.parameters["properties"]["content"]["description"]
@@ -742,20 +700,18 @@ mod tests {
     fn a_statement_beside_a_related_one_names_the_neighbour() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        tools
-            .call(
-                SAVE,
-                &json!({"content": "the primary database is Postgres", "subject": "primary database"}),
-            )
-            .expect("call")
-            .expect("result");
-        let second = tools
-            .call(
-                SAVE,
-                &json!({"content": "the primary database is SQLite now", "subject": "primary database"}),
-            )
-            .expect("call")
-            .expect("result");
+        call(
+            &tools,
+            SAVE,
+            json!({"content": "the primary database is Postgres", "subject": "primary database"}),
+        )
+        .expect("result");
+        let second = call(
+            &tools,
+            SAVE,
+            json!({"content": "the primary database is SQLite now", "subject": "primary database"}),
+        )
+        .expect("result");
         assert!(
             second.content.contains("not a duplicate"),
             "a neighbour is not a replacement: {}",
@@ -772,20 +728,18 @@ mod tests {
     fn a_subjectless_statement_beside_a_related_one_names_the_neighbour() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        tools
-            .call(
-                SAVE,
-                &json!({"content": "Alice manages the OR board", "subject": "alice"}),
-            )
-            .expect("call")
-            .expect("result");
-        let second = tools
-            .call(
-                SAVE,
-                &json!({"content": "the OR board needs two approvals"}),
-            )
-            .expect("call")
-            .expect("result");
+        call(
+            &tools,
+            SAVE,
+            json!({"content": "Alice manages the OR board", "subject": "alice"}),
+        )
+        .expect("result");
+        let second = call(
+            &tools,
+            SAVE,
+            json!({"content": "the OR board needs two approvals"}),
+        )
+        .expect("result");
         assert!(
             second.content.contains("related"),
             "a subjectless write must still name its neighbour: {}",
@@ -811,13 +765,12 @@ mod tests {
             )
             .expect("second");
         let tools = hearth_tools::ToolRegistry::new(service.tools_at(None, Zone::fixed(8 * 3600)));
-        let reply = tools
-            .call(
-                RECALL,
-                &json!({"subject": "release", "as_of": "2026-01-15"}),
-            )
-            .expect("call")
-            .expect("result");
+        let reply = call(
+            &tools,
+            RECALL,
+            json!({"subject": "release", "as_of": "2026-01-15"}),
+        )
+        .expect("result");
         assert!(
             reply
                 .content
@@ -838,31 +791,26 @@ mod tests {
     fn a_replaced_statement_is_kept_as_history() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let first = tools
-            .call(
-                SAVE,
-                &json!({"content": "the lab is in building 4", "subject": "lab"}),
-            )
-            .expect("call")
-            .expect("result");
+        let first = call(
+            &tools,
+            SAVE,
+            json!({"content": "the lab is in building 4", "subject": "lab"}),
+        )
+        .expect("result");
         let id = first
             .content
             .split_whitespace()
             .nth(1)
             .expect("id")
             .to_owned();
-        tools
-            .call(
-                SAVE,
-                &json!({"content": "the lab is in building 9", "subject": "lab", "supersedes": id}),
-            )
-            .expect("call")
-            .expect("result");
+        call(
+            &tools,
+            SAVE,
+            json!({"content": "the lab is in building 9", "subject": "lab", "supersedes": id}),
+        )
+        .expect("result");
 
-        let current = tools
-            .call(RECALL, &json!({"query": "where is the lab"}))
-            .expect("call")
-            .expect("result");
+        let current = call(&tools, RECALL, json!({"query": "where is the lab"})).expect("result");
         assert!(
             current.content.contains("building 9"),
             "{}",
@@ -874,10 +822,7 @@ mod tests {
             current.content
         );
 
-        let historical = tools
-            .call(RECALL, &json!({"id": id}))
-            .expect("call")
-            .expect("result");
+        let historical = call(&tools, RECALL, json!({"id": id})).expect("result");
         assert!(
             historical.content.contains("building 4"),
             "{}",
@@ -894,10 +839,7 @@ mod tests {
     fn forgetting_a_missing_statement_says_so() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let error = tools
-            .call(FORGET, &json!({"id": "m_missing"}))
-            .expect("call")
-            .expect_err("missing");
+        let error = call(&tools, FORGET, json!({"id": "m_missing"})).expect_err("missing");
         assert!(error.message.contains("does not exist"), "{error:?}");
     }
 
@@ -924,13 +866,12 @@ mod tests {
         let tools = hearth_tools::ToolRegistry::new(
             service.tools_at(None, hearth_core::Zone::fixed(8 * 3600)),
         );
-        let reply = tools
-            .call(
-                TRANSCRIPT,
-                &json!({"reference": format!("{}#1", conversation.id)}),
-            )
-            .expect("call")
-            .expect("result");
+        let reply = call(
+            &tools,
+            TRANSCRIPT,
+            json!({"reference": format!("{}#1", conversation.id)}),
+        )
+        .expect("result");
         assert!(
             reply.content.contains("2026-01-15T09:00:00+08:00"),
             "{}",
@@ -942,10 +883,7 @@ mod tests {
     fn a_greeting_is_refused_as_content() {
         let (_directory, service) = memory();
         let tools = registry(&service);
-        let error = tools
-            .call(SAVE, &json!({"content": "   "}))
-            .expect("call")
-            .expect_err("empty");
+        let error = call(&tools, SAVE, json!({"content": "   "})).expect_err("empty");
         assert_eq!(error.code, "invalid_input");
     }
 
@@ -964,10 +902,8 @@ mod tests {
         let (_directory, service) = memory();
         let tools = registry(&service);
         let length = crate::store::CONTENT_LIMIT + 1;
-        let error = tools
-            .call(SAVE, &json!({"content": "a".repeat(length)}))
-            .expect("call")
-            .expect_err("too long");
+        let error =
+            call(&tools, SAVE, json!({"content": "a".repeat(length)})).expect_err("too long");
         assert_eq!(error.code, "invalid_input");
         assert!(
             error.message.contains(&length.to_string()),
@@ -996,19 +932,15 @@ mod timestamp_tests {
         let harness = Harness::open(directory.path()).expect("harness");
         let service = MemoryService::new(harness.session().clone());
         let tools = hearth_tools::ToolRegistry::new(service.tools());
-        let saved = tools
-            .call(
-                SAVE,
-                &json!({"content": "the OR board meets on Tuesdays", "subject": "or board"}),
-            )
-            .expect("call")
-            .expect("result");
+        let saved = call(
+            &tools,
+            SAVE,
+            json!({"content": "the OR board meets on Tuesdays", "subject": "or board"}),
+        )
+        .expect("result");
         let id = saved.content.split_whitespace().nth(1).expect("id");
 
-        let recalled = tools
-            .call(RECALL, &json!({"id": id}))
-            .expect("call")
-            .expect("result");
+        let recalled = call(&tools, RECALL, json!({"id": id})).expect("result");
         let since = recalled
             .content
             .split("since ")
@@ -1058,10 +990,7 @@ mod as_of_tests {
 
         let tools = hearth_tools::ToolRegistry::new(service.tools());
         let as_of = Zone::utc().iso(old + 5_000_000);
-        let recalled = tools
-            .call(RECALL, &json!({"as_of": as_of}))
-            .expect("call")
-            .expect("result");
+        let recalled = call(&tools, RECALL, json!({"as_of": as_of})).expect("result");
         assert!(
             recalled.content.contains("Postgres"),
             "the as-of read must return the old statement: {}",
@@ -1072,42 +1001,5 @@ mod as_of_tests {
             "the as-of read must not return today's statement: {}",
             recalled.content
         );
-    }
-}
-
-#[cfg(test)]
-mod tool_shape_tests {
-    use super::*;
-    use hearth_core::Harness;
-    use tempfile::TempDir;
-
-    fn registry() -> hearth_tools::ToolRegistry {
-        let directory = TempDir::new().expect("temp home");
-        let harness = Harness::open(directory.path()).expect("harness");
-        let service = MemoryService::new(harness.session().clone());
-        hearth_tools::ToolRegistry::new(service.tools())
-    }
-
-    #[test]
-    fn memory_is_one_tool_with_four_actions() {
-        let tools = registry();
-        let specs = tools.specs();
-        let names: Vec<&str> = specs.iter().map(|spec| spec.name.as_str()).collect();
-        assert_eq!(names, vec!["memory"], "{names:?}");
-        assert_eq!(specs[0].parameters["required"], json!(["action"]));
-        assert_eq!(
-            specs[0].parameters["properties"]["action"]["enum"],
-            json!(["save", "recall", "forget", "transcript"])
-        );
-    }
-
-    #[test]
-    fn an_unknown_memory_action_is_refused() {
-        let tools = registry();
-        let error = tools
-            .call("memory", &json!({"action": "rename"}))
-            .expect("the memory tool")
-            .expect_err("unknown action");
-        assert_eq!(error.code, "unknown_action");
     }
 }
