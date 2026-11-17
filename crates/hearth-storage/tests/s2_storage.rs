@@ -96,6 +96,35 @@ fn a_failed_write_leaves_no_commit_and_no_sequence_gap() {
 }
 
 #[test]
+fn a_panicking_write_does_not_close_the_writer() {
+    let (_directory, path) = database();
+    let storage = Storage::open(&path).expect("open storage");
+
+    let panicked: Result<(), hearth_storage::StorageError> =
+        storage.write(|_writer| panic!("a write closure panicked"));
+    assert!(
+        panicked.is_err(),
+        "a panic reaches the caller as a write error"
+    );
+
+    let next = storage
+        .write(|writer| -> Result<i64, hearth_storage::StorageError> {
+            let seq: i64 = writer.query_row(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM commits",
+                [],
+                |row| row.get(0),
+            )?;
+            writer.execute(
+                "INSERT INTO commits (seq, created_at, conversation_id, kind) VALUES (?, 0, NULL, 'after-panic')",
+                (seq,),
+            )?;
+            Ok(seq)
+        })
+        .expect("a later write still commits");
+    assert_eq!(next, 1);
+}
+
+#[test]
 fn sequential_writes_get_increasing_sequences() {
     let (_directory, path) = database();
     let storage = Storage::open(&path).expect("open storage");
