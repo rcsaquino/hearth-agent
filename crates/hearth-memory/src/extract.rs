@@ -110,7 +110,7 @@ pub fn candidates(text: &str) -> Vec<Candidate> {
         return Vec::new();
     }
     let mut found: Vec<Candidate> = Vec::new();
-    for sentence in sentences(&message) {
+    for sentence in crate::text::sentences(&message) {
         let sentence = sentence.trim();
         if found.len() >= MAX_CANDIDATES {
             break;
@@ -135,26 +135,6 @@ pub fn candidates(text: &str) -> Vec<Candidate> {
 
 fn normalize_spacing(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn sentences(text: &str) -> Vec<&str> {
-    let mut spans = Vec::new();
-    let mut start = 0;
-    for (index, character) in text.char_indices() {
-        if matches!(character, '.' | '!' | '?' | '\n') {
-            let end = index + character.len_utf8();
-            let span = &text[start..end];
-            if !span.trim().is_empty() {
-                spans.push(span);
-            }
-            start = end;
-        }
-    }
-    let rest = &text[start..];
-    if !rest.trim().is_empty() {
-        spans.push(rest);
-    }
-    spans
 }
 
 fn trim_end(sentence: &str) -> String {

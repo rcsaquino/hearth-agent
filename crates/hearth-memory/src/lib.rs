@@ -31,6 +31,7 @@ mod query;
 mod rank;
 mod retrieval;
 mod store;
+mod text;
 mod tools;
 mod transcript;
 

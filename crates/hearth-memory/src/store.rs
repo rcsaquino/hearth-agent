@@ -264,6 +264,13 @@ pub fn validate(item: &NewMemory) -> Result<()> {
     if content.contains('\0') {
         return Err(MemoryError::invalid("memory content cannot contain NUL."));
     }
+    let statements = crate::text::statement_count(content);
+    if statements > 1 {
+        return Err(MemoryError::invalid(format!(
+            "memory content holds {statements} statements; save one statement per memory. \
+             Split it into separate memories."
+        )));
+    }
     if item.subject.chars().count() > SUBJECT_LIMIT {
         return Err(MemoryError::invalid(format!(
             "memory subject must be at most {SUBJECT_LIMIT} characters."
