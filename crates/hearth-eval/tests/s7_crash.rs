@@ -277,3 +277,69 @@ fn a_crash_mid_stream_keeps_the_input_and_retries_once() {
     assert_eq!(submission.status, SubmissionStatus::Done);
     assert!(submission.answer_entry_id.is_some());
 }
+
+#[test]
+fn a_crash_during_consolidation_leaves_no_row_half_closed() {
+    let home = home();
+    let home_text = home.path().to_str().expect("utf-8 home");
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        let session = harness.session().clone();
+        let now = session.now_micros();
+        let content = "the user prefers dark mode";
+        let digest = hearth_memory::fingerprint(content);
+        session
+            .storage()
+            .write(move |writer| {
+                for (id, kind) in [("m_dup1", "fact"), ("m_dup2", "preference")] {
+                    writer.execute(
+                        "INSERT INTO memories (id, kind, content, subject, terms, fingerprint, pinned, \
+                         source_kind, source_entry, valid_from, valid_to, created_at, updated_at, revision) \
+                         VALUES (?, ?, ?, 'user', '', ?, 0, 'user', NULL, ?, NULL, ?, ?, 1)",
+                        hearth_storage::rusqlite::params![id, kind, content, digest, now, now, now],
+                    )?;
+                }
+                Ok::<_, hearth_memory::MemoryError>(())
+            })
+            .expect("seed duplicates");
+    }
+
+    let crashed = run(
+        home.path(),
+        &["consolidate", home_text],
+        Some("memory.consolidate"),
+    );
+    assert!(
+        !crashed.status.success(),
+        "the driver did not crash: {}",
+        output_text(&crashed)
+    );
+
+    {
+        let harness = Harness::open(home.path()).expect("reopen harness");
+        let service = hearth_memory::MemoryService::new(harness.session().clone());
+        assert_eq!(
+            service.count().expect("count"),
+            2,
+            "a rolled-back pass must leave both rows current"
+        );
+        assert!(
+            harness
+                .session()
+                .meta_value("last_consolidation")
+                .expect("stamp lookup")
+                .is_none(),
+            "a rolled-back pass must not stamp the store"
+        );
+    }
+
+    let retry = run(home.path(), &["consolidate", home_text], None);
+    assert!(
+        retry.status.success(),
+        "the retry failed: {}",
+        output_text(&retry)
+    );
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let service = hearth_memory::MemoryService::new(harness.session().clone());
+    assert_eq!(service.count().expect("count"), 1);
+}

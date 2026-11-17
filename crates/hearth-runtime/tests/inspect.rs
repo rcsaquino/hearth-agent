@@ -363,3 +363,71 @@ fn prompt_exchanges_settle_each_request_with_its_outcome() {
         "a request with no outcome yet says nothing"
     );
 }
+
+#[test]
+fn memory_state_counts_the_store_not_the_loaded_page() {
+    let home = TempDir::new().expect("temp home");
+    init(home.path(), options()).expect("init");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let memory = MemoryService::new(harness.session().clone());
+    memory
+        .write(NewMemory::new("Pinned rule.").kind(Kind::Rule).pinned(true))
+        .expect("rule");
+    let retired = memory
+        .write(NewMemory::new("Retired fact.").subject("retired"))
+        .expect("retired")
+        .memory()
+        .clone();
+    memory
+        .write(
+            NewMemory::new("Replacement fact.")
+                .subject("retired")
+                .supersedes(retired.id),
+        )
+        .expect("replacement");
+    let rows: Vec<NewMemory> = (0..1_005)
+        .map(|index| NewMemory::new(format!("note {index}")).subject(format!("subject{index}")))
+        .collect();
+    memory.write_many(rows).expect("bulk write");
+
+    let page = list_memories(home.path(), 1_000).expect("page");
+    assert_eq!(page.len(), 1_000, "the tab page is bounded");
+    let state = hearth_runtime::inspect::memory_state(home.path()).expect("memory state");
+    assert_eq!(state.counts.pinned, 1, "{state:?}");
+    assert_eq!(state.counts.active, 1_006, "{state:?}");
+    assert_eq!(state.counts.retired, 1, "{state:?}");
+    assert!(state.audit.is_none(), "no pass has run");
+}
+
+#[test]
+fn memory_state_reads_the_last_audit_report() {
+    let home = TempDir::new().expect("temp home");
+    init(home.path(), options()).expect("init");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let memory = MemoryService::new(harness.session().clone());
+    let now = harness.session().now_micros();
+    let content = "the user prefers dark mode";
+    let fingerprint = hearth_memory::fingerprint(content);
+    harness
+        .session()
+        .storage()
+        .write(move |writer| {
+            for (id, kind) in [("m_dup1", "fact"), ("m_dup2", "preference")] {
+                writer.execute(
+                    "INSERT INTO memories (id, kind, content, subject, terms, fingerprint, pinned, \
+                     source_kind, source_entry, valid_from, valid_to, created_at, updated_at, revision) \
+                     VALUES (?, ?, ?, 'user', '', ?, 0, 'user', NULL, ?, NULL, ?, ?, 1)",
+                    hearth_storage::rusqlite::params![id, kind, content, fingerprint, now, now, now],
+                )?;
+            }
+            Ok::<_, hearth_memory::MemoryError>(())
+        })
+        .expect("seed duplicates");
+    memory.consolidate().expect("consolidate");
+
+    let state = hearth_runtime::inspect::memory_state(home.path()).expect("memory state");
+    let audit = state.audit.expect("the report is readable");
+    assert_eq!(audit.canonical_closed, 1);
+    assert_eq!(state.counts.active, 1);
+    assert_eq!(state.counts.retired, 1);
+}

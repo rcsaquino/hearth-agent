@@ -400,6 +400,24 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_statement_is_shown_once_and_counted() {
+        let items = vec![
+            memory("m_1", "user", "the user prefers dark mode"),
+            memory("m_2", "user", "the user prefers dark mode"),
+        ];
+        let block = recall_body(&items, &Coverage::default(), 0);
+        assert_eq!(
+            block.matches("the user prefers dark mode").count(),
+            1,
+            "the same statement must not spend tokens twice: {block}"
+        );
+        assert!(
+            block.contains("1 hidden"),
+            "the digest must say how many rows it collapsed: {block}"
+        );
+    }
+
+    #[test]
     fn an_empty_recall_renders_nothing() {
         assert!(recall_body(&[], &Coverage::default(), 0).is_empty());
     }

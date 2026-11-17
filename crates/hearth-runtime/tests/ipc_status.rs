@@ -175,3 +175,74 @@ fn status_reports_the_active_skill_count_and_index_cost() {
         "the status must measure the same index the agent builds: {status}"
     );
 }
+
+#[test]
+fn status_reports_the_memory_breakdown_and_the_last_audit() {
+    use hearth_memory::{Kind, NewMemory};
+
+    let home = TempDir::new().expect("temp home");
+    write_settings(home.path(), "UTC");
+    let harness = Harness::open(home.path()).expect("harness");
+    let session = harness.session().clone();
+    let memory = MemoryService::new(session.clone());
+    memory
+        .write(NewMemory::new("Pinned rule.").kind(Kind::Rule).pinned(true))
+        .expect("rule");
+    memory
+        .write(NewMemory::new("the user prefers tea").subject("user"))
+        .expect("active");
+    let retired = memory
+        .write(NewMemory::new("Retired fact.").subject("retired"))
+        .expect("retired")
+        .memory()
+        .clone();
+    memory
+        .write(
+            NewMemory::new("Replacement fact.")
+                .subject("retired")
+                .supersedes(retired.id),
+        )
+        .expect("replacement");
+    let now = session.now_micros();
+    let content = "the user prefers tea";
+    let fingerprint = hearth_memory::fingerprint(content);
+    session
+        .storage()
+        .write(move |writer| {
+            writer.execute(
+                "INSERT INTO memories (id, kind, content, subject, terms, fingerprint, pinned, \
+                 source_kind, source_entry, valid_from, valid_to, created_at, updated_at, revision) \
+                 VALUES ('m_dup', 'preference', ?, 'user', '', ?, 0, 'user', NULL, ?, NULL, ?, ?, 1)",
+                hearth_storage::rusqlite::params![content, fingerprint, now, now, now],
+            )?;
+            Ok::<_, hearth_memory::MemoryError>(())
+        })
+        .expect("seed duplicate");
+    memory.consolidate().expect("consolidate");
+
+    let context = StatusContext::new(
+        session,
+        "fake-model".to_owned(),
+        Instant::now(),
+        Arc::new(memory),
+    );
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let handle = serve(
+        home.path(),
+        context,
+        Arc::new(EventBus::new(Vec::new())),
+        Arc::clone(&shutdown),
+    )
+    .expect("serve");
+    let status = read_status(home.path()).expect("read status");
+    shutdown.store(true, Ordering::SeqCst);
+    handle.join().expect("server thread");
+
+    assert_eq!(status["memory"]["pinned"], 1, "{status}");
+    assert_eq!(status["memory"]["active"], 2, "{status}");
+    assert_eq!(status["memory"]["retired"], 2, "the closed duplicate is retired too: {status}");
+    assert_eq!(status["memory"]["audit"]["canonical_closed"], 1, "{status}");
+    assert_eq!(status["memory"]["audit"]["near_duplicates"], 0, "{status}");
+    assert_eq!(status["memory_items"], 3, "{status}");
+    assert!(status["last_consolidation"].as_str().is_some(), "{status}");
+}

@@ -1676,4 +1676,173 @@ mod tests {
         let (_home, app) = initialized_app();
         assert_eq!(app.screen, Screen::Dashboard);
     }
+
+    #[test]
+    fn a_consolidation_event_names_the_counts() {
+        let text = event_summary(&serde_json::json!({
+            "kind": "memory.consolidated",
+            "data": {"canonical_closed": 2, "near_duplicates": 1, "compound": 3}
+        }));
+        assert!(text.contains("2 duplicate closed"), "{text}");
+        assert!(text.contains("1 near"), "{text}");
+        assert!(text.contains("3 compound"), "{text}");
+    }
+
+    fn memory_fixture(home: &TempDir) -> (usize, usize, usize) {
+        use hearth_core::Harness;
+        use hearth_memory::{Kind, MemoryService, NewMemory};
+
+        let harness = Harness::open(home.path()).expect("harness");
+        let memory = MemoryService::new(harness.session().clone());
+        memory
+            .write(
+                NewMemory::new("Never deploy on a Friday.")
+                    .kind(Kind::Rule)
+                    .pinned(true),
+            )
+            .expect("pinned");
+        memory
+            .write(NewMemory::new("Release notes live in docs/.").subject("release"))
+            .expect("first active");
+        memory
+            .write(NewMemory::new("The OR board meets on Monday.").subject("board"))
+            .expect("second active");
+        let retired = memory
+            .write(NewMemory::new("The release gate needs one approval.").subject("gate"))
+            .expect("retired")
+            .memory()
+            .clone();
+        memory
+            .write(
+                NewMemory::new("The release gate needs two approvals.")
+                    .subject("gate")
+                    .supersedes(retired.id),
+            )
+            .expect("replacement");
+        let counts = memory.breakdown().expect("breakdown");
+        (counts.pinned, counts.active, counts.retired)
+    }
+
+    #[test]
+    fn memory_tab_shows_pinned_active_and_retired_totals() {
+        let (home, mut app) = initialized_app();
+        let (pinned, active, retired) = memory_fixture(&home);
+        assert_eq!((pinned, active, retired), (1, 3, 1));
+        app.tab = Tab::Memory;
+        app.memory.reload(home.path());
+        let text = buffer_text(&app, 140, 34);
+        assert!(text.contains("1 pinned"), "{text}");
+        assert!(text.contains("3 active"), "{text}");
+        assert!(text.contains("1 retired"), "{text}");
+        assert!(
+            !text.contains("saved"),
+            "the combined total is not a store state: {text}"
+        );
+    }
+
+    #[test]
+    fn a_search_keeps_the_store_totals_and_adds_a_match_count() {
+        let (home, mut app) = initialized_app();
+        memory_fixture(&home);
+        app.tab = Tab::Memory;
+        app.memory.reload(home.path());
+        app.memory.filter = "release notes".to_owned();
+        let text = buffer_text(&app, 140, 34);
+        assert!(text.contains("1 pinned"), "{text}");
+        assert!(text.contains("3 active"), "{text}");
+        assert!(text.contains("1 retired"), "{text}");
+        assert!(
+            text.contains("1 match"),
+            "a filtered count must read as a match count: {text}"
+        );
+    }
+
+    #[test]
+    fn a_zero_retired_count_is_still_shown() {
+        use hearth_core::Harness;
+        use hearth_memory::{MemoryService, NewMemory};
+
+        let (home, mut app) = initialized_app();
+        {
+            let harness = Harness::open(home.path()).expect("harness");
+            MemoryService::new(harness.session().clone())
+                .write(NewMemory::new("Release notes live in docs/.").subject("release"))
+                .expect("active");
+        }
+        app.tab = Tab::Memory;
+        app.memory.reload(home.path());
+        let text = buffer_text(&app, 140, 34);
+        assert!(text.contains("0 pinned"), "{text}");
+        assert!(text.contains("1 active"), "{text}");
+        assert!(text.contains("0 retired"), "{text}");
+    }
+
+    #[test]
+    fn a_retired_pinned_row_counts_as_retired() {
+        use hearth_core::Harness;
+        use hearth_memory::{Kind, MemoryService, NewMemory};
+
+        let (home, mut app) = initialized_app();
+        {
+            let harness = Harness::open(home.path()).expect("harness");
+            let memory = MemoryService::new(harness.session().clone());
+            let rule = memory
+                .write(
+                    NewMemory::new("Never deploy on a Friday.")
+                        .kind(Kind::Rule)
+                        .pinned(true),
+                )
+                .expect("rule")
+                .memory()
+                .clone();
+            memory
+                .write(
+                    NewMemory::new("Never deploy on a Friday.")
+                        .kind(Kind::Commitment)
+                        .supersedes(rule.id),
+                )
+                .expect("replacement");
+        }
+        app.tab = Tab::Memory;
+        app.memory.reload(home.path());
+        let text = buffer_text(&app, 140, 34);
+        assert!(text.contains("0 pinned"), "{text}");
+        assert!(text.contains("1 active"), "{text}");
+        assert!(text.contains("1 retired"), "{text}");
+    }
+
+    #[test]
+    fn memory_tab_marks_a_report_candidate() {
+        use hearth_core::Harness;
+        use hearth_memory::{MemoryService, fingerprint};
+
+        let (home, mut app) = initialized_app();
+        {
+            let harness = Harness::open(home.path()).expect("harness");
+            let session = harness.session().clone();
+            let now = session.now_micros();
+            let content = "the user likes apples. He buys one every day.";
+            let digest = fingerprint(content);
+            session
+                .storage()
+                .write(move |writer| {
+                    writer.execute(
+                        "INSERT INTO memories (id, kind, content, subject, terms, fingerprint, pinned, \
+                         source_kind, source_entry, valid_from, valid_to, created_at, updated_at, revision) \
+                         VALUES ('m_compound', 'fact', ?, 'user', '', ?, 0, 'user', NULL, ?, NULL, ?, ?, 1)",
+                        (content, digest, now, now, now),
+                    )?;
+                    Ok::<_, hearth_memory::MemoryError>(())
+                })
+                .expect("seed compound");
+            MemoryService::new(session)
+                .consolidate()
+                .expect("consolidate");
+        }
+        app.tab = Tab::Memory;
+        app.memory.reload(home.path());
+        let text = buffer_text(&app, 140, 34);
+        assert!(text.contains('⚠'), "the candidate must be marked: {text}");
+        assert!(text.contains("1 compound"), "{text}");
+    }
 }

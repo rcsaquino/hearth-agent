@@ -36,15 +36,14 @@ fn the_maintenance_tasks_are_created_once() {
             .has_open_task("helper.retention")
             .expect("helper retention")
     );
-    // Memory has no scheduled pass: the standing file is repaired at startup.
     assert!(
-        !session
+        session
             .has_open_task("memory.consolidate")
             .expect("memory task lookup")
     );
     let counts = session.task_counts().expect("counts");
-    assert_eq!(counts.asleep, 3);
+    assert_eq!(counts.asleep, 4);
     ensure_maintenance_tasks(session, &Zone::utc(), 30, 25).expect("ensure again");
     let counts = session.task_counts().expect("counts");
-    assert_eq!(counts.asleep, 3);
+    assert_eq!(counts.asleep, 4);
 }
