@@ -244,16 +244,16 @@ fn run_fixture(service: &MemoryService, fixture: &Fixture) -> Report {
         latencies.push(started.elapsed().as_secs_f64() * 1_000.0);
         tokens.push(hearth_model::estimate_tokens(&recall.digest).max(0) as u64);
 
-        let shown: Vec<&str> = recall
+        let digest: Vec<&str> = recall
             .items
             .iter()
-            .take(5)
             .map(|memory| memory.id.as_str())
             .collect();
+        let top_five: &[&str] = &digest[..digest.len().min(5)];
         let automatic = question.expected_keys.iter().all(|key| {
             by_key
                 .get(key)
-                .is_some_and(|id| shown.contains(&id.as_str()))
+                .is_some_and(|id| digest.contains(&id.as_str()))
         });
         if !automatic && std::env::var("HEARTH_BENCH_VERBOSE").is_ok() {
             let expected: Vec<&str> = question
@@ -276,7 +276,6 @@ fn run_fixture(service: &MemoryService, fixture: &Fixture) -> Report {
                 recall
                     .items
                     .iter()
-                    .take(5)
                     .filter_map(|memory| by_id.get(&memory.id))
                     .flatten()
                     .map(String::as_str)
@@ -302,7 +301,7 @@ fn run_fixture(service: &MemoryService, fixture: &Fixture) -> Report {
             .filter(|key| {
                 by_key
                     .get(*key)
-                    .is_some_and(|id| shown.contains(&id.as_str()))
+                    .is_some_and(|id| top_five.contains(&id.as_str()))
             })
             .count();
         precision_sum += hits as f64 / relevant as f64;
