@@ -39,26 +39,19 @@ they started in `parent_id` and `parent_entry_id`.
 Entries are append-only. A reset is an entry, not a deletion. The model sees the
 newest reset or summary marker onward, subject to compaction.
 
-**Document.** A small mutable record attached to a conversation.
+**Meta.** Small bookkeeping values. Migration 0011 dropped the document table,
+so there is no per-conversation document record.
 
 | Field | Notes |
 |---|---|
-| `conversation_id`, `kind` | Primary key |
-| `version` | Integer, incremented on every write |
-| `json` | Valid JSON, no extensions |
-| `updated_at` | |
+| `key` | Primary key |
+| `value` | Text |
 
-Built-in document kinds:
+Built-in keys:
 
-- `agent`: model alias, thinking level, extra instructions, workspace.
-- `provider`: provider session identity, used for prompt-cache affinity.
-- `live`: current run and task id, for status display only.
-- `usage`: rolling counters, not the authoritative usage ledger.
-- `last_consolidation`, `last_skill_review`: maintenance bookkeeping.
-- `transport`: transport-channel state that is not in its own table.
-
-A document update inside a save must supply the version it expects. A mismatch
-aborts the save; the caller re-reads and retries.
+- `last_consolidation`: the last `memory.consolidate` instant, RFC 3339.
+- `last_consolidation_report`: the last memory audit report, JSON.
+- `last_skill_review`, `last_skill_review_changes`: skill review bookkeeping.
 
 **Submission.** A message handed in, with a receipt.
 
@@ -70,6 +63,7 @@ aborts the save; the caller re-reads and retries.
 | `kind` | `input` or `entry` |
 | `content` | User input blocks |
 | `status` | `queued`, `running`, `done`, `unanswered`, `cancelled` |
+| `user_entry_id` | The user entry saved with this submission, nullable |
 | `answer_entry_id` | Nullable |
 | `error` | Structured, nullable |
 | `created_at`, `settled_at` | |

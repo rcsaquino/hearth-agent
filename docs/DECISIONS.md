@@ -2782,3 +2782,82 @@ just after.
 - Browser work belongs to whatever the user installs and drives through `shell`.
   SPEC 9.2 and SECURITY now name that boundary instead of the Camofox process, and
   the tests no longer mention a browser.
+
+## 2026-11-17: One memory identity and one statement per write
+
+- A memory write is refused when its content holds more than one statement. The
+  splitter in `hearth-memory/src/text.rs` is shared with the extractor and is
+  conservative: a word in a small title list, a one-letter initial, a decimal, a
+  repeated punctuation mark, an ellipsis, or a lowercase continuation is not a
+  boundary. The refusal names the statement count and asks the caller to split
+  the write. Existing compound rows are not rewritten; the audit reports them.
+- The extractor gives a remembered first-person statement the subject `user`,
+  runs the preference classifier before the possessive one, and writes both
+  relation orders as `Alice is the user's sister`. These are the forms the store
+  already receives from a direct preference write.
+- The duplicate comparison folds US and UK spellings and the preference verbs
+  `prefer`, `like`, and `love`, and it refuses to call a negation a duplicate of
+  its affirmative. The fold is in `content_tokens`, so it affects comparison and
+  overlap only. The stored fingerprint keeps the words the caller wrote; changing
+  it would strand every existing row.
+- The near-duplicate check is not limited to two non-empty subjects. A subject is
+  indexed and is read in full, while a subjectless write is compared against the
+  newest 64 current rows. That catches the empty-subject variant without scanning
+  the whole store on the write path.
+- A write whose source is `extract` cannot close a pinned row, a row with a
+  subject when the extract has none, or a non-`fact` row with a `fact`. It returns
+  the earlier row. This keeps the stronger provenance the agent or the user
+  supplied.
+- `memory_save` now reports a related row as a separate statement and no longer
+  recommends `supersedes` in the reply. The schema already teaches replacement,
+  and a non-replacing behaviour must not invite one.
+
+## 2026-11-17: Capture reads the entries the run answered
+
+- Migration 0012 adds `submissions.user_entry_id`, the user entry saved with the
+  submission. `Session::save` links a submission to the user entry in the same
+  save, and the backfill links an existing row by conversation, content, and
+  creation instant. The link is durable, so a restart between the answer and
+  capture still resolves the run's own words.
+- `RunOutcome.user_entry_ids` carries the submission's entry plus every absorbed
+  submission's entry, oldest first and deduplicated. The daemon captures each
+  one; a queued message that was not absorbed is captured by its own run later.
+- The daemon's memory tool source uses the same submission entry instead of the
+  newest user entry, so provenance matches the message the run answered.
+- Capture of the same entry twice still writes nothing, because the store's
+  exact and near checks see the earlier row.
+
+## 2026-11-17: The consolidation audit
+
+- `MemoryService::consolidate` runs one write transaction. Canonical means the
+  same fingerprint under the same subject. The survivor is the pinned row first,
+  then the higher `Kind::prior`, then the most recently updated, then the smaller
+  id. Every other row in the group gets `valid_to`, `superseded_by`, and a cleared
+  pin; nothing is deleted and no content is rewritten.
+- The pass reports near-duplicate pairs, one content under different non-empty
+  subjects, and compound rows. It changes none of them. Canonical groups are
+  found over the whole store with a grouped query. The near and compound reads
+  take the newest 10,000 current rows, and each sample list stops at 20 examples.
+- The report and the `last_consolidation` instant are written in the same
+  transaction as the closes, as the meta keys `last_consolidation` and
+  `last_consolidation_report`. The report is JSON. A crash rolls the pass back,
+  and the crash suite proves it at `HEARTH_CRASH_AT=memory.consolidate`.
+- `memory.consolidate` is a global nightly task at 03:30 local, registered by
+  `ensure_maintenance_tasks` in both the Telegram daemon and the maintenance-only
+  scheduler. The handler publishes a `memory.consolidated` event with the counts
+  when a bus is attached, then sleeps to the next slot.
+- There is no startup pass. The nightly task is the automatic path; a duplicate
+  created before it runs is repaired by the next pass. The digest collapses a
+  canonical duplicate and reports the hidden count in the meantime, so the prompt
+  does not pay for the same statement twice.
+- The status payload gains `memory.pinned`, `memory.active`, `memory.retired`, and
+  `memory.audit` with the last report's counts. `memory_items` stays for the
+  Overview and its existing test.
+- `hearth-cli` now depends on `hearth-memory` in the normal build, because the
+  Memory tab renders `Breakdown` and the audit report. The crate was already a
+  test dependency; no external crate was added.
+- The Memory tab reads `inspect::memory_state`, which counts through a read-only
+  connection rather than the loaded page, so a store larger than the 1,000-row
+  page reports its full size. The title names pinned, active, and retired; a
+  search adds a separate match count. A report candidate carries `⚠` in the list
+  and an `audit` label in the detail pane.

@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.54, plain-language edition
+**Status:** Draft 0.55, plain-language edition
 **Date:** 2026-11-17
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,25 @@
 ---
 
 ## A note on language
+
+Draft 0.55 gives memory one identity and one statement per row. A write is
+refused when it carries more than one clear statement, and the refusal says to
+split it. The same conservative splitter serves the extractor, so an
+abbreviation, a decimal, or a repeated punctuation mark is not a boundary. The
+extractor names `user` for a remembered first person, classifies a favourite as
+a preference before the possessive clause, and composes both relation orders the
+same way. The store compares synonyms, spelling variants, and negation only for
+duplicates; stored content and fingerprints do not change. An automatic extract
+cannot replace a stronger subject, a non-fact, or a pinned row. The digest
+collapses canonical duplicates and says how many it hid.
+
+A nightly `memory.consolidate` pass closes canonical duplicates in one
+transaction, reports near duplicates, cross-subject repeats, and compound rows,
+and stamps `last_consolidation` and its report. The Memory tab shows pinned,
+active, and retired totals from the store rather than the loaded page, marks
+report candidates, and reads an audit line. The status payload carries the same
+totals and the last audit. A submission records the user entry it answers, so
+capture reads the run's own words instead of whichever message arrived last.
 
 Draft 0.54 removes the browser, the documents tool, and the lazy tool groups. The
 Camofox client advertised a service Hearth never installed, started, or checked,
@@ -532,7 +551,7 @@ terminal application. There are no subcommands or flags.
 | Onboarding | First run replaces `hearth init`: bot token, user id, provider, API key, model picker, thinking, agent name, optional media, start mode, keep-running. |
 | Overview | Runtime, model, thinking, context, usage and cache, tasks, memory, Telegram, providers, media, workspace, and recent activity. |
 | Activity | The live event stream from the daemon, one row per whole event, with a readable event detail. |
-| Memory | Browse and search saved memory records, pinned first, then current, then closed windows, each newest first. |
+| Memory | Browse and search saved memory records, pinned first, then current, then closed windows, each newest first. The title shows the store's pinned, active, and retired totals and the last audit's candidate counts; report candidates carry a warning mark. |
 | Skills | Browse skills with automatic, scrollable body preview; create and edit user skills; learned skills stay read-only. |
 | Prompt | A live conversation, folded at the start: the saved requests merged into one transcript, every prompt layer and message in its role bar, one key that opens every section from a five-line preview, memory per request, and the turn being written at the tail. |
 | Doctor | Offline and live checks. |
@@ -1210,7 +1229,7 @@ One row is one statement the user would recognise as one thing they said.
 |---|---|
 | `id` | Stable `m_` id: ten Crockford base32 characters, excluding `I`, `L`, `O`, and `U` |
 | `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, or `fact` |
-| `content` | One standalone statement; a write is capped at 200 characters |
+| `content` | One standalone statement; a write is capped at 200 characters and refused when it carries more than one statement |
 | `subject` | The normalised person, project, or thing it is about |
 | `pinned` | Injects the statement as a rule; only valid with `kind = rule`, and only while the row is current |
 | `source_kind`, `source_entry` | Provenance, down to the entry the user typed |
@@ -1223,6 +1242,12 @@ pronouns depends on what it was written beside. That is a cost of the words, not
 a rule: the content is stored as written, and a pronoun is neither refused nor
 required. The `subject` field, not the wording, is what makes a statement
 findable. Existing rows are not rewritten.
+
+A write carries one statement. Content with two clear sentences is refused with
+a message that names the number and asks the caller to split it. The splitter is
+conservative: a title such as `Dr.`, an initial, a decimal, an ellipsis, and a
+lowercase continuation are not boundaries. A row written before this rule keeps
+its compound content; the audit reports it, and nothing rewrites it.
 
 There is **no importance score**. A stored importance is a number no one can
 calibrate, and it invites a write-time model call to produce it. Ranking is
@@ -1271,8 +1296,18 @@ Write rules:
   the rule stays current.
 - A near duplicate about the same subject is refused the same way, which is what
   stops eight weeks of "ordered pad thai" from becoming eight rows. A duplicate
-  is judged by token containment, and a statement that swaps its own subject is
-  never a duplicate.
+  is judged by token containment. The comparison folds common spelling variants
+  and the preference verbs `prefer`, `like`, and `love`; it runs only for the
+  duplicate decision, so stored content and the fingerprint keep the words the
+  caller wrote. A negation is never a duplicate of its affirmative form. A
+  statement that swaps its own non-empty subject is never a duplicate, but a
+  subjectless write is compared against the store so the missing field cannot
+  hide a repeat.
+- One surface fact has one identity. The extractor names `user` for a remembered
+  first person, classifies `my favourite ...` as a preference, and writes both
+  relation orders as `Alice is the user's sister`. An automatic extract cannot
+  replace a subjectful, non-`fact`, or pinned row with a weaker one; it returns
+  the earlier row instead.
 - A pinned rule must fit the rules budget; a write that would overflow it is
   refused with the current rules listed, so the model can replace one.
 - Credential-shaped content is refused before it reaches the table.
@@ -1348,6 +1383,10 @@ because that is where addressing belongs. A new id is `m_` plus ten Crockford
 base32 characters; an older 34-character id keeps working. `memory_recall` accepts
 an id in either case with surrounding whitespace, and a prefix is not an id.
 
+A canonical duplicate, meaning the same fingerprint under the same subject, is
+shown once and the digest reports how many rows it collapsed. The repair pass
+closes it later; the digest does not spend tokens on it before then.
+
 The coverage line is the part that makes recall honest. For each subject the
 message named, the store counts what it holds and reports the difference. A digest
 that silently shows six of fourteen facts teaches the model that six is all
@@ -1391,7 +1430,17 @@ text moves.
 - A replaced statement is not deleted. It leaves the current set and stays
   readable by id and by `as_of`.
 - There is no decay and no automatic archival. A statement stops being current
-  only when another statement replaces it or when the user removes it.
+  only when another statement replaces it, a canonical duplicate is closed by
+  the audit, or the user removes it.
+- The nightly `memory.consolidate` pass makes no model call. In one transaction
+  it closes all but one row of each canonical group, keeping the pinned row and
+  then the stronger kind, and records the report and the instant. It reports
+  near-duplicate pairs, one statement under different non-empty subjects, and
+  compound rows, and changes none of them. A second run is a no-op.
+- The report is bounded. Canonical groups are found over the whole store; the
+  near and compound reads take the newest 10,000 current rows, and each sample
+  list stops at 20 examples. The pass is restart-safe: a crash rolls the whole
+  transaction back, so no row is half-closed.
 - Credential-shaped content is refused before a write. The check runs in the
   store, so every path shares it.
 
