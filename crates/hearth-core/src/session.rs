@@ -1969,7 +1969,7 @@ impl Session {
                 };
                 let sql = format!(
                     "SELECT id, conversation_id, kind, phase, attempt, input_json, checkpoint_json \
-                     FROM tasks WHERE status = 'pending' \
+                     FROM tasks WHERE status IN ('pending', 'asleep') \
                      AND (next_wake_at IS NULL OR next_wake_at <= ?){filter} \
                      ORDER BY COALESCE(next_wake_at, created_at), id LIMIT 1"
                 );
@@ -2004,7 +2004,7 @@ impl Session {
                 let changed = writer.execute(
                     "UPDATE tasks SET status = 'running', lease_owner = ?, lease_until = ?, \
                      attempt = ?, next_wake_at = NULL, updated_at = ? \
-                     WHERE id = ? AND status = 'pending'",
+                     WHERE id = ? AND status IN ('pending', 'asleep')",
                     (
                         owner.as_str(),
                         now + lease_micros,
@@ -2062,7 +2062,7 @@ impl Session {
             .write(move |writer| -> Result<Option<ClaimedTask>, CoreError> {
                 let row: Option<RawClaim> = writer.query_optional(
                     "SELECT id, conversation_id, kind, phase, attempt, input_json, checkpoint_json \
-                     FROM tasks WHERE id = ? AND status = 'pending' \
+                     FROM tasks WHERE id = ? AND status IN ('pending', 'asleep') \
                      AND (next_wake_at IS NULL OR next_wake_at <= ?)",
                     (task_id.as_str(), now),
                     |row| {
@@ -2084,7 +2084,7 @@ impl Session {
                 let changed = writer.execute(
                     "UPDATE tasks SET status = 'running', lease_owner = ?, lease_until = ?, \
                      attempt = ?, next_wake_at = NULL, updated_at = ? \
-                     WHERE id = ? AND status = 'pending'",
+                     WHERE id = ? AND status IN ('pending', 'asleep')",
                     (
                         owner.as_str(),
                         now + lease_micros,
