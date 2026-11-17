@@ -33,12 +33,9 @@ plants its value in `notes.txt`, which is not excluded.
 ## Resolution
 
 The path-wide exclusions are gone from the tree and history scans. The scanner
-now exempts only the known placeholder values the repository's own tests use
-(`sk-test-not-a-real-key`, `sk-live-abcdefghijklmnop`,
-`ghp_abcdefghijklmnopqrstuvwxyz`, `xoxb-1234567890-abcdefghij`,
-`AKIAABCDEFGHIJKLMNOP`, `123456789:AAFakeTokenFakeTokenFakeTokenFake`) and the
-planted value and allowlist lines in the two scanner scripts. The deny-list scan
-has no exemptions at all.
+now exempts only the six placeholder values the repository's own tests use, and
+the planted value and allowlist lines in the two scanner scripts. The deny-list
+scan has no exemptions at all.
 
 Commits: `1a7154a` (test), `5f7c004` (fix). Verified by
 `scripts/test-scripts.sh`, which commits a credential into
