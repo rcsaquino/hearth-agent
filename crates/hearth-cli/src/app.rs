@@ -1,7 +1,7 @@
 //! The Hearth TUI application.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use hearth_config::{Daemon, SETTINGS_FILE, Settings};
 use hearth_runtime::Zone;
+use hearth_memory::{Breakdown, ConsolidationReport};
 use hearth_runtime::inspect::MemoryRecord;
 use hearth_runtime::skills::{Skill, SkillLibrary, SkillScope, SkillStats};
 
@@ -252,6 +253,12 @@ pub struct MemoryView {
     pub filter: String,
     pub filter_mode: bool,
     pub error: Option<String>,
+    /// The store totals, which do not follow the loaded page or the filter.
+    pub counts: Breakdown,
+    /// The last consolidation report, when one has run.
+    pub audit: Option<ConsolidationReport>,
+    /// The rows one audit group named, keyed by memory id.
+    pub candidates: BTreeMap<String, &'static str>,
 }
 
 /// The kind of a memory row, marked when it is pinned or retired.
@@ -267,17 +274,28 @@ pub fn store_label(record: &MemoryRecord) -> String {
 
 impl MemoryView {
     pub fn reload(&mut self, home: &Path) {
-        match hearth_runtime::inspect::list_memories(home, 1000) {
-            Ok(records) => {
+        let records = hearth_runtime::inspect::list_memories(home, 1000);
+        let state = hearth_runtime::inspect::memory_state(home);
+        match (records, state) {
+            (Ok(records), Ok(state)) => {
                 self.records = records;
+                self.counts = state.counts;
+                self.audit = state.audit;
+                self.candidates = candidate_marks(self.audit.as_ref());
                 self.error = None;
                 self.selected = self.selected.min(self.filtered().len().saturating_sub(1));
             }
-            Err(error) => {
+            (Err(error), _) | (_, Err(error)) => {
                 self.records.clear();
+                self.candidates.clear();
                 self.error = Some(error.to_string());
             }
         }
+    }
+
+    /// How the audit labels one row, when the report named it.
+    pub fn candidate(&self, id: &str) -> Option<&'static str> {
+        self.candidates.get(id).copied()
     }
 
     pub fn filtered(&self) -> Vec<&MemoryRecord> {
@@ -297,6 +315,31 @@ impl MemoryView {
     pub fn selected_record(&self) -> Option<&MemoryRecord> {
         self.filtered().get(self.selected).copied()
     }
+}
+
+fn candidate_marks(audit: Option<&ConsolidationReport>) -> BTreeMap<String, &'static str> {
+    let Some(audit) = audit else {
+        return BTreeMap::new();
+    };
+    let mut marks = BTreeMap::new();
+    for group in &audit.canonical {
+        for id in &group.closed {
+            marks.insert(id.clone(), "duplicate");
+        }
+    }
+    for pair in &audit.near {
+        marks.entry(pair.left.clone()).or_insert("near");
+        marks.entry(pair.right.clone()).or_insert("near");
+    }
+    for conflict in &audit.subject_conflicts {
+        for id in &conflict.ids {
+            marks.entry(id.clone()).or_insert("subject");
+        }
+    }
+    for row in &audit.compound_rows {
+        marks.entry(row.id.clone()).or_insert("compound");
+    }
+    marks
 }
 
 pub struct App {

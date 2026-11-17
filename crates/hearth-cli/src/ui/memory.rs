@@ -21,26 +21,35 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
 fn list(app: &App, frame: &mut Frame, area: Rect) {
     let records = app.memory.filtered();
+    let mut title = format!(
+        " Memory · {} pinned · {} active · {} retired ",
+        app.memory.counts.pinned, app.memory.counts.active, app.memory.counts.retired
+    );
+    if !app.memory.filter.is_empty() {
+        title.push_str(&format!("· {} match ", records.len()));
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
-        .title(theme::heading(format!(
-            " Memory · {} saved ",
-            records.len()
-        )));
+        .title(theme::heading(title));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(inner);
     filter(app, frame, rows[0]);
+    audit(app, frame, rows[1]);
     if let Some(error) = &app.memory.error {
         frame.render_widget(
             Paragraph::new(error.clone())
                 .style(theme::bad())
                 .wrap(Wrap { trim: false }),
-            rows[1],
+            rows[2],
         );
         return;
     }
@@ -55,11 +64,11 @@ fn list(app: &App, frame: &mut Frame, area: Rect) {
                 ),
             ])
             .wrap(Wrap { trim: false }),
-            rows[1],
+            rows[2],
         );
         return;
     }
-    let height = rows[1].height.max(1) as usize;
+    let height = rows[2].height.max(1) as usize;
     let start = app
         .memory
         .selected
@@ -70,8 +79,8 @@ fn list(app: &App, frame: &mut Frame, area: Rect) {
         let marker = if selected { "▸" } else { " " };
         let (status, status_style) = status(record);
         let kind = short(&crate::app::store_label(record).to_uppercase(), 10);
-        let content_width = rows[1].width.saturating_sub(20) as usize;
-        let spans = vec![
+        let content_width = rows[2].width.saturating_sub(22) as usize;
+        let mut spans = vec![
             Span::styled(
                 format!(" {marker} "),
                 if selected {
@@ -82,8 +91,14 @@ fn list(app: &App, frame: &mut Frame, area: Rect) {
             ),
             Span::styled(format!("{status} "), status_style),
             Span::styled(format!("{kind:<10} "), theme::muted()),
-            Span::styled(short(&record.content, content_width), theme::text()),
         ];
+        if app.memory.candidate(&record.id).is_some() {
+            spans.push(Span::styled("⚠ ", theme::warn()));
+        }
+        spans.push(Span::styled(
+            short(&record.content, content_width),
+            theme::text(),
+        ));
         let line = Line::from(spans);
         lines.push(if selected {
             line.style(Style::default().bg(theme::SELECT_BG).fg(theme::SELECT_FG))
@@ -91,7 +106,38 @@ fn list(app: &App, frame: &mut Frame, area: Rect) {
             line
         });
     }
-    frame.render_widget(Paragraph::new(lines), rows[1]);
+    frame.render_widget(Paragraph::new(lines), rows[2]);
+}
+
+fn audit(app: &App, frame: &mut Frame, area: Rect) {
+    let (text, style) = match &app.memory.audit {
+        Some(report) => {
+            let attention = !report.is_empty();
+            (
+                format!(
+                    " audit · {} duplicate closed · {} near · {} subject · {} compound",
+                    report.canonical_closed,
+                    report.near_duplicates,
+                    report.cross_subject,
+                    report.compound
+                ),
+                if attention {
+                    theme::warn()
+                } else {
+                    theme::faint()
+                },
+            )
+        }
+        None => (
+            " audit · not run yet · the nightly pass repairs canonical duplicates"
+                .to_owned(),
+            theme::faint(),
+        ),
+    };
+    frame.render_widget(
+        Paragraph::new(Line::styled(text, style)),
+        area,
+    );
 }
 
 fn filter(app: &App, frame: &mut Frame, area: Rect) {
@@ -151,6 +197,9 @@ fn detail(app: &App, frame: &mut Frame, area: Rect) {
     }
     if !record.updated_at.is_empty() {
         meta(&mut lines, "updated", &record.updated_at);
+    }
+    if let Some(candidate) = app.memory.candidate(&record.id) {
+        meta(&mut lines, "audit", candidate);
     }
     lines.push(Line::from(""));
     lines.push(Line::styled(
