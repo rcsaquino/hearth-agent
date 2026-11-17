@@ -306,13 +306,17 @@ pub fn by_subject(
     session: &Session,
     subject: &str,
     at: Option<i64>,
+    kind: Option<Kind>,
     limit: i64,
 ) -> Result<Vec<Memory>> {
     let filter = valid_clause("m");
     let observed = instant(session, at);
+    let kind = kind.map(Kind::as_str);
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(subject.to_owned())];
     params.push(Box::new(observed));
     params.push(Box::new(observed));
+    params.push(Box::new(kind));
+    params.push(Box::new(kind));
     params.push(Box::new(limit.max(1)));
     session
         .storage()
@@ -320,7 +324,7 @@ pub fn by_subject(
             reader.query(
                 &format!(
                     "SELECT {COLUMNS} FROM memories m WHERE m.subject = ? AND {filter} \
-                     ORDER BY m.created_at DESC LIMIT ?"
+                     AND (? IS NULL OR m.kind = ?) ORDER BY m.created_at DESC LIMIT ?"
                 ),
                 rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
                 map_memory,
@@ -421,13 +425,17 @@ pub fn lexical(
     session: &Session,
     expression: &str,
     at: Option<i64>,
+    kind: Option<Kind>,
     limit: i64,
 ) -> Result<Vec<Memory>> {
     let filter = valid_clause("m");
     let observed = instant(session, at);
+    let kind = kind.map(Kind::as_str);
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(expression.to_owned())];
     params.push(Box::new(observed));
     params.push(Box::new(observed));
+    params.push(Box::new(kind));
+    params.push(Box::new(kind));
     params.push(Box::new(limit.max(1)));
     session
         .storage()
@@ -435,7 +443,7 @@ pub fn lexical(
             reader.query(
                 &format!(
                     "SELECT {COLUMNS_OF_M} FROM memories_fts f JOIN memories m ON m.rowid = f.rowid \
-                     WHERE memories_fts MATCH ? AND {filter} \
+                     WHERE memories_fts MATCH ? AND {filter} AND (? IS NULL OR m.kind = ?) \
                      ORDER BY bm25(memories_fts) LIMIT ?"
                 ),
                 rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
@@ -451,12 +459,20 @@ pub fn lexical(
 }
 
 /// Recent memories, newest first.
-pub fn recent(session: &Session, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
+pub fn recent(
+    session: &Session,
+    at: Option<i64>,
+    kind: Option<Kind>,
+    limit: i64,
+) -> Result<Vec<Memory>> {
     let filter = valid_clause("m");
     let observed = instant(session, at);
+    let kind = kind.map(Kind::as_str);
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     params.push(Box::new(observed));
     params.push(Box::new(observed));
+    params.push(Box::new(kind));
+    params.push(Box::new(kind));
     params.push(Box::new(limit.max(1)));
     session
         .storage()
@@ -464,6 +480,7 @@ pub fn recent(session: &Session, at: Option<i64>, limit: i64) -> Result<Vec<Memo
             reader.query(
                 &format!(
                     "SELECT {COLUMNS} FROM memories m WHERE {filter} \
+                     AND (? IS NULL OR m.kind = ?) \
                      ORDER BY m.updated_at DESC, m.id LIMIT ?"
                 ),
                 rusqlite::params_from_iter(params.iter().map(|value| value.as_ref())),
@@ -792,7 +809,7 @@ pub fn related(
     if subject.is_empty() {
         return Ok(None);
     }
-    let candidates = by_subject(session, subject, None, 32)?;
+    let candidates = by_subject(session, subject, None, None, 32)?;
     Ok(candidates
         .into_iter()
         .filter(|candidate| candidate.id != exclude)
@@ -1033,7 +1050,7 @@ mod tests {
             Some(new.memory().id.as_str())
         );
         assert_eq!(
-            by_subject(&session, "primary database", None, 10)
+            by_subject(&session, "primary database", None, None, 10)
                 .unwrap()
                 .len(),
             1
@@ -1241,11 +1258,11 @@ mod tests {
         )
         .expect("write");
         assert!(
-            by_subject(&session, "office", None, 10).unwrap().is_empty(),
+            by_subject(&session, "office", None, None, 10).unwrap().is_empty(),
             "a statement that starts being true next month is not true now"
         );
         assert_eq!(
-            by_subject(&session, "office", Some(later + 1), 10)
+            by_subject(&session, "office", Some(later + 1), None, 10)
                 .unwrap()
                 .len(),
             1
@@ -1282,10 +1299,10 @@ mod tests {
         )
         .expect("new");
 
-        let then = by_subject(&session, "lab", Some(middle), 10).unwrap();
+        let then = by_subject(&session, "lab", Some(middle), None, 10).unwrap();
         assert_eq!(then.len(), 1);
         assert_eq!(then[0].id, old.memory().id);
-        let now = by_subject(&session, "lab", None, 10).unwrap();
+        let now = by_subject(&session, "lab", None, None, 10).unwrap();
         assert_eq!(now.len(), 1);
         assert_eq!(now[0].id, new.memory().id);
     }

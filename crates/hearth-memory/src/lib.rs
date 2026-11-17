@@ -268,17 +268,19 @@ impl MemoryService {
         let mut channels: Vec<Vec<String>> = Vec::new();
 
         if let Some(expression) = retrieval::match_all(&parsed.terms) {
-            let items = store::lexical(&self.inner.session, &expression, at, rank::POOL as i64)?;
+            let items =
+                store::lexical(&self.inner.session, &expression, at, None, rank::POOL as i64)?;
             channels.push(absorb(items, &mut memories));
         }
         if let Some(expression) =
             retrieval::match_any(&parsed.terms, &parsed.expanded, &parsed.entities)
         {
-            let items = store::lexical(&self.inner.session, &expression, at, rank::POOL as i64)?;
+            let items =
+                store::lexical(&self.inner.session, &expression, at, None, rank::POOL as i64)?;
             channels.push(absorb(items, &mut memories));
         }
         for entity in parsed.entities.iter().take(4) {
-            let mut found = store::by_subject(&self.inner.session, entity, at, 32)?;
+            let mut found = store::by_subject(&self.inner.session, entity, at, None, 32)?;
             found.extend(store::by_subject_prefix(
                 &self.inner.session,
                 entity,
@@ -410,21 +412,53 @@ impl MemoryService {
 
     /// Everything known about a subject.
     pub fn subject(&self, subject: &str, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
+        self.subject_of_kind(subject, at, None, limit)
+    }
+
+    /// Everything about a subject, optionally narrowed to one kind.
+    pub fn subject_of_kind(
+        &self,
+        subject: &str,
+        at: Option<i64>,
+        kind: Option<Kind>,
+        limit: i64,
+    ) -> Result<Vec<Memory>> {
         let normalized = query::normalize(subject);
-        store::by_subject(&self.inner.session, &normalized, at, limit)
+        store::by_subject(&self.inner.session, &normalized, at, kind, limit)
     }
 
     /// Recent statements when a caller asks for memory without a topic.
     pub fn recent(&self, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
-        store::recent(&self.inner.session, at, limit)
+        self.recent_of_kind(at, None, limit)
+    }
+
+    /// Recent statements, optionally narrowed to one kind.
+    pub fn recent_of_kind(
+        &self,
+        at: Option<i64>,
+        kind: Option<Kind>,
+        limit: i64,
+    ) -> Result<Vec<Memory>> {
+        store::recent(&self.inner.session, at, kind, limit)
     }
 
     /// A keyword, subject, or entity search, for the tool.
     pub fn search(&self, text: &str, at: Option<i64>, limit: i64) -> Result<Vec<Memory>> {
+        self.search_of_kind(text, at, None, limit)
+    }
+
+    /// A keyword, subject, or entity search narrowed to one kind.
+    pub fn search_of_kind(
+        &self,
+        text: &str,
+        at: Option<i64>,
+        kind: Option<Kind>,
+        limit: i64,
+    ) -> Result<Vec<Memory>> {
         let known = self.known_subjects()?;
         let parsed = query::analyze(text, &known);
         if parsed.trivial {
-            return store::recent(&self.inner.session, at, limit);
+            return store::recent(&self.inner.session, at, kind, limit);
         }
         let mut seen = HashSet::new();
         let mut hits = Vec::new();
@@ -435,14 +469,14 @@ impl MemoryService {
         .into_iter()
         .flatten()
         {
-            for memory in store::lexical(&self.inner.session, &expression, at, limit)? {
+            for memory in store::lexical(&self.inner.session, &expression, at, kind, limit)? {
                 if seen.insert(memory.id.clone()) {
                     hits.push(memory);
                 }
             }
         }
         for entity in parsed.entities.iter().take(3) {
-            for memory in store::by_subject(&self.inner.session, entity, at, limit)? {
+            for memory in store::by_subject(&self.inner.session, entity, at, kind, limit)? {
                 if seen.insert(memory.id.clone()) {
                     hits.push(memory);
                 }
@@ -453,6 +487,9 @@ impl MemoryService {
             && let Some(ids) = self.semantic_channel(text)
         {
             for memory in store::by_ids(&self.inner.session, &ids)? {
+                if kind.is_some_and(|kind| memory.kind != kind) {
+                    continue;
+                }
                 if seen.insert(memory.id.clone()) {
                     hits.push(memory);
                 }

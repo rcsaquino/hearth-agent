@@ -320,15 +320,18 @@ impl Tool for RecallTool {
         let found = if let Some(subject) = optional(arguments, "subject") {
             self.memory
                 .service
-                .subject(&subject, at, count)
+                .subject_of_kind(&subject, at, kind_filter, count)
                 .map_err(failure)?
         } else if let Some(query) = optional(arguments, "query") {
             self.memory
                 .service
-                .search(&query, at, count)
+                .search_of_kind(&query, at, kind_filter, count)
                 .map_err(failure)?
         } else {
-            self.memory.service.recent(at, count).map_err(failure)?
+            self.memory
+                .service
+                .recent_of_kind(at, kind_filter, count)
+                .map_err(failure)?
         };
 
         let selected: Vec<&Memory> = found
