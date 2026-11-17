@@ -613,12 +613,9 @@ user wants it to do.
 
 ### 3.2 Which setting wins
 
-From strongest to weakest:
-
-1. command-line flags;
-2. `HEARTH_*` environment variables;
-3. `settings.json`;
-4. built-in defaults.
+There are no flags or subcommands beyond `--version` and `--help`.
+`HEARTH_HOME` selects the home folder. Everything else comes from
+`settings.json`, and an omitted value uses the built-in default.
 
 Secrets may be written inline or referenced as `${ENV_VAR}`. A missing referenced
 variable is a startup error if the feature that needs it is enabled. Optional search
@@ -627,12 +624,9 @@ be mode `0600`; the daemon refuses to start otherwise.
 
 ### 3.3 Reloading
 
-`SIGHUP` (a reload signal) and a file watcher reload settings.
-
-- Changes to models, memory policy, safety policy, tools, and logging apply to new
-  work.
-- Changes to the Telegram token, home folder, or database path require a restart.
-- An invalid reload keeps the old settings and reports the error to the user.
+Settings are read once when a process starts. There is no reload signal and no
+file watcher. Restart the daemon to apply a change; the TUI opens a fresh process
+and reads the file again. An invalid file refuses the start and names the field.
 
 ### 3.4 First run
 
@@ -764,12 +758,11 @@ The steps:
    fail).
 2. Append entries.
 3. Update tasks and submissions.
-4. Insert or update memory rows.
-5. Record effect intents, meaning "we are about to do this."
-6. Increase the save sequence.
-7. Commit.
-8. Publish the committed state to watchers.
-9. Run effect intents outside the transaction.
+4. Record effect intents, meaning "we are about to do this."
+5. Increase the save sequence.
+6. Commit.
+7. Publish the committed state to watchers.
+8. Run effect intents outside the transaction.
 
 Publication happens only after SQLite reports success. Watchers include Telegram
 delivery, command-line views, and the task scheduler. They receive a read-only
@@ -777,7 +770,8 @@ copy. If publication itself fails, the next process re-derives pending work from
 the database; it does not rewrite the save.
 
 **For builders.** A save is one SQLite transaction across `entries`, `tasks`,
-`submissions`, `effects`, and memory rows. `PRAGMA synchronous=FULL` is the
+`submissions`, and `effects`. Memory writes use their own storage transaction, so
+one save never holds both. `PRAGMA synchronous=FULL` is the
 default. `NORMAL` is allowed by configuration for lower latency, with the documented
 loss window: a power failure can lose the last few transactions, but cannot corrupt
 the database.
@@ -899,8 +893,7 @@ The rules:
   the provider and model support them.
 - `HEARTH.md` and the workspace's `AGENTS.md` chain become one
   `<project_instructions>` system message after the identity message and before
-  rules. The files are read at run start, capped, and shown in the
-  Prompt tab.
+  rules. Every file is read whole, and the result is shown in the Prompt tab.
 
 ### 5.3 Tools
 
@@ -911,10 +904,10 @@ and shows the model a bounded version.
 A tool declares a name, group, description, argument schema, retry policy, timeout,
 and output cap. All of it is compiled in.
 
-Tool execution is a durable task when it can outlive a turn, such as shell,
-browser, generation, or a long HTTP request. Fast local tools may run inline, in the
-same step, but their result is still saved before the model sees it. Results are
-truncated by policy, with overflow written to spill.
+Every tool runs inline in the turn, and its result is saved before the next
+request. No production path creates a durable task of kind `tool`; shell, browser,
+and HTTP calls finish or time out inside the turn. Results are truncated by
+policy, with overflow written to spill.
 
 Errors are structured with `code`, `message`, `retryable`, and `detail`, and
 rendered compactly. Stack traces and raw provider errors never enter the context
@@ -964,9 +957,9 @@ Range selection walks backward from the newest entry, adding estimated tokens un
 assistant entry. A cut never lands on a tool result or a system entry, and an
 assistant message keeps its tool results.
 
-Before summarizing, the task runs a **memory flush**: durable facts from the range
-are extracted and saved. The summary prompt receives messages turned into text with
-tool results truncated. It must preserve decisions, open threads, names, dates, and
+The summary request asks for the summary and the durable facts in one JSON
+answer, and writes the memories after parsing it. Messages are turned into text
+with tool results truncated. It must preserve decisions, open threads, names, dates, and
 user preferences. A summary entry records `covers` (first and last sequence number)
 and `first_kept`. Summaries may summarize earlier summaries.
 
@@ -1571,18 +1564,20 @@ in the prompt. Optional groups are loaded only when a job needs them.
 
 | Tool | Purpose |
 |---|---|
-| `memory` | Search, save, update, forget, pin |
+| `memory_save` | Store one durable statement |
+| `memory_recall` | Read by id, subject, query, kind, or as-of instant |
+| `memory_forget` | Retire a statement |
+| `memory_transcript` | Read the evidence behind a memory |
 | `message` | Send files, albums, voice to the user |
 | `web_search` | Search the web |
 | `web_fetch` | Fetch and extract a page or PDF |
 | `files` | Read, write, edit, list within the workspace |
 | `shell` | Run a command in the workspace |
-| `task` | Spawn, list, read, or kill background helpers |
 | `schedule` | Reminders and recurring tasks |
 | `skill` | Load, save, or archive a Markdown skill |
-| `tool_search` | Discover optional tool groups |
 
-The core set is capped at ten tools and roughly 1200 schema tokens.
+`tool_search` joins the core set when an optional group exists. `task` joins it
+only for a Telegram conversation below the helper depth limit.
 
 ### 9.2 Optional tools
 
@@ -1609,7 +1604,8 @@ with confirmation tiers and Telegram buttons, is deferred to 1.1.
   or empty). The model sees the size and the path, and can read more with `files`.
   The root is created at mode `0700` and may vanish at any time; a missing spill
   file reads as not found.
-- Tool results include duration and a stable call id.
+- A tool result carries its content and an error flag. The stable call id lives on
+  the assistant entry that requested it, not on the result.
 
 ### 9.5 Web search and fetch
 
@@ -2176,7 +2172,7 @@ defines the suites that must pass before release.
 - Integration tests with a fake provider that replays streaming, tool calls, errors,
   rate limits, and overflows; Telegram tests against a local fake Bot API.
 - Crash tests: a separate process is killed at `before_commit`, `after_commit`,
-  `mid_stream`, and `during_effect` (`HEARTH_CRASH_AT`).
+  and `mid_stream` (`HEARTH_CRASH_AT`).
 - Memory benchmarks from 7.8, and a 7-day soak with restarts and backup/restore.
 
 ### 16.2 Release acceptance for 1.0

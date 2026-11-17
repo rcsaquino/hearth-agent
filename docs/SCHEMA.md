@@ -155,7 +155,7 @@ second database file and no markdown store.
 | Field | Notes |
 |---|---|
 | `rowid` | Integer primary key, also the FTS content rowid |
-| `id` | `m_` plus a UUID, unique |
+| `id` | `m_` plus ten Crockford base32 characters, unique |
 | `kind` | `rule`, `preference`, `person`, `decision`, `commitment`, `episode`, `fact` |
 | `content` | One statement |
 | `subject` | Normalised entity, empty when the statement names none |
