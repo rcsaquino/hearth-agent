@@ -31,7 +31,7 @@ acceptance matrix pass; a seven-day real-time soak is still pending.
 - Provides a live daemon event stream, status, live prompt and session export,
   and skill inspection.
 - Lets you edit `SOUL.md`, `HEARTH.md`, and every setting, browse saved
-  memories, and manage your own skills from the TUI.
+  memories, and inspect learned skills from the TUI.
 - Backs up to `~/.hearth/backups/` and installs or removes a systemd user service.
 
 ## Requirements

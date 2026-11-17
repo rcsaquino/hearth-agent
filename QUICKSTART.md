@@ -52,7 +52,7 @@ Paste keys with Ctrl+Shift+V (Ctrl+V also works in terminals that forward it).
 The TUI is also the control plane: **Settings** shows every option inline, with `r`
 to reset the selected row and `*` marking values that differ from the default. It
 also edits `SOUL.md` and `HEARTH.md` directly.
-**Memory** browses saved memories, and **Skills** can create or edit your own skills.
+**Memory** browses saved memories, and **Skills** browses learned skills.
 
 Finish writes `~/.hearth/settings.json` with mode `0600`, keeping only values that
 differ from the defaults. It creates `SOUL.md`, `HEARTH.md`, and the database,
@@ -109,11 +109,11 @@ Running `hearth` opens the control plane:
   tasks and memory, provider connections, and recent activity.
 - **Activity** streams live runs, including Telegram messages and tool calls.
 - **Memory** browses saved memories.
-- **Skills** browses learned skills and can create or edit your own.
+- **Skills** browses learned skills. The tab is read-only; edit the files under
+  `skills/` or use Hearth's own skill loop to change the library.
 - **Prompt** is a live, scrollable export of the newest saved session: system
   prompts, tool declarations, the full conversation, the reply, and token counts.
-  It refreshes after every reply. Use `[`/`]` for older snapshots and `f` to
-  resume following the tail.
+  It refreshes after every reply. Press `f` to resume following the tail.
 - **Doctor** runs offline and live checks.
 - **Settings** is the last tab and shows every option inline. Use `r` to reset the
   selected row, `*` to spot changes, and the daemon controls to start, stop, or
