@@ -1771,4 +1771,58 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn two_statements_in_one_write_are_refused() {
+        let (_directory, session) = home();
+        let error = insert(
+            &session,
+            Pending {
+                item: NewMemory::new("User likes apples. He likes to bring it to work."),
+                vector: None,
+            },
+            MemoryConfig::default().rules_max_tokens,
+        )
+        .expect_err("two statements are refused");
+        assert_eq!(error.code, Code::InvalidInput);
+        assert!(
+            error.message.contains("Split"),
+            "the refusal must tell the caller to split it: {}",
+            error.message
+        );
+        assert_eq!(count(&session).expect("count"), 0);
+    }
+
+    #[test]
+    fn an_abbreviation_does_not_make_a_second_statement() {
+        let (_directory, session) = home();
+        write(&session, NewMemory::new("Dr. Smith likes apples"));
+        write(&session, NewMemory::new("the user meets at 1.5 p.m."));
+        write(&session, NewMemory::new("the user prefers e.g. dark mode"));
+        assert_eq!(
+            count(&session).expect("count"),
+            3,
+            "an abbreviation and a decimal are not sentence boundaries"
+        );
+    }
+
+    #[test]
+    fn atomic_statements_for_the_shared_preference_remain_three_rows() {
+        let (_directory, session) = home();
+        for content in [
+            "the user likes apples",
+            "the user brings apples to work",
+            "the user buys an apple every day",
+        ] {
+            write(&session, NewMemory::new(content).subject("user"));
+        }
+        assert_eq!(count(&session).expect("count"), 3);
+        let contents: Vec<String> = by_subject(&session, "user", None, None, 10)
+            .expect("subject")
+            .into_iter()
+            .map(|row| row.content)
+            .collect();
+        assert_eq!(contents.len(), 3, "{contents:?}");
+    }
+
 }
