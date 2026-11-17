@@ -225,10 +225,10 @@ impl SkillLibrary {
 
     /// The prompt skill index: active skills, capped at 50 lines.
     ///
-    /// Only the line count retires a learned skill, lowest success rate first and
-    /// then least recently used. A description was costing the skill its place,
-    /// which made the index a mutator of the library instead of a view of it.
-    /// User skills are read-only, so they are never archived.
+    /// The line count bounds the view, lowest success rate first and then least
+    /// recently used. Reading the index never changes the library; the nightly
+    /// review is the writer that retires a learned skill. User skills are
+    /// read-only and are never archived.
     pub fn index(&self) -> Result<String, SkillError> {
         let skills = self.load_all()?;
         let mut users: Vec<Skill> = skills
@@ -261,10 +261,9 @@ impl SkillLibrary {
             lines.push(skill.index_line());
             active += 1;
         }
-        for mut skill in learned {
+        for skill in learned {
             if active >= INDEX_MAX_ACTIVE {
-                self.archive_for_index(&mut skill)?;
-                continue;
+                break;
             }
             lines.push(skill.index_line());
             active += 1;
@@ -493,13 +492,6 @@ impl SkillLibrary {
             .load_all()?
             .into_iter()
             .find(|skill| skill.name == name && skill.scope == SkillScope::Learned))
-    }
-
-    fn archive_for_index(&self, skill: &mut Skill) -> Result<(), SkillError> {
-        skill.status = SkillStatus::Archived;
-        skill.updated = now();
-        write_skill(skill)?;
-        self.append_changelog(skill, "archived by index cap")
     }
 
     fn append_changelog(&self, skill: &Skill, action: &str) -> Result<(), SkillError> {

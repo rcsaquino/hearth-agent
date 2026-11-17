@@ -253,12 +253,7 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         .unwrap_or_default();
     let socket_handle = ipc::serve(
         home,
-        StatusContext {
-            session: session.clone(),
-            model,
-            started,
-            memory: Arc::clone(&memory),
-        },
+        StatusContext::new(session.clone(), model, started, Arc::clone(&memory)),
         Arc::clone(&events),
         Arc::clone(&ipc_shutdown),
     )?;

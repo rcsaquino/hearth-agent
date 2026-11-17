@@ -78,12 +78,12 @@ fn today_for(zone: &str) -> Value {
     clock.advance(ONE_HOUR);
     write_settings(home.path(), zone);
 
-    let context = StatusContext {
+    let context = StatusContext::new(
         session,
-        model: "fake-model".to_owned(),
-        started: Instant::now(),
-        memory: Arc::new(MemoryService::new(harness.session().clone())),
-    };
+        "fake-model".to_owned(),
+        Instant::now(),
+        Arc::new(MemoryService::new(harness.session().clone())),
+    );
     let shutdown = Arc::new(AtomicBool::new(false));
     let handle = serve(
         home.path(),
@@ -151,12 +151,12 @@ fn status_reports_the_active_skill_count_and_index_cost() {
         .expect("index");
     let expected_tokens = hearth_model::estimate_tokens(&expected);
 
-    let context = StatusContext {
-        session: harness.session().clone(),
-        model: "fake-model".to_owned(),
-        started: Instant::now(),
-        memory: Arc::new(MemoryService::new(harness.session().clone())),
-    };
+    let context = StatusContext::new(
+        harness.session().clone(),
+        "fake-model".to_owned(),
+        Instant::now(),
+        Arc::new(MemoryService::new(harness.session().clone())),
+    );
     let shutdown = Arc::new(AtomicBool::new(false));
     let handle = serve(
         home.path(),

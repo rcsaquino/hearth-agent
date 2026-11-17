@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -34,13 +34,82 @@ pub enum IpcError {
     Core(#[from] CoreError),
 }
 
+/// How long a status probe reuses the lifetime counters.
+///
+/// The TUI polls every two seconds. The lifetime usage total, the memory count,
+/// the rules, and the skills index change slowly, and each one scans its whole
+/// source, so they are kept for a few polls and never written by a read.
+const STATUS_CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// The status fields that are expensive to recompute on every probe.
+#[derive(Clone)]
+struct SlowStatus {
+    total: UsageTotals,
+    memory_items: usize,
+    rules: hearth_memory::Rules,
+    last_consolidation: Option<String>,
+    skills_index: String,
+    skills_active: usize,
+    last_skill_review: Option<String>,
+    last_skill_review_changes: u64,
+}
+
 /// Values the socket server needs for a status reply.
 #[derive(Clone)]
 pub struct StatusContext {
     pub session: Session,
     pub model: String,
     pub started: Instant,
-    pub memory: std::sync::Arc<hearth_memory::MemoryService>,
+    pub memory: Arc<hearth_memory::MemoryService>,
+    slow: Arc<Mutex<Option<(Instant, SlowStatus)>>>,
+}
+
+impl StatusContext {
+    /// Build a status context with an empty counter cache.
+    pub fn new(
+        session: Session,
+        model: String,
+        started: Instant,
+        memory: Arc<hearth_memory::MemoryService>,
+    ) -> Self {
+        Self {
+            session,
+            model,
+            started,
+            memory,
+            slow: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn slow_status(&self, home: &Path) -> Result<SlowStatus, IpcError> {
+        if let Ok(cache) = self.slow.lock()
+            && let Some((at, value)) = cache.as_ref()
+            && at.elapsed() < STATUS_CACHE_TTL
+        {
+            return Ok(value.clone());
+        }
+        let rules = self.memory.rules().unwrap_or_default();
+        let library = SkillLibrary::new(home);
+        let skills_index = library.index().unwrap_or_default();
+        let value = SlowStatus {
+            total: self.session.usage_totals_since(0)?,
+            memory_items: self.memory.count().unwrap_or(0),
+            rules,
+            last_consolidation: self.session.meta_value("last_consolidation")?,
+            skills_index,
+            skills_active: library.stats().map(|stats| stats.active).unwrap_or(0),
+            last_skill_review: self.session.meta_value("last_skill_review")?,
+            last_skill_review_changes: self
+                .session
+                .meta_value("last_skill_review_changes")?
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0),
+        };
+        if let Ok(mut cache) = self.slow.lock() {
+            *cache = Some((Instant::now(), value.clone()));
+        }
+        Ok(value)
+    }
 }
 
 #[derive(Deserialize)]
@@ -162,20 +231,8 @@ fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError>
     let month = context
         .session
         .usage_totals_since(now - TimeDuration::days(30).whole_microseconds() as i64)?;
-    let total = context.session.usage_totals_since(0)?;
+    let slow = context.slow_status(home)?;
     let counts = context.session.task_counts()?;
-    let memory = context.memory.count().unwrap_or(0);
-    let rules = context.memory.rules().unwrap_or_default();
-    let last_consolidation = context.session.meta_value("last_consolidation")?;
-    let library = SkillLibrary::new(home);
-    let skills_index = library.index().unwrap_or_default();
-    let skills_active = library.stats().map(|stats| stats.active).unwrap_or(0);
-    let last_skill_review = context.session.meta_value("last_skill_review")?;
-    let last_skill_review_changes = context
-        .session
-        .meta_value("last_skill_review_changes")?
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
     let cache_hit_rate = hearth_core::cache_hit_rate(today.input_tokens, today.cache_read_tokens);
     Ok(json!({
         "model": context.model,
@@ -186,16 +243,16 @@ fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError>
             "today": usage_value(today),
             "week": usage_value(week),
             "month": usage_value(month),
-            "total": usage_value(total),
+            "total": usage_value(slow.total),
         },
         "cache_read_tokens": today.cache_read_tokens,
         "input_tokens": today.input_tokens,
         "output_tokens": today.output_tokens,
         "cache_hit_rate": cache_hit_rate,
-        "memory_items": memory,
-        "rules_version": rules.version,
-        "rules_bullets": rules.count,
-        "rules_characters": rules.text.chars().count(),
+        "memory_items": slow.memory_items,
+        "rules_version": slow.rules.version,
+        "rules_bullets": slow.rules.count,
+        "rules_characters": slow.rules.text.chars().count(),
         "memory_recall": {
             "mode": context.memory.mode(),
             "embeddings_configured": context.memory.embeddings_configured(),
@@ -203,13 +260,13 @@ fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError>
             "embedding_model": context.memory.embedding_model(),
             "max_items": context.memory.config().recall_max_items,
         },
-        "last_consolidation": last_consolidation,
+        "last_consolidation": slow.last_consolidation,
         "skills": {
-            "active": skills_active,
-            "index_tokens": hearth_model::estimate_tokens(&skills_index),
+            "active": slow.skills_active,
+            "index_tokens": hearth_model::estimate_tokens(&slow.skills_index),
         },
-        "last_skill_review": last_skill_review,
-        "last_skill_review_changes": last_skill_review_changes,
+        "last_skill_review": slow.last_skill_review,
+        "last_skill_review_changes": slow.last_skill_review_changes,
     }))
 }
 
