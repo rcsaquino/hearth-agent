@@ -141,7 +141,7 @@ impl SkillReviewer {
         self.record_usage(task_id, usage, latency_ms)?;
         let changes = parse_changes(&text)?;
         for change in changes.iter().take(MAX_CHANGES) {
-            match self.apply_change(change, &success) {
+            match self.apply_change(change, &success, now) {
                 Ok(true) => report.applied += 1,
                 Ok(false) => {}
                 Err(error) => {
@@ -258,6 +258,7 @@ impl SkillReviewer {
         &self,
         change: &Value,
         success: &HashMap<String, String>,
+        now: i64,
     ) -> Result<bool, String> {
         let action = change
             .get("action")
@@ -365,7 +366,15 @@ impl SkillReviewer {
                 Ok(true)
             }
             "archive" => {
-                self.learned(name)?;
+                let skill = self.learned(name)?;
+                let unused = unused_days(&skill, now) >= 90;
+                let bad_rate = skill.uses >= 4 && skill.success_rate() < 0.5;
+                if !(unused || bad_rate) {
+                    return Err(
+                        "archive needs 90 unused days or more than half failures after four uses"
+                            .to_owned(),
+                    );
+                }
                 self.skills
                     .set_status(name, SkillStatus::Archived)
                     .map_err(|error| error.to_string())?;
