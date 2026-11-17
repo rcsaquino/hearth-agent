@@ -26,7 +26,12 @@ fn list(app: &App, frame: &mut Frame, area: Rect) {
         app.memory.counts.pinned, app.memory.counts.active, app.memory.counts.retired
     );
     if !app.memory.filter.is_empty() {
-        title.push_str(&format!("· {} match ", records.len()));
+        let noun = if records.len() == 1 {
+            "match"
+        } else {
+            "matches"
+        };
+        title.push_str(&format!("· {} {noun} ", records.len()));
     }
     let block = Block::default()
         .borders(Borders::ALL)
@@ -115,7 +120,7 @@ fn audit(app: &App, frame: &mut Frame, area: Rect) {
             let attention = !report.is_empty();
             (
                 format!(
-                    " audit · {} duplicate closed · {} near · {} subject · {} compound",
+                    " audit · {} canonical closed · {} near · {} subject · {} compound",
                     report.canonical_closed,
                     report.near_duplicates,
                     report.cross_subject,

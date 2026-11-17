@@ -128,7 +128,7 @@ does.
 The Memory tab title is now `Memory · N pinned · N active · N retired`. The
 figures come from `inspect::memory_state`, which counts through a read-only
 connection with `store::breakdown_on`, not from the 1,000-row page. A search adds a
-separate `N match` clause; it never restates the three store figures. A zero
+separate match count; it never restates the three store figures. A zero
 figure is printed as `0 retired`, not omitted. A row that was pinned before its
 window closed counts as retired, because the SQL is `valid_to IS NULL AND pinned`
 for pinned and `valid_to IS NOT NULL` for retired.
