@@ -404,6 +404,7 @@ impl HelperPool {
         let task_id = task.id.clone();
         let Some(helper_id) = task.conversation_id.clone() else {
             tracing::warn!(task = %task_id, "helper task has no conversation");
+            self.fail_task(&task_id, "helper has no conversation");
             return;
         };
         let Some(brief) = task
@@ -413,6 +414,7 @@ impl HelperPool {
             .map(str::to_owned)
         else {
             tracing::warn!(task = %task_id, "helper task has no brief");
+            self.fail_task(&task_id, "helper has no brief");
             return;
         };
         let parent_id = task
@@ -659,6 +661,19 @@ impl HelperPool {
         {
             tracing::warn!(task = %task_id, %error, "helper task finish failed");
         }
+    }
+}
+
+impl HelperPool {
+    fn fail_task(&self, task_id: &str, message: &str) {
+        let _ = self.config.session.finish_task(
+            task_id,
+            &self.config.owner,
+            StepOutput::Failed {
+                error: json!({"error": message}),
+                retryable: false,
+            },
+        );
     }
 }
 
