@@ -1385,7 +1385,7 @@ newline is the row boundary, and a statement cannot contain one.
 
 A whole row carries no id, because the statement is shown whole. A row clipped at
 200 characters appends its id after the ellipsis, because the `memory` tool with
-`action = recall` and `id` is the only way to read the rest. The recall tool always ends a row with its id,
+`action = recall` and `id` is the only way to read the rest. The recall action always ends a row with its id,
 because that is where addressing belongs. A new id is `m_` plus ten Crockford
 base32 characters; an older 34-character id keeps working. The recall action
 accepts an id in either case with surrounding whitespace, and a prefix is not an id.
