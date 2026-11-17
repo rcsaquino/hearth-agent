@@ -624,7 +624,9 @@ pub fn breakdown(session: &Session) -> Result<Breakdown> {
 }
 
 /// Count the three states on a read-only connection.
-pub fn breakdown_on(connection: &hearth_storage::rusqlite::Connection) -> rusqlite::Result<Breakdown> {
+pub fn breakdown_on(
+    connection: &hearth_storage::rusqlite::Connection,
+) -> rusqlite::Result<Breakdown> {
     connection.query_row(BREAKDOWN_SQL, [], map_breakdown)
 }
 
@@ -1063,10 +1065,7 @@ mod tests {
     fn write(session: &Session, item: NewMemory) -> WriteOutcome {
         insert(
             session,
-            Pending {
-                item,
-                vector: None,
-            },
+            Pending { item, vector: None },
             MemoryConfig::default().rules_max_tokens,
         )
         .expect("write")
@@ -1710,7 +1709,10 @@ mod tests {
                 .kind(Kind::Preference)
                 .subject("user"),
         );
-        assert!(!second.created(), "a spelling variant is the same statement");
+        assert!(
+            !second.created(),
+            "a spelling variant is the same statement"
+        );
         assert_eq!(count(&session).expect("count"), 1);
     }
 
@@ -1746,7 +1748,10 @@ mod tests {
                 .subject("user"),
         );
         assert!(first.created());
-        let second = write(&session, NewMemory::new("the user prefers dark mode please"));
+        let second = write(
+            &session,
+            NewMemory::new("the user prefers dark mode please"),
+        );
         assert!(
             !second.created(),
             "the near check must not depend on both subjects being set"
@@ -1809,14 +1814,18 @@ mod tests {
             &session,
             NewMemory::new("Alice manages the OR board").subject("alice"),
         );
-        let neighbour = related(&session, "", "Alice manages the OR board and budget", "none")
-            .expect("related");
+        let neighbour = related(
+            &session,
+            "",
+            "Alice manages the OR board and budget",
+            "none",
+        )
+        .expect("related");
         assert!(
             neighbour.is_some(),
             "an empty subject must not hide a neighbour"
         );
     }
-
 
     #[test]
     fn two_statements_in_one_write_are_refused() {
@@ -1870,5 +1879,4 @@ mod tests {
             .collect();
         assert_eq!(contents.len(), 3, "{contents:?}");
     }
-
 }

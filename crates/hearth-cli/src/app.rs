@@ -14,8 +14,8 @@ use ratatui::DefaultTerminal;
 use serde_json::Value;
 
 use hearth_config::{Daemon, SETTINGS_FILE, Settings};
-use hearth_runtime::Zone;
 use hearth_memory::{Breakdown, ConsolidationReport};
+use hearth_runtime::Zone;
 use hearth_runtime::inspect::MemoryRecord;
 use hearth_runtime::skills::{Skill, SkillLibrary, SkillScope, SkillStats};
 

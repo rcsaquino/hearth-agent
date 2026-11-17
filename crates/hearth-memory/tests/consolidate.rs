@@ -11,14 +11,7 @@ fn home() -> (TempDir, Harness) {
     (directory, harness)
 }
 
-fn seed(
-    session: &Session,
-    id: &str,
-    content: &str,
-    subject: &str,
-    kind: &str,
-    pinned: bool,
-) {
+fn seed(session: &Session, id: &str, content: &str, subject: &str, kind: &str, pinned: bool) {
     let now = session.now_micros();
     let fingerprint = hearth_memory::fingerprint(content);
     let id = id.to_owned();
@@ -131,7 +124,14 @@ fn compound_rows_are_reported_and_not_split() {
     let (_directory, harness) = home();
     let service = MemoryService::new(harness.session().clone());
     let content = "the user likes apples. He buys one every day.";
-    seed(harness.session(), "m_compound", content, "user", "fact", false);
+    seed(
+        harness.session(),
+        "m_compound",
+        content,
+        "user",
+        "fact",
+        false,
+    );
 
     let report = service.consolidate().expect("consolidate");
     assert!(report.compound >= 1, "{report:?}");

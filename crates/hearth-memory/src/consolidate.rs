@@ -121,10 +121,7 @@ pub fn run(session: &Session) -> Result<ConsolidationReport> {
         .write(move |writer| consolidate_in(writer, now))
 }
 
-fn consolidate_in(
-    writer: &hearth_storage::Writer<'_>,
-    now: i64,
-) -> Result<ConsolidationReport> {
+fn consolidate_in(writer: &hearth_storage::Writer<'_>, now: i64) -> Result<ConsolidationReport> {
     let mut report = ConsolidationReport {
         at: now,
         ..ConsolidationReport::default()
@@ -230,7 +227,10 @@ fn report_subject_conflicts(
         samples.push(SubjectConflict {
             ids: rows.iter().map(|(id, _, _)| id.clone()).collect(),
             subjects,
-            content: rows.first().map(|(_, _, content)| content.clone()).unwrap_or_default(),
+            content: rows
+                .first()
+                .map(|(_, _, content)| content.clone())
+                .unwrap_or_default(),
         });
     }
     Ok(total)
@@ -304,8 +304,9 @@ fn write_stamp(
     now: i64,
     report: &ConsolidationReport,
 ) -> Result<()> {
-    let encoded = serde_json::to_string(report)
-        .map_err(|error| MemoryError::unavailable(format!("report could not be encoded: {error}")))?;
+    let encoded = serde_json::to_string(report).map_err(|error| {
+        MemoryError::unavailable(format!("report could not be encoded: {error}"))
+    })?;
     let stamp = OffsetDateTime::from_unix_timestamp_nanos(now as i128 * 1_000)
         .ok()
         .and_then(|instant| instant.format(&Rfc3339).ok())

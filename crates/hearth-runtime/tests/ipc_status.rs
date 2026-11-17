@@ -240,7 +240,10 @@ fn status_reports_the_memory_breakdown_and_the_last_audit() {
 
     assert_eq!(status["memory"]["pinned"], 1, "{status}");
     assert_eq!(status["memory"]["active"], 2, "{status}");
-    assert_eq!(status["memory"]["retired"], 2, "the closed duplicate is retired too: {status}");
+    assert_eq!(
+        status["memory"]["retired"], 2,
+        "the closed duplicate is retired too: {status}"
+    );
     assert_eq!(status["memory"]["audit"]["canonical_closed"], 1, "{status}");
     assert_eq!(status["memory"]["audit"]["near_duplicates"], 0, "{status}");
     assert_eq!(status["memory_items"], 3, "{status}");

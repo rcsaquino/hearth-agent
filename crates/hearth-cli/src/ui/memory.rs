@@ -129,15 +129,11 @@ fn audit(app: &App, frame: &mut Frame, area: Rect) {
             )
         }
         None => (
-            " audit · not run yet · the nightly pass repairs canonical duplicates"
-                .to_owned(),
+            " audit · not run yet · the nightly pass repairs canonical duplicates".to_owned(),
             theme::faint(),
         ),
     };
-    frame.render_widget(
-        Paragraph::new(Line::styled(text, style)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(Line::styled(text, style)), area);
 }
 
 fn filter(app: &App, frame: &mut Frame, area: Rect) {

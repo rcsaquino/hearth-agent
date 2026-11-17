@@ -74,4 +74,3 @@ fn plain_text(content: &serde_json::Value) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-
