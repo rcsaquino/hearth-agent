@@ -2754,3 +2754,28 @@ just after.
   best effort and that the local Camofox process and its resolver are the
   boundary. Pinning the resolved address would require a Camofox API that accepts
   an address and a Host override, which it does not have.
+
+## 2026-11-17: the tool set is flat and there is no browser
+
+- `browser` is gone. It was a REST client for a Camofox service that Hearth never
+  installed, started, or checked, so every install advertised a tool that could
+  not work and every call failed with `browser_unavailable`. The client also
+  answered `click` and `type` with success without reading the response body, so
+  a click that landed on a consent banner was reported as a click.
+- `tool_search` and the lazy group registry are gone with it. Removing the two
+  groups left one tool behind a 158-token indirection that also cost a per-run
+  selection set, a checkpoint field, and a `tool_groups` input on `task`.
+  `documents` and `media` are ordinary registry entries: `documents` always,
+  `media` only when a media service is configured, which is the condition that
+  made its group unavailable before.
+- The core schema budget is measured, not assumed. The registry measures 1,762
+  tokens with documents in and `tool_search` out, and 1,927 with image, speech to
+  text, and text to speech all configured. Tests assert 1,800 and 1,950.
+- `docs/SCHEMA.md` listed tool groups on the stored `agent` document. No settings
+  key ever existed for them, and the field is removed.
+- Browser work belongs to whatever the user installs and drives through `shell`.
+  SPEC 9.2 and SECURITY now name that boundary instead of the Camofox process, and
+  the tests no longer mention a browser.
+- `documents` stays. It is the only path to a PDF, DOCX, PPTX, or XLSX that is
+  already on disk, including a Telegram attachment, and it needs no system binary.
+  `web_fetch` reads a PDF from a URL; nothing else reads one from a file.

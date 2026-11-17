@@ -179,8 +179,7 @@ fn seed_helper(
                     "chat_id": 42,
                     "thread_id": null,
                     "depth": 1,
-                    "expected_seconds": 0,
-                    "tool_groups": []
+                    "expected_seconds": 0
                 }),
             )
             .conversation(&helper.id),

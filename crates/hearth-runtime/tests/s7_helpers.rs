@@ -37,8 +37,7 @@ fn spawn_creates_a_child_conversation_and_helper_task() {
         .call(&json!({
             "action": "spawn",
             "brief": "Read the logs and summarize them.",
-            "expected_minutes": 5,
-            "tool_groups": ["web"]
+            "expected_minutes": 5
         }))
         .expect("spawn");
     assert!(!out.is_error);

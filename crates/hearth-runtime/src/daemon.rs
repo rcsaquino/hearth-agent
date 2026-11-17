@@ -937,7 +937,7 @@ impl TelegramWorker {
                 model: self.model.clone(),
                 provider_name: self.provider_name.clone(),
                 owner: format!("daemon:{}:{}", self.pid, submission.id),
-                tools: built.core,
+                tools: built,
                 home: self.home.clone(),
                 spill_dir: self.spill.clone(),
                 guidance: hearth_core::load_guidance(&self.home, &self.workspace),
@@ -945,7 +945,6 @@ impl TelegramWorker {
         )
         .with_memory(Arc::clone(&self.memory))
         .with_skills(Arc::clone(&self.skills))
-        .with_groups(built.groups, built.selection)
         .with_budget(self.budget);
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();

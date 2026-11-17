@@ -115,7 +115,6 @@ impl Tool for TaskTool {
                     "brief": {"type": "string", "description": "Objective, paths, constraints, and completion criteria"},
                     "expected_minutes": {"type": "integer", "minimum": 1},
                     "wall_seconds": {"type": "integer", "minimum": 1},
-                    "tool_groups": {"type": "array", "items": {"type": "string"}},
                     "task_id": {"type": "string"}
                 },
                 "required": ["action"]
@@ -172,17 +171,6 @@ impl TaskTool {
             .unwrap_or(10)
             .max(1);
         let wall_seconds = arguments.get("wall_seconds").and_then(Value::as_i64);
-        let tool_groups = arguments
-            .get("tool_groups")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
         let now = self.session.now_micros();
         let key = format!("helper:{}:{}", self.conversation_id, now);
         let helper = self
@@ -207,7 +195,6 @@ impl TaskTool {
                 "depth": child_depth,
                 "expected_seconds": expected_minutes.saturating_mul(60),
                 "wall_seconds": wall_seconds,
-                "tool_groups": tool_groups,
             }),
         )
         .conversation(&helper.id);
@@ -512,14 +499,6 @@ impl HelperPool {
                 return;
             }
         };
-        if let Some(groups) = task.input.get("tool_groups").and_then(Value::as_array)
-            && let Ok(mut selection) = built.selection.lock()
-        {
-            for group in groups.iter().filter_map(Value::as_str) {
-                selection.insert(group.to_owned());
-            }
-        }
-
         let agent = Agent::new(
             self.config.session.clone(),
             Arc::clone(&self.config.provider),
@@ -528,14 +507,13 @@ impl HelperPool {
                 model: self.config.model.clone(),
                 provider_name: self.config.provider_name.clone(),
                 owner: format!("{}:{}", self.config.owner, task_id),
-                tools: built.core,
+                tools: built,
                 home: self.config.home.clone(),
                 spill_dir: self.config.spill.clone(),
                 guidance: hearth_core::load_guidance(&self.config.home, &self.config.workspace),
             },
         )
         .with_memory(Arc::clone(&self.config.memory))
-        .with_groups(built.groups, built.selection)
         .with_budget(self.config.budget);
 
         let (wall_tx, wall_rx) = mpsc::channel::<()>();

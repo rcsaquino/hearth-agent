@@ -21,8 +21,8 @@ keep this file accurate, free of secrets, and free of live personal data.
   commits needs explicit instruction, and force-pushing or rewriting published
   history needs its own. Run `scripts/secret-scan.sh` before a push that grows
   the history.
-- Do not make live Telegram, provider, ElevenLabs, OpenRouter, Groq, search, or
-  Camofox calls in tests. Use local fake servers. A live smoke test needs explicit
+- Do not make live Telegram, provider, ElevenLabs, OpenRouter, Groq, or search
+  calls in tests. Use local fake servers. A live smoke test needs explicit
   approval before it runs.
 - Do not change the configured model or provider, or add a paid service, without
   approval.
@@ -128,7 +128,7 @@ The suites are:
 - S3 provider adapter and streaming.
 - S4 memory, extraction, and consolidation.
 - S5 Telegram, media, and the message tool.
-- S6 agent loop, budgets, secrets, steering, and lazy tools.
+- S6 agent loop, budgets, secrets, and steering.
 - S7 crash recovery, scheduler, helpers, maintenance, and skill review.
 - S8 operator surface, daemon end-to-end, packaging, and acceptance.
 
@@ -149,7 +149,7 @@ nonblocking accept so a failed test cannot hang the suite.
 | `hearth-storage` | SQLite connections, one writer and a read pool, migrations, snapshots, FTS5. |
 | `hearth-model` | OpenAI-compatible streaming, tool calls, usage, pricing, media clients. |
 | `hearth-memory` | Statements, rules, the retrieval cascade, the digest, and four tools. |
-| `hearth-tools` | Files, shell, web search, web fetch, documents, media, browser, workspace confinement, spill. |
+| `hearth-tools` | Files, shell, web search, web fetch, documents, media, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, and the message tool. |
 | `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket. |
 | `hearth-cli` | The `hearth` binary and the ratatui terminal application. |
@@ -180,8 +180,9 @@ Key invariants:
   No memory operation calls a model. Every new statement names its actor in the
   content, and a pronoun is refused; existing rows still render. The digest
   reports what it left out.
-- Optional tool groups are lazy. Their schemas enter a request only after
-  `tool_search` selects them; the core prompt budget must not grow.
+- The tool set is flat and compiled in. `documents` is always present; `media`
+  enters the registry only when a media service is configured. There is no tool
+  discovery layer and no browser.
 - Every timestamp shown to the model or the person is ISO 8601 in
   `identity.timezone`, resolved when it renders so a settings change applies
   without a restart. Every stored instant stays UTC. See `Zone` in `hearth-core`.

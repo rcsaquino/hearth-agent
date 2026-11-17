@@ -20,7 +20,6 @@ use thiserror::Error;
 
 use crate::compaction::Compactor;
 use crate::events::{EventSink, NoopSink, RunEvent};
-use crate::tool_groups::ToolGroups;
 
 /// Everything an agent needs beyond the record and the provider.
 #[derive(Debug, Clone)]
@@ -67,8 +66,6 @@ pub struct Agent {
     skills: Option<Arc<crate::skills::SkillLibrary>>,
     reservations: Mutex<HashSet<String>>,
     budget: ContextBudget,
-    groups: Option<Arc<ToolGroups>>,
-    selection: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Agent {
@@ -82,8 +79,6 @@ impl Agent {
             skills: None,
             reservations: Mutex::new(HashSet::new()),
             budget: ContextBudget::default(),
-            groups: None,
-            selection: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -119,52 +114,8 @@ impl Agent {
         }
     }
 
-    /// Attach the optional tool groups and the selection shared with tool_search.
-    pub fn with_groups(
-        mut self,
-        groups: Arc<ToolGroups>,
-        selection: Arc<Mutex<HashSet<String>>>,
-    ) -> Self {
-        self.groups = Some(groups);
-        self.selection = selection;
-        self
-    }
-
-    fn selected_groups(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .selection
-            .lock()
-            .map(|selection| selection.iter().cloned().collect())
-            .unwrap_or_default();
-        names.sort();
-        names
-    }
-
     fn tool_specs(&self) -> Vec<ToolSpec> {
-        let mut specs = self.config.tools.specs();
-        if let Some(groups) = &self.groups
-            && let Ok(selection) = self.selection.lock()
-        {
-            specs.extend(groups.selected_specs(&selection));
-        }
-        specs
-    }
-
-    fn load_selection(&self, checkpoint: Option<&Value>) {
-        let Ok(mut selection) = self.selection.lock() else {
-            return;
-        };
-        selection.clear();
-        if let Some(items) = checkpoint
-            .and_then(|checkpoint| checkpoint.get("selected_groups"))
-            .and_then(Value::as_array)
-        {
-            for item in items {
-                if let Some(name) = item.as_str() {
-                    selection.insert(name.to_owned());
-                }
-            }
-        }
+        self.config.tools.specs()
     }
 
     fn absorb_queued(
@@ -411,7 +362,6 @@ impl Agent {
                 json!({"text": text}),
             );
         }
-        self.load_selection(claimed.checkpoint.as_ref());
         let mut absorbed: Vec<String> = Vec::new();
         if cancel.load(Ordering::Relaxed) {
             return self.settle_cancelled(&submission, &claimed.id, None, &absorbed, events);
@@ -431,11 +381,8 @@ impl Agent {
         if !pending.is_empty() {
             self.execute_calls(&submission, &claimed.id, &pending, true, events)?;
             turn += 1;
-            self.session.checkpoint_task(
-                &claimed.id,
-                &self.config.owner,
-                json!({"turn": turn, "selected_groups": self.selected_groups()}),
-            )?;
+            self.session
+                .checkpoint_task(&claimed.id, &self.config.owner, json!({"turn": turn}))?;
             emit(
                 events,
                 &claimed.id,
@@ -535,7 +482,6 @@ impl Agent {
                     "prefix_hash": prompt.prefix_hash.clone(),
                     "prefix_parts": prompt.prefix_parts.clone(),
                     "prefix_cause": causes,
-                    "selected_groups": self.selected_groups(),
                 }),
             )?;
             previous_prefix = Some(json!(prompt.prefix_parts.clone()));
@@ -669,7 +615,7 @@ impl Agent {
                 self.session.checkpoint_task(
                     &claimed.id,
                     &self.config.owner,
-                    json!({"turn": turn, "selected_groups": self.selected_groups()}),
+                    json!({"turn": turn}),
                 )?;
                 emit(
                     events,
@@ -798,11 +744,6 @@ impl Agent {
                     "arguments": preview(&call.arguments.to_string()),
                 }),
             );
-            let selected = self.groups.as_ref().and_then(|groups| {
-                self.selection.lock().ok().and_then(|selection| {
-                    groups.call_selected(&call.name, &call.arguments, &selection)
-                })
-            });
             let outcome = if replay && !replay_safe(&call.name) {
                 Some(Err(ToolError::invalid(
                     "not_replayed",
@@ -812,10 +753,7 @@ impl Agent {
                     ),
                 )))
             } else {
-                self.config
-                    .tools
-                    .call(&call.name, &call.arguments)
-                    .or(selected)
+                self.config.tools.call(&call.name, &call.arguments)
             };
             let (content, is_error) = match outcome {
                 Some(Ok(output)) => {
@@ -1065,7 +1003,7 @@ impl Drop for Reservation<'_> {
 fn replay_safe(name: &str) -> bool {
     !matches!(
         name,
-        "shell" | "message" | "schedule" | "browser" | "media" | "task" | "skill" | "memory_save"
+        "shell" | "message" | "schedule" | "media" | "task" | "skill" | "memory_save"
     )
 }
 

@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.53, plain-language edition
+**Status:** Draft 0.54, plain-language edition
 **Date:** 2026-11-17
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,15 @@
 ---
 
 ## A note on language
+
+Draft 0.54 removes the browser and the lazy tool groups. The Camofox client
+advertised a service Hearth never installed, started, or checked, and
+`tool_search` existed only to keep optional schemas out of the core prompt. The
+`browser` tool, its client, and the group registry are gone. `documents` and
+`media` are ordinary tools now, and `media` appears only when a media service is
+configured. The task tool loses its `tool_groups` input, and a checkpoint no
+longer records a selection. The core schemas measure 1,762 tokens without media
+and 1,927 with every media service configured.
 
 Draft 0.53 removes the document record and the conversation fork. Neither had a
 production caller. Migration 0011 drops the `documents` table; the conversation
@@ -901,12 +910,12 @@ The rules:
 its arguments, a safety level, and a time limit. Hearth calls it, saves the result,
 and shows the model a bounded version.
 
-A tool declares a name, group, description, argument schema, retry policy, timeout,
+A tool declares a name, description, argument schema, retry policy, timeout,
 and output cap. All of it is compiled in.
 
 Every tool runs inline in the turn, and its result is saved before the next
-request. No production path creates a durable task of kind `tool`; shell, browser,
-and HTTP calls finish or time out inside the turn. Results are truncated by
+request. No production path creates a durable task of kind `tool`; shell and HTTP
+calls finish or time out inside the turn. Results are truncated by
 policy, with overflow written to spill.
 
 Errors are structured with `code`, `message`, `retryable`, and `detail`, and
@@ -1577,17 +1586,21 @@ in the prompt. Optional groups are loaded only when a job needs them.
 | `shell` | Run a command in the workspace |
 | `schedule` | Reminders and recurring tasks |
 | `skill` | Load, save, or archive a Markdown skill |
+| `documents` | Read or create PDF, DOCX, PPTX, and XLSX files |
+| `media` | Generate an image, transcribe audio, or synthesize speech |
 
-`tool_search` joins the core set when an optional group exists. `task` joins it
-only for a Telegram conversation below the helper depth limit.
+`task` joins the core set only for a Telegram conversation below the helper depth
+limit. `media` joins only when `media.image`, `media.stt`, or `media.tts` is
+configured, so its schema costs nothing on an install that does not use it.
 
-### 9.2 Optional tools
+### 9.2 Capabilities that wait
 
-`browser`, `documents` (PDF, DOCX, PPTX, XLSX), and `media` (image generation,
-speech to text, text to speech) ship in 1.0. `code`, `calendar`, and `home` wait
-until there is evidence they are needed. A group is enabled in settings; `media`
-needs the matching `media.stt`, `media.tts`, or `media.image` block. Its schemas are
-loaded only after `tool_search` selects it.
+`code`, `calendar`, and `home` wait until there is evidence they are needed.
+Hearth ships no browser. The Camofox client, the tool-search group it lived in,
+and the lazy group loader were removed: the browser was a separately installed
+service, and a compiled client for it advertised a capability that almost no
+install could use. Browser work belongs to whatever the user installs and drives
+through `shell`.
 
 ### 9.3 Approval
 
@@ -1632,10 +1645,6 @@ HTTPS fetch.
   and PDFs to text, follows at most 3 redirects, caps the page at 2 MB, and refuses
   private and link-local addresses. Every fetch provider validates the target URL
   before it is used.
-- **Browser navigation.** Hearth checks the URL before it hands it to the local
-  Camofox service, but Camofox resolves the name and makes the connection. A name
-  that changes its answer between the check and the connection can pass. The check
-  is best effort; the Camofox process and its network are the boundary.
 - **Untrusted content.** Fetch output is labeled as untrusted web content. The
   model treats it as data, never as instructions.
 - If every search or fetch provider fails, the tool returns the first error and the

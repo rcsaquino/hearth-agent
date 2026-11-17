@@ -1,8 +1,7 @@
 //! Shared runtime tool construction.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use hearth_config::Settings;
@@ -11,7 +10,7 @@ use hearth_memory::MemoryService;
 use hearth_model::{ImageClient, Speaker, SpeechClient, Transcriber, TranscriptionClient};
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
-    BraveSearch, BrowserTool, DeepSeekFetch, DeepSeekSearch, DocumentsTool, ExaSearch, FetchError,
+    BraveSearch, DeepSeekFetch, DeepSeekSearch, DocumentsTool, ExaSearch, FetchError,
     FetchProvider, FileTool, FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, MediaTool,
     SearchError, SearchProvider, ShellTool, TinyFishFetch, TinyFishSearch, Tool, ToolRegistry,
     WebFetchTool, WebSearchTool,
@@ -21,7 +20,6 @@ use thiserror::Error;
 use crate::helpers::{HelperControls, TaskTool};
 use crate::scheduler::ScheduleTool;
 use crate::skills::{SkillLibrary, SkillTool};
-use crate::tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
 
 /// The Telegram values needed for the message tool.
 pub struct MessageTarget {
@@ -42,14 +40,7 @@ pub struct TaskTarget {
     pub max_concurrent: u8,
 }
 
-/// The core tools plus the lazy group registry.
-pub struct BuiltTools {
-    pub core: ToolRegistry,
-    pub groups: Arc<ToolGroups>,
-    pub selection: Arc<Mutex<HashSet<String>>>,
-}
-
-/// The inbound and outbound media roots used by the optional tools.
+/// The inbound and outbound media roots used by the documents and media tools.
 #[derive(Clone, Debug)]
 pub struct ToolMediaRoots {
     pub inbound: PathBuf,
@@ -78,21 +69,20 @@ pub fn build_tools(
     skills: Option<Arc<SkillLibrary>>,
     task: Option<TaskTarget>,
     media: &ToolMediaRoots,
-) -> Result<BuiltTools, ToolBuildError> {
-    let groups = Arc::new(groups_for(settings, workspace, spill, media));
-    let selection = Arc::new(Mutex::new(HashSet::new()));
-    let mut tools: Vec<Arc<dyn hearth_tools::Tool>> = vec![
+) -> Result<ToolRegistry, ToolBuildError> {
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(FileTool::new(workspace, spill)),
         Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
         Arc::new(build_web_search(settings)?),
         Arc::new(build_web_fetch(settings)?),
+        Arc::new(DocumentsTool::new(
+            workspace.to_path_buf(),
+            spill.to_path_buf(),
+            media.inbound.clone(),
+        )),
     ];
-    // `tool_search` only earns its tokens when there is a group to reach.
-    if groups.any_available() {
-        tools.push(Arc::new(ToolSearchTool::new(
-            Arc::clone(&groups),
-            Arc::clone(&selection),
-        )));
+    if let Some(media_tool) = build_media_tool(settings, workspace, spill, media) {
+        tools.push(Arc::new(media_tool));
     }
     if let Some(memory) = memory {
         tools.extend(memory.tools_at(memory_source, zone));
@@ -131,51 +121,7 @@ pub fn build_tools(
             )));
         }
     }
-    Ok(BuiltTools {
-        core: ToolRegistry::new(tools),
-        groups,
-        selection,
-    })
-}
-
-fn groups_for(
-    settings: &Settings,
-    workspace: &Path,
-    spill: &Path,
-    media: &ToolMediaRoots,
-) -> ToolGroups {
-    let documents = Arc::new(DocumentsTool::new(
-        workspace.to_path_buf(),
-        spill.to_path_buf(),
-        media.inbound.clone(),
-    ));
-    let media_tools: Vec<Arc<dyn Tool>> = build_media_tool(settings, workspace, spill, media)
-        .map(|tool| vec![Arc::new(tool) as Arc<dyn Tool>])
-        .unwrap_or_default();
-    let browser_tools: Vec<Arc<dyn Tool>> = BrowserTool::new(
-        std::env::var("CAMOFOX_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:9377".to_owned()),
-        workspace.to_path_buf(),
-        Duration::from_secs(30),
-    )
-    .map(|tool| vec![Arc::new(tool) as Arc<dyn Tool>])
-    .unwrap_or_default();
-    ToolGroups::new(vec![
-        ToolGroup::new(
-            "browser",
-            "Browse and interact with web pages that plain fetch cannot reach.",
-            browser_tools,
-        ),
-        ToolGroup::new(
-            "documents",
-            "Read PDF, DOCX, PPTX, and XLSX files.",
-            vec![documents],
-        ),
-        ToolGroup::new(
-            "media",
-            "Generate images, transcribe audio, and synthesize speech.",
-            media_tools,
-        ),
-    ])
+    Ok(ToolRegistry::new(tools))
 }
 
 fn build_media_tool(
@@ -423,10 +369,20 @@ mod tests {
 ///
 /// Four memory tools replaced five, and each schema lost a store selector, an id
 /// prefix convention, and a tag array. Measured at 767 tokens for the memory
-/// family against 1,410 for the five it replaced. The guard sits just above the
-/// measured total so a single tool growing a sprawling schema is caught.
+/// family against 1,410 for the five it replaced. The current registry, with
+/// documents and without tool_search, measures 1,762. The guard sits just above
+/// the measured total so a single tool growing a sprawling schema is caught.
 #[cfg(test)]
 const CORE_SCHEMA_TOKEN_BUDGET: i64 = 1_800;
+
+/// The ceiling once a media service keeps the media schema in every request.
+///
+/// The widest registry, with image, speech to text, and text to speech all
+/// configured, measures 1,927 tokens against 1,762 without media. The guard sits
+/// just above the measured total so a single tool growing a sprawling schema is
+/// caught.
+#[cfg(test)]
+const MEDIA_CONFIGURED_TOKEN_BUDGET: i64 = 1_950;
 
 /// The memory family's share of the core schema budget.
 ///
@@ -440,17 +396,32 @@ mod core_budget_tests {
     use super::*;
     use hearth_core::Harness;
     use hearth_memory::MemoryService;
+    use hearth_model::ToolSpec;
     use hearth_telegram::{SystemSleeper, TelegramClient};
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     fn settings() -> Settings {
         serde_json::from_value(json!({})).expect("empty settings")
     }
 
-    #[test]
-    fn the_core_tool_schemas_fit_the_budget() {
-        let home = tempfile::TempDir::new().expect("temp home");
-        let harness = Harness::open(home.path()).expect("harness");
+    fn schema_tokens(specs: &[ToolSpec]) -> i64 {
+        let values: Vec<Value> = specs
+            .iter()
+            .map(|spec| {
+                json!({
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.parameters,
+                })
+            })
+            .collect();
+        hearth_model::estimate_tokens(&serde_json::to_string(&values).unwrap_or_default())
+    }
+
+    /// The widest core registry a run can carry, so the measured budget covers
+    /// every always-loaded schema rather than the smallest set.
+    fn full_core_tools(home: &Path, settings: &Settings) -> ToolRegistry {
+        let harness = Harness::open(home).expect("harness");
         let memory = Arc::new(MemoryService::new(harness.session().clone()));
         let sender = TelegramSender::new(
             TelegramClient::with_base_url("test-token", "http://127.0.0.1:1")
@@ -463,39 +434,41 @@ mod core_budget_tests {
             sender,
             chat_id: 1,
             thread_id: None,
-            outbound: home.path().join("outbound"),
+            outbound: home.join("outbound"),
             speaker: None,
         };
-        let spill = home.path().join("spill");
+        let spill = home.join("spill");
         let media = ToolMediaRoots {
-            inbound: home.path().join("media/inbound"),
-            outbound: home.path().join("media/outbound"),
+            inbound: home.join("media/inbound"),
+            outbound: home.join("media/outbound"),
         };
-        let built = build_tools(
-            &settings(),
+        build_tools(
+            settings,
             hearth_core::Zone::utc(),
-            home.path(),
+            home,
             &spill,
             Some(target),
             Some(memory),
             None,
-            Some(Arc::new(SkillLibrary::new(home.path()))),
+            Some(Arc::new(SkillLibrary::new(home))),
             None,
             &media,
         )
-        .expect("tools");
+        .expect("tools")
+    }
 
-        let names: Vec<String> = built
-            .core
-            .specs()
-            .into_iter()
-            .map(|spec| spec.name)
-            .collect();
+    #[test]
+    fn the_core_tool_schemas_fit_the_budget() {
+        let home = tempfile::TempDir::new().expect("temp home");
+        let tools = full_core_tools(home.path(), &settings());
+
+        let names: Vec<String> = tools.specs().into_iter().map(|spec| spec.name).collect();
         for expected in [
             "files",
             "shell",
             "web_search",
             "web_fetch",
+            "documents",
             "memory_save",
             "memory_recall",
             "memory_forget",
@@ -503,7 +476,6 @@ mod core_budget_tests {
             "message",
             "schedule",
             "skill",
-            "tool_search",
         ] {
             assert!(
                 names.iter().any(|name| name == expected),
@@ -511,17 +483,16 @@ mod core_budget_tests {
             );
         }
 
-        let tokens = ToolGroups::schema_tokens(&built.core.specs());
+        let tokens = schema_tokens(&tools.specs());
         assert!(
             tokens <= CORE_SCHEMA_TOKEN_BUDGET,
             "core tool schemas use {tokens} tokens"
         );
-        let memory_tokens: i64 = built
-            .core
+        let memory_tokens: i64 = tools
             .specs()
             .iter()
             .filter(|spec| spec.name.starts_with("memory_"))
-            .map(|spec| ToolGroups::schema_tokens(std::slice::from_ref(spec)))
+            .map(|spec| schema_tokens(std::slice::from_ref(spec)))
             .sum();
         assert!(
             memory_tokens <= MEMORY_SCHEMA_TOKEN_BUDGET,
@@ -529,78 +500,28 @@ mod core_budget_tests {
         );
     }
 
+    /// Any configured media service adds the media schema to the core request,
+    /// so the widest one is measured against this separate total.
     #[test]
-    fn real_documents_and_media_groups_load_lazily() {
+    fn the_core_schemas_fit_the_budget_with_media() {
         let home = tempfile::TempDir::new().expect("temp home");
-        let workspace = home.path().join("workspace");
-        let spill = home.path().join("spill");
-        let inbound = home.path().join("media/inbound");
-        let outbound = home.path().join("media/outbound");
-        std::fs::create_dir_all(&workspace).expect("workspace");
-        std::fs::create_dir_all(&spill).expect("spill");
-        std::fs::create_dir_all(&inbound).expect("inbound");
-        std::fs::create_dir_all(&outbound).expect("outbound");
         let settings: Settings = serde_json::from_value(json!({
             "media": {
-                "image": {"kind": "openrouter-images", "api_key": "fake", "model": "image-model"},
-                "stt": {"kind": "groq", "api_key": "fake", "model": "whisper-large-v3-turbo"},
-                "tts": {"kind": "elevenlabs", "api_key": "fake", "model": "eleven_v4", "voice_id": "voice-id"}
+                "image": {"api_key": "test-key", "model": "test-model"},
+                "stt": {"api_key": "test-key", "model": "test-model"},
+                "tts": {"api_key": "test-key", "model": "test-model", "voice_id": "test-voice"}
             }
         }))
         .expect("settings");
-        let media = ToolMediaRoots { inbound, outbound };
-        let built = build_tools(
-            &settings,
-            hearth_core::Zone::utc(),
-            &workspace,
-            &spill,
-            None,
-            None,
-            None,
-            None,
-            None,
-            &media,
-        )
-        .expect("tools");
+        let tools = full_core_tools(home.path(), &settings);
 
-        let documents = built.groups.get("documents").expect("documents group");
-        assert!(documents.available());
-        assert_eq!(documents.specs()[0].name, "documents");
-        let media_group = built.groups.get("media").expect("media group");
-        assert!(media_group.available());
-        assert_eq!(media_group.specs()[0].name, "media");
-        let browser = built.groups.get("browser").expect("browser group");
-        assert!(browser.available());
-        assert_eq!(browser.specs()[0].name, "browser");
+        let names: Vec<String> = tools.specs().into_iter().map(|spec| spec.name).collect();
+        assert!(names.iter().any(|name| name == "media"), "missing media");
 
-        let empty = HashSet::new();
-        assert!(built.groups.selected_specs(&empty).is_empty());
-        let core_names: Vec<String> = built
-            .core
-            .specs()
-            .into_iter()
-            .map(|spec| spec.name)
-            .collect();
+        let tokens = schema_tokens(&tools.specs());
         assert!(
-            !core_names
-                .iter()
-                .any(|name| name == "documents" || name == "media" || name == "browser"),
-            "{core_names:?}"
+            tokens <= MEDIA_CONFIGURED_TOKEN_BUDGET,
+            "core tool schemas with media use {tokens} tokens"
         );
-
-        let mut selected = HashSet::new();
-        selected.insert("documents".to_owned());
-        let specs = built.groups.selected_specs(&selected);
-        assert!(specs.iter().any(|spec| spec.name == "documents"));
-        selected.insert("browser".to_owned());
-        let specs = built.groups.selected_specs(&selected);
-        assert!(specs.iter().any(|spec| spec.name == "browser"));
-        let outcome =
-            built
-                .groups
-                .call_selected("documents", &json!({"path": "missing.pdf"}), &selected);
-        assert!(outcome.is_some(), "the selected documents tool is callable");
-        assert!(outcome.unwrap().is_err());
-        assert!(ToolGroups::schema_tokens(&built.core.specs()) <= CORE_SCHEMA_TOKEN_BUDGET);
     }
 }

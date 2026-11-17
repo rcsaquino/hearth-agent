@@ -21,7 +21,6 @@ pub mod service;
 pub mod skill_review;
 pub mod skills;
 pub mod spill;
-pub mod tool_groups;
 mod tools;
 
 pub use agent::{Agent, AgentConfig, AgentError, RunOutcome};
@@ -37,7 +36,6 @@ pub use ipc::{IpcError, StatusContext, open_watch, read_status, serve, socket_pa
 pub use scheduler::{
     ReminderHandler, ScheduleTool, Scheduler, TaskHandler, TaskHandlerError, TaskRegistry,
 };
-pub use tool_groups::{ToolGroup, ToolGroups, ToolSearchTool};
 pub use tools::ToolMediaRoots;
 
 /// The size at which `logs/hearth.log` is rotated to `hearth.log.1`.

@@ -50,7 +50,7 @@ newest reset or summary marker onward, subject to compaction.
 
 Built-in document kinds:
 
-- `agent`: model alias, thinking level, tool groups, extra instructions, workspace.
+- `agent`: model alias, thinking level, extra instructions, workspace.
 - `provider`: provider session identity, used for prompt-cache affinity.
 - `live`: current run and task id, for status display only.
 - `usage`: rolling counters, not the authoritative usage ledger.

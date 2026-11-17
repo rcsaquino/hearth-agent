@@ -1165,8 +1165,7 @@ fn a_helper_runs_in_the_daemon_and_notifies_the_parent() {
                         "chat_id": 42,
                         "thread_id": null,
                         "depth": 1,
-                        "expected_seconds": 600,
-                        "tool_groups": []
+                        "expected_seconds": 600
                     }),
                 )
                 .conversation(&helper.id),
