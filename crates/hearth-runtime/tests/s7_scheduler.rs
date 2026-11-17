@@ -119,20 +119,15 @@ fn a_due_sleeping_task_is_woken_while_the_scheduler_runs() {
     let session = harness.session();
     let now = session.now_micros();
     session
-        .create_sleeping_task(
-            NewTask::new("wake-audit", 1, "run", json!({})),
-            now - 1,
-        )
+        .create_sleeping_task(NewTask::new("wake-audit", 1, "run", json!({})), now - 1)
         .expect("sleeping task");
     let calls = Arc::new(AtomicUsize::new(0));
-    let registry = Arc::new(
-        hearth_runtime::TaskRegistry::new().register(
-            "wake-audit",
-            Arc::new(CountingHandler {
-                calls: Arc::clone(&calls),
-            }),
-        ),
-    );
+    let registry = Arc::new(hearth_runtime::TaskRegistry::new().register(
+        "wake-audit",
+        Arc::new(CountingHandler {
+            calls: Arc::clone(&calls),
+        }),
+    ));
     let scheduler = hearth_runtime::Scheduler::new(session.clone(), registry, "scheduler");
     let shutdown = Arc::new(AtomicBool::new(false));
     let handle = thread::spawn({

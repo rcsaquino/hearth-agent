@@ -220,7 +220,10 @@ fn a_large_successful_search_response_is_not_cut() {
         })
         .collect();
     let payload = json!({"web": {"results": results}});
-    assert!(payload.to_string().len() > 8 * 1024, "the body exceeds the error cap");
+    assert!(
+        payload.to_string().len() > 8 * 1024,
+        "the body exceeds the error cap"
+    );
     let server = serve(json_reply(payload));
     let provider: Arc<dyn SearchProvider> = Arc::new(
         BraveSearch::new(server.base.clone(), "brave-key".to_owned()).expect("brave provider"),

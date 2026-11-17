@@ -174,9 +174,7 @@ fn reopening_the_harness_preserves_the_records() {
             .create_conversation("Test", "local", "local:1")
             .expect("create conversation");
         session
-            .save(
-                Save::new(&conversation.id).entry("user", json!({"n": 1})),
-            )
+            .save(Save::new(&conversation.id).entry("user", json!({"n": 1})))
             .expect("save");
         let submitted = session
             .submit(&conversation.id, "req-1", "input", json!({"text": "hello"}))

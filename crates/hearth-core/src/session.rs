@@ -10,9 +10,9 @@ use uuid::Uuid;
 use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
-    Commit, CommitRecord, Conversation, Effect, EffectStatus, Entry, NewEntry,
-    NewSubmission, NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult,
-    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
+    Commit, CommitRecord, Conversation, Effect, EffectStatus, Entry, NewEntry, NewSubmission,
+    NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult, TaskCounts,
+    TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
 };
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
@@ -168,43 +168,44 @@ impl Session {
         }
         let conversation_id = save.conversation_id.clone();
 
-        self.storage.write(move |writer| -> Result<Commit, CoreError> {
-            let exists: Option<i64> = writer.query_optional(
-                "SELECT 1 FROM conversations WHERE id = ?",
-                (conversation_id.as_str(),),
-                |row| row.get(0),
-            )?;
-            if exists.is_none() {
-                return Err(CoreError::ConversationNotFound(conversation_id.clone()));
-            }
+        self.storage
+            .write(move |writer| -> Result<Commit, CoreError> {
+                let exists: Option<i64> = writer.query_optional(
+                    "SELECT 1 FROM conversations WHERE id = ?",
+                    (conversation_id.as_str(),),
+                    |row| row.get(0),
+                )?;
+                if exists.is_none() {
+                    return Err(CoreError::ConversationNotFound(conversation_id.clone()));
+                }
 
-            let seq = next_sequence(writer)?;
-            for (entry, id) in save.entries.iter().zip(entry_ids.iter()) {
-                let content_value = crate::secrets::redact_value(&entry.content);
-                let content = serde_json::to_string(&content_value)
-                    .map_err(|error| CoreError::Invalid(error.to_string()))?;
-                let tokens_est = crate::prompt::estimate_content(&content_value);
-                writer.execute(
-                    "INSERT INTO entries (id, conversation_id, seq, kind, content_json, \
+                let seq = next_sequence(writer)?;
+                for (entry, id) in save.entries.iter().zip(entry_ids.iter()) {
+                    let content_value = crate::secrets::redact_value(&entry.content);
+                    let content = serde_json::to_string(&content_value)
+                        .map_err(|error| CoreError::Invalid(error.to_string()))?;
+                    let tokens_est = crate::prompt::estimate_content(&content_value);
+                    writer.execute(
+                        "INSERT INTO entries (id, conversation_id, seq, kind, content_json, \
                      tokens_est, source, prompt_hash, created_at) \
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        id.as_str(),
-                        conversation_id.as_str(),
-                        seq,
-                        entry.kind.as_str(),
-                        content.as_str(),
-                        tokens_est,
-                        entry.source.as_deref(),
-                        entry.prompt_hash.as_deref(),
-                        now,
-                    ),
-                )?;
-            }
+                        (
+                            id.as_str(),
+                            conversation_id.as_str(),
+                            seq,
+                            entry.kind.as_str(),
+                            content.as_str(),
+                            tokens_est,
+                            entry.source.as_deref(),
+                            entry.prompt_hash.as_deref(),
+                            now,
+                        ),
+                    )?;
+                }
 
-            for submission in &save.submissions {
-                let content = redacted_json(&submission.content)?;
-                writer.execute(
+                for submission in &save.submissions {
+                    let content = redacted_json(&submission.content)?;
+                    writer.execute(
                     "INSERT INTO submissions (id, conversation_id, request_id, kind, content_json, \
                      status, answer_entry_id, error_json, created_at, settled_at) \
                      VALUES (?, ?, ?, ?, ?, 'queued', NULL, NULL, ?, NULL)",
@@ -217,74 +218,74 @@ impl Session {
                         now,
                     ),
                 )?;
-            }
+                }
 
-            for settle in &save.settles {
-                if let Some(answer_entry_id) = settle.answer_entry_id.as_deref() {
-                    let found: Option<i64> = writer.query_optional(
-                        "SELECT 1 FROM entries WHERE id = ? AND conversation_id = ?",
-                        (answer_entry_id, conversation_id.as_str()),
-                        |row| row.get(0),
+                for settle in &save.settles {
+                    if let Some(answer_entry_id) = settle.answer_entry_id.as_deref() {
+                        let found: Option<i64> = writer.query_optional(
+                            "SELECT 1 FROM entries WHERE id = ? AND conversation_id = ?",
+                            (answer_entry_id, conversation_id.as_str()),
+                            |row| row.get(0),
+                        )?;
+                        if found.is_none() {
+                            return Err(CoreError::EntryNotFound(
+                                answer_entry_id.to_owned(),
+                                conversation_id.clone(),
+                            ));
+                        }
+                    }
+                    let error_json = settle.error.as_ref().map(redacted_json).transpose()?;
+                    let changed = writer.execute(
+                        "UPDATE submissions SET status = ?, answer_entry_id = ?, error_json = ?, \
+                     settled_at = ? WHERE id = ? AND conversation_id = ? AND settled_at IS NULL",
+                        (
+                            settle.status.as_str(),
+                            settle.answer_entry_id.as_deref(),
+                            error_json.as_deref(),
+                            now,
+                            settle.submission_id.as_str(),
+                            conversation_id.as_str(),
+                        ),
                     )?;
-                    if found.is_none() {
-                        return Err(CoreError::EntryNotFound(
-                            answer_entry_id.to_owned(),
-                            conversation_id.clone(),
-                        ));
+                    if changed != 1 {
+                        let found: Option<(String, String)> = writer.query_optional(
+                            "SELECT status, conversation_id FROM submissions WHERE id = ?",
+                            (settle.submission_id.as_str(),),
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )?;
+                        return match found {
+                            Some((status, found_conversation)) => {
+                                if found_conversation != conversation_id {
+                                    Err(CoreError::Invalid(format!(
+                                        "submission {} belongs to another conversation",
+                                        settle.submission_id
+                                    )))
+                                } else {
+                                    Err(CoreError::AlreadySettled(
+                                        settle.submission_id.clone(),
+                                        status,
+                                    ))
+                                }
+                            }
+                            None => {
+                                Err(CoreError::SubmissionNotFound(settle.submission_id.clone()))
+                            }
+                        };
                     }
                 }
-                let error_json = settle.error.as_ref().map(redacted_json).transpose()?;
-                let changed = writer.execute(
-                    "UPDATE submissions SET status = ?, answer_entry_id = ?, error_json = ?, \
-                     settled_at = ? WHERE id = ? AND conversation_id = ? AND settled_at IS NULL",
-                    (
-                        settle.status.as_str(),
-                        settle.answer_entry_id.as_deref(),
-                        error_json.as_deref(),
-                        now,
-                        settle.submission_id.as_str(),
-                        conversation_id.as_str(),
-                    ),
-                )?;
-                if changed != 1 {
-                    let found: Option<(String, String)> = writer.query_optional(
-                        "SELECT status, conversation_id FROM submissions WHERE id = ?",
-                        (settle.submission_id.as_str(),),
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )?;
-                    return match found {
-                        Some((status, found_conversation)) => {
-                            if found_conversation != conversation_id {
-                                Err(CoreError::Invalid(format!(
-                                    "submission {} belongs to another conversation",
-                                    settle.submission_id
-                                )))
-                            } else {
-                                Err(CoreError::AlreadySettled(
-                                    settle.submission_id.clone(),
-                                    status,
-                                ))
-                            }
-                        }
-                        None => Err(CoreError::SubmissionNotFound(
-                            settle.submission_id.clone(),
-                        )),
-                    };
-                }
-            }
 
-            let mut recorded_effect_ids = Vec::with_capacity(save.effects.len());
-            for (intent, generated_id) in save.effects.iter().zip(effect_ids.iter()) {
-                let existing: Option<String> = writer.query_optional(
-                    "SELECT id FROM effects WHERE kind = ? AND key = ?",
-                    (intent.kind.as_str(), intent.key.as_str()),
-                    |row| row.get(0),
-                )?;
-                let id = match existing {
-                    Some(id) => id,
-                    None => {
-                        let payload = redacted_json(&intent.payload)?;
-                        writer.execute(
+                let mut recorded_effect_ids = Vec::with_capacity(save.effects.len());
+                for (intent, generated_id) in save.effects.iter().zip(effect_ids.iter()) {
+                    let existing: Option<String> = writer.query_optional(
+                        "SELECT id FROM effects WHERE kind = ? AND key = ?",
+                        (intent.kind.as_str(), intent.key.as_str()),
+                        |row| row.get(0),
+                    )?;
+                    let id = match existing {
+                        Some(id) => id,
+                        None => {
+                            let payload = redacted_json(&intent.payload)?;
+                            writer.execute(
                             "INSERT INTO effects (id, task_id, kind, key, payload_json, status, \
                              result_json, attempts, created_at, settled_at) \
                              VALUES (?, ?, ?, ?, ?, 'intent', NULL, 0, ?, NULL)",
@@ -297,66 +298,66 @@ impl Session {
                                 now,
                             ),
                         )?;
-                        generated_id.clone()
-                    }
-                };
-                recorded_effect_ids.push(id);
-            }
+                            generated_id.clone()
+                        }
+                    };
+                    recorded_effect_ids.push(id);
+                }
 
-            if let Some(update) = &save.telegram_update {
-                writer.execute(
+                if let Some(update) = &save.telegram_update {
+                    writer.execute(
                     "INSERT INTO telegram_updates (update_id, chat_id, message_id, processed_at) \
                      VALUES (?, ?, ?, ?)",
                     (update.update_id, update.chat_id, update.message_id, now),
                 )?;
-            }
-            if let Some(offset) = save.telegram_offset {
-                writer.execute(
-                    "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
-                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (offset.to_string(),),
-                )?;
-            }
-            for meta in &save.meta {
-                let found: Option<String> = writer.query_optional(
-                    "SELECT value FROM meta WHERE key = ?",
-                    (meta.key.as_str(),),
-                    |row| row.get(0),
-                )?;
-                if found != meta.expected {
-                    return Err(CoreError::MetaVersion {
-                        key: meta.key.clone(),
-                        expected: meta.expected.clone(),
-                        found,
-                    });
                 }
-                writer.execute(
-                    "INSERT INTO meta (key, value) VALUES (?, ?) \
+                if let Some(offset) = save.telegram_offset {
+                    writer.execute(
+                        "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (meta.key.as_str(), meta.value.as_str()),
+                        (offset.to_string(),),
+                    )?;
+                }
+                for meta in &save.meta {
+                    let found: Option<String> = writer.query_optional(
+                        "SELECT value FROM meta WHERE key = ?",
+                        (meta.key.as_str(),),
+                        |row| row.get(0),
+                    )?;
+                    if found != meta.expected {
+                        return Err(CoreError::MetaVersion {
+                            key: meta.key.clone(),
+                            expected: meta.expected.clone(),
+                            found,
+                        });
+                    }
+                    writer.execute(
+                        "INSERT INTO meta (key, value) VALUES (?, ?) \
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (meta.key.as_str(), meta.value.as_str()),
+                    )?;
+                }
+
+                writer.execute(
+                    "UPDATE conversations SET updated_at = ? WHERE id = ?",
+                    (now, conversation_id.as_str()),
                 )?;
-            }
 
-            writer.execute(
-                "UPDATE conversations SET updated_at = ? WHERE id = ?",
-                (now, conversation_id.as_str()),
-            )?;
+                insert_commit(
+                    writer,
+                    seq,
+                    now,
+                    Some(conversation_id.as_str()),
+                    None,
+                    "save",
+                )?;
 
-            insert_commit(
-                writer,
-                seq,
-                now,
-                Some(conversation_id.as_str()),
-                None,
-                "save",
-            )?;
-
-            Ok(Commit {
-                seq,
-                entry_ids,
-                effect_ids: recorded_effect_ids,
+                Ok(Commit {
+                    seq,
+                    entry_ids,
+                    effect_ids: recorded_effect_ids,
+                })
             })
-        })
     }
 
     /// Read the newest line in the save log.
@@ -1435,9 +1436,9 @@ impl Session {
             "{ENTRY_SELECT} WHERE conversation_id = ? AND kind IN ('summary', 'reset') \
              ORDER BY seq DESC, rowid DESC LIMIT 1"
         );
-        let raw_marker: Option<RawEntry> = self.storage.read(|reader| {
-            reader.query_optional(&marker_sql, (conversation_id,), raw_entry)
-        })?;
+        let raw_marker: Option<RawEntry> = self
+            .storage
+            .read(|reader| reader.query_optional(&marker_sql, (conversation_id,), raw_entry))?;
         let Some(marker) = raw_marker.map(RawEntry::into_entry).transpose()? else {
             return self.history(conversation_id);
         };
@@ -1891,7 +1892,10 @@ impl Session {
                     (id.as_str(),),
                 )?;
                 writer.execute("DELETE FROM effects WHERE task_id = ?", (id.as_str(),))?;
-                writer.execute("DELETE FROM tasks WHERE id = ? AND kind = 'helper'", (id.as_str(),))?;
+                writer.execute(
+                    "DELETE FROM tasks WHERE id = ? AND kind = 'helper'",
+                    (id.as_str(),),
+                )?;
             }
             for conversation_id in &conversations {
                 writer.execute(
@@ -2713,7 +2717,9 @@ impl RawConversation {
     }
 }
 
-fn raw_entry(row: &hearth_storage::rusqlite::Row<'_>) -> hearth_storage::rusqlite::Result<RawEntry> {
+fn raw_entry(
+    row: &hearth_storage::rusqlite::Row<'_>,
+) -> hearth_storage::rusqlite::Result<RawEntry> {
     Ok(RawEntry {
         id: row.get(0)?,
         conversation_id: row.get(1)?,

@@ -955,7 +955,8 @@ impl Agent {
         let settled = self
             .session
             .settle(&submission.id, SubmissionStatus::Cancelled, None)?;
-        if let Err(error) = self.settle_absorbed(absorbed, SubmissionStatus::Cancelled, None, None) {
+        if let Err(error) = self.settle_absorbed(absorbed, SubmissionStatus::Cancelled, None, None)
+        {
             tracing::warn!(%error, "an absorbed submission could not be settled");
         }
         if let Err(error) = self.session.finish_task(

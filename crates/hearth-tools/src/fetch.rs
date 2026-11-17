@@ -261,9 +261,7 @@ impl HttpFetch {
             .user_agent("Hearth/0.1")
             .gzip(true)
             .brotli(true)
-            .dns_resolver(Arc::new(hearth_model::net::public_resolver(
-                allow_loopback,
-            )))
+            .dns_resolver(Arc::new(hearth_model::net::public_resolver(allow_loopback)))
             .build()
             .map_err(|error| {
                 FetchError::permanent(format!("could not build the HTTP client: {error}"))

@@ -270,7 +270,8 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         telegram_handles.extend(runtime.helpers.spawn_workers(Arc::clone(&shutdown)));
         tracing::info!("telegram poller, worker, and scheduler started");
     } else {
-        let scheduler = maintenance_scheduler(home, &settings, session.clone(), Arc::clone(&memory))?;
+        let scheduler =
+            maintenance_scheduler(home, &settings, session.clone(), Arc::clone(&memory))?;
         let scheduler_shutdown = Arc::clone(&shutdown);
         telegram_handles.push(thread::spawn(move || scheduler.run(scheduler_shutdown)));
         tracing::info!("scheduler started without telegram");
@@ -586,11 +587,11 @@ fn maintenance_scheduler(
     );
     let zone = Zone::resolve(&hearth_config::identity_timezone(home));
     ensure_maintenance_tasks(
-            &session,
-            &zone,
-            settings.tasks.retention_days,
-            settings.tasks.retention_runs,
-        )?;
+        &session,
+        &zone,
+        settings.tasks.retention_days,
+        settings.tasks.retention_runs,
+    )?;
     Ok(Scheduler::new(
         session,
         registry,
@@ -1113,8 +1114,11 @@ impl TelegramWorker {
                         "submission_id": submission.id,
                     });
                     if let Err(error) = self.session.save(
-                        Save::new(&submission.conversation_id)
-                            .effect(EffectIntent::new("telegram.send", key, payload)),
+                        Save::new(&submission.conversation_id).effect(EffectIntent::new(
+                            "telegram.send",
+                            key,
+                            payload,
+                        )),
                     ) {
                         tracing::warn!(
                             submission = %submission.id,

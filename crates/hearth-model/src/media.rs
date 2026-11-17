@@ -286,8 +286,7 @@ impl ImageClient {
                 message: body.chars().take(200).collect(),
             });
         }
-        let text = crate::body::capped(response, 32 * 1024 * 1024)
-            .map_err(MediaError::Protocol)?;
+        let text = crate::body::capped(response, 32 * 1024 * 1024).map_err(MediaError::Protocol)?;
         let value: Value = serde_json::from_str(&text)
             .map_err(|error| MediaError::Protocol(format!("invalid JSON: {error}")))?;
         let data = value["data"]
@@ -308,13 +307,9 @@ impl ImageClient {
             let parsed = reqwest::Url::parse(url)
                 .map_err(|error| MediaError::Protocol(format!("invalid image URL: {error}")))?;
             crate::net::validate_url(&parsed, false).map_err(MediaError::Protocol)?;
-            let response = self
-                .download_client
-                .get(parsed)
-                .send()
-                .map_err(|error| {
-                    MediaError::Transport(format!("image download failed: {error}"))
-                })?;
+            let response = self.download_client.get(parsed).send().map_err(|error| {
+                MediaError::Transport(format!("image download failed: {error}"))
+            })?;
             let status = response.status();
             if !status.is_success() {
                 return Err(MediaError::Response {

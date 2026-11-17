@@ -4,9 +4,9 @@
 //! resolved twice by reqwest, so the same filter is installed as the client's
 //! resolver and applied when the connection is actually made.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use reqwest::Url;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 
 /// Whether an address may be contacted for untrusted content.
 pub fn address_allowed(address: IpAddr, allow_loopback: bool) -> bool {
@@ -24,7 +24,9 @@ pub fn validate_url(url: &Url, allow_loopback: bool) -> Result<(), String> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err("URLs with user information are not allowed".to_owned());
     }
-    let host = url.host_str().ok_or_else(|| "the URL has no host".to_owned())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "the URL has no host".to_owned())?;
     let host = host
         .strip_prefix('[')
         .and_then(|value| value.strip_suffix(']'))
@@ -72,9 +74,7 @@ impl Resolve for PublicResolver {
         Box::pin(async move {
             let addrs = (host.as_str(), 0)
                 .to_socket_addrs()
-                .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> {
-                    Box::new(error)
-                })?;
+                .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) })?;
             let resolved: Vec<SocketAddr> = addrs
                 .filter(|address| address_allowed(address.ip(), allow_loopback))
                 .collect();
@@ -82,7 +82,8 @@ impl Resolve for PublicResolver {
                 return Err(Box::new(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     format!("{host} does not resolve to a public address"),
-                )) as Box<dyn std::error::Error + Send + Sync>);
+                ))
+                    as Box<dyn std::error::Error + Send + Sync>);
             }
             Ok(Box::new(resolved.into_iter()) as Addrs)
         })

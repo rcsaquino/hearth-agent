@@ -57,8 +57,8 @@ pub fn list_models(base_url: &str, api_key: &str) -> Result<Vec<String>, Provide
             retryable: false,
         });
     }
-    let text = crate::body::capped(response, MODEL_LIST_BODY_BYTES)
-        .map_err(ProviderError::Protocol)?;
+    let text =
+        crate::body::capped(response, MODEL_LIST_BODY_BYTES).map_err(ProviderError::Protocol)?;
     let body: Value = serde_json::from_str(&text)
         .map_err(|error| ProviderError::Protocol(format!("model list is not JSON: {error}")))?;
     let items = body
@@ -326,7 +326,8 @@ impl Provider for OpenAiCompatibleProvider {
                             .to_ascii_lowercase()
                             .starts_with("text/event-stream")
                         {
-                            let body = crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
+                            let body =
+                                crate::body::snippet(response, crate::body::ERROR_BODY_BYTES);
                             let snippet: String = body.chars().take(200).collect();
                             return Err(ProviderError::Protocol(format!(
                                 "provider returned {content_type:?} instead of an event stream: {snippet}"

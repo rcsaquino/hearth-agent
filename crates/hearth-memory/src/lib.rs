@@ -266,15 +266,25 @@ impl MemoryService {
         let mut channels: Vec<Vec<String>> = Vec::new();
 
         if let Some(expression) = retrieval::match_all(&parsed.terms) {
-            let items =
-                store::lexical(&self.inner.session, &expression, at, None, rank::POOL as i64)?;
+            let items = store::lexical(
+                &self.inner.session,
+                &expression,
+                at,
+                None,
+                rank::POOL as i64,
+            )?;
             channels.push(absorb(items, &mut memories));
         }
         if let Some(expression) =
             retrieval::match_any(&parsed.terms, &parsed.expanded, &parsed.entities)
         {
-            let items =
-                store::lexical(&self.inner.session, &expression, at, None, rank::POOL as i64)?;
+            let items = store::lexical(
+                &self.inner.session,
+                &expression,
+                at,
+                None,
+                rank::POOL as i64,
+            )?;
             channels.push(absorb(items, &mut memories));
         }
         for entity in parsed.entities.iter().take(4) {
@@ -364,7 +374,10 @@ impl MemoryService {
         let supersedes = item.supersedes.clone();
         let outcome = store::insert(
             &self.inner.session,
-            store::Pending { item, vector: vector.clone() },
+            store::Pending {
+                item,
+                vector: vector.clone(),
+            },
             self.config().rules_max_tokens,
         )?;
         if outcome.created() {
@@ -634,7 +647,12 @@ impl MemoryService {
             .map(|cache| cache.rows.len())
     }
 
-    fn remember(&self, outcome: &WriteOutcome, vector: Option<&store::VectorWrite>, superseded: Option<&str>) {
+    fn remember(
+        &self,
+        outcome: &WriteOutcome,
+        vector: Option<&store::VectorWrite>,
+        superseded: Option<&str>,
+    ) {
         let memory = outcome.memory();
         if !memory.subject.is_empty()
             && let Ok(mut cache) = self.inner.subjects.lock()

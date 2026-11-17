@@ -458,7 +458,12 @@ fn the_daemon_delivers_an_answer_whose_effect_was_never_written() {
             .create_conversation("Stranded", "telegram", "42:0")
             .expect("conversation");
         let submitted = session
-            .submit(&conversation.id, "tg:42:stalled", "input", json!({"text": "hi"}))
+            .submit(
+                &conversation.id,
+                "tg:42:stalled",
+                "input",
+                json!({"text": "hi"}),
+            )
             .expect("submit");
         session
             .begin_submission(&submitted.submission.id)

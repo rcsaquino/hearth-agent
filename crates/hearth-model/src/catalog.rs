@@ -127,8 +127,8 @@ pub fn fetch(url: &str) -> Result<Catalog, CatalogError> {
             "the catalog returned {status}"
         )));
     }
-    let text = crate::body::capped(response, CATALOG_BODY_BYTES)
-        .map_err(CatalogError::Transport)?;
+    let text =
+        crate::body::capped(response, CATALOG_BODY_BYTES).map_err(CatalogError::Transport)?;
     Catalog::parse(&text)
 }
 

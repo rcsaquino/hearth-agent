@@ -23,5 +23,8 @@ fn the_old_minutes_setting_is_rejected() {
         "tasks": {"eta_reminder_minutes": 10}
     }))
     .expect_err("a removed key is a schema error");
-    assert!(error.to_string().contains("eta_reminder_minutes"), "{error}");
+    assert!(
+        error.to_string().contains("eta_reminder_minutes"),
+        "{error}"
+    );
 }

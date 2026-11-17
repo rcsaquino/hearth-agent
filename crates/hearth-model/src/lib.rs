@@ -1,10 +1,10 @@
 //! Provider-neutral chat types and the OpenAI-compatible adapter.
 
 mod body;
-pub mod net;
 mod catalog;
 mod estimate;
 mod media;
+pub mod net;
 mod openai;
 mod provider;
 mod types;

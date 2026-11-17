@@ -1279,7 +1279,12 @@ fn recovery_does_not_requeue_a_foreground_task() {
         .expect("claim generation")
         .expect("claimed");
     let compaction = session
-        .create_task(hearth_core::NewTask::new("compaction", 1, "compact", json!({})))
+        .create_task(hearth_core::NewTask::new(
+            "compaction",
+            1,
+            "compact",
+            json!({}),
+        ))
         .expect("compaction task");
     session
         .claim_task_by_id(&compaction.id, "daemon:1", 60_000_000)

@@ -1273,7 +1273,9 @@ mod tests {
         )
         .expect("write");
         assert!(
-            by_subject(&session, "office", None, None, 10).unwrap().is_empty(),
+            by_subject(&session, "office", None, None, 10)
+                .unwrap()
+                .is_empty(),
             "a statement that starts being true next month is not true now"
         );
         assert_eq!(

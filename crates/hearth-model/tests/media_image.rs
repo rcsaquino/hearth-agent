@@ -45,7 +45,12 @@ fn serve_json(body: &str) -> (String, thread::JoinHandle<()>) {
     (base, handle)
 }
 
-fn loopback_server() -> (String, Arc<AtomicUsize>, Arc<AtomicBool>, thread::JoinHandle<()>) {
+fn loopback_server() -> (
+    String,
+    Arc<AtomicUsize>,
+    Arc<AtomicBool>,
+    thread::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     listener.set_nonblocking(true).expect("nonblocking");
     let url = format!("http://{}/secret", listener.local_addr().expect("addr"));
