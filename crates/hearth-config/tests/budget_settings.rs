@@ -146,7 +146,7 @@ fn thinking_accepts_xhigh_and_max() {
 }
 
 #[test]
-fn a_legacy_soul_file_setting_is_ignored() {
+fn a_legacy_soul_file_setting_is_rejected() {
     let home = tempfile::TempDir::new().expect("home");
     let path = home.path().join("settings.json");
     std::fs::write(
@@ -159,8 +159,11 @@ fn a_legacy_soul_file_setting_is_ignored() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("mode");
     }
-    let settings = hearth_config::load(home.path()).expect("load");
-    assert_eq!(settings.identity.agent_name, "Hearth");
+    let error = hearth_config::load(home.path()).expect_err("a removed key is a schema error");
+    assert!(
+        error.to_string().contains("identity.soul_file"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

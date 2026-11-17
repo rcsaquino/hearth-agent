@@ -18,8 +18,10 @@ fn the_eta_reminder_accepts_seconds() {
 }
 
 #[test]
-fn the_old_minutes_setting_still_parses() {
-    let settings = parse(json!({"tasks": {"eta_reminder_minutes": 10}}));
-    assert_eq!(settings.tasks.eta_reminder_minutes, Some(10));
-    assert_eq!(settings.tasks.eta_reminder_seconds, 1);
+fn the_old_minutes_setting_is_rejected() {
+    let error = serde_json::from_value::<Settings>(json!({
+        "tasks": {"eta_reminder_minutes": 10}
+    }))
+    .expect_err("a removed key is a schema error");
+    assert!(error.to_string().contains("eta_reminder_minutes"), "{error}");
 }

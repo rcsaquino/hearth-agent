@@ -2417,25 +2417,6 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_https_fetch_alias_is_normalized() {
-        let form = SettingsForm::from_document(json!({
-            "models": {
-                "kind": "openai-compatible",
-                "base_url": "https://example.com/v1",
-                "api_key": "fake-key",
-                "model": "fake-model"
-            },
-            "web": {"fetch": {"order": ["jina", "https", "http"]}}
-        }))
-        .expect("form");
-        assert_eq!(
-            form.document["web"]["fetch"]["order"],
-            json!(["jina", "http"])
-        );
-        assert!(!form.rows.iter().any(|row| row.label == "Direct HTTPS"));
-    }
-
-    #[test]
     fn only_one_direct_fetch_row_is_offered() {
         let form = form();
         let labels: Vec<&str> = form.rows.iter().map(|row| row.label.as_str()).collect();
@@ -2460,25 +2441,6 @@ mod tests {
                 .iter()
                 .any(|row| row.label == "Add image generation…")
         );
-    }
-
-    #[test]
-    fn a_legacy_pricing_block_is_not_shown() {
-        let form = SettingsForm::from_document(json!({
-            "models": {
-                "kind": "openai-compatible",
-                "base_url": "https://example.com/v1",
-                "api_key": "fake-key",
-                "model": "fake-model",
-                "pricing": {"fake-model": {"input": 0.15}}
-            }
-        }))
-        .expect("form");
-        assert!(!form.rows.iter().any(|row| {
-            row.path
-                .starts_with(&["models".to_owned(), "pricing".to_owned()])
-        }));
-        assert!(!form.text().contains("pricing"));
     }
 
     #[test]
@@ -2574,31 +2536,6 @@ mod tests {
         form.handle_key(key(KeyCode::Char('r')));
         assert!(form.document["media"]["image"].is_object());
         assert_eq!(form.document["media"]["image"]["kind"], "openrouter-images");
-    }
-
-    #[test]
-    fn the_old_eta_minutes_key_is_not_shown() {
-        let form = SettingsForm::from_document(json!({
-            "models": {
-                "kind": "openai-compatible",
-                "base_url": "https://example.com/v1",
-                "api_key": "fake-key",
-                "model": "fake-model"
-            },
-            "tasks": {"eta_reminder_minutes": 10}
-        }))
-        .expect("form");
-        assert!(
-            !form
-                .rows
-                .iter()
-                .any(|row| row.label.contains("ETA reminder minutes"))
-        );
-        assert!(
-            form.rows
-                .iter()
-                .any(|row| row.label.contains("ETA reminder"))
-        );
     }
 
     #[test]

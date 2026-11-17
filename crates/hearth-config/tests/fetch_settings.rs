@@ -19,9 +19,17 @@ fn web_fetch_rejects_an_unknown_provider() {
 #[test]
 fn web_fetch_accepts_the_allowed_chain() {
     let settings: Settings = serde_json::from_str(
-        r#"{"web":{"fetch":{"order":["jina","https","tinyfish","firecrawl","deepseek"],"providers":{"jina":{},"tinyfish":{"api_key":"t"},"firecrawl":{"api_key":"f"},"deepseek":{"api_key":"d"}}}}}"#,
+        r#"{"web":{"fetch":{"order":["jina","http","tinyfish","firecrawl","deepseek"],"providers":{"jina":{},"tinyfish":{"api_key":"t"},"firecrawl":{"api_key":"f"},"deepseek":{"api_key":"d"}}}}}"#,
     )
     .expect("settings");
     settings.validate().expect("valid settings");
     assert_eq!(settings.web.expect("web").fetch.order.len(), 5);
+}
+
+#[test]
+fn web_fetch_rejects_the_removed_https_alias() {
+    let settings: Settings =
+        serde_json::from_str(r#"{"web":{"fetch":{"order":["https"]}}}"#).expect("settings");
+    let error = settings.validate().expect_err("the https alias is gone");
+    assert!(error.to_string().contains("web.fetch.order"), "{error}");
 }
