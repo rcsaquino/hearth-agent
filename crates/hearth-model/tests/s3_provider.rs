@@ -215,6 +215,30 @@ fn wire(base_url: &str, effort: Option<&str>) -> Value {
 }
 
 #[test]
+fn consecutive_text_blocks_keep_their_boundary() {
+    let provider =
+        OpenAiCompatibleProvider::new("https://example.com/v1", "test-key", Vec::new(), None)
+            .expect("provider");
+    let request = ChatRequest {
+        model: "test-model".to_owned(),
+        messages: vec![ChatMessage {
+            role: Role::User,
+            blocks: vec![
+                ContentBlock::Text("alpha".to_owned()),
+                ContentBlock::Text("beta".to_owned()),
+            ],
+        }],
+        tools: Vec::new(),
+        temperature: None,
+        max_tokens: None,
+        session_id: None,
+    };
+
+    let body = provider.wire_body(&request).expect("wire body");
+    assert_eq!(body["messages"][0]["content"], "alpha\nbeta");
+}
+
+#[test]
 fn the_reasoning_effort_is_added_to_the_wire_body() {
     let body = wire("https://example.com/v1", Some("medium"));
     assert_eq!(body["reasoning_effort"], "medium");
