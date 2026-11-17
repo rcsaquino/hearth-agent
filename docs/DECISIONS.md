@@ -1689,7 +1689,9 @@ request over the same range.
 
 **Four tools, not five.** `memory_save`, `memory_recall`, `memory_forget`,
 `memory_transcript`. No store selector, no `s_`/`m_` prefix convention, no tag
-array. The family measures 767 schema tokens against 1,410.
+array. The family measures 767 schema tokens against 1,410. The shape is
+superseded by the 2026-11-17 one-tool entry. The store and the handlers do not
+change.
 
 **Retrieval is a recommendation cascade.** Write-time map, candidate generation,
 ranking, and a budgeted slate. Three cheap channels feed one pool of 128: FTS5
@@ -2861,3 +2863,22 @@ just after.
   page reports its full size. The title names pinned, active, and retired. A
   search adds a separate match count. A report candidate carries `⚠` in the list
   and an `audit` label in the detail pane.
+
+## 2026-11-17: One memory tool with four actions
+
+- `memory_save`, `memory_recall`, `memory_forget`, and `memory_transcript` are
+  now one tool, `memory`, with a required `action` of `save`, `recall`, `forget`,
+  or `transcript`. The shape mirrors `files`, which is the operator's request.
+- The properties are flat. `subject`, `kind`, and `limit` serve save and recall.
+  `id` serves recall and forget. `query` serves recall and transcript. The
+  content, kind, id, and subject descriptions are unchanged, and each action
+  runs the same handler code as the tool it replaces.
+- The combined schema measures 485 tokens, down from 811 for the four. The core
+  set measures 1,287 tokens, and 1,453 with every media service configured, so
+  the core guard moves from 1,800 to 1,470 and the memory guard from 820 to 500.
+- `replay_safe` reads the action. A replayed `save` or `forget` is refused like
+  `shell` and `message`, because it changes the store. A replayed `recall` or
+  `transcript` runs again because it is read-only.
+- The digest coverage line names `memory(recall, subject)` and
+  `memory(recall, as_of)`. The status key `memory_recall` keeps its name because
+  it describes the recall subsystem, not a tool.

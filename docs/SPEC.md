@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.55, plain-language edition
+**Status:** Draft 0.56, plain-language edition
 **Date:** 2026-11-17
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,13 @@
 ---
 
 ## A note on language
+
+Draft 0.56 makes memory one tool with four actions, the same shape as `files`.
+The `memory` tool takes a required `action`: `save`, `recall`, `forget`, or
+`transcript`. The four separate tools are gone. The schema measures 485 tokens,
+down from 811, and the core set measures 1,287 tokens, or 1,453 with every media
+service configured, against a 1,470 guard. The handlers, the store, and the
+status key `memory_recall` do not change.
 
 Draft 0.55 gives memory one identity and one statement per row. A write is
 refused when it carries more than one clear statement, and the refusal says to
@@ -530,7 +537,7 @@ tested and reasoned about alone. The names are literal.
 | `hearth-core` | The permanent record: entries, saves, submissions, tasks, scheduler, and prompt assembly. |
 | `hearth-storage` | Owns SQLite connections, migrations, full-text search, and backups. |
 | `hearth-model` | Talks to providers: streaming, tool calls, retries, token estimates, and the media clients (image, transcription, speech). |
-| `hearth-memory` | Statements, rules, retrieval, ranking, the digest, and four tools. |
+| `hearth-memory` | Statements, rules, retrieval, ranking, the digest, and one memory tool. |
 | `hearth-tools` | The built-in tools, output spill, and workspace confinement. |
 | `hearth-telegram` | The Bot API client, polling, rendering, and attachments. |
 | `hearth-runtime` | Wires everything together: daemon, agent loop, notifications, shutdown. |
@@ -1272,8 +1279,8 @@ when it writes, and the statement's expansions are indexed beside it.
 Two paths, and neither one makes a model call beyond the turn that is already
 happening.
 
-**The agent writes.** `memory_save` is the primary path. The model calls it when
-the user says something lasting. It names the subject, chooses the kind, and can
+**The agent writes.** The `memory` tool with `action = save` is the primary path.
+The model calls it when the user says something lasting. It names the subject, chooses the kind, and can
 name the statement it replaces. The write result reports any current statement
 about the same subject that overlaps the new one, so a contradiction is visible
 and repairable on the same turn rather than discovered by a later question.
@@ -1283,7 +1290,7 @@ four phrasings are read from the user's message without a model: "remember
 that", "my X is Y", "X is my Y", and a stated preference. At most three
 statements per message. Precision is worth more than recall here, because a
 noisy store spends tokens on every turn from then on and a wrong row is one
-`memory_forget` away from gone.
+the `memory` tool with `action = forget` away from gone.
 
 **Compaction carries extraction in the same call.** The summary request already
 contains the range, so it returns the summary and up to three durable statements
@@ -1367,7 +1374,7 @@ every turn, so a line is terse:
 ```text
 fact | alice | 12d: Alice manages the OR board
 pref | - | 3mo: prefers dark roast coffee
-more: alice 6 | memory_recall(subject) for the rest
+more: alice 6 | memory(recall, subject) for the rest
 ```
 
 A line is the kind, the subject, the age, and the statement, separated by ` | `
@@ -1377,11 +1384,11 @@ changes, and a multi-word subject stays one field. There is no bullet: the
 newline is the row boundary, and a statement cannot contain one.
 
 A whole row carries no id, because the statement is shown whole. A row clipped at
-200 characters appends its id after the ellipsis, because `memory_recall(id)` is
-the only way to read the rest. The recall tool always ends a row with its id,
+200 characters appends its id after the ellipsis, because the `memory` tool with
+`action = recall` and `id` is the only way to read the rest. The recall tool always ends a row with its id,
 because that is where addressing belongs. A new id is `m_` plus ten Crockford
-base32 characters; an older 34-character id keeps working. `memory_recall` accepts
-an id in either case with surrounding whitespace, and a prefix is not an id.
+base32 characters; an older 34-character id keeps working. The recall action
+accepts an id in either case with surrounding whitespace, and a prefix is not an id.
 
 A canonical duplicate, meaning the same fingerprint under the same subject, is
 shown once and the digest reports how many rows it collapsed. The repair pass
@@ -1409,7 +1416,8 @@ text moves.
 - Every rule uses the one 200-character content limit. A row written before
   that limit is clipped at 400 characters for display, with an ellipsis.
 - The block renders one plain line per rule, with no id, no fields, and no bullet.
-  A rule is read, not addressed; `memory_recall(kind = rule)` returns the ids.
+  A rule is read, not addressed; `memory` with `action = recall` and `kind = rule`
+  returns the ids.
 - Any rule that does not fit the render is named as `N more rules were not
   shown`, so a hand-edited store cannot hide content silently.
 - The content hash is the rules version, so a change invalidates the cached
@@ -1426,7 +1434,8 @@ text moves.
 
 ### 7.7 Forgetting and secrets
 
-- `memory_forget` removes one statement permanently, including its vector.
+- The `memory` tool with `action = forget` removes one statement permanently,
+  including its vector.
 - A replaced statement is not deleted. It leaves the current set and stays
   readable by id and by `as_of`.
 - There is no decay and no automatic archival. A statement stops being current
@@ -1444,21 +1453,23 @@ text moves.
 - Credential-shaped content is refused before a write. The check runs in the
   store, so every path shares it.
 
-### 7.8 The memory tools
+### 7.8 The memory tool
 
-Four verbs, and each one does one thing.
+One tool, four actions, and each action does one thing.
 
-| Tool | Use |
+| Action | Use |
 |---|---|
-| `memory_save` | Store one statement, optionally replacing another |
-| `memory_recall` | Search, read by id, read a subject, or read as of an instant |
-| `memory_forget` | Remove one statement permanently |
-| `memory_transcript` | Search the saved conversation record, or read one citation |
+| `save` | Store one statement, optionally replacing another |
+| `recall` | Search, read by id, read a subject, or read as of an instant |
+| `forget` | Remove one statement permanently |
+| `transcript` | Search the saved conversation record, or read one citation |
 
-There is no store selector, no id-prefix convention, and no tag array. An id is
-exact, never a prefix. The four
-schemas measure 823 tokens against 1,410 for the five they replace, and the
-saving is paid on every request.
+`action` is required. The properties are flat and shared where the actions are
+related: `subject`, `kind`, and `limit` serve both `save` and `recall`, `id`
+serves `recall` and `forget`, and `query` serves `recall` and `transcript`. There
+is no store selector, no id-prefix convention, and no tag array. An id is exact,
+never a prefix. The one schema measures 485 tokens against 811 for the four it
+replaced, and the saving is paid on every request.
 
 A bare `as_of` date means that whole local day in `identity.timezone`, so its
 boundary is the start of the next local day. An instant is read exactly as given.
@@ -1474,7 +1485,7 @@ reports two numbers on purpose:
 
 - **Automatic recall** is what the digest put in front of the model.
 - **Recoverable** is automatic recall, or the answer appearing in one
-  `memory_recall` call.
+  `memory` recall call.
 
 The second number is the honest form of "nothing is lost", because a bounded
 digest will always miss something. Measured on the committed fixture:
@@ -1624,10 +1635,7 @@ in the prompt. Optional groups are loaded only when a job needs them.
 
 | Tool | Purpose |
 |---|---|
-| `memory_save` | Store one durable statement |
-| `memory_recall` | Read by id, subject, query, kind, or as-of instant |
-| `memory_forget` | Remove a statement permanently |
-| `memory_transcript` | Read the evidence behind a memory |
+| `memory` | Save, recall, forget, or read the transcript. |
 | `message` | Send files, albums, voice to the user |
 | `web_search` | Search the web |
 | `web_fetch` | Fetch and extract a page or PDF |
@@ -2335,7 +2343,7 @@ install contains nothing personal.
 | Helper depth | 2 | 5.4 |
 | Helper retention | 30 days or newest 25 runs | 5.4 |
 | ETA reminder | 1 second after expectation | 5.4 |
-| Core tool schemas | 10 tools, roughly 1,200 tokens | 9.1 |
+| Core tool schemas | 8 tools, 1,287 tokens, or 1,453 with media | 9.1 |
 | Skills index | 50 active | 9.6 |
 | Skill review | 04:30 in `identity.timezone`, 0 to 3 new skills | 9.6 |
 | Learned skills | `skills/learned/` | 9.6 |
