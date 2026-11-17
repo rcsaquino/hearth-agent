@@ -170,3 +170,15 @@ fn a_legacy_soul_file_setting_is_rejected() {
 fn the_rules_budget_defaults_to_800() {
     assert_eq!(hearth_config::Memory::default().rules_max_tokens, 800);
 }
+
+#[test]
+fn a_memory_budget_outside_its_range_is_rejected() {
+    for (field, value) in [("rules_max_tokens", 1), ("recall_max_items", 1000)] {
+        let settings: hearth_config::Settings = serde_json::from_value(serde_json::json!({
+            "memory": {field: value}
+        }))
+        .expect("settings shape");
+        let error = settings.validate().expect_err("a clamp is not a range");
+        assert!(error.to_string().contains(field), "error was {error}");
+    }
+}
