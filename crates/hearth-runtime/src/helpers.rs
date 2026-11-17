@@ -734,8 +734,13 @@ fn send_notice(
             Ok(())
         }
         Err(error) => {
-            session.mark_effect_failed(&effect_id, json!({"error": error.to_string()}))?;
-            Err(CoreError::Invalid(error.to_string()))
+            if error.retryable() {
+                session.mark_effect_unknown(&effect_id, json!({"error": error.to_string()}))?;
+                Ok(())
+            } else {
+                session.mark_effect_failed(&effect_id, json!({"error": error.to_string()}))?;
+                Err(CoreError::Invalid(error.to_string()))
+            }
         }
     }
 }

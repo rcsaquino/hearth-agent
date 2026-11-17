@@ -247,10 +247,17 @@ impl ReminderHandler {
             }
             Err(error) => {
                 let message = error.to_string();
-                self.session
-                    .mark_effect_failed(&effect_id, json!({"error": message}))
-                    .map_err(TaskHandlerError::from_core)?;
-                Err(TaskHandlerError::Permanent(message))
+                if error.retryable() {
+                    self.session
+                        .mark_effect_unknown(&effect_id, json!({"error": message}))
+                        .map_err(TaskHandlerError::from_core)?;
+                    Err(TaskHandlerError::Retryable(message))
+                } else {
+                    self.session
+                        .mark_effect_failed(&effect_id, json!({"error": message}))
+                        .map_err(TaskHandlerError::from_core)?;
+                    Err(TaskHandlerError::Permanent(message))
+                }
             }
         }
     }
