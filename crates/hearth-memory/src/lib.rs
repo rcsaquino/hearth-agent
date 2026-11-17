@@ -363,14 +363,14 @@ impl MemoryService {
     pub fn write(&self, item: NewMemory) -> Result<WriteOutcome> {
         store::validate(&item)?;
         let vector = self.embed_for_write(&item);
+        let supersedes = item.supersedes.clone();
         let outcome = store::insert(
             &self.inner.session,
-            store::Pending { item, vector },
+            store::Pending { item, vector: vector.clone() },
             self.config().rules_max_tokens,
         )?;
         if outcome.created() {
-            self.invalidate_subjects();
-            self.invalidate_vectors();
+            self.remember(&outcome, vector.as_ref(), supersedes.as_deref());
         }
         Ok(outcome)
     }
@@ -383,25 +383,33 @@ impl MemoryService {
         for item in &items {
             store::validate(item)?;
         }
+        let mut kept = Vec::with_capacity(items.len());
         let pending = items
             .into_iter()
             .map(|item| {
                 let vector = self.embed_for_write(&item);
+                kept.push((vector.clone(), item.supersedes.clone()));
                 store::Pending { item, vector }
             })
             .collect();
         let outcomes =
             store::insert_many(&self.inner.session, pending, self.config().rules_max_tokens)?;
-        self.invalidate_subjects();
-        self.invalidate_vectors();
+        for (outcome, (vector, supersedes)) in outcomes.iter().zip(kept) {
+            if outcome.created() {
+                self.remember(outcome, vector.as_ref(), supersedes.as_deref());
+            }
+        }
         Ok(outcomes)
     }
 
     /// Remove one statement permanently.
     pub fn forget(&self, id: &str) -> Result<()> {
         store::forget(&self.inner.session, id)?;
-        self.invalidate_subjects();
-        self.invalidate_vectors();
+        if let Ok(mut cache) = self.inner.vectors.lock()
+            && let Some(cache) = cache.as_mut()
+        {
+            cache.rows.retain(|row| row.memory_id != id);
+        }
         Ok(())
     }
 
@@ -628,10 +636,45 @@ impl MemoryService {
             .map(|cache| cache.rows.len())
     }
 
-    fn invalidate_subjects(&self) {
-        if let Ok(mut cache) = self.inner.subjects.lock() {
-            *cache = None;
+    fn remember(&self, outcome: &WriteOutcome, vector: Option<&store::VectorWrite>, superseded: Option<&str>) {
+        let memory = outcome.memory();
+        if !memory.subject.is_empty()
+            && let Ok(mut cache) = self.inner.subjects.lock()
+            && let Some(subjects) = cache.as_mut()
+            && !subjects.iter().any(|subject| subject == &memory.subject)
+        {
+            subjects.push(memory.subject.clone());
+            subjects.sort_by(|left, right| {
+                right
+                    .chars()
+                    .count()
+                    .cmp(&left.chars().count())
+                    .then_with(|| left.cmp(right))
+            });
+            subjects.truncate(store::MAX_KNOWN_SUBJECTS as usize);
         }
+        let Some(vector) = vector else {
+            return;
+        };
+        let Ok(mut cache) = self.inner.vectors.lock() else {
+            return;
+        };
+        let Some(cache) = cache.as_mut() else {
+            return;
+        };
+        if cache.model != vector.model || cache.dims != vector.dims {
+            return;
+        }
+        let Ok(row) = store::vector_row(&memory.id, vector, true) else {
+            return;
+        };
+        if let Some(old) = superseded
+            && old != memory.id
+            && let Some(row) = cache.rows.iter_mut().find(|row| row.memory_id == old)
+        {
+            row.current = false;
+        }
+        cache.rows.push(row);
     }
 
     fn invalidate_vectors(&self) {

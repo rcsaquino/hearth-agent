@@ -366,6 +366,19 @@ pub fn by_subject_prefix(
 }
 
 /// Memories by id, in one query.
+/// Build the cache row for a vector that was just written.
+pub(crate) fn vector_row(
+    memory_id: &str,
+    vector: &VectorWrite,
+    current: bool,
+) -> Result<VectorRow> {
+    Ok(VectorRow {
+        memory_id: memory_id.to_owned(),
+        current,
+        quantised: quantise(&vector.values, vector.dims)?,
+    })
+}
+
 pub fn by_ids(session: &Session, ids: &[String]) -> Result<Vec<Memory>> {
     if ids.is_empty() {
         return Ok(Vec::new());
@@ -377,7 +390,9 @@ pub fn by_ids(session: &Session, ids: &[String]) -> Result<Vec<Memory>> {
         .storage()
         .read(|reader| {
             reader.query(
-                &format!("SELECT {COLUMNS} FROM memories WHERE id IN ({placeholders})"),
+                &format!(
+                    "SELECT {COLUMNS} FROM memories WHERE valid_to IS NULL AND id IN ({placeholders})"
+                ),
                 rusqlite::params_from_iter(ids.iter()),
                 map_memory,
             )
