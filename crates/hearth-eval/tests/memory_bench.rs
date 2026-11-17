@@ -516,6 +516,48 @@ fn the_spot_check_labels_are_honest() {
 }
 
 #[test]
+fn every_rendered_digest_row_counts_as_automatic() {
+    let mut memories = vec![FixtureMemory {
+        key: "expected".to_owned(),
+        content: "alice is the account owner".to_owned(),
+        kind: "fact".to_owned(),
+        subject: "launch".to_owned(),
+        valid_from: None,
+        valid_to: None,
+        duplicate_of: None,
+    }];
+    for index in 0..5 {
+        memories.push(FixtureMemory {
+            key: format!("newer-{index}"),
+            content: format!("alice owns the launch note {index}"),
+            kind: "fact".to_owned(),
+            subject: "launch".to_owned(),
+            valid_from: None,
+            valid_to: None,
+            duplicate_of: None,
+        });
+    }
+    let fixture = Fixture {
+        memories,
+        questions: vec![FixtureQuestion {
+            key: "q".to_owned(),
+            question: "alice owns the launch".to_owned(),
+            expected_keys: vec!["expected".to_owned()],
+            relevant_keys: vec!["expected".to_owned()],
+            category: "person".to_owned(),
+            as_of_micros: None,
+            spot_check: false,
+        }],
+    };
+    let (_directory, service) = service();
+    let report = run_fixture(&service, &fixture);
+    assert_eq!(
+        report.automatic, 1.0,
+        "a row rendered after the fifth place is still in the digest"
+    );
+}
+
+#[test]
 fn a_noisy_store_keeps_the_answer_in_reach() {
     let fixture = load();
     let (_directory, service) = service();
