@@ -58,6 +58,40 @@ fn list_models_reports_a_provider_error() {
 }
 
 #[test]
+fn list_models_rejects_a_body_over_its_cap() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let address = listener.local_addr().expect("test server address");
+    let body = "x".repeat(4 * 1024 * 1024 + 1);
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).expect("request line");
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("header line");
+            if line == "\r\n" || line == "\n" || line.is_empty() {
+                break;
+            }
+        }
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("response");
+    });
+    let error = list_models(&format!("http://{address}/v1"), "fake-key")
+        .expect_err("an oversized model list must be refused");
+    assert!(
+        error.to_string().contains("larger than"),
+        "unexpected error: {error}"
+    );
+    server.join().expect("server thread");
+}
+
+#[test]
 fn list_models_accepts_a_top_level_array() {
     let (base_url, server) = serve_once("200 OK", r#"[{"id":"only"}]"#);
     let models = list_models(&base_url, "fake-key").expect("list models");

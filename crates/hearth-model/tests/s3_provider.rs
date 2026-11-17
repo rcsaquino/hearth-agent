@@ -239,6 +239,30 @@ fn consecutive_text_blocks_keep_their_boundary() {
 }
 
 #[test]
+fn a_large_provider_error_body_is_cut() {
+    let body = "x".repeat(32 * 1024);
+    let server = FakeServer::start(vec![
+        TestResponse::text(500, "Internal Server Error", &body),
+        TestResponse::text(500, "Internal Server Error", &body),
+        TestResponse::text(500, "Internal Server Error", &body),
+    ]);
+    let provider = provider(&server, Arc::new(NoopSleeper::default()));
+    let error = match provider.stream(request()) {
+        Ok(_) => panic!("a 500 is an error"),
+        Err(error) => error,
+    };
+    match error {
+        ProviderError::Request { message, .. } => assert!(
+            message.len() <= 8 * 1024,
+            "the error body was kept whole: {} bytes",
+            message.len()
+        ),
+        other => panic!("unexpected error: {other}"),
+    }
+    server.finish();
+}
+
+#[test]
 fn the_reasoning_effort_is_added_to_the_wire_body() {
     let body = wire("https://example.com/v1", Some("medium"));
     assert_eq!(body["reasoning_effort"], "medium");
