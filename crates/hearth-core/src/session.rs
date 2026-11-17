@@ -28,7 +28,7 @@ const CONVERSATION_SELECT: &str = "SELECT id, parent_id, parent_entry_id, title,
 const ENTRY_SELECT: &str = "SELECT id, conversation_id, seq, kind, content_json, tokens_est, \
      source, prompt_hash, created_at FROM entries";
 const SUBMISSION_SELECT: &str = "SELECT id, conversation_id, request_id, kind, content_json, \
-     status, answer_entry_id, error_json, created_at, settled_at FROM submissions";
+     status, user_entry_id, answer_entry_id, error_json, created_at, settled_at FROM submissions";
 const TASK_SELECT: &str = "SELECT id, conversation_id, parent_task_id, kind, version, status, \
      phase, attempt, input_json, checkpoint_json, result_json, lease_owner, lease_until, \
      next_wake_at, created_at, updated_at, terminal_at FROM tasks";
@@ -167,6 +167,11 @@ impl Session {
             effect_ids.push(self.ids.new_id());
         }
         let conversation_id = save.conversation_id.clone();
+        let user_entry_id = save
+            .entries
+            .iter()
+            .position(|entry| entry.kind == "user")
+            .and_then(|index| entry_ids.get(index).cloned());
 
         self.storage
             .write(move |writer| -> Result<Commit, CoreError> {
@@ -207,14 +212,15 @@ impl Session {
                     let content = redacted_json(&submission.content)?;
                     writer.execute(
                     "INSERT INTO submissions (id, conversation_id, request_id, kind, content_json, \
-                     status, answer_entry_id, error_json, created_at, settled_at) \
-                     VALUES (?, ?, ?, ?, ?, 'queued', NULL, NULL, ?, NULL)",
+                     status, user_entry_id, answer_entry_id, error_json, created_at, settled_at) \
+                     VALUES (?, ?, ?, ?, ?, 'queued', ?, NULL, NULL, ?, NULL)",
                     (
                         submission.id.as_str(),
                         conversation_id.as_str(),
                         submission.request_id.as_str(),
                         submission.kind.as_str(),
                         content.as_str(),
+                        user_entry_id.as_deref(),
                         now,
                     ),
                 )?;
@@ -1063,7 +1069,8 @@ impl Session {
         let raw: Vec<RawSubmission> = self.storage.read(|reader| {
             reader.query(
                 "SELECT id, conversation_id, request_id, kind, content_json, status, \
-                 answer_entry_id, error_json, created_at, settled_at FROM submissions \
+                 user_entry_id, answer_entry_id, error_json, created_at, settled_at \
+                 FROM submissions \
                  WHERE conversation_id = ? AND status = 'queued' ORDER BY created_at, id",
                 (conversation_id,),
                 |row| {
@@ -1074,10 +1081,11 @@ impl Session {
                         kind: row.get(3)?,
                         content_json: row.get(4)?,
                         status: row.get(5)?,
-                        answer_entry_id: row.get(6)?,
-                        error_json: row.get(7)?,
-                        created_at: row.get(8)?,
-                        settled_at: row.get(9)?,
+                        user_entry_id: row.get(6)?,
+                        answer_entry_id: row.get(7)?,
+                        error_json: row.get(8)?,
+                        created_at: row.get(9)?,
+                        settled_at: row.get(10)?,
                     })
                 },
             )
@@ -1092,8 +1100,9 @@ impl Session {
         let raw: Option<RawSubmission> = self.storage.read(|reader| {
             reader.query_optional(
                 "SELECT s.id, s.conversation_id, s.request_id, s.kind, s.content_json, \
-                 s.status, s.answer_entry_id, s.error_json, s.created_at, s.settled_at \
-                 FROM submissions s JOIN conversations c ON c.id = s.conversation_id \
+                 s.status, s.user_entry_id, s.answer_entry_id, s.error_json, s.created_at, \
+                 s.settled_at FROM submissions s \
+                 JOIN conversations c ON c.id = s.conversation_id \
                  WHERE s.status = 'queued' AND c.transport = 'telegram' \
                  ORDER BY s.created_at, s.id LIMIT 1",
                 [],
@@ -1105,10 +1114,11 @@ impl Session {
                         kind: row.get(3)?,
                         content_json: row.get(4)?,
                         status: row.get(5)?,
-                        answer_entry_id: row.get(6)?,
-                        error_json: row.get(7)?,
-                        created_at: row.get(8)?,
-                        settled_at: row.get(9)?,
+                        user_entry_id: row.get(6)?,
+                        answer_entry_id: row.get(7)?,
+                        error_json: row.get(8)?,
+                        created_at: row.get(9)?,
+                        settled_at: row.get(10)?,
                     })
                 },
             )
@@ -1127,8 +1137,8 @@ impl Session {
         let raw: Vec<(RawSubmission, String, String)> = self.storage.read(|reader| {
             reader.query(
                 "SELECT s.id, s.conversation_id, s.request_id, s.kind, s.content_json, \
-                 s.status, s.answer_entry_id, s.error_json, s.created_at, s.settled_at, \
-                 e.content_json, c.transport_key \
+                 s.status, s.user_entry_id, s.answer_entry_id, s.error_json, s.created_at, \
+                 s.settled_at, e.content_json, c.transport_key \
                  FROM submissions s \
                  JOIN conversations c ON c.id = s.conversation_id \
                  JOIN entries e ON e.id = s.answer_entry_id \
@@ -1148,13 +1158,14 @@ impl Session {
                             kind: row.get(3)?,
                             content_json: row.get(4)?,
                             status: row.get(5)?,
-                            answer_entry_id: row.get(6)?,
-                            error_json: row.get(7)?,
-                            created_at: row.get(8)?,
-                            settled_at: row.get(9)?,
+                            user_entry_id: row.get(6)?,
+                            answer_entry_id: row.get(7)?,
+                            error_json: row.get(8)?,
+                            created_at: row.get(9)?,
+                            settled_at: row.get(10)?,
                         },
-                        row.get(10)?,
                         row.get(11)?,
+                        row.get(12)?,
                     ))
                 },
             )
@@ -1281,10 +1292,11 @@ impl Session {
                     kind: row.get(3)?,
                     content_json: row.get(4)?,
                     status: row.get(5)?,
-                    answer_entry_id: row.get(6)?,
-                    error_json: row.get(7)?,
-                    created_at: row.get(8)?,
-                    settled_at: row.get(9)?,
+                    user_entry_id: row.get(6)?,
+                    answer_entry_id: row.get(7)?,
+                    error_json: row.get(8)?,
+                    created_at: row.get(9)?,
+                    settled_at: row.get(10)?,
                 })
             })
         })?;
@@ -1375,6 +1387,15 @@ impl Session {
     pub fn history(&self, conversation_id: &str) -> Result<Vec<Entry>, CoreError> {
         let sql = format!("{ENTRY_SELECT} WHERE conversation_id = ? ORDER BY seq, rowid");
         self.read_entries(&sql, (conversation_id,))
+    }
+
+    /// Read one entry by id, whatever conversation it belongs to.
+    pub fn entry(&self, id: &str) -> Result<Option<Entry>, CoreError> {
+        let sql = format!("{ENTRY_SELECT} WHERE id = ?");
+        let raw: Option<RawEntry> = self
+            .storage
+            .read(|reader| reader.query_optional(&sql, (id,), raw_entry))?;
+        raw.map(RawEntry::into_entry).transpose()
     }
 
     fn read_entries(
@@ -2641,10 +2662,11 @@ impl Session {
                     kind: row.get(3)?,
                     content_json: row.get(4)?,
                     status: row.get(5)?,
-                    answer_entry_id: row.get(6)?,
-                    error_json: row.get(7)?,
-                    created_at: row.get(8)?,
-                    settled_at: row.get(9)?,
+                    user_entry_id: row.get(6)?,
+                    answer_entry_id: row.get(7)?,
+                    error_json: row.get(8)?,
+                    created_at: row.get(9)?,
+                    settled_at: row.get(10)?,
                 })
             })
         })?;
@@ -2733,6 +2755,7 @@ struct RawSubmission {
     kind: String,
     content_json: String,
     status: String,
+    user_entry_id: Option<String>,
     answer_entry_id: Option<String>,
     error_json: Option<String>,
     created_at: i64,
@@ -2760,6 +2783,7 @@ impl RawSubmission {
             kind: self.kind,
             content,
             status,
+            user_entry_id: self.user_entry_id,
             answer_entry_id: self.answer_entry_id,
             error,
             created_at: self.created_at,

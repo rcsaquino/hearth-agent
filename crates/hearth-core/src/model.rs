@@ -40,6 +40,8 @@ pub struct Submission {
     pub kind: String,
     pub content: Value,
     pub status: SubmissionStatus,
+    /// The user entry this submission answers, saved with the submission.
+    pub user_entry_id: Option<String>,
     pub answer_entry_id: Option<String>,
     pub error: Option<Value>,
     pub created_at: i64,

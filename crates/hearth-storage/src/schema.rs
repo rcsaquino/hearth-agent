@@ -31,3 +31,6 @@ pub const MIGRATION_0010: &str = include_str!("../migrations/0010.sql");
 
 /// Migration 0011 drops the unused document table.
 pub const MIGRATION_0011: &str = include_str!("../migrations/0011.sql");
+
+/// Migration 0012 links a submission to the user entry it answers.
+pub const MIGRATION_0012: &str = include_str!("../migrations/0012.sql");

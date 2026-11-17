@@ -40,18 +40,25 @@ pub fn capture(
     Ok(report)
 }
 
-/// Capture from the newest user entry in a conversation.
-pub fn capture_conversation(
+/// Capture from one user entry the run answered.
+///
+/// The entry id comes from the submission, not from the newest row in the
+/// history, so a queued message is captured by its own run and a replay of the
+/// same entry writes nothing.
+pub fn capture_entry(
     session: &Session,
     memory: &MemoryService,
-    conversation_id: &str,
+    entry_id: &str,
 ) -> hearth_memory::Result<CaptureReport> {
-    let history = session
-        .history(conversation_id)
-        .map_err(|error| hearth_memory::MemoryError::unavailable(error.to_string()))?;
-    let Some(entry) = history.iter().rev().find(|entry| entry.kind == "user") else {
+    let Some(entry) = session
+        .entry(entry_id)
+        .map_err(|error| hearth_memory::MemoryError::unavailable(error.to_string()))?
+    else {
         return Ok(CaptureReport::default());
     };
+    if entry.kind != "user" {
+        return Ok(CaptureReport::default());
+    }
     let text = plain_text(&entry.content);
     capture(memory, Some(entry.id.clone()), &text)
 }

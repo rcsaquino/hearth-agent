@@ -896,11 +896,7 @@ impl TelegramWorker {
         // A memory the model saves during this run points at the message that
         // prompted it, so provenance is the user's own words. It rides on the
         // tool set, not on the shared service.
-        let memory_source = self
-            .session
-            .latest_user_entry_id(&conversation.id)
-            .ok()
-            .flatten();
+        let memory_source = submission.user_entry_id.clone();
         let built = match build_tools(
             &self.settings,
             hearth_core::Zone::resolve(&hearth_config::identity_timezone(&self.home)),
@@ -971,18 +967,17 @@ impl TelegramWorker {
                 if outcome.answer_text.is_some() {
                     let session = self.session.clone();
                     let memory = Arc::clone(&self.memory);
-                    let conversation_id = conversation.id.clone();
+                    let entries = outcome.user_entry_ids.clone();
                     thread::spawn(move || {
-                        match crate::extraction::capture_conversation(
-                            &session,
-                            &memory,
-                            &conversation_id,
-                        ) {
-                            Ok(report) if report.written > 0 => {
-                                tracing::info!(written = report.written, "memory captured")
+                        let mut written = 0;
+                        for entry in entries {
+                            match crate::extraction::capture_entry(&session, &memory, &entry) {
+                                Ok(report) => written += report.written,
+                                Err(error) => tracing::warn!(%error, "memory capture failed"),
                             }
-                            Ok(_) => {}
-                            Err(error) => tracing::warn!(%error, "memory capture failed"),
+                        }
+                        if written > 0 {
+                            tracing::info!(written, "memory captured");
                         }
                     });
                 }

@@ -39,6 +39,8 @@ pub struct AgentConfig {
 pub struct RunOutcome {
     pub submission: Submission,
     pub task_id: String,
+    /// The user entries this run answered, oldest first.
+    pub user_entry_ids: Vec<String>,
     pub answer_entry_id: Option<String>,
     pub answer_text: Option<String>,
     pub notice: Option<String>,
@@ -674,9 +676,23 @@ impl Agent {
                 "run_settled",
                 json!({"status": "done", "answer_entry_id": answer_entry_id}),
             );
+            let mut user_entry_ids = Vec::new();
+            if let Some(entry) = settled.user_entry_id.clone() {
+                user_entry_ids.push(entry);
+            }
+            for absorbed_id in &absorbed {
+                if let Ok(Some(answered)) = self.session.submission_by_id(absorbed_id)
+                    && let Some(entry) = answered.user_entry_id
+                {
+                    user_entry_ids.push(entry);
+                }
+            }
+            user_entry_ids.sort();
+            user_entry_ids.dedup();
             return Ok(RunOutcome {
                 submission: settled,
                 task_id: claimed.id,
+                user_entry_ids,
                 answer_entry_id: Some(answer_entry_id),
                 answer_text: Some(hearth_core::secrets::redact_secrets(&text)),
                 notice: None,
@@ -908,6 +924,7 @@ impl Agent {
         Ok(RunOutcome {
             submission: settled,
             task_id: task_id.to_owned(),
+            user_entry_ids: Vec::new(),
             answer_entry_id: None,
             answer_text: None,
             notice: Some(notice.to_owned()),
@@ -964,6 +981,7 @@ impl Agent {
         Ok(RunOutcome {
             submission: settled,
             task_id: task_id.to_owned(),
+            user_entry_ids: Vec::new(),
             answer_entry_id: None,
             answer_text: None,
             notice: Some(notice),
