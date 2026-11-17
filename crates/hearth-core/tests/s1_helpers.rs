@@ -103,7 +103,7 @@ fn helper_tasks_can_be_listed_newest_first() {
 }
 
 #[test]
-fn helper_retention_archives_runs_beyond_the_newest_limit() {
+fn helper_retention_deletes_task_rows_and_archives_conversations() {
     let (_home, harness) = harness();
     let session = harness.session();
     let parent = session
@@ -137,17 +137,17 @@ fn helper_retention_archives_runs_beyond_the_newest_limit() {
         .expect("prune helpers");
     assert_eq!(pruned, 5);
     let tasks = session.tasks_by_kind("helper").expect("tasks");
-    assert_eq!(tasks.len(), 30);
-    let archived = tasks
-        .iter()
-        .filter(|task| {
-            task.conversation_id
-                .as_deref()
-                .and_then(|id| session.conversation(id).ok().flatten())
-                .map(|conversation| conversation.archived)
-                .unwrap_or(false)
+    assert_eq!(tasks.len(), 25, "the oldest five run records are deleted");
+    let archived: i64 = session
+        .storage()
+        .read(|reader| {
+            reader.query_row(
+                "SELECT COUNT(*) FROM conversations WHERE transport = 'helper' AND archived = 1",
+                [],
+                |row| row.get(0),
+            )
         })
-        .count();
+        .expect("archived helpers");
     assert_eq!(archived, 5);
     let parent = session
         .conversation(&parent.id)
