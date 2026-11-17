@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use hearth_config::{ConfigError, Media, Settings};
 use hearth_core::{
-    ContextBudget, CoreError, EffectIntent, EffectStatus, Harness, Save, Session, Submission, Zone,
-    plan_compaction,
+    ContextBudget, CoreError, EffectIntent, EffectStatus, Harness, NewEntry, Save, Session,
+    Submission, SubmissionStatus, Zone, plan_compaction,
 };
 use hearth_model::{
     MediaError, OpenAiCompatibleProvider, Provider, ProviderError, Speaker, SpeechClient,
@@ -712,6 +712,49 @@ impl TelegramWorker {
         }
     }
 
+    /// Settle a submission that cannot reach the agent, so it leaves the queue.
+    ///
+    /// A notice is stored when the conversation still exists; a submission whose
+    /// conversation is gone is only settled. Either way the next chat can run.
+    fn abandon(&self, submission: &Submission, reason: &str, notice: &str) {
+        if self
+            .session
+            .conversation(&submission.conversation_id)
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            let entry = NewEntry {
+                kind: "notice".to_owned(),
+                content: json!({"text": notice, "reason": reason}),
+                source: None,
+                prompt_hash: None,
+            };
+            if let Err(error) = self
+                .session
+                .save(Save::new(&submission.conversation_id).entry_with(entry))
+            {
+                tracing::warn!(
+                    submission = %submission.id,
+                    %error,
+                    "telegram notice could not be saved"
+                );
+            }
+        }
+        if let Err(error) = self.session.settle_with_error(
+            &submission.id,
+            SubmissionStatus::Unanswered,
+            None,
+            Some(json!({"reason": reason})),
+        ) {
+            tracing::warn!(
+                submission = %submission.id,
+                %error,
+                "telegram submission could not be settled"
+            );
+        }
+    }
+
     fn run_one(&self, submission: Submission) {
         let conversation = match self.session.conversation(&submission.conversation_id) {
             Ok(Some(conversation)) => conversation,
@@ -720,10 +763,20 @@ impl TelegramWorker {
                     submission = %submission.id,
                     "telegram conversation is missing"
                 );
+                self.abandon(
+                    &submission,
+                    "missing_conversation",
+                    "This message was not answered because its conversation no longer exists.",
+                );
                 return;
             }
             Err(error) => {
                 tracing::warn!(%error, "telegram conversation lookup failed");
+                self.abandon(
+                    &submission,
+                    "conversation_error",
+                    "This message was not answered because its conversation could not be read.",
+                );
                 return;
             }
         };
@@ -731,6 +784,11 @@ impl TelegramWorker {
             tracing::warn!(
                 key = %conversation.transport_key,
                 "telegram transport key is invalid"
+            );
+            self.abandon(
+                &submission,
+                "invalid_transport_key",
+                "This message was not answered because the chat address is invalid.",
             );
             return;
         };
@@ -775,6 +833,11 @@ impl TelegramWorker {
             Ok(tools) => tools,
             Err(error) => {
                 tracing::warn!(%error, "telegram tools could not be built");
+                self.abandon(
+                    &submission,
+                    "tools_unavailable",
+                    "This message was not answered because its tools could not be built.",
+                );
                 return;
             }
         };
