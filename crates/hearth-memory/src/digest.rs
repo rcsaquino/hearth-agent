@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{Kind, Memory};
+use crate::model::Memory;
 
 /// Longest statement shown in one recall line.
 ///
@@ -92,9 +92,12 @@ pub fn tool_line(memory: &Memory, now: i64) -> String {
 }
 
 /// Whether a line is a memory row rather than a coverage or rules notice.
-pub fn is_memory_line(line: &str) -> bool {
+#[cfg(test)]
+fn is_memory_line(line: &str) -> bool {
     let code = line.split(" | ").next().unwrap_or_default();
-    Kind::ALL.iter().any(|kind| kind.code() == code)
+    crate::model::Kind::ALL
+        .iter()
+        .any(|kind| kind.code() == code)
 }
 
 fn render(memory: &Memory, now: i64, addressing: Addressing) -> String {

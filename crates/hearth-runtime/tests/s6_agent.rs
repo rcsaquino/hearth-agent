@@ -723,7 +723,7 @@ fn a_cancelled_run_before_the_stream_settles_cancelled() {
     let cancel = Arc::new(AtomicBool::new(true));
 
     let outcome = agent
-        .run_submission_with_cancel(&submission.id, cancel)
+        .run_submission_with_events(&submission.id, cancel, Arc::new(hearth_runtime::NoopSink))
         .expect("run submission");
 
     assert_eq!(outcome.submission.status, SubmissionStatus::Cancelled);
@@ -806,7 +806,7 @@ fn a_run_cancelled_during_the_stream_discards_the_answer_and_records_usage() {
     let agent = agent(home.path(), &harness, provider.clone());
 
     let outcome = agent
-        .run_submission_with_cancel(&submission.id, cancel)
+        .run_submission_with_events(&submission.id, cancel, Arc::new(hearth_runtime::NoopSink))
         .expect("run submission");
 
     assert_eq!(outcome.submission.status, SubmissionStatus::Cancelled);
@@ -1330,9 +1330,22 @@ fn a_full_recall_is_not_shrunk_for_the_context_budget() {
         .expect("saved prompt");
     let document: serde_json::Value = serde_json::from_str(&prompt.text).expect("prompt document");
     let recall = document["recall"].as_str().expect("recall layer");
+    let kinds = [
+        "rule",
+        "preference",
+        "person",
+        "decision",
+        "commitment",
+        "episode",
+        "fact",
+    ];
     let lines = recall
         .lines()
-        .filter(|line| hearth_memory::is_memory_line(line))
+        .filter(|line| {
+            line.split(" | ")
+                .next()
+                .is_some_and(|code| kinds.contains(&code))
+        })
         .count();
     assert_eq!(
         lines, 10,

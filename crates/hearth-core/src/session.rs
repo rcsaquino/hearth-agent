@@ -360,7 +360,8 @@ impl Session {
             })
     }
 
-    /// Read the newest line in the save log.
+    /// Test seam for the save-log contract; production status reads its own query.
+    #[doc(hidden)]
     pub fn latest_commit(&self) -> Result<Option<CommitRecord>, CoreError> {
         let raw: Option<RawCommitRow> = self.storage.read(|reader| {
             reader.query_optional(
@@ -777,7 +778,8 @@ impl Session {
         Ok(event)
     }
 
-    /// Read the usage recorded for a task, oldest first.
+    /// Test seam for the usage-recording contract; production does not read it.
+    #[doc(hidden)]
     pub fn usage_for_task(&self, task_id: &str) -> Result<Vec<UsageEvent>, CoreError> {
         let raw: Vec<UsageEvent> = self.storage.read(|reader| {
             reader.query(
@@ -807,7 +809,8 @@ impl Session {
         Ok(raw)
     }
 
-    /// Read the newest usage row.
+    /// Test seam for the usage-recording contract; production status aggregates it.
+    #[doc(hidden)]
     pub fn latest_usage(&self) -> Result<Option<UsageEvent>, CoreError> {
         let raw: Option<UsageEvent> = self.storage.read(|reader| {
             reader.query_optional(
@@ -1867,7 +1870,8 @@ impl Session {
         Ok(count)
     }
 
-    /// Claim the oldest runnable task.
+    /// Test seam for queue-order contracts; production claims by kind or by id.
+    #[doc(hidden)]
     pub fn claim_task(
         &self,
         owner: &str,

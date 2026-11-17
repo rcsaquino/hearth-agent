@@ -149,7 +149,8 @@ impl OpenAiCompatibleProvider {
         self
     }
 
-    /// Build the exact wire body without sending it.
+    /// Test seam for the provider wire-format contract; production sends the body.
+    #[doc(hidden)]
     pub fn wire_body(&self, request: &ChatRequest) -> Result<Value, ProviderError> {
         self.body(request)
     }

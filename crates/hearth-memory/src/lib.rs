@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use hearth_core::{Session, Zone};
 
-pub use digest::{Coverage, is_memory_line};
+pub use digest::Coverage;
 pub use embedding::{
     BekkoEmbedding, EmbeddingProvider, MODEL_DIMS, MODEL_NAME, download_model, model_files_present,
 };

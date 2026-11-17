@@ -232,7 +232,13 @@ fn a_stop_settles_the_absorbed_submission_cancelled() {
         let agent = Arc::clone(&agent);
         let id = first.id.clone();
         let cancel = Arc::clone(&cancel);
-        thread::spawn(move || agent.run_submission_with_cancel(&id, Arc::clone(&cancel)))
+        thread::spawn(move || {
+            agent.run_submission_with_events(
+                &id,
+                Arc::clone(&cancel),
+                Arc::new(hearth_runtime::NoopSink),
+            )
+        })
     };
     started
         .recv_timeout(Duration::from_secs(5))

@@ -9,9 +9,7 @@ mod openai;
 mod provider;
 mod types;
 
-pub use catalog::{
-    Catalog, CatalogError, ModelLimits, fetch as fetch_catalog, lookup as lookup_model_info,
-};
+pub use catalog::{Catalog, CatalogError, ModelLimits, lookup as lookup_model_info};
 pub use estimate::{estimate_tokens, estimate_tokens_chars};
 pub use media::{
     ELEVENLABS_TAG_GUIDANCE, ImageClient, MediaError, Speaker, SpeechClient, Transcriber,

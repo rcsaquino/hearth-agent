@@ -336,15 +336,6 @@ impl Agent {
         )
     }
 
-    /// Run one submission, stopping at the next boundary when `cancel` is set.
-    pub fn run_submission_with_cancel(
-        &self,
-        submission_id: &str,
-        cancel: Arc<AtomicBool>,
-    ) -> Result<RunOutcome, AgentError> {
-        self.run_submission_with_events(submission_id, cancel, Arc::new(NoopSink))
-    }
-
     /// Run one submission and publish live events to `events`.
     pub fn run_submission_with_events(
         &self,

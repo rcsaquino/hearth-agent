@@ -101,7 +101,7 @@ impl Catalog {
 }
 
 /// Fetch and parse the catalog at `url`.
-pub fn fetch(url: &str) -> Result<Catalog, CatalogError> {
+fn fetch(url: &str) -> Result<Catalog, CatalogError> {
     let client = reqwest::blocking::Client::builder()
         .timeout(CATALOG_TIMEOUT)
         .user_agent("Hearth/0.1")
@@ -188,5 +188,73 @@ mod tests {
                 .lookup("https://example.com/v1", "deepseek-v4.1-flash")
                 .is_none()
         );
+    }
+
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn serve(body: &'static str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let base = format!("http://{}", listener.local_addr().expect("addr"));
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("request line");
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).expect("header");
+                if header == "\r\n" || header == "\n" || header.is_empty() {
+                    break;
+                }
+            }
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("response");
+        });
+        (base, server)
+    }
+
+    #[test]
+    fn a_catalog_body_over_its_cap_is_refused() {
+        let body: &'static str = Box::leak("x".repeat(8 * 1024 * 1024 + 1).into_boxed_str());
+        let (base, server) = serve(body);
+        let error =
+            fetch(&format!("{base}/api.json")).expect_err("an oversized catalog must be refused");
+        assert!(
+            error.to_string().contains("larger than"),
+            "unexpected error: {error}"
+        );
+        server.join().expect("server");
+    }
+
+    #[test]
+    fn the_catalog_is_fetched_over_http() {
+        let (base, server) = serve(
+            r#"{
+                "example": {
+                    "api": "https://example.com/v1",
+                    "models": {
+                        "example-model": {
+                            "limit": {"context": 64000, "output": 4096}
+                        }
+                    }
+                }
+            }"#,
+        );
+        let catalog = fetch(&format!("{base}/api.json")).expect("catalog");
+        assert_eq!(
+            catalog
+                .lookup("https://example.com/v1", "example-model")
+                .expect("model")
+                .context_window,
+            64_000
+        );
+        server.join().expect("server");
     }
 }
