@@ -392,6 +392,35 @@ impl Drop for DaemonGuard {
 }
 
 #[test]
+fn a_daemon_without_telegram_still_schedules_maintenance() {
+    use hearth_core::Harness;
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_daemon_home(home.path());
+    let mut daemon = DaemonGuard::new(
+        hearth_daemon(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn daemon"),
+    );
+    wait_for_lock_pid(home.path(), daemon.child());
+    daemon.stop();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    for kind in ["backup", "skill.review"] {
+        assert!(
+            !harness
+                .session()
+                .tasks_by_kind(kind)
+                .expect("tasks")
+                .is_empty(),
+            "{kind} must be scheduled without Telegram"
+        );
+    }
+}
+
+#[test]
 fn daemon_recovers_an_expired_task_lease() {
     use hearth_core::{Harness, NewTask, TaskStatus};
 
