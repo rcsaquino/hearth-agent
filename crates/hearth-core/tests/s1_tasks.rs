@@ -1307,6 +1307,63 @@ fn recovery_does_not_requeue_a_foreground_task() {
 }
 
 #[test]
+fn recovery_requeues_a_running_submission_with_no_claimed_task() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Crash", "telegram", "42:0")
+        .expect("conversation");
+    let submitted = session
+        .submit_telegram(
+            &conversation.id,
+            "tg:42:9",
+            json!({"text": "hello"}),
+            hearth_core::TelegramUpdate {
+                update_id: 9,
+                chat_id: 42,
+                message_id: 9,
+            },
+            10,
+        )
+        .expect("submit");
+    session
+        .begin_submission(&submitted.submission.id)
+        .expect("begin");
+    let pending = session
+        .create_task(
+            hearth_core::NewTask::new(
+                "generation",
+                1,
+                "request",
+                json!({"submission_id": submitted.submission.id}),
+            )
+            .conversation(&conversation.id),
+        )
+        .expect("pending task");
+
+    let report = session.recover_interrupted().expect("recovery");
+
+    assert_eq!(report.requeued, 1);
+    assert_eq!(
+        session
+            .submission_by_id(&submitted.submission.id)
+            .expect("submission")
+            .expect("row")
+            .status,
+        hearth_core::SubmissionStatus::Queued
+    );
+    assert!(
+        session
+            .next_queued_telegram_submission()
+            .expect("next queued")
+            .is_some(),
+        "the worker must find the submission again"
+    );
+    let task = session.task(&pending.id).expect("task").expect("row");
+    assert_eq!(task.status, TaskStatus::Failed, "the orphan is retired");
+}
+
+#[test]
 fn a_second_interruption_is_reported_to_the_person() {
     let (_home, harness, _clock) = harness();
     let session = harness.session();
