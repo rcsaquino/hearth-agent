@@ -224,6 +224,7 @@ pub struct ImageClient {
     api_key: String,
     model: String,
     client: reqwest::blocking::Client,
+    download_client: reqwest::blocking::Client,
 }
 
 impl ImageClient {
@@ -237,11 +238,17 @@ impl ImageClient {
             .timeout(Duration::from_secs(120))
             .build()
             .map_err(|error| MediaError::Transport(format!("client build failed: {error}")))?;
+        let download_client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .dns_resolver(std::sync::Arc::new(crate::net::public_resolver(false)))
+            .build()
+            .map_err(|error| MediaError::Transport(format!("client build failed: {error}")))?;
         Ok(Self {
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
             client,
+            download_client,
         })
     }
 
@@ -279,8 +286,9 @@ impl ImageClient {
                 message: body.chars().take(200).collect(),
             });
         }
-        let value: Value = response
-            .json()
+        let text = crate::body::capped(response, 32 * 1024 * 1024)
+            .map_err(MediaError::Protocol)?;
+        let value: Value = serde_json::from_str(&text)
             .map_err(|error| MediaError::Protocol(format!("invalid JSON: {error}")))?;
         let data = value["data"]
             .as_array()
@@ -297,9 +305,16 @@ impl ImageClient {
             return Ok(bytes);
         }
         if let Some(url) = data["url"].as_str() {
-            let response = self.client.get(url).send().map_err(|error| {
-                MediaError::Transport(format!("image download failed: {error}"))
-            })?;
+            let parsed = reqwest::Url::parse(url)
+                .map_err(|error| MediaError::Protocol(format!("invalid image URL: {error}")))?;
+            crate::net::validate_url(&parsed, false).map_err(MediaError::Protocol)?;
+            let response = self
+                .download_client
+                .get(parsed)
+                .send()
+                .map_err(|error| {
+                    MediaError::Transport(format!("image download failed: {error}"))
+                })?;
             let status = response.status();
             if !status.is_success() {
                 return Err(MediaError::Response {
@@ -307,15 +322,14 @@ impl ImageClient {
                     message: "image download was rejected".to_owned(),
                 });
             }
-            let bytes = response.bytes().map_err(|error| {
-                MediaError::Transport(format!("could not read the image: {error}"))
-            })?;
+            let bytes = crate::body::capped_bytes(response, 32 * 1024 * 1024)
+                .map_err(MediaError::Protocol)?;
             if bytes.is_empty() {
                 return Err(MediaError::Empty(
                     "the downloaded image was empty".to_owned(),
                 ));
             }
-            return Ok(bytes.to_vec());
+            return Ok(bytes);
         }
         Err(MediaError::Protocol(
             "the image response had neither b64_json nor url".to_owned(),

@@ -1,7 +1,6 @@
 //! Web fetch: an ordered provider chain and one model-facing tool.
 
 use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -262,6 +261,9 @@ impl HttpFetch {
             .user_agent("Hearth/0.1")
             .gzip(true)
             .brotli(true)
+            .dns_resolver(Arc::new(hearth_model::net::public_resolver(
+                allow_loopback,
+            )))
             .build()
             .map_err(|error| {
                 FetchError::permanent(format!("could not build the HTTP client: {error}"))
@@ -718,89 +720,7 @@ fn cap_text(mut text: String, max_bytes: usize) -> String {
 
 /// Refuse a target that is not a public http or https address.
 pub(crate) fn validate_target(url: &Url, allow_loopback: bool) -> Result<(), FetchError> {
-    if url.scheme() != "http" && url.scheme() != "https" {
-        return Err(FetchError::permanent(
-            "only http and https URLs are allowed",
-        ));
-    }
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err(FetchError::permanent(
-            "URLs with user information are not allowed",
-        ));
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| FetchError::permanent("the URL has no host"))?;
-    let host = host
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .unwrap_or(host);
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| FetchError::permanent("the URL has no usable port"))?;
-    if let Ok(address) = host.parse::<IpAddr>() {
-        return check_ip(address, allow_loopback);
-    }
-    let mut found = false;
-    for address in (host, port)
-        .to_socket_addrs()
-        .map_err(|error| FetchError::permanent(format!("could not resolve {host}: {error}")))?
-    {
-        found = true;
-        check_ip(address.ip(), allow_loopback)?;
-    }
-    if !found {
-        return Err(FetchError::permanent(format!("could not resolve {host}")));
-    }
-    Ok(())
-}
-
-fn check_ip(address: IpAddr, allow_loopback: bool) -> Result<(), FetchError> {
-    if allow_loopback && address.is_loopback() {
-        return Ok(());
-    }
-    if is_disallowed(address) {
-        return Err(FetchError::permanent(format!(
-            "address {address} is not public"
-        )));
-    }
-    Ok(())
-}
-
-fn is_disallowed(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => is_disallowed_v4(address),
-        IpAddr::V6(address) => {
-            if let Some(mapped) = address.to_ipv4_mapped() {
-                return is_disallowed_v4(mapped);
-            }
-            let segments = address.segments();
-            address.is_loopback()
-                || address.is_unspecified()
-                || address.is_multicast()
-                || (segments[0] & 0xfe00) == 0xfc00
-                || (segments[0] & 0xffc0) == 0xfe80
-                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
-        }
-    }
-}
-
-fn is_disallowed_v4(address: Ipv4Addr) -> bool {
-    let octets = address.octets();
-    address.is_private()
-        || address.is_loopback()
-        || address.is_link_local()
-        || address.is_broadcast()
-        || address.is_multicast()
-        || address.is_unspecified()
-        || octets[0] == 0
-        || (octets[0] == 100 && (octets[1] & 0xc0) == 64)
-        || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
-        || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
-        || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
-        || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
-        || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
-        || octets[0] >= 240
+    hearth_model::net::validate_url(url, allow_loopback).map_err(FetchError::permanent)
 }
 
 #[cfg(test)]
