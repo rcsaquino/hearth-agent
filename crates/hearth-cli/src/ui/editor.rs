@@ -5,7 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 use crate::editor::OpenEditor;
 use crate::theme;
@@ -155,9 +155,4 @@ fn width_of(chars: &[char]) -> usize {
 
 fn char_width(character: char) -> usize {
     UnicodeWidthChar::width(character).unwrap_or(0)
-}
-
-#[allow(dead_code)]
-fn display_width(text: &str) -> usize {
-    UnicodeWidthStr::width(text)
 }

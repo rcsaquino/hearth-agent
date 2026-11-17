@@ -98,16 +98,6 @@ impl Catalog {
             })
             .map(|entry| entry.limits)
     }
-
-    /// The number of parsed provider-model entries.
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Whether the catalog has no entries.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
 }
 
 /// Fetch and parse the catalog at `url`.

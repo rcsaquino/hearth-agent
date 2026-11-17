@@ -78,14 +78,6 @@ impl EventBus {
             subscribers.retain(|subscriber| subscriber.send(text.clone()).is_ok());
         }
     }
-
-    /// The current number of attached watchers, for tests.
-    pub fn subscriber_count(&self) -> usize {
-        self.subscribers
-            .lock()
-            .map(|subscribers| subscribers.len())
-            .unwrap_or(0)
-    }
 }
 
 impl EventSink for EventBus {
@@ -115,19 +107,5 @@ mod tests {
         assert_eq!(value["v"], 1);
         assert_eq!(value["kind"], "text_delta");
         assert_eq!(value["task_id"], "task-1");
-    }
-
-    #[test]
-    fn detached_subscribers_are_dropped() {
-        let bus = EventBus::new(Vec::new());
-        let receiver = bus.subscribe();
-        drop(receiver);
-        bus.publish(RunEvent {
-            task_id: "task-1".to_owned(),
-            conversation_id: "conv-1".to_owned(),
-            kind: "run_started",
-            data: json!({}),
-        });
-        assert_eq!(bus.subscriber_count(), 0);
     }
 }

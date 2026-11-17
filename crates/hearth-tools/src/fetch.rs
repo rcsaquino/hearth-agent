@@ -153,7 +153,6 @@ impl Tool for WebFetchTool {
             code: "fetch_failed".to_owned(),
             message: error.message,
             retryable: all_retryable && error.retryable,
-            detail: None,
         })
     }
 }

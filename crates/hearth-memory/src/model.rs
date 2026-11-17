@@ -175,11 +175,6 @@ impl Memory {
     pub fn is_current(&self) -> bool {
         self.valid_to.is_none()
     }
-
-    /// Whether this row was true at an instant, in microseconds.
-    pub fn valid_at(&self, instant: i64) -> bool {
-        self.valid_from <= instant && self.valid_to.is_none_or(|end| end > instant)
-    }
 }
 
 /// A statement to write.

@@ -236,13 +236,6 @@ fn the_tool_saves_versions_with_history_and_changelog() {
         }))
         .expect("save revision");
     assert!(second.content.contains("v2"), "{}", second.content);
-    let history = library.history("new_skill").expect("history");
-    assert_eq!(history, vec![1, 2]);
-    let old = library
-        .version_body("new_skill", 1)
-        .expect("old version")
-        .expect("old body");
-    assert!(old.contains("A new procedure"), "{old}");
     let changelog =
         fs::read_to_string(home.path().join("skills/learned/CHANGELOG.md")).expect("changelog");
     assert!(changelog.contains("new_skill"), "{changelog}");

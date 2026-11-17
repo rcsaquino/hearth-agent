@@ -22,7 +22,6 @@ pub struct ToolError {
     pub code: String,
     pub message: String,
     pub retryable: bool,
-    pub detail: Option<String>,
 }
 
 impl ToolError {
@@ -32,7 +31,6 @@ impl ToolError {
             code: code.into(),
             message: message.into(),
             retryable: false,
-            detail: None,
         }
     }
 
@@ -42,14 +40,7 @@ impl ToolError {
             code: code.into(),
             message: message.into(),
             retryable: true,
-            detail: None,
         }
-    }
-
-    /// Attach extra detail.
-    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = Some(detail.into());
-        self
     }
 
     /// Whether the same call may succeed later.
@@ -59,15 +50,13 @@ impl ToolError {
 
     /// A compact JSON view for a tool result.
     pub fn to_json(&self) -> Value {
-        let mut error = json!({
-            "code": self.code,
-            "message": self.message,
-            "retryable": self.retryable,
-        });
-        if let Some(detail) = &self.detail {
-            error["detail"] = Value::String(detail.clone());
-        }
-        json!({ "error": error })
+        json!({
+            "error": {
+                "code": self.code,
+                "message": self.message,
+                "retryable": self.retryable,
+            }
+        })
     }
 }
 

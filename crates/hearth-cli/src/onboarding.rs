@@ -595,19 +595,6 @@ impl Onboarding {
         }
     }
 
-    pub fn extras_input(&self) -> Option<&TextInput> {
-        match self.extras_focus {
-            1 if self.image => Some(&self.image_key),
-            2 if self.image => Some(&self.image_model),
-            4 if self.stt => Some(&self.stt_key),
-            5 if self.stt => Some(&self.stt_model),
-            7 if self.tts => Some(&self.tts_key),
-            8 if self.tts => Some(&self.tts_voice),
-            9 if self.tts => Some(&self.tts_model),
-            _ => None,
-        }
-    }
-
     fn validate_extras(&self) -> Result<(), &'static str> {
         if self.image {
             if self.image_key.is_empty() {

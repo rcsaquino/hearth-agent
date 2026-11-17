@@ -12,7 +12,7 @@ use std::time::Duration;
 use hearth_config::Settings;
 use hearth_core::{
     ContextBudget, CoreError, EffectIntent, EffectStatus, NewEntry, NewTask, Save, Session,
-    StepOutput, SubmissionStatus, TaskStatus, TerminalOutcome,
+    StepOutput, SubmissionStatus, TerminalOutcome,
 };
 use hearth_memory::MemoryService;
 use hearth_model::{Provider, Speaker, ToolSpec};
@@ -320,11 +320,6 @@ impl TaskTool {
         }
         Ok(task)
     }
-}
-
-#[allow(dead_code)]
-fn is_terminal(status: TaskStatus) -> bool {
-    status.is_terminal()
 }
 
 /// Everything a helper worker needs.

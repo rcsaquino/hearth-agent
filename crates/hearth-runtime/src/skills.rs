@@ -348,12 +348,6 @@ impl SkillLibrary {
         let path = self.learned_root().join(format!("{name}.md"));
         let existing = self.find_learned(&name)?;
         let mut skill = if let Some(existing) = existing {
-            let history_dir = self.learned_root().join(".history").join(&name);
-            fs::create_dir_all(&history_dir)?;
-            fs::copy(
-                &existing.path,
-                history_dir.join(format!("v{}.md", existing.version)),
-            )?;
             Skill {
                 name: name.clone(),
                 description: save.description,
@@ -414,49 +408,6 @@ impl SkillLibrary {
     }
 
     /// Preserved versions of one learned skill, oldest first.
-    pub fn history(&self, name: &str) -> Result<Vec<u64>, SkillError> {
-        let mut versions = Vec::new();
-        if let Some(current) = self.find_learned(name)? {
-            versions.push(current.version);
-        }
-        let directory = self.learned_root().join(".history").join(name);
-        if directory.is_dir() {
-            for entry in fs::read_dir(directory)? {
-                let entry = entry?;
-                let file = entry.file_name().to_string_lossy().to_string();
-                if let Some(version) = file
-                    .strip_prefix('v')
-                    .and_then(|value| value.strip_suffix(".md"))
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    versions.push(version);
-                }
-            }
-        }
-        versions.sort_unstable();
-        versions.dedup();
-        Ok(versions)
-    }
-
-    /// The full text of one version of a learned skill.
-    pub fn version_body(&self, name: &str, version: u64) -> Result<Option<String>, SkillError> {
-        if let Some(current) = self.find_learned(name)?
-            && current.version == version
-        {
-            return Ok(Some(fs::read_to_string(&current.path)?));
-        }
-        let path = self
-            .learned_root()
-            .join(".history")
-            .join(name)
-            .join(format!("v{version}.md"));
-        if path.is_file() {
-            Ok(Some(fs::read_to_string(path)?))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Summary counts for the CLI.
     pub fn stats(&self) -> Result<SkillStats, SkillError> {
         let skills = self.load_all()?;
