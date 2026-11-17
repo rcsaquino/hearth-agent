@@ -107,6 +107,25 @@ if printf '%s' "$output" | grep -q 'sk-t'; then
     exit 1
 fi
 
+mkdir -p crates/demo/tests
+printf 'sk-test-planted-credential-value-1234567890\n' > crates/demo/tests/leak.rs
+git add crates/demo/tests/leak.rs
+git commit -qm test-credential
+set +e
+output="$(HEARTH_PUBLIC_DENYLIST="$work/deny-list" "$root/scripts/public-scan.sh" 2>&1)"
+status=$?
+set -e
+if [ "$status" -eq 0 ]; then
+    echo "public scan skipped a credential in a test file" >&2
+    exit 1
+fi
+if ! printf '%s' "$output" | grep -q 'crates/demo/tests/leak.rs'; then
+    echo "public scan did not name the test file with the credential" >&2
+    exit 1
+fi
+rm -rf crates/demo
+git add -A
+
 mkdir -p "$work/ci-repo"
 (
     cd "$work/ci-repo"
