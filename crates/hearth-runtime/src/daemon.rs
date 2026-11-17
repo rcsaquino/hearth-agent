@@ -271,8 +271,13 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         telegram_handles.extend(runtime.helpers.spawn_workers(Arc::clone(&shutdown)));
         tracing::info!("telegram poller, worker, and scheduler started");
     } else {
-        let scheduler =
-            maintenance_scheduler(home, &settings, session.clone(), Arc::clone(&memory))?;
+        let scheduler = maintenance_scheduler(
+            home,
+            &settings,
+            session.clone(),
+            Arc::clone(&memory),
+            Arc::clone(&events),
+        )?;
         let scheduler_shutdown = Arc::clone(&shutdown);
         telegram_handles.push(thread::spawn(move || scheduler.run(scheduler_shutdown)));
         tracing::info!("scheduler started without telegram");
@@ -537,13 +542,14 @@ fn recover_started_effects(session: &Session) -> Result<usize, CoreError> {
 
 /// The scheduler a daemon runs when it has no Telegram transport.
 ///
-/// Backup and skill review need no chat. Reminders and helpers do, so those
-/// handlers and workers exist only in the Telegram runtime.
+/// Backup, skill review, and the memory audit need no chat. Reminders and
+/// helpers do, so those handlers and workers exist only in the Telegram runtime.
 fn maintenance_scheduler(
     home: &Path,
     settings: &Settings,
     session: Session,
     memory: Arc<MemoryService>,
+    events: Arc<EventBus>,
 ) -> Result<Scheduler, DaemonError> {
     let models = settings
         .models
@@ -598,7 +604,7 @@ fn maintenance_scheduler(
                 Arc::new(MemoryConsolidationHandler::new(
                     home.to_path_buf(),
                     Arc::clone(&memory),
-                    None,
+                    Some(events),
                 )),
             ),
     );
