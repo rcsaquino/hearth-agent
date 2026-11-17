@@ -1244,6 +1244,69 @@ fn an_interrupted_submission_is_queued_again() {
 }
 
 #[test]
+fn recovery_does_not_requeue_a_foreground_task() {
+    let (_home, harness, _clock) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Crash", "telegram", "42:0")
+        .expect("conversation");
+    let submitted = session
+        .submit(&conversation.id, "req-1", "input", json!({"text": "hello"}))
+        .expect("submit");
+    session
+        .begin_submission(&submitted.submission.id)
+        .expect("begin");
+    session
+        .settle(
+            &submitted.submission.id,
+            hearth_core::SubmissionStatus::Done,
+            None,
+        )
+        .expect("settle");
+    let generation = session
+        .create_task(
+            hearth_core::NewTask::new(
+                "generation",
+                1,
+                "request",
+                json!({"submission_id": submitted.submission.id}),
+            )
+            .conversation(&conversation.id),
+        )
+        .expect("generation task");
+    session
+        .claim_task_by_id(&generation.id, "daemon:1", 60_000_000)
+        .expect("claim generation")
+        .expect("claimed");
+    let compaction = session
+        .create_task(hearth_core::NewTask::new("compaction", 1, "compact", json!({})))
+        .expect("compaction task");
+    session
+        .claim_task_by_id(&compaction.id, "daemon:1", 60_000_000)
+        .expect("claim compaction")
+        .expect("claimed");
+
+    let report = session.recover_interrupted().expect("recovery");
+
+    assert_eq!(report.requeued, 0, "no foreground task is requeued");
+    for id in [generation.id, compaction.id] {
+        let task = session.task(&id).expect("read task").expect("task");
+        assert_eq!(
+            task.status,
+            TaskStatus::Failed,
+            "a foreground task has no claimant after recovery"
+        );
+        assert!(
+            task.result
+                .as_ref()
+                .is_some_and(|result| result["error"] == "interrupted"),
+            "the cause is recorded: {:?}",
+            task.result
+        );
+    }
+}
+
+#[test]
 fn a_second_interruption_is_reported_to_the_person() {
     let (_home, harness, _clock) = harness();
     let session = harness.session();
