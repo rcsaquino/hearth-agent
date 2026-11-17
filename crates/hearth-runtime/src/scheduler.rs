@@ -137,7 +137,6 @@ impl Scheduler {
             } else {
                 tracing::info!(task = %task.id, kind = %kind, "scheduler task step");
             }
-            return Ok(());
         }
         Ok(())
     }

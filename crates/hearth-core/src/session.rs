@@ -20,6 +20,9 @@ use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskSt
 /// How long a saved prompt blob is kept before the nightly pass removes it.
 pub const PROMPT_BLOB_RETENTION_MICROS: i64 = 30 * 24 * 60 * 60 * 1_000_000;
 
+/// The most attempts one task may consume before a retryable failure is poison.
+const MAX_TASK_ATTEMPTS: i64 = 5;
+
 const CONVERSATION_SELECT: &str = "SELECT id, parent_id, parent_entry_id, title, transport, \
      transport_key, created_at, updated_at, archived FROM conversations";
 const ENTRY_SELECT: &str = "SELECT id, conversation_id, seq, kind, content_json, tokens_est, \
@@ -2189,6 +2192,9 @@ impl Session {
                     StepOutput::Terminal { .. } => "task.terminal",
                     StepOutput::Failed {
                         retryable: true, ..
+                    } if task.attempt >= MAX_TASK_ATTEMPTS => "task.poison",
+                    StepOutput::Failed {
+                        retryable: true, ..
                     } => "task.retry",
                     StepOutput::Failed {
                         retryable: false, ..
@@ -2253,15 +2259,42 @@ impl Session {
                         }
                     }
                     StepOutput::Failed {
-                        retryable: true, ..
+                        error,
+                        retryable: true,
                     } => {
-                        let changed = writer.execute(
-                            "UPDATE tasks SET status = 'pending', attempt = 0, \
-                             lease_owner = NULL, lease_until = NULL, next_wake_at = ?, \
-                             updated_at = ? WHERE id = ? AND status = 'running' \
-                             AND lease_owner = ?",
-                            (now + 1_000_000, now, task_id.as_str(), owner.as_str()),
-                        )?;
+                        let changed = if task.attempt >= MAX_TASK_ATTEMPTS {
+                            let result = redacted_json(
+                                &serde_json::json!({"error": error, "poisoned": true}),
+                            )?;
+                            writer.execute(
+                                "UPDATE tasks SET status = 'failed', result_json = ?, \
+                                 terminal_at = ?, lease_owner = NULL, lease_until = NULL, \
+                                 next_wake_at = NULL, updated_at = ? \
+                                 WHERE id = ? AND status = 'running' AND lease_owner = ?",
+                                (
+                                    result,
+                                    now,
+                                    now,
+                                    task_id.as_str(),
+                                    owner.as_str(),
+                                ),
+                            )?
+                        } else {
+                            let result = redacted_json(&error)?;
+                            writer.execute(
+                                "UPDATE tasks SET status = 'pending', result_json = ?, \
+                                 lease_owner = NULL, lease_until = NULL, next_wake_at = ?, \
+                                 updated_at = ? WHERE id = ? AND status = 'running' \
+                                 AND lease_owner = ?",
+                                (
+                                    result,
+                                    now.saturating_add(retry_delay(task.attempt)),
+                                    now,
+                                    task_id.as_str(),
+                                    owner.as_str(),
+                                ),
+                            )?
+                        };
                         if changed != 1 {
                             return Err(CoreError::LeaseLost(task_id));
                         }
@@ -2970,6 +3003,16 @@ fn record_commit(
 fn redacted_json(value: &Value) -> Result<String, CoreError> {
     serde_json::to_string(&crate::secrets::redact_value(value))
         .map_err(|error| CoreError::Invalid(error.to_string()))
+}
+
+/// The wait before a retryable task failure is claimed again.
+fn retry_delay(attempt: i64) -> i64 {
+    const BASE_MICROS: i64 = 1_000_000;
+    const MAX_MICROS: i64 = 300_000_000;
+    let exponent = attempt.saturating_sub(1).clamp(0, 8) as u32;
+    BASE_MICROS
+        .saturating_mul(1_i64 << exponent)
+        .min(MAX_MICROS)
 }
 
 fn load_task(writer: &Writer<'_>, id: &str) -> Result<Option<Task>, CoreError> {
