@@ -1063,7 +1063,10 @@ impl Drop for Reservation<'_> {
 /// are answered with a not-replayed result instead, and the model decides
 /// whether to issue them again.
 fn replay_safe(name: &str) -> bool {
-    !matches!(name, "shell" | "message" | "schedule" | "browser" | "media")
+    !matches!(
+        name,
+        "shell" | "message" | "schedule" | "browser" | "media" | "task" | "skill" | "memory_save"
+    )
 }
 
 fn pending_calls(history: &[Entry]) -> Vec<ToolCall> {
