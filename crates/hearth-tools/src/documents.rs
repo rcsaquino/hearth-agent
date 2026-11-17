@@ -142,6 +142,9 @@ impl Tool for DocumentsTool {
                 "the document contains no extractable text",
             ));
         }
+        if text.len() > MAX_DOCUMENT_TEXT_BYTES {
+            return Err(too_much_text());
+        }
         Ok(ToolOutput {
             content: text,
             is_error: false,
@@ -169,6 +172,9 @@ fn archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>, ToolError> {
 /// Deflate reaches roughly 1000:1, so a small archive can otherwise expand to
 /// gigabytes during extraction.
 pub const MAX_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The largest text a single extraction builds across every entry.
+pub const MAX_DOCUMENT_TEXT_BYTES: usize = 32 * 1024 * 1024;
 
 fn archive_text(archive: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<String, ToolError> {
     let mut file = archive
@@ -201,6 +207,21 @@ fn too_large(name: &str) -> ToolError {
     )
 }
 
+fn too_much_text() -> ToolError {
+    ToolError::invalid(
+        "document_too_large",
+        format!("the extracted text is larger than {MAX_DOCUMENT_TEXT_BYTES} bytes"),
+    )
+}
+
+fn append_text(out: &mut String, section: &str) -> Result<(), ToolError> {
+    if out.len().saturating_add(section.len()) > MAX_DOCUMENT_TEXT_BYTES {
+        return Err(too_much_text());
+    }
+    out.push_str(section);
+    Ok(())
+}
+
 fn docx_text(bytes: &[u8]) -> Result<String, ToolError> {
     let mut archive = archive(bytes)?;
     let xml = archive_text(&mut archive, "word/document.xml")?;
@@ -220,15 +241,18 @@ fn pptx_text(bytes: &[u8]) -> Result<String, ToolError> {
         let xml = archive_text(&mut archive, &name)?;
         let text = extract_ooxml_text(&xml, b"t", b"p");
         if !text.trim().is_empty() {
-            out.push_str(&format!(
-                "--- Slide {} ---\n{}\n",
-                if number == 0 {
-                    index + 1
-                } else {
-                    number as usize
-                },
-                text.trim_end()
-            ));
+            append_text(
+                &mut out,
+                &format!(
+                    "--- Slide {} ---\n{}\n",
+                    if number == 0 {
+                        index + 1
+                    } else {
+                        number as usize
+                    },
+                    text.trim_end()
+                ),
+            )?;
         }
     }
     Ok(out)
@@ -246,18 +270,13 @@ fn trailing_number(name: &str) -> u32 {
 
 fn xlsx_text(bytes: &[u8]) -> Result<String, ToolError> {
     let mut archive = archive(bytes)?;
-    let shared = match archive.by_name("xl/sharedStrings.xml") {
-        Ok(mut file) => {
-            let mut xml = String::new();
-            file.read_to_string(&mut xml).map_err(|error| {
-                ToolError::invalid(
-                    "corrupt_document",
-                    format!("could not read shared strings: {error}"),
-                )
-            })?;
-            shared_strings(&xml)
-        }
-        Err(_) => Vec::new(),
+    let shared = if archive
+        .file_names()
+        .any(|name| name == "xl/sharedStrings.xml")
+    {
+        shared_strings(&archive_text(&mut archive, "xl/sharedStrings.xml")?)
+    } else {
+        Vec::new()
     };
     let mut sheets: Vec<(u32, String)> = archive
         .file_names()
@@ -270,15 +289,18 @@ fn xlsx_text(bytes: &[u8]) -> Result<String, ToolError> {
         let xml = archive_text(&mut archive, &name)?;
         let text = sheet_text(&xml, &shared);
         if !text.trim().is_empty() {
-            out.push_str(&format!(
-                "--- Sheet {} ---\n{}\n",
-                if number == 0 {
-                    index + 1
-                } else {
-                    number as usize
-                },
-                text.trim_end()
-            ));
+            append_text(
+                &mut out,
+                &format!(
+                    "--- Sheet {} ---\n{}\n",
+                    if number == 0 {
+                        index + 1
+                    } else {
+                        number as usize
+                    },
+                    text.trim_end()
+                ),
+            )?;
         }
     }
     Ok(out)
