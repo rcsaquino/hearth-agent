@@ -26,7 +26,6 @@ mod digest;
 mod embedding;
 mod errors;
 mod extract;
-mod legacy;
 mod model;
 mod query;
 mod rank;
@@ -47,7 +46,6 @@ pub use embedding::{
 };
 pub use errors::{Code, MemoryError, Result};
 pub use extract::{Candidate, candidates};
-pub use legacy::{LegacyImport, import as import_legacy};
 pub use model::{Kind, Memory, NewMemory, Source, WriteOutcome};
 pub use store::CONTENT_LIMIT;
 pub use tools::{FORGET, RECALL, SAVE, TRANSCRIPT, ToolMemory};

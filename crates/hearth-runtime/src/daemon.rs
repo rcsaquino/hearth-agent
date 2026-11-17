@@ -169,29 +169,6 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
             );
         }
     }
-    // A home that ran an earlier release keeps its memory in
-    // `memory/long-term.sqlite` and `memory/standing.md`. Import it once, then
-    // retire the directory so the next start has nothing to do.
-    match hearth_memory::import_legacy(&memory, home) {
-        Ok(report) if report.is_empty() => {}
-        Ok(report) if report.complete() => tracing::info!(
-            statements = report.statements,
-            rules = report.rules,
-            archived = report
-                .archived
-                .as_ref()
-                .map(|path| path.display().to_string()),
-            "previous memory imported"
-        ),
-        Ok(report) => tracing::warn!(
-            statements = report.statements,
-            rules = report.rules,
-            skipped = report.skipped,
-            "some previous memory could not be imported; the old files were kept so the next start retries"
-        ),
-        Err(error) => tracing::warn!(%error, "previous memory could not be imported"),
-    }
-
     let memory = Arc::new(memory);
     if memory.embeddings_active() {
         let backfill = Arc::clone(&memory);
