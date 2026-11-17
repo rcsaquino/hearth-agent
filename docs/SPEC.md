@@ -1429,7 +1429,7 @@ digest will always miss something. Measured on the committed fixture:
 |---|---|---|
 | Recoverable in one call, lexical | 0.98 | 0.99 |
 | Recoverable in one call, hybrid | 0.98 | 0.99 |
-| Automatic recall, lexical | 0.92 | 0.928 |
+| Automatic recall, lexical | 0.92 | 0.933 |
 | Automatic recall, hybrid | 0.92 | 0.954 |
 | Paraphrase, automatic, hybrid | 0.85 | 0.900 |
 | Digest tokens, p95 | 300 | 97 |

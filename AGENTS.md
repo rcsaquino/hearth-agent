@@ -224,7 +224,7 @@ second identity.
 
 ## Known residuals
 
-- Memory recall is 0.928 automatic and 0.99 recoverable in one call on the lexical
+- Memory recall is 0.933 automatic and 0.99 recoverable in one call on the lexical
   path, and 0.954 and 0.99 with the local encoder installed. Paraphrase is the
   weak category at 0.90 hybrid and 0.65 lexical.
 - Two of the 195 benchmark questions need more than one tool call. Both are
