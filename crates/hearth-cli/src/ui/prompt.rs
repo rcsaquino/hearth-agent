@@ -2252,6 +2252,25 @@ mod tests {
     }
 
     #[test]
+    fn a_notice_that_arrives_later_redraws_the_chat() {
+        let mut exchanges = conversation();
+        exchanges[0]["response"] = Value::Null;
+        let (_home, mut app) = prompt_app(exchanges);
+        let in_flight = rendered(&app, 100, 80);
+        assert!(
+            !in_flight.contains("no reply"),
+            "an in-flight request says nothing: {in_flight}"
+        );
+
+        app.prompt.exchanges[0]["notice"] = json!({"reason": "provider_error"});
+        let settled = rendered(&app, 100, 80);
+        assert!(
+            settled.contains("no reply · provider error"),
+            "the notice replaces the stale in-flight state: {settled}"
+        );
+    }
+
+    #[test]
     fn a_response_with_thinking_is_not_reprinted_by_the_next_request() {
         let user = json!({
             "role": "user",
