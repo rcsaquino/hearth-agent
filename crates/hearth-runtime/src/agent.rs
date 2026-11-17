@@ -955,15 +955,19 @@ impl Agent {
         let settled = self
             .session
             .settle(&submission.id, SubmissionStatus::Cancelled, None)?;
-        self.settle_absorbed(absorbed, SubmissionStatus::Cancelled, None, None)?;
-        self.session.finish_task(
+        if let Err(error) = self.settle_absorbed(absorbed, SubmissionStatus::Cancelled, None, None) {
+            tracing::warn!(%error, "an absorbed submission could not be settled");
+        }
+        if let Err(error) = self.session.finish_task(
             task_id,
             &self.config.owner,
             StepOutput::Terminal {
                 outcome: TerminalOutcome::Aborted,
                 result: json!({"reason": "cancelled"}),
             },
-        )?;
+        ) {
+            tracing::warn!(%error, "the cancelled generation task could not be finished");
+        }
         emit(
             events,
             task_id,
@@ -1002,20 +1006,24 @@ impl Agent {
             None,
             Some(json!({"reason": failure.reason})),
         )?;
-        self.settle_absorbed(
+        if let Err(error) = self.settle_absorbed(
             absorbed,
             SubmissionStatus::Unanswered,
             None,
             Some(failure.reason),
-        )?;
-        self.session.finish_task(
+        ) {
+            tracing::warn!(%error, "an absorbed submission could not be settled");
+        }
+        if let Err(error) = self.session.finish_task(
             task_id,
             &self.config.owner,
             StepOutput::Terminal {
                 outcome: TerminalOutcome::Failed,
                 result: json!({"error": notice, "reason": failure.reason}),
             },
-        )?;
+        ) {
+            tracing::warn!(%error, "the failed generation task could not be finished");
+        }
         emit(
             events,
             task_id,

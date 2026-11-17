@@ -626,6 +626,7 @@ impl StopHandler for RegistryStop {
 
 impl TelegramWorker {
     fn run(&self, shutdown: Arc<AtomicBool>) {
+        self.recover_undelivered();
         let mut last_idle_check = Instant::now();
         let mut last_idle_compaction = 0i64;
         let mut idle_attempted: HashMap<String, i64> = HashMap::new();
@@ -993,6 +994,62 @@ impl TelegramWorker {
         }
     }
 
+    /// Deliver settled answers whose effect was lost and retry pending effects.
+    fn recover_undelivered(&self) {
+        let since = self
+            .session
+            .now_micros()
+            .saturating_sub(7 * 24 * 60 * 60 * 1_000_000);
+        match self.session.done_answers_without_delivery(since) {
+            Ok(stranded) => {
+                for (submission, content, transport_key) in stranded {
+                    let Some((chat_id, thread_id)) = parse_target(&transport_key) else {
+                        tracing::warn!(
+                            submission = %submission.id,
+                            "a settled answer has an invalid chat address"
+                        );
+                        continue;
+                    };
+                    let text = answer_text(&content);
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                    let key = format!("tg:{}", submission.id);
+                    let payload = json!({
+                        "chat_id": chat_id,
+                        "thread_id": thread_id,
+                        "markdown": text,
+                        "submission_id": submission.id,
+                    });
+                    if let Err(error) = self.session.save(
+                        Save::new(&submission.conversation_id)
+                            .effect(EffectIntent::new("telegram.send", key, payload)),
+                    ) {
+                        tracing::warn!(
+                            submission = %submission.id,
+                            %error,
+                            "a settled answer could not get a delivery intent"
+                        );
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(%error, "settled answers could not be read"),
+        }
+        let pending = self
+            .session
+            .effects_awaiting_delivery("telegram.send")
+            .unwrap_or_default();
+        for effect in pending {
+            if effect.payload.get("reminder").and_then(Value::as_bool) == Some(true) {
+                continue;
+            }
+            if let Some(chat_id) = effect.payload.get("chat_id").and_then(Value::as_i64) {
+                let thread_id = effect.payload.get("thread_id").and_then(Value::as_i64);
+                self.recover_delivery(chat_id, thread_id);
+            }
+        }
+    }
+
     fn recover_delivery(&self, chat_id: i64, thread_id: Option<i64>) {
         let effects = match self.session.effects_awaiting_delivery("telegram.send") {
             Ok(effects) => effects,
@@ -1210,6 +1267,28 @@ fn embedding_directory(home: &std::path::Path, configured: &str) -> std::path::P
         path
     } else {
         home.join(path)
+    }
+}
+
+fn answer_text(content: &Value) -> String {
+    match content {
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter(|block| {
+                block
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_none_or(|kind| kind == "text")
+            })
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Object(object) => object
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        _ => String::new(),
     }
 }
 

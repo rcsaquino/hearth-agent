@@ -1184,6 +1184,58 @@ impl Session {
         raw.map(RawSubmission::into_submission).transpose()
     }
 
+    /// Settled Telegram answers whose delivery effect was never written.
+    ///
+    /// The answer entry is part of the settled record, so a crash between the
+    /// settle and the effect insert leaves enough information to deliver it.
+    pub fn done_answers_without_delivery(
+        &self,
+        since: i64,
+    ) -> Result<Vec<(Submission, serde_json::Value, String)>, CoreError> {
+        let raw: Vec<(RawSubmission, String, String)> = self.storage.read(|reader| {
+            reader.query(
+                "SELECT s.id, s.conversation_id, s.request_id, s.kind, s.content_json, \
+                 s.status, s.answer_entry_id, s.error_json, s.created_at, s.settled_at, \
+                 e.content_json, c.transport_key \
+                 FROM submissions s \
+                 JOIN conversations c ON c.id = s.conversation_id \
+                 JOIN entries e ON e.id = s.answer_entry_id \
+                 WHERE s.status = 'done' AND s.answer_entry_id IS NOT NULL \
+                 AND s.settled_at >= ? AND c.transport = 'telegram' \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM effects f WHERE f.kind = 'telegram.send' \
+                   AND f.key = 'tg:' || s.id) \
+                 ORDER BY s.settled_at, s.id",
+                (since,),
+                |row| {
+                    Ok((
+                        RawSubmission {
+                            id: row.get(0)?,
+                            conversation_id: row.get(1)?,
+                            request_id: row.get(2)?,
+                            kind: row.get(3)?,
+                            content_json: row.get(4)?,
+                            status: row.get(5)?,
+                            answer_entry_id: row.get(6)?,
+                            error_json: row.get(7)?,
+                            created_at: row.get(8)?,
+                            settled_at: row.get(9)?,
+                        },
+                        row.get(10)?,
+                        row.get(11)?,
+                    ))
+                },
+            )
+        })?;
+        raw.into_iter()
+            .map(|(submission, content, transport_key)| {
+                let content = serde_json::from_str(&content)
+                    .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+                Ok((submission.into_submission()?, content, transport_key))
+            })
+            .collect()
+    }
+
     /// Settle a submission exactly once.
     pub fn settle(
         &self,
