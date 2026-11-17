@@ -364,6 +364,38 @@ fn the_review_handler_records_the_night_and_sleeps() {
 }
 
 #[test]
+fn a_review_cannot_archive_a_healthy_skill() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("harness");
+    let session = harness.session();
+    learned_file(home.path(), "healthy", "active", 1, 1, 0, "2026-11-01");
+    let conversation = conversation(session);
+    let evidence = seed_run(session, &conversation, "healthy", "req-archive");
+    let response = json!({
+        "changes": [{
+            "action": "archive",
+            "name": "healthy",
+            "evidence": [evidence],
+        }]
+    })
+    .to_string();
+    let (_scripted, reviewer) = reviewer(session, home.path(), &response);
+    let (report, _) = run_review(&reviewer, session);
+    assert_eq!(
+        report.rejected, 1,
+        "a healthy skill must not be archived without the archive condition"
+    );
+    assert_eq!(
+        SkillLibrary::new(home.path())
+            .find("healthy")
+            .expect("find")
+            .expect("healthy")
+            .status,
+        SkillStatus::Active
+    );
+}
+
+#[test]
 fn a_review_cannot_promote_an_unused_draft() {
     let home = TempDir::new().expect("temp home");
     let harness = Harness::open(home.path()).expect("harness");
