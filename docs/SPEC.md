@@ -1626,7 +1626,7 @@ in the prompt. Optional groups are loaded only when a job needs them.
 |---|---|
 | `memory_save` | Store one durable statement |
 | `memory_recall` | Read by id, subject, query, kind, or as-of instant |
-| `memory_forget` | Retire a statement |
+| `memory_forget` | Remove a statement permanently |
 | `memory_transcript` | Read the evidence behind a memory |
 | `message` | Send files, albums, voice to the user |
 | `web_search` | Search the web |
