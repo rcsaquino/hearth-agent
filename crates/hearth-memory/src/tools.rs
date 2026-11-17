@@ -505,6 +505,31 @@ mod tests {
     }
 
     #[test]
+    fn a_kind_filter_applies_before_the_limit() {
+        let (_directory, service) = memory();
+        service
+            .write(NewMemory::new("never deploy on friday").kind(Kind::Rule))
+            .expect("rule");
+        for index in 0..30 {
+            service
+                .write(NewMemory::new(format!("fact number {index}")).kind(Kind::Fact))
+                .expect("fact");
+        }
+        let tools = registry(&service);
+
+        let reply = tools
+            .call(RECALL, &json!({"kind": "rule"}))
+            .expect("call")
+            .expect("result");
+
+        assert!(
+            reply.content.contains("never deploy on friday"),
+            "a kind filter must not be hidden behind newer rows: {}",
+            reply.content
+        );
+    }
+
+    #[test]
     fn a_recall_line_keeps_its_id_for_addressing() {
         let (_directory, service) = memory();
         let tools = registry(&service);
