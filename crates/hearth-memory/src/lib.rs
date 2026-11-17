@@ -618,6 +618,16 @@ impl MemoryService {
         Ok(subjects)
     }
 
+    #[cfg(test)]
+    fn cached_vector_count(&self) -> Option<usize> {
+        self.inner
+            .vectors
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|cache| cache.rows.len())
+    }
+
     fn invalidate_subjects(&self) {
         if let Ok(mut cache) = self.inner.subjects.lock() {
             *cache = None;
@@ -760,6 +770,24 @@ mod tests {
                 .expect("pending")
                 .is_empty(),
             "no row is left for a later pass"
+        );
+    }
+
+    #[test]
+    fn a_write_extends_the_vector_cache() {
+        let (_directory, service) = service();
+        let service = service.with_embedder(Arc::new(ConstantEmbedding));
+        seed(&service, "alpha fact", "alpha");
+        seed(&service, "beta fact", "beta");
+        service.recall("alpha beta").expect("recall");
+        assert_eq!(service.cached_vector_count(), Some(2));
+
+        seed(&service, "gamma fact", "gamma");
+
+        assert_eq!(
+            service.cached_vector_count(),
+            Some(3),
+            "a write must extend the loaded vector cache, not discard it"
         );
     }
 
