@@ -297,7 +297,7 @@ fn a_terminal_outcome_settles_the_task_once() {
 }
 
 #[test]
-fn a_retryable_failure_requeues_with_a_delay_and_resets_attempt() {
+fn a_retryable_failure_keeps_its_attempt_and_records_the_cause() {
     let (_home, harness, clock) = harness();
     let session = harness.session();
 
@@ -322,8 +322,11 @@ fn a_retryable_failure_requeues_with_a_delay_and_resets_attempt() {
         .expect("retryable failure");
     assert_eq!(retried.status, TaskStatus::Pending);
     assert_eq!(retried.next_wake_at, Some(retry_at));
-    assert_eq!(retried.attempt, 0);
-    assert!(retried.result.is_none());
+    assert_eq!(retried.attempt, 1, "the failed attempt is not forgotten");
+    assert_eq!(
+        retried.result.as_ref().expect("the cause is kept")["code"],
+        "temporary"
+    );
     assert!(retried.lease_owner.is_none());
 
     assert!(
@@ -338,7 +341,52 @@ fn a_retryable_failure_requeues_with_a_delay_and_resets_attempt() {
         .expect("claim after delay")
         .expect("the task is runnable again");
     assert_eq!(claimed.id, task.id);
-    assert_eq!(claimed.attempt, 1);
+    assert_eq!(claimed.attempt, 2);
+}
+
+#[test]
+fn a_retryable_failure_stops_after_five_attempts() {
+    let (_home, harness, clock) = harness();
+    let session = harness.session();
+
+    session
+        .create_task(NewTask::new("test", 1, "start", json!({})))
+        .expect("create task");
+    for attempt in 1..=5 {
+        let claimed = session
+            .claim_task("worker", 60_000_000)
+            .expect("claim")
+            .expect("the task is runnable");
+        assert_eq!(claimed.attempt, attempt, "the attempt counter advances");
+        let finished = session
+            .finish_task(
+                &claimed.id,
+                "worker",
+                StepOutput::Failed {
+                    error: json!({"code": "temporary"}),
+                    retryable: true,
+                },
+            )
+            .expect("retryable failure");
+        if attempt < 5 {
+            assert_eq!(finished.status, TaskStatus::Pending);
+            assert_eq!(finished.attempt, attempt);
+            clock.advance(300_000_000);
+        } else {
+            assert_eq!(finished.status, TaskStatus::Failed);
+            assert_eq!(
+                finished.result.as_ref().expect("the cause is kept")["poisoned"],
+                true
+            );
+        }
+    }
+    assert!(
+        session
+            .claim_task("worker", 60_000_000)
+            .expect("claim")
+            .is_none(),
+        "a poisoned task is not claimable"
+    );
 }
 
 #[test]
