@@ -72,4 +72,6 @@ Verified by `a_submission_names_the_user_entry_it_answers` in
 `an_explicit_remember_is_written_once`, and
 `a_captured_entry_still_resolves_after_a_restart` in
 `crates/hearth-runtime/tests/extraction.rs`. The restart test reopens the home
-between the save and the capture. `./scripts/ci.sh` passes.
+between the save and the capture. `a_plain_answer_settles_the_submission_and_records_usage`
+in `crates/hearth-runtime/tests/s6_agent.rs` asserts that the run outcome names
+the submission's user entry. `./scripts/ci.sh` passes.
