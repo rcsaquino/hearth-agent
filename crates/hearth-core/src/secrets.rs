@@ -70,6 +70,24 @@ pub fn redact_secrets(content: &str) -> String {
     output
 }
 
+/// Redact credential shapes and configured credential values in one string.
+///
+/// Configured values are matched longest first, so a key that contains a shorter
+/// key is still replaced whole.
+pub fn redact_with_values(content: &str, values: &[String]) -> String {
+    let mut redacted = redact_secrets(content);
+    let mut values: Vec<&str> = values
+        .iter()
+        .map(String::as_str)
+        .filter(|value| is_redactable_value(value))
+        .collect();
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    for value in values {
+        redacted = redacted.replace(value, "[redacted]");
+    }
+    redacted
+}
+
 /// Recursively redact every string in a JSON value.
 pub fn redact_value(value: &Value) -> Value {
     match value {

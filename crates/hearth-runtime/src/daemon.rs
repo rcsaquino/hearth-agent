@@ -1103,7 +1103,7 @@ fn run_poller(poller: TelegramPoller, shutdown: Arc<AtomicBool>) {
     }
 }
 
-fn collect_secrets(settings: &Settings) -> Vec<String> {
+pub(crate) fn collect_secrets(settings: &Settings) -> Vec<String> {
     let mut secrets = Vec::new();
     if let Some(telegram) = &settings.telegram
         && let Some(token) = &telegram.bot_token

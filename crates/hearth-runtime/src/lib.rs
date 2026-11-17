@@ -54,12 +54,19 @@ pub fn init_logging(home: &Path) -> std::io::Result<()> {
         &path,
         LOG_LIMIT_BYTES,
     )?));
+    let secrets = std::sync::Arc::new(
+        hearth_config::load(home)
+            .map(|settings| daemon::collect_secrets(&settings))
+            .unwrap_or_default(),
+    );
     let writer_file = std::sync::Arc::clone(&file);
+    let writer_secrets = std::sync::Arc::clone(&secrets);
     let subscriber = tracing_subscriber::fmt()
         .json()
         .with_max_level(tracing::Level::INFO)
         .with_writer(move || RedactingWriter {
             file: std::sync::Arc::clone(&writer_file),
+            secrets: std::sync::Arc::clone(&writer_secrets),
         })
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
@@ -125,12 +132,13 @@ fn open_log(path: &Path) -> std::io::Result<std::fs::File> {
 /// A log writer that redacts credential-shaped tokens before they reach disk.
 struct RedactingWriter {
     file: std::sync::Arc<std::sync::Mutex<LogFile>>,
+    secrets: std::sync::Arc<Vec<String>>,
 }
 
 impl std::io::Write for RedactingWriter {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
         let text = String::from_utf8_lossy(buffer);
-        let redacted = hearth_core::secrets::redact_secrets(&text);
+        let redacted = hearth_core::secrets::redact_with_values(&text, &self.secrets);
         let mut file = self
             .file
             .lock()
