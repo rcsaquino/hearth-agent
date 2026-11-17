@@ -1880,6 +1880,10 @@ Optional overrides, only when needed:
 - `tasks.max_concurrent` is 1 to 8, `tasks.max_depth` is 1 or 2, and the retention
   values are positive. `tasks.eta_reminder_seconds` is a non-negative delay after the
   expected finish; the default is 1.
+- `memory.rules_max_tokens` is 50 to 4,000 and `memory.recall_max_items` is 1 to
+  64. A value outside the range is a settings error, not a silent clamp.
+  `logging.level` sets the logger's maximum level, and
+  `compaction.idle_minutes` and `compaction.idle_min_tokens` drive the idle pass.
 - `identity.timezone` is an IANA zone name. Every timestamp Hearth shows the person
   or the model is ISO 8601 with the offset in force at that instant, such as
   `2026-02-14T09:41:05+08:00`, and the nightly backup and skill-review slots are

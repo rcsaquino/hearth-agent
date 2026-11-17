@@ -95,8 +95,14 @@ impl Settings {
             "compaction.keep_recent_tokens",
             self.compaction.keep_recent_tokens,
         )?;
-        positive("memory.rules_max_tokens", self.memory.rules_max_tokens)?;
-        positive("memory.recall_max_items", self.memory.recall_max_items)?;
+        if !(50..=4_000).contains(&self.memory.rules_max_tokens) {
+            return Err(invalid(
+                "memory.rules_max_tokens must be between 50 and 4000",
+            ));
+        }
+        if !(1..=64).contains(&self.memory.recall_max_items) {
+            return Err(invalid("memory.recall_max_items must be between 1 and 64"));
+        }
 
         if !matches!(
             self.logging.level.as_str(),

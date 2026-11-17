@@ -695,11 +695,21 @@ impl TelegramWorker {
                     if last_idle_check.elapsed() >= Duration::from_secs(60) {
                         last_idle_check = Instant::now();
                         let now = self.session.now_micros();
-                        if now.saturating_sub(last_idle_compaction) >= 3_600_000_000 {
-                            let min_tokens = 100_000u64.min(self.budget.soft);
+                        let idle_micros = self
+                            .settings
+                            .compaction
+                            .idle_minutes
+                            .saturating_mul(60_000_000)
+                            .min(i64::MAX as u64) as i64;
+                        if now.saturating_sub(last_idle_compaction) >= idle_micros {
+                            let min_tokens = self
+                                .settings
+                                .compaction
+                                .idle_min_tokens
+                                .min(self.budget.soft);
                             match self.session.idle_compaction_candidate(
                                 now,
-                                3_600_000_000,
+                                idle_micros,
                                 min_tokens,
                             ) {
                                 Ok(Some(conversation)) => {

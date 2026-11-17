@@ -52,16 +52,22 @@ pub fn init_logging(home: &Path) -> std::io::Result<()> {
         &path,
         LOG_LIMIT_BYTES,
     )?));
+    let settings = hearth_config::load(home).ok();
     let secrets = std::sync::Arc::new(
-        hearth_config::load(home)
-            .map(|settings| daemon::collect_secrets(&settings))
+        settings
+            .as_ref()
+            .map(daemon::collect_secrets)
             .unwrap_or_default(),
     );
+    let level = settings
+        .as_ref()
+        .and_then(|settings| log_level(&settings.logging.level))
+        .unwrap_or(tracing::Level::INFO);
     let writer_file = std::sync::Arc::clone(&file);
     let writer_secrets = std::sync::Arc::clone(&secrets);
     let subscriber = tracing_subscriber::fmt()
         .json()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(level)
         .with_writer(move || RedactingWriter {
             file: std::sync::Arc::clone(&writer_file),
             secrets: std::sync::Arc::clone(&writer_secrets),
@@ -69,6 +75,17 @@ pub fn init_logging(home: &Path) -> std::io::Result<()> {
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
     Ok(())
+}
+
+fn log_level(name: &str) -> Option<tracing::Level> {
+    Some(match name {
+        "trace" => tracing::Level::TRACE,
+        "debug" => tracing::Level::DEBUG,
+        "info" => tracing::Level::INFO,
+        "warn" => tracing::Level::WARN,
+        "error" => tracing::Level::ERROR,
+        _ => return None,
+    })
 }
 
 /// One append-only log file that rotates into a single `.1` copy when full.
