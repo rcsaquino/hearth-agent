@@ -31,7 +31,8 @@ use crate::events::EventBus;
 use crate::helpers::{HelperConfig, HelperControls, HelperPool};
 use crate::ipc::{self, StatusContext};
 use crate::maintenance::{
-    BACKUP_KIND, BackupHandler, HELPER_RETENTION_KIND, HelperRetentionHandler, SKILL_REVIEW_KIND,
+    BACKUP_KIND, BackupHandler, HELPER_RETENTION_KIND, HelperRetentionHandler,
+    MEMORY_CONSOLIDATION_KIND, MemoryConsolidationHandler, SKILL_REVIEW_KIND,
     ensure_maintenance_tasks,
 };
 use crate::scheduler::{ReminderHandler, Scheduler, TaskRegistry};
@@ -423,6 +424,14 @@ impl TelegramRuntime {
                         settings.tasks.retention_days,
                         settings.tasks.retention_runs,
                     )),
+                )
+                .register(
+                    MEMORY_CONSOLIDATION_KIND,
+                    Arc::new(MemoryConsolidationHandler::new(
+                        home.to_path_buf(),
+                        Arc::clone(&memory),
+                        Some(Arc::clone(&events)),
+                    )),
                 ),
         );
         let scheduler = Scheduler::new(
@@ -556,7 +565,7 @@ fn maintenance_scheduler(
     let reviewer = Arc::new(SkillReviewer::new(
         session.clone(),
         provider,
-        memory,
+        Arc::clone(&memory),
         skills,
         models.model.clone(),
         models.kind.clone(),
@@ -582,6 +591,14 @@ fn maintenance_scheduler(
                     session.clone(),
                     settings.tasks.retention_days,
                     settings.tasks.retention_runs,
+                )),
+            )
+            .register(
+                MEMORY_CONSOLIDATION_KIND,
+                Arc::new(MemoryConsolidationHandler::new(
+                    home.to_path_buf(),
+                    Arc::clone(&memory),
+                    None,
                 )),
             ),
     );

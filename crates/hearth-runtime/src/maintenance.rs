@@ -1,13 +1,16 @@
 //! Nightly maintenance scheduling.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use hearth_core::{ClaimedTask, CoreError, NewTask, Session, StepOutput, Zone};
+use hearth_memory::MemoryService;
 use serde_json::json;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::backup::{BackupError, backup};
+use crate::events::{EventBus, RunEvent};
 use crate::scheduler::{TaskHandler, TaskHandlerError};
 
 /// The nightly database backup.
@@ -20,6 +23,11 @@ pub const SKILL_REVIEW_KIND: &str = "skill.review";
 /// Skill review wakes at 04:30 local time.
 pub const SKILL_REVIEW_HOUR: u8 = 4;
 pub const SKILL_REVIEW_MINUTE: u8 = 30;
+
+/// The scheduled memory audit and canonical duplicate repair.
+pub const MEMORY_CONSOLIDATION_KIND: &str = "memory.consolidate";
+pub const MEMORY_CONSOLIDATION_HOUR: u8 = 3;
+pub const MEMORY_CONSOLIDATION_MINUTE: u8 = 30;
 
 /// Helper-retention sweep.
 pub const HELPER_RETENTION_KIND: &str = "helper.retention";
@@ -47,6 +55,12 @@ pub fn ensure_maintenance_tasks(
             "04:00",
             HELPER_RETENTION_HOUR,
             HELPER_RETENTION_MINUTE,
+        ),
+        (
+            MEMORY_CONSOLIDATION_KIND,
+            "03:30",
+            MEMORY_CONSOLIDATION_HOUR,
+            MEMORY_CONSOLIDATION_MINUTE,
         ),
     ] {
         if session.has_open_task(kind)? {
@@ -121,6 +135,68 @@ impl TaskHandler for HelperRetentionHandler {
                 "retention_days": self.retention_days,
                 "retention_runs": self.retention_runs,
             }),
+        })
+    }
+}
+
+/// Audits memory, closes canonical duplicates, and sleeps until the next night.
+pub struct MemoryConsolidationHandler {
+    home: PathBuf,
+    memory: Arc<MemoryService>,
+    events: Option<Arc<EventBus>>,
+}
+
+impl MemoryConsolidationHandler {
+    /// Build the handler for one home.
+    pub fn new(
+        home: impl Into<PathBuf>,
+        memory: Arc<MemoryService>,
+        events: Option<Arc<EventBus>>,
+    ) -> Self {
+        Self {
+            home: home.into(),
+            memory,
+            events,
+        }
+    }
+}
+
+impl TaskHandler for MemoryConsolidationHandler {
+    fn step(&self, task: &ClaimedTask) -> Result<StepOutput, TaskHandlerError> {
+        let now = self.memory.session().now_micros();
+        let zone = Zone::resolve(&hearth_config::identity_timezone(&self.home));
+        let next = zone.next_at(now, MEMORY_CONSOLIDATION_HOUR, MEMORY_CONSOLIDATION_MINUTE);
+        let mut checkpoint = json!({"slot": "03:30"});
+        match self.memory.consolidate() {
+            Ok(report) => {
+                let summary = report.summary_json();
+                checkpoint = json!({
+                    "slot": "03:30",
+                    "canonical_closed": report.canonical_closed,
+                    "near_duplicates": report.near_duplicates,
+                    "cross_subject": report.cross_subject,
+                    "compound": report.compound,
+                });
+                if let Some(events) = &self.events {
+                    events.publish(RunEvent {
+                        task_id: task.id.clone(),
+                        conversation_id: String::new(),
+                        kind: "memory.consolidated",
+                        data: summary,
+                    });
+                }
+                tracing::info!(
+                    closed = report.canonical_closed,
+                    near = report.near_duplicates,
+                    "memory consolidation complete"
+                );
+            }
+            Err(error) => tracing::warn!(%error, "memory consolidation failed"),
+        }
+        Ok(StepOutput::Sleep {
+            until_micros: next,
+            phase: "run".to_owned(),
+            checkpoint,
         })
     }
 }

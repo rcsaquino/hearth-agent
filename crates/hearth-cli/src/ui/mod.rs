@@ -311,6 +311,12 @@ pub fn event_summary(value: &serde_json::Value) -> String {
         "run_started" => "Run started".to_owned(),
         "run_settled" => format!("Run {}", data["status"].as_str().unwrap_or("settled")),
         "turn_started" => format!("Turn {} started", data["turn"]),
+        "memory.consolidated" => format!(
+            "Memory audit · {} duplicate closed · {} near · {} compound",
+            data["canonical_closed"].as_u64().unwrap_or(0),
+            data["near_duplicates"].as_u64().unwrap_or(0),
+            data["compound"].as_u64().unwrap_or(0)
+        ),
         "task_step" => format!(
             "Step · {} (turn {})",
             data["phase"].as_str().unwrap_or("working"),

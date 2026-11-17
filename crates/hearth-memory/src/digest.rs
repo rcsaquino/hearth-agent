@@ -12,7 +12,7 @@
 //! stated explicitly, because a digest that silently shows six of fourteen facts
 //! teaches the model that six is all there is.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::model::Memory;
 
@@ -135,13 +135,34 @@ pub fn recall_body(items: &[Memory], coverage: &Coverage, now: i64) -> String {
     if items.is_empty() && coverage.is_empty() {
         return String::new();
     }
-    let mut lines: Vec<String> = items.iter().map(|memory| line(memory, now)).collect();
-    lines.extend(coverage_lines(items, coverage));
+    // A canonical duplicate is one statement in two rows. Until the repair pass
+    // closes it, the digest shows it once and says how many rows it hid.
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut hidden = 0usize;
+    let mut shown: Vec<&Memory> = Vec::new();
+    for memory in items {
+        let key = (
+            crate::store::fingerprint(&memory.content),
+            memory.subject.clone(),
+        );
+        if seen.insert(key) {
+            shown.push(memory);
+        } else {
+            hidden += 1;
+        }
+    }
+    let mut lines: Vec<String> = shown.iter().map(|memory| line(memory, now)).collect();
+    lines.extend(coverage_lines(&shown, coverage));
+    if hidden > 0 {
+        lines.push(format!(
+            "duplicates: {hidden} hidden | repeated statements shown once"
+        ));
+    }
     lines.join("\n")
 }
 
 /// The coverage line, when the digest shows a subset.
-fn coverage_lines(items: &[Memory], coverage: &Coverage) -> Vec<String> {
+fn coverage_lines(items: &[&Memory], coverage: &Coverage) -> Vec<String> {
     let shown: BTreeMap<&str, usize> = items.iter().fold(BTreeMap::new(), |mut counts, memory| {
         if !memory.subject.is_empty() {
             *counts.entry(memory.subject.as_str()).or_insert(0) += 1;

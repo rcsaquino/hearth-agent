@@ -22,6 +22,7 @@
 //! features ranks the pool, and a greedy fill spends the token budget on the best
 //! value per token.
 
+mod consolidate;
 mod digest;
 mod embedding;
 mod errors;
@@ -41,6 +42,9 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use hearth_core::{Session, Zone};
 
+pub use consolidate::{
+    CanonicalGroup, CompoundRow, ConsolidationReport, NearPair, SubjectConflict,
+};
 pub use digest::Coverage;
 pub use embedding::{
     BekkoEmbedding, EmbeddingProvider, MODEL_DIMS, MODEL_NAME, download_model, model_files_present,
@@ -48,7 +52,7 @@ pub use embedding::{
 pub use errors::{Code, MemoryError, Result};
 pub use extract::{Candidate, candidates};
 pub use model::{Kind, Memory, NewMemory, Source, WriteOutcome};
-pub use store::CONTENT_LIMIT;
+pub use store::{Breakdown, CONTENT_LIMIT, breakdown_on, fingerprint};
 pub use tools::{FORGET, RECALL, SAVE, TRANSCRIPT, ToolMemory};
 pub use transcript::{EntryHit, TranscriptRead};
 
@@ -230,6 +234,16 @@ impl MemoryService {
     /// The number of current memories.
     pub fn count(&self) -> Result<usize> {
         store::count(&self.inner.session)
+    }
+
+    /// The pinned, active, and retired counts.
+    pub fn breakdown(&self) -> Result<Breakdown> {
+        store::breakdown(&self.inner.session)
+    }
+
+    /// Audit the store and close its canonical duplicates.
+    pub fn consolidate(&self) -> Result<ConsolidationReport> {
+        consolidate::run(&self.inner.session)
     }
 
     /// The rendered rules body and a hash of it.

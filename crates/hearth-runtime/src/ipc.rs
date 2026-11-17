@@ -46,6 +46,8 @@ const STATUS_CACHE_TTL: Duration = Duration::from_secs(5);
 struct SlowStatus {
     total: UsageTotals,
     memory_items: usize,
+    memory_breakdown: hearth_memory::Breakdown,
+    consolidation: Option<hearth_memory::ConsolidationReport>,
     rules: hearth_memory::Rules,
     last_consolidation: Option<String>,
     skills_index: String,
@@ -94,6 +96,13 @@ impl StatusContext {
         let value = SlowStatus {
             total: self.session.usage_totals_since(0)?,
             memory_items: self.memory.count().unwrap_or(0),
+            memory_breakdown: self.memory.breakdown().unwrap_or_default(),
+            consolidation: self
+                .session
+                .meta_value("last_consolidation_report")
+                .ok()
+                .flatten()
+                .and_then(|text| serde_json::from_str(&text).ok()),
             rules,
             last_consolidation: self.session.meta_value("last_consolidation")?,
             skills_index,
@@ -250,6 +259,15 @@ fn status_value(home: &Path, context: &StatusContext) -> Result<Value, IpcError>
         "output_tokens": today.output_tokens,
         "cache_hit_rate": cache_hit_rate,
         "memory_items": slow.memory_items,
+        "memory": {
+            "pinned": slow.memory_breakdown.pinned,
+            "active": slow.memory_breakdown.active,
+            "retired": slow.memory_breakdown.retired,
+            "audit": slow
+                .consolidation
+                .as_ref()
+                .map(hearth_memory::ConsolidationReport::summary_json),
+        },
         "rules_version": slow.rules.version,
         "rules_bullets": slow.rules.count,
         "rules_characters": slow.rules.text.chars().count(),

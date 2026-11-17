@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use hearth_core::{Guidance, Harness, Save};
+use hearth_memory::MemoryService;
 use hearth_model::{ChatRequest, Provider, ProviderError, ProviderStream, StreamEvent};
 use hearth_runtime::{Agent, AgentConfig};
 use hearth_tools::ToolRegistry;
@@ -19,7 +20,8 @@ fn main() -> Result<()> {
         Some("save") => save(&args),
         Some("submit") => submit(&args),
         Some("agent") => agent(&args),
-        _ => bail!("usage: crash-driver save|submit|agent <arguments>"),
+        Some("consolidate") => consolidate(&args),
+        _ => bail!("usage: crash-driver save|submit|agent|consolidate <arguments>"),
     }
 }
 
@@ -44,6 +46,14 @@ fn submit(args: &[String]) -> Result<()> {
             .session()
             .submit(conversation, request_id, "input", json!({"text": "hello"}))?;
     println!("created={}", result.created);
+    Ok(())
+}
+
+fn consolidate(args: &[String]) -> Result<()> {
+    let home = home(args)?;
+    let harness = Harness::open(&home)?;
+    let report = MemoryService::new(harness.session().clone()).consolidate()?;
+    println!("closed={}", report.canonical_closed);
     Ok(())
 }
 

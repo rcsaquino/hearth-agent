@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use hearth_core::Zone;
+use hearth_memory::{Breakdown, ConsolidationReport};
+use hearth_storage::rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -178,6 +180,35 @@ pub struct MemoryRecord {
     pub pinned: bool,
     /// True when a newer statement closed this row's window.
     pub retired: bool,
+}
+
+/// The store totals and the last consolidation report.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MemoryState {
+    pub counts: Breakdown,
+    pub audit: Option<ConsolidationReport>,
+}
+
+/// Read the three totals and the last audit without touching the writer.
+///
+/// The counts come from the store, not from the page the tab loaded, so a store
+/// larger than the page limit still reports its full size.
+pub fn memory_state(home: &Path) -> Result<MemoryState, InspectError> {
+    let database = home.join("hearth.db");
+    if !database.is_file() {
+        return Ok(MemoryState::default());
+    }
+    let connection = hearth_storage::open_read_only(&database)?;
+    let counts = hearth_memory::breakdown_on(&connection)?;
+    let audit = connection
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'last_consolidation_report'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|text| serde_json::from_str(&text).ok());
+    Ok(MemoryState { counts, audit })
 }
 
 /// Read saved memories from the main database without touching the writer.

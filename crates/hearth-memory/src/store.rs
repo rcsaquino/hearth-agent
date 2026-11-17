@@ -18,6 +18,7 @@ use std::collections::HashSet;
 
 use hearth_core::Session;
 use rusqlite::Row;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::errors::{Code, MemoryError, Result};
@@ -73,7 +74,7 @@ const MERGE_SIMILARITY: f32 = 0.85;
 /// How many same-subject rows a write compares against.
 const MERGE_WINDOW: i64 = 64;
 
-const COLUMNS: &str = "id, kind, content, subject, pinned, source_kind, source_entry, \
+pub(crate) const COLUMNS: &str = "id, kind, content, subject, pinned, source_kind, source_entry, \
      valid_from, valid_to, superseded_by, created_at, updated_at, revision";
 
 /// The same columns, qualified for a query that joins the index.
@@ -104,7 +105,7 @@ pub struct Pending {
     pub vector: Option<VectorWrite>,
 }
 
-fn map_memory(row: &Row<'_>) -> rusqlite::Result<Memory> {
+pub(crate) fn map_memory(row: &Row<'_>) -> rusqlite::Result<Memory> {
     let kind: String = row.get(1)?;
     let source: String = row.get(5)?;
     let pinned: i64 = row.get(4)?;
@@ -219,7 +220,7 @@ pub fn similarity(left: &str, right: &str) -> f32 {
 /// Jaccard alone misses a statement that merely adds a word, which is exactly what
 /// "ordered pad thai on friday again" is. Containment covers that case without
 /// merging a statement that swaps its subject, which is how a contradiction looks.
-fn same_statement(left: &str, right: &str) -> bool {
+pub(crate) fn same_statement(left: &str, right: &str) -> bool {
     if negated(left) != negated(right) {
         return false;
     }
@@ -587,6 +588,44 @@ fn subjects_limited(session: &Session, limit: i64) -> Result<Vec<String>> {
             )
         })
         .map_err(Into::into)
+}
+
+/// The three states the operator surface distinguishes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Breakdown {
+    /// Current rows that are injected as rules.
+    pub pinned: usize,
+    /// Current rows that are not pinned.
+    pub active: usize,
+    /// Rows whose window is closed.
+    pub retired: usize,
+}
+
+const BREAKDOWN_SQL: &str = "SELECT \
+     COALESCE(SUM(CASE WHEN valid_to IS NULL AND pinned = 1 THEN 1 ELSE 0 END), 0), \
+     COALESCE(SUM(CASE WHEN valid_to IS NULL AND pinned = 0 THEN 1 ELSE 0 END), 0), \
+     COALESCE(SUM(CASE WHEN valid_to IS NOT NULL THEN 1 ELSE 0 END), 0) \
+     FROM memories";
+
+fn map_breakdown(row: &Row<'_>) -> rusqlite::Result<Breakdown> {
+    Ok(Breakdown {
+        pinned: row.get::<_, i64>(0)? as usize,
+        active: row.get::<_, i64>(1)? as usize,
+        retired: row.get::<_, i64>(2)? as usize,
+    })
+}
+
+/// Count the three states through the read pool.
+pub fn breakdown(session: &Session) -> Result<Breakdown> {
+    session
+        .storage()
+        .read(|reader| reader.query_row(BREAKDOWN_SQL, [], map_breakdown))
+        .map_err(Into::into)
+}
+
+/// Count the three states on a read-only connection.
+pub fn breakdown_on(connection: &hearth_storage::rusqlite::Connection) -> rusqlite::Result<Breakdown> {
+    connection.query_row(BREAKDOWN_SQL, [], map_breakdown)
 }
 
 /// The total number of current memories.
