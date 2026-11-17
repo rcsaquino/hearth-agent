@@ -309,6 +309,11 @@ pub fn daemon(home: &Path) -> Result<(), DaemonError> {
         telegram_handles.push(thread::spawn(move || scheduler.run(scheduler_shutdown)));
         telegram_handles.extend(runtime.helpers.spawn_workers(Arc::clone(&shutdown)));
         tracing::info!("telegram poller, worker, and scheduler started");
+    } else {
+        let scheduler = maintenance_scheduler(home, &settings, session.clone(), Arc::clone(&memory))?;
+        let scheduler_shutdown = Arc::clone(&shutdown);
+        telegram_handles.push(thread::spawn(move || scheduler.run(scheduler_shutdown)));
+        tracing::info!("scheduler started without telegram");
     }
 
     tracing::info!(
@@ -515,6 +520,65 @@ impl TelegramRuntime {
             helpers,
         })
     }
+}
+
+/// The scheduler a daemon runs when it has no Telegram transport.
+///
+/// Backup and skill review need no chat. Reminders and helpers do, so those
+/// handlers and workers exist only in the Telegram runtime.
+fn maintenance_scheduler(
+    home: &Path,
+    settings: &Settings,
+    session: Session,
+    memory: Arc<MemoryService>,
+) -> Result<Scheduler, DaemonError> {
+    let models = settings
+        .models
+        .as_ref()
+        .ok_or_else(|| invalid("models is required for the scheduler"))?;
+    let provider = OpenAiCompatibleProvider::new(
+        models.base_url.clone(),
+        models.api_key.clone(),
+        models
+            .headers
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+        models.session_header.clone(),
+    )?
+    .with_reasoning_effort(models.thinking.clone());
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let skills = Arc::new(SkillLibrary::new(home));
+    let reviewer = Arc::new(SkillReviewer::new(
+        session.clone(),
+        provider,
+        memory,
+        skills,
+        models.model.clone(),
+        models.kind.clone(),
+    ));
+    let registry = Arc::new(
+        TaskRegistry::new()
+            .register(
+                SKILL_REVIEW_KIND,
+                Arc::new(SkillReviewHandler::new(
+                    session.clone(),
+                    reviewer,
+                    home.to_path_buf(),
+                )),
+            )
+            .register(
+                BACKUP_KIND,
+                Arc::new(BackupHandler::new(home.to_path_buf(), session.clone())),
+            ),
+    );
+    let zone = Zone::resolve(&hearth_config::identity_timezone(home));
+    ensure_maintenance_tasks(&session, &zone)?;
+    Ok(Scheduler::new(
+        session,
+        registry,
+        format!("scheduler:{}", std::process::id()),
+    ))
 }
 
 struct TelegramWorker {

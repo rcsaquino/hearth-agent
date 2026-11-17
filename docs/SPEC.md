@@ -1857,6 +1857,8 @@ Optional overrides, only when needed:
 - Telegram is enabled when `telegram.bot_token` is present. Then
   `allowed_user_ids` must be non-empty. `telegram.base_url`, when present, must be
   an http or https URL.
+- A models-only home can run the daemon. The nightly backup and skill review are
+  scheduled without Telegram; reminders and helper workers need its transport.
 - The `models` block requires `kind`, `base_url`, `api_key`, and `model`. `kind`
   must be `openai-compatible`. `models.context_window` and
   `models.max_output_tokens` must be positive.
