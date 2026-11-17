@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
 
-use hearth_core::{Harness, NewTask};
+use hearth_core::{EffectStatus, Harness, NewTask, TaskStatus};
 use hearth_telegram::{SystemSleeper, TelegramClient, TelegramSender};
 use hearth_tools::Tool;
 use serde_json::json;
@@ -92,6 +92,110 @@ fn fake_telegram(markdown: Arc<std::sync::Mutex<Vec<String>>>) -> (String, threa
         .expect("response");
     });
     (base, handle)
+}
+
+fn fake_telegram_429() -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let base = format!("http://{}", listener.local_addr().expect("addr"));
+    let handle = thread::spawn(move || {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("line");
+            let mut length = 0usize;
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).expect("header");
+                if header == "\r\n" || header == "\n" || header.is_empty() {
+                    break;
+                }
+                if header.to_ascii_lowercase().starts_with("content-length:") {
+                    length = header
+                        .split(':')
+                        .nth(1)
+                        .and_then(|value| value.trim().parse().ok())
+                        .unwrap_or(0);
+                }
+            }
+            let mut body = vec![0u8; length];
+            reader.read_exact(&mut body).expect("body");
+            let response = r#"{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":0}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response.len(),
+                response
+            )
+            .expect("response");
+        }
+    });
+    (base, handle)
+}
+
+#[test]
+fn a_rate_limited_reminder_is_not_marked_permanent() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Test", "telegram", "42:0")
+        .expect("conversation");
+    let now = session.now_micros();
+    let task = session
+        .create_sleeping_task(
+            NewTask::new(
+                "reminder",
+                1,
+                "remind",
+                json!({
+                    "chat_id": 42,
+                    "thread_id": null,
+                    "message": "Take the medication",
+                    "repeat_seconds": null,
+                    "first_wake": now - 1
+                }),
+            )
+            .conversation(&conversation.id),
+            now - 1,
+        )
+        .expect("task");
+    session.recover_tasks().expect("recovery");
+    let claimed = session
+        .claim_task_for_kind("scheduler", 60_000_000, "reminder")
+        .expect("claim")
+        .expect("due");
+    let (base, server) = fake_telegram_429();
+    let client = TelegramClient::with_base_url("token", base).expect("client");
+    let sender = TelegramSender::new(client, Arc::new(SystemSleeper));
+    let handler = hearth_runtime::ReminderHandler::new(session.clone(), sender);
+
+    let error = hearth_runtime::TaskHandler::step(&handler, &claimed)
+        .expect_err("a rate limit is a deferral");
+    assert!(matches!(
+        error,
+        hearth_runtime::TaskHandlerError::Retryable(_)
+    ));
+    server.join().expect("server");
+    let key = format!("reminder:{}:{}", task.id, now - 1);
+    let effect = session
+        .effect_by_key("telegram.send", &key)
+        .expect("effect")
+        .expect("effect row");
+    assert_eq!(effect.status, EffectStatus::Unknown);
+
+    let output = hearth_runtime::TaskHandler::step(&handler, &claimed)
+        .expect("the retry reports the failed delivery");
+    let finished = session
+        .finish_task(&claimed.id, "scheduler", output)
+        .expect("finish");
+    assert_eq!(finished.status, TaskStatus::Done);
+    let history = session.history(&conversation.id).expect("history");
+    assert!(
+        history.iter().any(|entry| {
+            entry.kind == "notice" && entry.content.to_string().contains("Take the medication")
+        }),
+        "the person must learn the reminder was not confirmed"
+    );
 }
 
 #[test]
