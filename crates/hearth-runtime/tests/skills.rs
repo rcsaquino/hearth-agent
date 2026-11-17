@@ -148,7 +148,7 @@ fn the_index_lists_every_active_skill_past_the_old_token_cap() {
 }
 
 #[test]
-fn the_index_archives_learned_skills_only_past_the_active_count_cap() {
+fn the_index_bounds_the_view_without_archiving() {
     let home = TempDir::new().expect("temp home");
     for index in 0..60 {
         let name = format!("skill-{index:02}");
@@ -174,20 +174,9 @@ fn the_index_archives_learned_skills_only_past_the_active_count_cap() {
         .filter(|skill| skill.status == SkillStatus::Archived)
         .map(|skill| skill.name)
         .collect();
-    assert_eq!(
-        archived.len(),
-        10,
-        "the count cap retires ten: {archived:?}"
-    );
-    for name in ["skill-00", "skill-04"] {
-        assert!(
-            archived.iter().any(|archived| archived == name),
-            "the zero-success skills must be archived first: {archived:?}"
-        );
-    }
     assert!(
-        !archived.iter().any(|archived| archived == "skill-05"),
-        "the first successful skill stays: {archived:?}"
+        archived.is_empty(),
+        "reading the index must not archive a skill: {archived:?}"
     );
 }
 
