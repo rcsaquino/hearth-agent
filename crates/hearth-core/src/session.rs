@@ -2515,20 +2515,44 @@ impl Session {
                             continue;
                         }
                     }
-                    writer.execute(
-                        "UPDATE tasks SET status = 'pending', lease_owner = NULL, \
-                         lease_until = NULL, updated_at = ? \
-                         WHERE id = ? AND status = 'running'",
-                        (now, id.as_str()),
-                    )?;
-                    record_commit(
-                        writer,
-                        now,
-                        conversation_id.as_deref(),
-                        Some(id.as_str()),
-                        "task.recover",
-                    )?;
-                    report.requeued += 1;
+                    if matches!(
+                        kind.as_str(),
+                        "helper" | "reminder" | "backup" | "skill.review"
+                    ) {
+                        writer.execute(
+                            "UPDATE tasks SET status = 'pending', lease_owner = NULL, \
+                             lease_until = NULL, updated_at = ? \
+                             WHERE id = ? AND status = 'running'",
+                            (now, id.as_str()),
+                        )?;
+                        record_commit(
+                            writer,
+                            now,
+                            conversation_id.as_deref(),
+                            Some(id.as_str()),
+                            "task.recover",
+                        )?;
+                        report.requeued += 1;
+                    } else {
+                        writer.execute(
+                            "UPDATE tasks SET status = 'failed', result_json = ?, \
+                             terminal_at = ?, lease_owner = NULL, lease_until = NULL, \
+                             updated_at = ? WHERE id = ? AND status = 'running'",
+                            (
+                                serde_json::json!({"error": "interrupted"}).to_string(),
+                                now,
+                                now,
+                                id.as_str(),
+                            ),
+                        )?;
+                        record_commit(
+                            writer,
+                            now,
+                            conversation_id.as_deref(),
+                            Some(id.as_str()),
+                            "task.interrupt",
+                        )?;
+                    }
                 }
                 Ok(report)
             })
