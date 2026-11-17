@@ -149,7 +149,7 @@ nonblocking accept so a failed test cannot hang the suite.
 | `hearth-storage` | SQLite connections, one writer and a read pool, migrations, snapshots, FTS5. |
 | `hearth-model` | OpenAI-compatible streaming, tool calls, usage, pricing, media clients. |
 | `hearth-memory` | Statements, rules, the retrieval cascade, the digest, and four tools. |
-| `hearth-tools` | Files, shell, web search, web fetch, documents, media, workspace confinement, spill. |
+| `hearth-tools` | Files, shell, web search, web fetch, media, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, and the message tool. |
 | `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket. |
 | `hearth-cli` | The `hearth` binary and the ratatui terminal application. |
@@ -180,9 +180,9 @@ Key invariants:
   No memory operation calls a model. Every new statement names its actor in the
   content, and a pronoun is refused; existing rows still render. The digest
   reports what it left out.
-- The tool set is flat and compiled in. `documents` is always present; `media`
-  enters the registry only when a media service is configured. There is no tool
-  discovery layer and no browser.
+- The tool set is flat and compiled in. `media` enters the registry only when a
+  media service is configured. There is no tool discovery layer, no browser, and
+  no office-document reader.
 - Every timestamp shown to the model or the person is ISO 8601 in
   `identity.timezone`, resolved when it renders so a settings change applies
   without a restart. Every stored instant stays UTC. See `Zone` in `hearth-core`.

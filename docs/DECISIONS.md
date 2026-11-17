@@ -2764,18 +2764,21 @@ just after.
   a click that landed on a consent banner was reported as a click.
 - `tool_search` and the lazy group registry are gone with it. Removing the two
   groups left one tool behind a 158-token indirection that also cost a per-run
-  selection set, a checkpoint field, and a `tool_groups` input on `task`.
-  `documents` and `media` are ordinary registry entries: `documents` always,
-  `media` only when a media service is configured, which is the condition that
-  made its group unavailable before.
-- The core schema budget is measured, not assumed. The registry measures 1,762
-  tokens with documents in and `tool_search` out, and 1,927 with image, speech to
-  text, and text to speech all configured. Tests assert 1,800 and 1,950.
+  selection set, a checkpoint field, and a `tool_groups` input on `task`. `media`
+  is an ordinary registry entry that appears only when a media service is
+  configured, which is the condition that made its group unavailable before.
+- `documents` is gone on review. It was the only path to a PDF, DOCX, PPTX, or
+  XLSX already on disk, including a Telegram attachment, and `web_fetch` reads one
+  only from a URL. The trade is accepted rather than overlooked: `pdf-extract`
+  stays in the tree for the fetcher, so this removes the tool and not the
+  dependency, 151 schema tokens leave every request, and the agent now tells the
+  user it cannot read an attachment. A user who needs it installs a converter and
+  drives it through `shell`.
+- The core schema budget is measured, not assumed. The registry measures 1,611
+  tokens, and 1,776 with image, speech to text, and text to speech all configured.
+  One guard of 1,800 covers the widest run.
 - `docs/SCHEMA.md` listed tool groups on the stored `agent` document. No settings
   key ever existed for them, and the field is removed.
 - Browser work belongs to whatever the user installs and drives through `shell`.
   SPEC 9.2 and SECURITY now name that boundary instead of the Camofox process, and
   the tests no longer mention a browser.
-- `documents` stays. It is the only path to a PDF, DOCX, PPTX, or XLSX that is
-  already on disk, including a Telegram attachment, and it needs no system binary.
-  `web_fetch` reads a PDF from a URL; nothing else reads one from a file.

@@ -23,8 +23,8 @@ acceptance matrix pass; a seven-day real-time soak is still pending.
 - Remembers facts, preferences, people, projects, and past work in a local
   library with full-text and local-vector recall, provenance, and backups.
 - Reads your standing rules from `HEARTH.md` and project rules from `AGENTS.md`.
-- Runs an agent loop with tools: files, shell, web search, web fetch, documents,
-  media, memory, skills, reminders, helpers, and Telegram files or voice.
+- Runs an agent loop with tools: files, shell, web search, web fetch, media,
+  memory, skills, reminders, helpers, and Telegram files or voice.
 - Speaks Telegram natively: text, images, documents, voice notes, albums, and
   rich replies.
 - Provides a live daemon event stream, status, live prompt and session export,
@@ -75,7 +75,7 @@ Hearth is a Rust workspace with narrow crate boundaries:
 | `hearth-storage` | SQLite connections, migrations, snapshots, full-text search. |
 | `hearth-model` | OpenAI-compatible streaming, tool calls, usage, media clients. |
 | `hearth-memory` | Statements, rules, the retrieval cascade, the digest, and the memory tools. |
-| `hearth-tools` | Files, shell, web search, web fetch, documents, media, workspace confinement, spill. |
+| `hearth-tools` | Files, shell, web search, web fetch, media, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, the message tool. |
 | `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, maintenance, watch socket, CLI wiring. |
 | `hearth-cli` | The `hearth` binary and the terminal application. |

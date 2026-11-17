@@ -10,10 +10,9 @@ use hearth_memory::MemoryService;
 use hearth_model::{ImageClient, Speaker, SpeechClient, Transcriber, TranscriptionClient};
 use hearth_telegram::{MessageTool, TelegramSender};
 use hearth_tools::{
-    BraveSearch, DeepSeekFetch, DeepSeekSearch, DocumentsTool, ExaSearch, FetchError,
-    FetchProvider, FileTool, FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, MediaTool,
-    SearchError, SearchProvider, ShellTool, TinyFishFetch, TinyFishSearch, Tool, ToolRegistry,
-    WebFetchTool, WebSearchTool,
+    BraveSearch, DeepSeekFetch, DeepSeekSearch, ExaSearch, FetchError, FetchProvider, FileTool,
+    FirecrawlFetch, FirecrawlSearch, HttpFetch, JinaFetch, MediaTool, SearchError, SearchProvider,
+    ShellTool, TinyFishFetch, TinyFishSearch, Tool, ToolRegistry, WebFetchTool, WebSearchTool,
 };
 use thiserror::Error;
 
@@ -40,7 +39,7 @@ pub struct TaskTarget {
     pub max_concurrent: u8,
 }
 
-/// The inbound and outbound media roots used by the documents and media tools.
+/// The inbound and outbound media roots used by the media tool.
 #[derive(Clone, Debug)]
 pub struct ToolMediaRoots {
     pub inbound: PathBuf,
@@ -75,11 +74,6 @@ pub fn build_tools(
         Arc::new(ShellTool::new(workspace, Duration::from_secs(60))),
         Arc::new(build_web_search(settings)?),
         Arc::new(build_web_fetch(settings)?),
-        Arc::new(DocumentsTool::new(
-            workspace.to_path_buf(),
-            spill.to_path_buf(),
-            media.inbound.clone(),
-        )),
     ];
     if let Some(media_tool) = build_media_tool(settings, workspace, spill, media) {
         tools.push(Arc::new(media_tool));
@@ -369,20 +363,13 @@ mod tests {
 ///
 /// Four memory tools replaced five, and each schema lost a store selector, an id
 /// prefix convention, and a tag array. Measured at 767 tokens for the memory
-/// family against 1,410 for the five it replaced. The current registry, with
-/// documents and without tool_search, measures 1,762. The guard sits just above
-/// the measured total so a single tool growing a sprawling schema is caught.
+/// family against 1,410 for the five it replaced. The registry measures 1,611
+/// tokens, and 1,776 with image, speech to text, and text to speech all
+/// configured, so the guard covers the widest run rather than the smallest. It
+/// sits just above the measured total so a single tool growing a sprawling schema
+/// is caught.
 #[cfg(test)]
 const CORE_SCHEMA_TOKEN_BUDGET: i64 = 1_800;
-
-/// The ceiling once a media service keeps the media schema in every request.
-///
-/// The widest registry, with image, speech to text, and text to speech all
-/// configured, measures 1,927 tokens against 1,762 without media. The guard sits
-/// just above the measured total so a single tool growing a sprawling schema is
-/// caught.
-#[cfg(test)]
-const MEDIA_CONFIGURED_TOKEN_BUDGET: i64 = 1_950;
 
 /// The memory family's share of the core schema budget.
 ///
@@ -468,7 +455,6 @@ mod core_budget_tests {
             "shell",
             "web_search",
             "web_fetch",
-            "documents",
             "memory_save",
             "memory_recall",
             "memory_forget",
@@ -501,7 +487,7 @@ mod core_budget_tests {
     }
 
     /// Any configured media service adds the media schema to the core request,
-    /// so the widest one is measured against this separate total.
+    /// so the widest registry is measured against the same budget.
     #[test]
     fn the_core_schemas_fit_the_budget_with_media() {
         let home = tempfile::TempDir::new().expect("temp home");
@@ -520,7 +506,7 @@ mod core_budget_tests {
 
         let tokens = schema_tokens(&tools.specs());
         assert!(
-            tokens <= MEDIA_CONFIGURED_TOKEN_BUDGET,
+            tokens <= CORE_SCHEMA_TOKEN_BUDGET,
             "core tool schemas with media use {tokens} tokens"
         );
     }

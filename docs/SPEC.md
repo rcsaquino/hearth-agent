@@ -10,14 +10,14 @@
 
 ## A note on language
 
-Draft 0.54 removes the browser and the lazy tool groups. The Camofox client
-advertised a service Hearth never installed, started, or checked, and
-`tool_search` existed only to keep optional schemas out of the core prompt. The
-`browser` tool, its client, and the group registry are gone. `documents` and
-`media` are ordinary tools now, and `media` appears only when a media service is
+Draft 0.54 removes the browser, the documents tool, and the lazy tool groups. The
+Camofox client advertised a service Hearth never installed, started, or checked,
+and `tool_search` existed only to keep optional schemas out of the core prompt.
+The `browser` tool, its client, the `documents` tool, and the group registry are
+gone. `media` is an ordinary tool that appears only when a media service is
 configured. The task tool loses its `tool_groups` input, and a checkpoint no
-longer records a selection. The core schemas measure 1,762 tokens without media
-and 1,927 with every media service configured.
+longer records a selection. The core schemas measure 1,611 tokens, or 1,776 with
+every media service configured, against a guard of 1,800.
 
 Draft 0.53 removes the document record and the conversation fork. Neither had a
 production caller. Migration 0011 drops the `documents` table; the conversation
@@ -385,8 +385,8 @@ Appendix A. Defaults at a Glance
 
 **In plain terms.** Hearth is a personal assistant with a memory and a workshop. It
 talks to you through Telegram, remembers what matters over years, and can do real
-work: read and write files, search the web, run commands, make documents, schedule
-reminders, and check on longer jobs. It is built for one person, on one machine,
+work: read and write files, search the web, run commands, make images and
+speech, schedule reminders, and check on longer jobs. It is built for one person, on one machine,
 with one durable record of everything it knows and does.
 
 ### 1.1 What it does
@@ -396,7 +396,7 @@ Hearth:
 - talks to its user primarily through Telegram;
 - remembers facts, preferences, people, projects, and past work across years;
 - runs durable background tasks that survive restarts, crashes, and reboots;
-- uses tools such as files, shell, web, documents, media, and scheduling under a
+- uses tools such as files, shell, web, media, and scheduling under a
   configurable policy;
 - keeps its transcript, memory, task state, and usage ledger in one local database;
 - stays affordable by caching, budgeting, compacting, and retrieving instead of
@@ -1586,7 +1586,6 @@ in the prompt. Optional groups are loaded only when a job needs them.
 | `shell` | Run a command in the workspace |
 | `schedule` | Reminders and recurring tasks |
 | `skill` | Load, save, or archive a Markdown skill |
-| `documents` | Read or create PDF, DOCX, PPTX, and XLSX files |
 | `media` | Generate an image, transcribe audio, or synthesize speech |
 
 `task` joins the core set only for a Telegram conversation below the helper depth
@@ -1595,12 +1594,13 @@ configured, so its schema costs nothing on an install that does not use it.
 
 ### 9.2 Capabilities that wait
 
-`code`, `calendar`, and `home` wait until there is evidence they are needed.
-Hearth ships no browser. The Camofox client, the tool-search group it lived in,
-and the lazy group loader were removed: the browser was a separately installed
-service, and a compiled client for it advertised a capability that almost no
-install could use. Browser work belongs to whatever the user installs and drives
-through `shell`.
+`code`, `calendar`, `documents`, and `home` wait until there is evidence they are
+needed. Hearth ships no browser and reads no office document. The Camofox client,
+the documents tool, the tool-search group they lived in, and the lazy group loader
+were removed: the browser was a separately installed service, and both compiled
+clients advertised capabilities that most installs could not use. `web_fetch`
+still extracts text from a PDF at a URL. Browser work belongs to whatever the user
+installs and drives through `shell`.
 
 ### 9.3 Approval
 
