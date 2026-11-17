@@ -34,6 +34,17 @@ fn write_zip(path: &Path, entries: &[(&str, &str)]) {
     zip.finish().expect("zip finish");
 }
 
+fn write_zip_deflated(path: &Path, entries: &[(&str, &str)]) {
+    let file = File::create(path).expect("zip file");
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    for (name, content) in entries {
+        zip.start_file(*name, options).expect("zip entry");
+        zip.write_all(content.as_bytes()).expect("zip content");
+    }
+    zip.finish().expect("zip finish");
+}
+
 fn write_docx(path: &Path) {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -275,6 +286,59 @@ fn overwrites_an_existing_document() {
         .expect("extract");
     assert!(extracted.content.contains("Second version"));
     assert!(!extracted.content.contains("First version"));
+}
+
+#[test]
+fn an_expanding_shared_string_table_is_refused() {
+    let (_directory, workspace, spill, media) = roots();
+    let path = workspace.join("huge.xlsx");
+    let big = format!(
+        r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>{}</t></si></sst>"#,
+        "A".repeat(17 * 1024 * 1024)
+    );
+    write_zip(
+        &path,
+        &[
+            ("xl/sharedStrings.xml", big.as_str()),
+            ("xl/worksheets/sheet1.xml", "<worksheet/>"),
+        ],
+    );
+    let tool = tool(&workspace, &spill, &media);
+    let error = tool
+        .call(&json!({"action": "extract", "path": "huge.xlsx"}))
+        .expect_err("shared strings over the cap must be refused");
+    assert_eq!(error.code, "document_too_large", "{}", error.message);
+}
+
+#[test]
+fn a_document_with_too_much_text_is_refused() {
+    let (_directory, workspace, spill, media) = roots();
+    let path = workspace.join("huge.pptx");
+    let slide = |text: &str| {
+        format!(
+            r#"<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>"#
+        )
+    };
+    let text = "A".repeat(11 * 1024 * 1024);
+    let one = slide(&text);
+    let two = slide(&text);
+    let three = slide(&text);
+    write_zip_deflated(
+        &path,
+        &[
+            ("ppt/slides/slide1.xml", one.as_str()),
+            ("ppt/slides/slide2.xml", two.as_str()),
+            ("ppt/slides/slide3.xml", three.as_str()),
+        ],
+    );
+    let tool = tool(&workspace, &spill, &media);
+    let error = tool
+        .call(&json!({"action": "extract", "path": "huge.pptx"}))
+        .expect_err("extracted text over the total cap must be refused");
+    assert_eq!(error.code, "document_too_large", "{}", error.message);
 }
 
 #[test]
