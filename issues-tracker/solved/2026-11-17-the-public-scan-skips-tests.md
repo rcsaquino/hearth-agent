@@ -34,8 +34,9 @@ plants its value in `notes.txt`, which is not excluded.
 
 The path-wide exclusions are gone from the tree and history scans. The scanner
 now exempts only the six placeholder values the repository's own tests use, and
-the planted value and allowlist lines in the two scanner scripts. The deny-list
-scan has no exemptions at all.
+the planted value and allowlist lines in the two scanner scripts, and this
+resolved issue's discussion of those placeholders. The deny-list scan has no
+exemptions at all.
 
 Commits: `1a7154a` (test), `5f7c004` (fix). Verified by
 `scripts/test-scripts.sh`, which commits a credential into

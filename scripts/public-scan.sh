@@ -51,6 +51,17 @@ is_known_fixture() {
                     ;;
             esac
             ;;
+        issues-tracker/*/2026-11-17-the-public-scan-skips-tests.md)
+            case "$text" in
+                *sk-live-abcdefghijklmnop* | \
+                *ghp_abcdefghijklmnopqrstuvwxyz* | \
+                *xoxb-1234567890-abcdefghij* | \
+                *AKIAABCDEFGHIJKLMNOP* | \
+                *123456789:AAFakeTokenFakeTokenFakeTokenFake*)
+                    return 0
+                    ;;
+            esac
+            ;;
     esac
     return 1
 }
