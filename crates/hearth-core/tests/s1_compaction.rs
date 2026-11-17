@@ -117,6 +117,36 @@ fn a_plan_covers_the_old_range_and_keeps_the_tail() {
 }
 
 #[test]
+fn a_prompt_history_skips_the_covered_range_without_decoding_it() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let conversation = conversation(session);
+    save_entry(session, &conversation, "user", "covered");
+    let covered = conversation.clone();
+    session
+        .storage()
+        .write(move |writer| {
+            writer.execute(
+                "INSERT INTO entries (id, conversation_id, seq, kind, content_json, tokens_est, \
+                 source, prompt_hash, created_at) VALUES (?, ?, 2, 'user', ?, 0, NULL, NULL, 0)",
+                ("e_broken", covered.as_str(), "this is not JSON"),
+            )?;
+            Ok::<(), hearth_core::CoreError>(())
+        })
+        .expect("a covered row that cannot be decoded");
+    save_summary(session, &conversation, "the summary", 1, 2, 3);
+    save_entry(session, &conversation, "user", "kept");
+
+    let visible = session
+        .history_for_prompt(&conversation)
+        .expect("the covered range is not decoded");
+
+    assert_eq!(visible[0].kind, "summary");
+    assert_eq!(visible[1].content["text"], "kept");
+    assert_eq!(visible.len(), 2);
+}
+
+#[test]
 fn a_cut_never_keeps_a_tool_result_without_its_assistant() {
     let (_home, harness) = harness();
     let session = harness.session();

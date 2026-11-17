@@ -1465,57 +1465,52 @@ impl Session {
     /// Read the entries of a conversation in order.
     pub fn history(&self, conversation_id: &str) -> Result<Vec<Entry>, CoreError> {
         let sql = format!("{ENTRY_SELECT} WHERE conversation_id = ? ORDER BY seq, rowid");
-        let raw: Vec<RawEntry> = self.storage.read(|reader| {
-            reader.query(&sql, (conversation_id,), |row| {
-                Ok(RawEntry {
-                    id: row.get(0)?,
-                    conversation_id: row.get(1)?,
-                    seq: row.get(2)?,
-                    kind: row.get(3)?,
-                    content_json: row.get(4)?,
-                    tokens_est: row.get(5)?,
-                    source: row.get(6)?,
-                    prompt_hash: row.get(7)?,
-                    created_at: row.get(8)?,
-                })
-            })
-        })?;
+        self.read_entries(&sql, (conversation_id,))
+    }
+
+    fn read_entries(
+        &self,
+        sql: &str,
+        params: impl hearth_storage::rusqlite::Params,
+    ) -> Result<Vec<Entry>, CoreError> {
+        let raw: Vec<RawEntry> = self
+            .storage
+            .read(|reader| reader.query(sql, params, raw_entry))?;
         raw.into_iter().map(RawEntry::into_entry).collect()
     }
 
     /// Read the entries the model should see: the newest summary or reset
     /// marker onward, with the summary first and the covered range excluded.
+    ///
+    /// The query starts at the marker, so a compacted conversation does not read
+    /// and decode the record it replaced.
     pub fn history_for_prompt(&self, conversation_id: &str) -> Result<Vec<Entry>, CoreError> {
-        let all = self.history(conversation_id)?;
-        let Some(marker) = all
-            .iter()
-            .rev()
-            .find(|entry| entry.kind == "summary" || entry.kind == "reset")
-        else {
-            return Ok(all);
+        let marker_sql = format!(
+            "{ENTRY_SELECT} WHERE conversation_id = ? AND kind IN ('summary', 'reset') \
+             ORDER BY seq DESC, rowid DESC LIMIT 1"
+        );
+        let raw_marker: Option<RawEntry> = self.storage.read(|reader| {
+            reader.query_optional(&marker_sql, (conversation_id,), raw_entry)
+        })?;
+        let Some(marker) = raw_marker.map(RawEntry::into_entry).transpose()? else {
+            return self.history(conversation_id);
         };
         if marker.kind == "summary" {
-            let first_kept = crate::compaction::summary_first_kept(marker)
+            let first_kept = crate::compaction::summary_first_kept(&marker)
                 .ok_or_else(|| CoreError::Corrupt("summary entry has no first_kept".to_owned()))?;
-            let mut visible = Vec::with_capacity(all.len());
-            visible.push(marker.clone());
-            visible.extend(
-                all.iter()
-                    .filter(|entry| {
-                        entry.seq >= first_kept
-                            && entry.id != marker.id
-                            && entry.kind != "summary"
-                            && entry.kind != "reset"
-                    })
-                    .cloned(),
+            let sql = format!(
+                "{ENTRY_SELECT} WHERE conversation_id = ? AND seq >= ? \
+                 AND kind NOT IN ('summary', 'reset') ORDER BY seq, rowid"
             );
+            let mut visible = vec![marker];
+            visible.extend(self.read_entries(&sql, (conversation_id, first_kept))?);
             Ok(visible)
         } else {
-            let reset_seq = marker.seq;
-            Ok(all
-                .into_iter()
-                .filter(|entry| entry.seq > reset_seq)
-                .collect())
+            let sql = format!(
+                "{ENTRY_SELECT} WHERE conversation_id = ? AND seq > ? \
+                 AND kind NOT IN ('summary', 'reset') ORDER BY seq, rowid"
+            );
+            self.read_entries(&sql, (conversation_id, marker.seq))
         }
     }
 
@@ -2907,6 +2902,20 @@ impl RawConversation {
             archived: self.archived != 0,
         }
     }
+}
+
+fn raw_entry(row: &hearth_storage::rusqlite::Row<'_>) -> hearth_storage::rusqlite::Result<RawEntry> {
+    Ok(RawEntry {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        seq: row.get(2)?,
+        kind: row.get(3)?,
+        content_json: row.get(4)?,
+        tokens_est: row.get(5)?,
+        source: row.get(6)?,
+        prompt_hash: row.get(7)?,
+        created_at: row.get(8)?,
+    })
 }
 
 struct RawEntry {
