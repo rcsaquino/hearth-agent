@@ -204,11 +204,10 @@ impl Tool for SaveTool {
         .map_err(failure)?
         {
             reply.push_str(&format!(
-                "\nrelated: {} ({:.2} overlap) {}. Pass supersedes=\"{}\" if this replaces it.",
+                "\nrelated: {} ({:.2} overlap) {}. This is a separate statement, not a duplicate.",
                 neighbour.id,
                 overlap,
-                digest::tool_line(&neighbour, now),
-                neighbour.id
+                digest::tool_line(&neighbour, now)
             ));
         }
         Ok(text(reply))

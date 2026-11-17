@@ -119,9 +119,9 @@ pub fn candidates(text: &str) -> Vec<Candidate> {
             continue;
         }
         if let Some(candidate) = from_remember(sentence)
-            .or_else(|| from_possessive(sentence))
-            .or_else(|| from_relation(sentence))
             .or_else(|| from_preference(sentence))
+            .or_else(|| from_relation(sentence))
+            .or_else(|| from_possessive(sentence))
             && acceptable(&candidate)
             && !found
                 .iter()
@@ -174,8 +174,15 @@ fn from_remember(sentence: &str) -> Option<Candidate> {
     if content.is_empty() {
         return None;
     }
+    // The rewrite names its actor, so the subject is the same one a stated
+    // preference uses. A name the rewrite leaves in place is still the subject.
+    let subject = if content.to_ascii_lowercase().starts_with("the user") {
+        "user".to_owned()
+    } else {
+        leading_subject(&content)
+    };
     Some(Candidate {
-        subject: leading_subject(&content),
+        subject,
         content,
         kind: Kind::Fact,
     })
@@ -196,13 +203,20 @@ fn from_possessive(sentence: &str) -> Option<Candidate> {
     }
     let first = noun.split_whitespace().next().unwrap_or("").to_lowercase();
     let relation = RELATIONS.contains(&first.as_str());
+    // Both word orders of a relation compose the same statement, so the
+    // extractor writes one order and the store can recognise the other.
+    let content = if relation {
+        format!("{} is the user's {}", trim_end(value), trim_end(noun))
+    } else {
+        format!("the user's {}", trim_end(rest))
+    };
     Some(Candidate {
         subject: if relation {
             leading_subject(value)
         } else {
             normalize(noun)
         },
-        content: format!("the user's {}", trim_end(rest)),
+        content,
         kind: if relation { Kind::Person } else { Kind::Fact },
     })
 }

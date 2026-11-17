@@ -151,8 +151,55 @@ fn content_tokens(text: &str) -> HashSet<String> {
             word.chars().count() > 1
                 || (word.len() == 1 && word.starts_with(|c: char| c.is_ascii_digit()))
         })
-        .map(str::to_owned)
+        .map(fold_token)
         .collect()
+}
+
+/// Fold the spelling and synonym variants that name the same thing.
+///
+/// The fold is for comparison only. Stored content and the fingerprint keep the
+/// words the caller wrote, so history is never rewritten.
+fn fold_token(word: &str) -> String {
+    let folded = match word {
+        "favourite" | "favorite" => "favorite",
+        "favourites" | "favorites" => "favorites",
+        "colour" | "color" => "color",
+        "colours" | "colors" => "colors",
+        "behaviour" | "behavior" => "behavior",
+        "organise" | "organize" => "organize",
+        "organised" | "organized" => "organized",
+        "prefer" | "prefers" | "preferred" | "like" | "likes" | "liked" | "love" | "loves"
+        | "loved" => "prefer",
+        _ => word,
+    };
+    folded.to_owned()
+}
+
+/// Whether a statement says what it does not do.
+///
+/// A negation is the opposite statement, not a duplicate. The check runs on the
+/// words, so it still sees a contraction the token split would break apart.
+fn negated(text: &str) -> bool {
+    let lowered = text.to_lowercase();
+    if lowered.contains("n't") {
+        return true;
+    }
+    lowered
+        .split(|character: char| !character.is_alphanumeric())
+        .any(|word| {
+            matches!(
+                word,
+                "not"
+                    | "no"
+                    | "never"
+                    | "none"
+                    | "nothing"
+                    | "neither"
+                    | "nor"
+                    | "without"
+                    | "cannot"
+            )
+        })
 }
 
 /// The Jaccard similarity of two statements.
@@ -173,6 +220,9 @@ pub fn similarity(left: &str, right: &str) -> f32 {
 /// "ordered pad thai on friday again" is. Containment covers that case without
 /// merging a statement that swaps its subject, which is how a contradiction looks.
 fn same_statement(left: &str, right: &str) -> bool {
+    if negated(left) != negated(right) {
+        return false;
+    }
     let left = content_tokens(left);
     let right = content_tokens(right);
     if left.is_empty() || right.is_empty() {
@@ -582,6 +632,17 @@ pub fn insert_many(
     })
 }
 
+/// Whether an extract would replace a stronger row with a weaker one.
+fn weaker_than(item: &NewMemory, earlier: &Memory) -> bool {
+    if earlier.pinned {
+        return true;
+    }
+    if !earlier.subject.is_empty() && item.subject.is_empty() {
+        return true;
+    }
+    earlier.kind != Kind::Fact && item.kind == Kind::Fact
+}
+
 fn insert_in(
     writer: &hearth_storage::Writer<'_>,
     pending: Pending,
@@ -655,24 +716,51 @@ fn insert_with(
     // The pin is why a rule is injected, so an unpinned copy of it is a no-op:
     // the rule stands and the copy is not written. Retiring it takes a write
     // that names the row.
-    if let Some(current) = &earlier
-        && current.pinned
-        && !item.pinned
-    {
-        return Ok(WriteOutcome::Unchanged(current.clone()));
+    if let Some(current) = &earlier {
+        if current.pinned && !item.pinned {
+            return Ok(WriteOutcome::Unchanged(current.clone()));
+        }
+        // The extractor writes what it heard. It cannot turn a stronger row into
+        // a weaker one, or the better subject and kind would be lost.
+        if item.source == Source::Extract && weaker_than(&item, current) {
+            return Ok(WriteOutcome::Unchanged(current.clone()));
+        }
     }
 
     // Replacement is deliberate, so it skips the duplicate merge: a caller that
     // names the row it replaces has already decided.
-    if supersedes.is_none() && earlier.is_none() && !item.subject.is_empty() {
-        let candidates = writer.query(
-            &format!(
-                "SELECT {COLUMNS} FROM memories WHERE subject = ? AND valid_to IS NULL \
-                 ORDER BY updated_at DESC LIMIT {MERGE_WINDOW}"
-            ),
-            [&item.subject],
-            map_memory,
-        )?;
+    if supersedes.is_none() && earlier.is_none() {
+        let mut candidates = Vec::new();
+        if item.subject.is_empty() {
+            candidates.extend(writer.query(
+                &format!(
+                    "SELECT {COLUMNS} FROM memories WHERE valid_to IS NULL \
+                     ORDER BY updated_at DESC LIMIT {MERGE_WINDOW}"
+                ),
+                [],
+                map_memory,
+            )?);
+        } else {
+            // A subject is indexed, so every row about it is visible however old
+            // it is. A subjectless row is not, so those are read newest first
+            // within the window.
+            candidates.extend(writer.query(
+                &format!(
+                    "SELECT {COLUMNS} FROM memories WHERE subject = ? AND valid_to IS NULL \
+                     ORDER BY updated_at DESC"
+                ),
+                [&item.subject],
+                map_memory,
+            )?);
+            candidates.extend(writer.query(
+                &format!(
+                    "SELECT {COLUMNS} FROM memories WHERE subject = '' AND valid_to IS NULL \
+                     ORDER BY updated_at DESC LIMIT {MERGE_WINDOW}"
+                ),
+                [],
+                map_memory,
+            )?);
+        }
         if let Some(near) = candidates
             .into_iter()
             .find(|candidate| same_statement(&candidate.content, &item.content))
@@ -821,10 +909,11 @@ pub fn related(
     content: &str,
     exclude: &str,
 ) -> Result<Option<(Memory, f32)>> {
-    if subject.is_empty() {
-        return Ok(None);
-    }
-    let candidates = by_subject(session, subject, None, None, 32)?;
+    let candidates = if subject.is_empty() {
+        recent(session, None, None, 32)?
+    } else {
+        by_subject(session, subject, None, None, 32)?
+    };
     Ok(candidates
         .into_iter()
         .filter(|candidate| candidate.id != exclude)
