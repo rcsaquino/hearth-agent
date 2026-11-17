@@ -494,4 +494,16 @@ mod tests {
         assert!(hearth_model::estimate_tokens(&block) <= 200, "{block}");
         assert!(block.contains("more rules were not shown"), "{block}");
     }
+
+    #[test]
+    fn the_coverage_hint_names_the_memory_tool() {
+        let items = vec![memory("m_1", "alice", "one")];
+        let coverage = Coverage {
+            current: [("alice".to_owned(), 7)].into(),
+            earlier: BTreeMap::new(),
+        };
+        let block = recall_body(&items, &coverage, 0);
+        assert!(block.contains("memory(recall, subject)"), "{block}");
+        assert!(!block.contains("memory_recall"), "{block}");
+    }
 }

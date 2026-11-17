@@ -510,4 +510,16 @@ mod core_budget_tests {
             "core tool schemas with media use {tokens} tokens"
         );
     }
+
+    #[test]
+    fn the_memory_family_is_one_tool() {
+        let home = tempfile::TempDir::new().expect("temp home");
+        let tools = full_core_tools(home.path(), &settings());
+        let names: Vec<String> = tools.specs().into_iter().map(|spec| spec.name).collect();
+        assert!(names.iter().any(|name| name == "memory"), "{names:?}");
+        assert!(
+            !names.iter().any(|name| name.starts_with("memory_")),
+            "{names:?}"
+        );
+    }
 }

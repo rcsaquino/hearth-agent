@@ -1074,3 +1074,40 @@ mod as_of_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod tool_shape_tests {
+    use super::*;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
+
+    fn registry() -> hearth_tools::ToolRegistry {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        let service = MemoryService::new(harness.session().clone());
+        hearth_tools::ToolRegistry::new(service.tools())
+    }
+
+    #[test]
+    fn memory_is_one_tool_with_four_actions() {
+        let tools = registry();
+        let specs = tools.specs();
+        let names: Vec<&str> = specs.iter().map(|spec| spec.name.as_str()).collect();
+        assert_eq!(names, vec!["memory"], "{names:?}");
+        assert_eq!(specs[0].parameters["required"], json!(["action"]));
+        assert_eq!(
+            specs[0].parameters["properties"]["action"]["enum"],
+            json!(["save", "recall", "forget", "transcript"])
+        );
+    }
+
+    #[test]
+    fn an_unknown_memory_action_is_refused() {
+        let tools = registry();
+        let error = tools
+            .call("memory", &json!({"action": "rename"}))
+            .expect("the memory tool")
+            .expect_err("unknown action");
+        assert_eq!(error.code, "unknown_action");
+    }
+}

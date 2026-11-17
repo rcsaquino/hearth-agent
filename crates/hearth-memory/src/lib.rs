@@ -1264,3 +1264,23 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod memory_tool_shape_tests {
+    use super::*;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
+
+    #[test]
+    fn the_memory_tool_set_is_one_tool() {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        let service = MemoryService::new(harness.session().clone());
+        let names: Vec<String> = service
+            .tools()
+            .iter()
+            .map(|tool| tool.spec().name)
+            .collect();
+        assert_eq!(names, vec!["memory"]);
+    }
+}

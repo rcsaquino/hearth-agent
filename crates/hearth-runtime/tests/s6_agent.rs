@@ -1864,3 +1864,46 @@ fn a_replayed_shell_call_does_not_run_again() {
         result.content
     );
 }
+
+#[test]
+fn a_replayed_memory_write_is_not_run_again() {
+    let (home, harness) = harness();
+    let conversation = conversation(&harness);
+    let submission = submit(&harness, &conversation);
+    harness
+        .session()
+        .save(Save::new(&conversation).entry(
+            "assistant",
+            json!([{
+                "type": "tool_call",
+                "id": "call-memory",
+                "name": "memory",
+                "arguments": {"action": "save"}
+            }]),
+        ))
+        .expect("assistant entry with a pending call");
+    let provider = Arc::new(ScriptedProvider::new(vec![Ok(vec![
+        Ok(StreamEvent::TextDelta("done".to_owned())),
+        Ok(StreamEvent::Done {
+            finish_reason: Some("stop".to_owned()),
+        }),
+    ])]));
+    let agent = agent_with(
+        home.path(),
+        &harness,
+        provider,
+        ToolRegistry::new(Vec::new()),
+    );
+    agent.run_submission(&submission.id).expect("run");
+
+    let history = harness.session().history(&conversation).expect("history");
+    let result = history
+        .iter()
+        .find(|entry| entry.kind == "tool_result")
+        .expect("a tool result for the pending call");
+    assert!(
+        result.content.to_string().contains("not re-run"),
+        "a replayed memory save must be refused: {}",
+        result.content
+    );
+}
