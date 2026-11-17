@@ -1,9 +1,11 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
+use std::time::{Duration, Instant};
 
-use hearth_core::{EffectStatus, Harness, NewTask, TaskStatus};
+use hearth_core::{EffectStatus, Harness, NewTask, StepOutput, TaskStatus, TerminalOutcome};
 use hearth_telegram::{SystemSleeper, TelegramClient, TelegramSender};
 use hearth_tools::Tool;
 use serde_json::json;
@@ -92,6 +94,66 @@ fn fake_telegram(markdown: Arc<std::sync::Mutex<Vec<String>>>) -> (String, threa
         .expect("response");
     });
     (base, handle)
+}
+
+struct CountingHandler {
+    calls: Arc<AtomicUsize>,
+}
+
+impl hearth_runtime::TaskHandler for CountingHandler {
+    fn step(
+        &self,
+        _task: &hearth_core::ClaimedTask,
+    ) -> Result<StepOutput, hearth_runtime::TaskHandlerError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(StepOutput::Terminal {
+            outcome: TerminalOutcome::Done,
+            result: json!({}),
+        })
+    }
+}
+
+#[test]
+fn a_due_sleeping_task_is_woken_while_the_scheduler_runs() {
+    let (_home, harness) = harness();
+    let session = harness.session();
+    let now = session.now_micros();
+    session
+        .create_sleeping_task(
+            NewTask::new("wake-audit", 1, "run", json!({})),
+            now - 1,
+        )
+        .expect("sleeping task");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let registry = Arc::new(
+        hearth_runtime::TaskRegistry::new().register(
+            "wake-audit",
+            Arc::new(CountingHandler {
+                calls: Arc::clone(&calls),
+            }),
+        ),
+    );
+    let scheduler = hearth_runtime::Scheduler::new(session.clone(), registry, "scheduler");
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let handle = thread::spawn({
+        let shutdown = Arc::clone(&shutdown);
+        move || scheduler.run(shutdown)
+    });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while calls.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    shutdown.store(true, Ordering::SeqCst);
+    handle.join().expect("scheduler thread");
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "the due sleep must run");
+    let task = session
+        .tasks_by_kind("wake-audit")
+        .expect("tasks")
+        .into_iter()
+        .next()
+        .expect("task");
+    assert_eq!(task.status, TaskStatus::Done);
 }
 
 fn fake_telegram_429() -> (String, thread::JoinHandle<()>) {
