@@ -3028,3 +3028,43 @@ just after.
   `crates/hearth-runtime/tests/skills.rs` and
   `a_loaded_user_skill_stops_saying_unused` in `crates/hearth-cli/src/ui/mod.rs`.
   `./scripts/ci.sh` passes.
+
+## 2026-11-19: The digest asks about a pair it cannot judge
+
+- A reworded restatement that neither wording contains still leaves two current
+  rows, and the store has no safe way to close it. Token overlap puts the reported
+  pair at 0.476 and the value changes the store must keep apart at 0.60 to 0.71.
+  The judgement is not in the words, so the store asks for it instead of guessing.
+- `store::maybe_one_statement` is the read-side complement of `one_statement`. A
+  pair at 0.45 overlap or more, about one non-empty subject, that `one_statement`
+  does not admit, is a pair the store hands to the reader. The floor sits in a
+  measured gap: the fixture's template pairs, which are different facts, stop at
+  0.429, and the reported restatement is at 0.476.
+- The digest renders both rows and adds one line, `similar: m_a/m_b | if they say
+  one thing, memory(forget) one`, naming at most two pairs with the strongest
+  overlap first. It changes nothing itself. The model reads both statements and
+  closes the one it judges redundant with the tool it already has. The line
+  disappears when the row does, so no state is added and a replay is a no-op.
+- The line is placed where the pair already costs tokens. A pair that is never
+  recalled never renders, never costs a line, and never needs repair, so the
+  notice appears exactly when the duplicate is spending the recall budget.
+- The digest now collapses a pair with the write gate's `one_statement` test
+  rather than only the fingerprint. Before this, a near duplicate the gate refuses
+  on write was still rendered twice until the nightly pass closed it. A pair under
+  two different subjects is still shown twice, because one statement under two
+  subjects is two claims; the pass reports that class and never closes it.
+- A model call in the repair path was rejected. `docs/SPEC.md` 6.5 and 7.7 say no
+  memory operation calls a model, and `AGENTS.md` gates a new paid call on
+  approval. The agent is already in the loop every turn, and the digest is the
+  surface it reads.
+- The bench counts the notice and gates it at 20 of 195 questions. Measured 10.
+  Digest tokens p95 stays 97, so the line does not move the budget.
+- Verification: `a_similar_pair_the_store_cannot_prove_names_both_rows`,
+  `a_near_duplicate_is_shown_once_and_counted`,
+  `two_different_facts_about_one_subject_get_no_notice`, and
+  `the_same_words_under_two_subjects_are_both_shown` in
+  `crates/hearth-memory/src/digest.rs`. `./scripts/ci.sh` and the memory benchmark
+  pass. The reported pair rendered through a real recall:
+  `fact | kya | now: Kya, Sir's partner, has a nut allergy ...` /
+  `fact | kya | now: Kya has a nut allergy ...` /
+  `similar: m_f7nk2tvvt4/m_zz1t9sk320 | if they say one thing, memory(forget) one`.

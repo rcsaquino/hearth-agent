@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.60, plain-language edition
+**Status:** Draft 0.61, plain-language edition
 **Date:** 2026-11-18
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,15 @@
 ---
 
 ## A note on language
+
+Draft 0.61 makes the digest name a pair it cannot judge. Two rows about one
+subject that overlap enough to be one fact, and that the write gate cannot prove
+are one, are both shown and followed by one line naming both ids and the repair.
+The store does not choose, because a reworded restatement overlaps by 0.476 and a
+changed value by 0.667, so no word-overlap threshold separates them. A pair the
+store can prove is now shown once and counted, for the same reason a canonical
+duplicate is. The model closes the pair it judges to be one fact with
+`memory(forget)`, and the line disappears with the row.
 
 Draft 0.60 counts a load of a user-made skill. A learned skill keeps its counters
 in its own frontmatter, but a user skill is read-only to Hearth, so the library
@@ -1429,9 +1438,19 @@ because that is where addressing belongs. A new id is `m_` plus ten Crockford
 base32 characters; an older 34-character id keeps working. The recall action
 accepts an id in either case with surrounding whitespace, and a prefix is not an id.
 
-A canonical duplicate, meaning the same fingerprint under the same subject, is
-shown once and the digest reports how many rows it collapsed. The repair pass
-closes it later; the digest does not spend tokens on it before then.
+A duplicate the store can prove, meaning the same fingerprint or one statement
+that contains the other, under the same subject, is shown once and the digest
+reports how many rows it collapsed. The repair pass closes it later; the digest
+does not spend tokens on it before then. The digest uses the write gate's own
+test, so a reworded copy is collapsed too.
+
+Two rows about one subject that overlap by 0.45 or more, and that the store cannot
+prove are one statement, are both shown with one line that names their ids and the
+repair. The store does not pick one: a reworded restatement and a changed value
+overlap by about the same amount, so the line says `similar: m_a/m_b | if they say
+one thing, memory(forget) one` and leaves the judgement to the model. The line
+names at most two pairs, strongest overlap first, and is measured to fire on 10 of
+the benchmark's 195 questions. A pinned row is never hidden or closed by it.
 
 The coverage line is the part that makes recall honest. For each subject the
 message named, the store counts what it holds and reports the difference. A digest
