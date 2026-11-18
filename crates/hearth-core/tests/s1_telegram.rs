@@ -341,15 +341,10 @@ fn queued_submissions_are_counted_per_conversation() {
     );
 }
 
-#[test]
-fn an_answer_shared_by_an_absorbed_submission_is_delivered_once() {
-    let home = TempDir::new().expect("temp home");
-    let harness = Harness::open(home.path()).expect("open harness");
-    let session = harness.session();
+fn two_messages_share_an_answer(session: &hearth_core::Session) -> (String, String, String) {
     let conversation = session
         .create_conversation("Chat", "telegram", "1:0")
         .expect("create conversation");
-
     let active = session
         .submit_telegram(
             &conversation.id,
@@ -396,13 +391,30 @@ fn an_answer_shared_by_an_absorbed_submission_is_delivered_once() {
         )
         .expect("settle absorbed");
 
+    (
+        conversation.id,
+        active.submission.id,
+        absorbed.submission.id,
+    )
+}
+
+fn record_delivery(session: &hearth_core::Session, conversation: &str, submission: &str) {
     session
-        .save(Save::new(&conversation.id).effect(EffectIntent::new(
+        .save(Save::new(conversation).effect(EffectIntent::new(
             "telegram.send",
-            format!("tg:{}", active.submission.id),
+            format!("tg:{submission}"),
             json!({"chat_id": 1, "markdown": "one answer"}),
         )))
         .expect("record the delivery");
+}
+
+#[test]
+fn an_answer_shared_by_an_absorbed_submission_is_delivered_once() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let (conversation, active, _absorbed) = two_messages_share_an_answer(session);
+    record_delivery(session, &conversation, &active);
 
     let owed = session
         .done_answers_without_delivery(0)
@@ -410,5 +422,22 @@ fn an_answer_shared_by_an_absorbed_submission_is_delivered_once() {
     assert!(
         owed.is_empty(),
         "the shared answer was delivered once and is not owed again: {owed:?}"
+    );
+}
+
+#[test]
+fn a_delivery_recorded_for_the_absorbed_submission_settles_the_shared_answer() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let (conversation, _active, absorbed) = two_messages_share_an_answer(session);
+    record_delivery(session, &conversation, &absorbed);
+
+    let owed = session
+        .done_answers_without_delivery(0)
+        .expect("read undelivered answers");
+    assert!(
+        owed.is_empty(),
+        "a delivery recorded for any submission of the answer settles it: {owed:?}"
     );
 }
