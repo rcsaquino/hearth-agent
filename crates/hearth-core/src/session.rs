@@ -1130,6 +1130,9 @@ impl Session {
     ///
     /// The answer entry is part of the settled record, so a crash between the
     /// settle and the effect insert leaves enough information to deliver it.
+    /// An answer is delivered once: an absorbed submission shares the active
+    /// submission's answer entry, so only the earliest submission for an
+    /// answer owns its delivery.
     pub fn done_answers_without_delivery(
         &self,
         since: i64,
@@ -1144,6 +1147,10 @@ impl Session {
                  JOIN entries e ON e.id = s.answer_entry_id \
                  WHERE s.status = 'done' AND s.answer_entry_id IS NOT NULL \
                  AND s.settled_at >= ? AND c.transport = 'telegram' \
+                 AND s.id = (SELECT owner.id FROM submissions owner \
+                   WHERE owner.answer_entry_id = s.answer_entry_id \
+                   AND owner.status = 'done' \
+                   ORDER BY owner.created_at, owner.id LIMIT 1) \
                  AND NOT EXISTS ( \
                    SELECT 1 FROM effects f WHERE f.kind = 'telegram.send' \
                    AND f.key = 'tg:' || s.id) \
