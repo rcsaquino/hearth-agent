@@ -2905,9 +2905,10 @@ just after.
   submission is settled `done` with the active submission's answer, so the old
   per-submission `tg:<id>` check reported it as undelivered and the startup
   recovery sent the answer again. The query now only returns the earliest settled
-  submission for an answer. That keeps the effect keyed by submission while making
-  the shared answer owe at most one delivery. A crash before the delivery intent
-  still derives the intent from the record.
+  submission for an answer, and treats the answer as delivered when any
+  submission sharing it has a `telegram.send` effect. That keeps the effect keyed
+  by submission while making the shared answer owe at most one delivery. A crash
+  before the delivery intent still derives the intent from the record.
 - No schema change. The tests are
   `an_answer_shared_by_an_absorbed_submission_is_delivered_once`,
   `a_delivered_answer_is_not_sent_again_after_a_restart`,

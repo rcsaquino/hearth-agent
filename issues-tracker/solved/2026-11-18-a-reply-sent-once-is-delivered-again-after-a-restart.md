@@ -58,13 +58,16 @@ looked undelivered even though the active submission had already delivered the
 shared answer. Startup recovery derived a delivery from that row and sent the
 answer again as "Recovered reply:".
 
-The query now returns only the earliest settled submission for an answer entry.
-Delivery stays keyed by submission, and a shared answer owes one delivery. The
-gap and the age of the reply do not matter; the second message only needs to be
-queued while the first run is active so the two submissions share an answer.
+The query now returns only the earliest settled submission for an answer entry,
+and it treats the answer as delivered when any submission sharing that answer has
+a `telegram.send` effect. Delivery stays keyed by submission, and a shared answer
+owes one delivery. The gap and the age of the reply do not matter; the second
+message only needs to be queued while the first run is active so the two
+submissions share an answer.
 
-Commits: `f286f2a` fixes the query, `4f9da5c` adds the failing core test, and
-`7c4cb1e` adds the daemon restart test.
+Commits: `f286f2a` fixes the per-answer ownership, `7f46363` lets any submission's
+delivery record settle the answer, `4f9da5c` and `c237605` add the failing core
+tests, and `7c4cb1e` adds the daemon restart test.
 
 Verified: the core test failed with the absorbed submission in the owed list and
 passes after the fix. The daemon test sends two messages in one batch, confirms
