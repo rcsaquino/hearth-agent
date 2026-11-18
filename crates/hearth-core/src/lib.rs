@@ -24,8 +24,9 @@ pub use guidance::{
 };
 pub use model::{
     Commit, CommitRecord, Conversation, Effect, EffectIntent, EffectStatus, Entry, NewEntry,
-    NewSubmission, NewUsage, PromptBlob, Save, Settle, Submission, SubmissionStatus, SubmitResult,
-    TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals, cache_hit_rate,
+    NewSubmission, NewUsage, PromptBlob, Save, Settle, StagedAlbum, StagedAlbumMember, Submission,
+    SubmissionStatus, SubmitResult, TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent,
+    UsageTotals, cache_hit_rate,
 };
 pub use prompt::{Prompt, PromptInput, build as build_prompt, parse_blocks, prefix_cause};
 pub use session::{Harness, PROMPT_BLOB_RETENTION_MICROS, Session};

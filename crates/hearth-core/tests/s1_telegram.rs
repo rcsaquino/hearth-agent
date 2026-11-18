@@ -441,3 +441,128 @@ fn a_delivery_recorded_for_the_absorbed_submission_settles_the_shared_answer() {
         "a delivery recorded for any submission of the answer settles it: {owed:?}"
     );
 }
+
+fn stage(session: &hearth_core::Session, update_id: i64, message_id: i64, ready_at: i64) -> bool {
+    session
+        .stage_telegram_album_member(
+            1,
+            "album-1",
+            None,
+            TelegramUpdate {
+                update_id,
+                chat_id: 1,
+                message_id,
+            },
+            json!({"message_id": message_id, "text": format!("photo {message_id}")}),
+            ready_at,
+            update_id + 1,
+        )
+        .expect("stage album member")
+}
+
+#[test]
+fn staging_an_album_member_holds_it_until_the_window() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+
+    assert!(stage(session, 1, 10, 2_000_000));
+    assert!(session.telegram_album_pending().expect("pending"));
+    assert_eq!(session.telegram_offset().expect("offset"), 2);
+    assert!(
+        session
+            .due_telegram_albums(1_999_999)
+            .expect("due")
+            .is_empty(),
+        "the album is not due before its ready time"
+    );
+
+    let due = session.due_telegram_albums(2_000_000).expect("due");
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].chat_id, 1);
+    assert_eq!(due[0].group_id, "album-1");
+    assert_eq!(due[0].members.len(), 1);
+    assert_eq!(due[0].members[0].message_id, 10);
+    assert_eq!(due[0].members[0].message["text"], "photo 10");
+}
+
+#[test]
+fn a_later_album_member_extends_the_window() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+
+    assert!(stage(session, 1, 10, 2_000_000));
+    assert!(stage(session, 2, 11, 2_500_000));
+
+    assert!(
+        session
+            .due_telegram_albums(2_000_000)
+            .expect("due")
+            .is_empty(),
+        "the second member moved the group ready time"
+    );
+    let due = session.due_telegram_albums(2_500_000).expect("due");
+    assert_eq!(due.len(), 1);
+    let message_ids: Vec<i64> = due[0]
+        .members
+        .iter()
+        .map(|member| member.message_id)
+        .collect();
+    assert_eq!(message_ids, vec![10, 11], "members arrive in message order");
+}
+
+#[test]
+fn a_replayed_album_member_does_not_extend_the_window() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+
+    assert!(stage(session, 1, 10, 2_000_000));
+    assert!(
+        !stage(session, 1, 10, 3_000_000),
+        "the same update id is not staged twice"
+    );
+
+    let due = session.due_telegram_albums(2_000_000).expect("due");
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].members.len(), 1);
+}
+
+#[test]
+fn an_album_submission_clears_its_rows() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Chat", "telegram", "1:0")
+        .expect("create conversation");
+    assert!(stage(session, 1, 10, 2_000_000));
+    assert!(stage(session, 2, 11, 2_000_000));
+
+    let admission = session
+        .submit_telegram_album(
+            &conversation.id,
+            "tg:1:10",
+            json!({"text": "one album"}),
+            "10",
+            1,
+            "album-1",
+        )
+        .expect("submit album");
+
+    assert!(!admission.duplicate);
+    assert_eq!(admission.submission.request_id, "tg:1:10");
+    assert!(!session.telegram_album_pending().expect("pending"));
+    assert!(
+        session
+            .due_telegram_albums(i64::MAX)
+            .expect("due")
+            .is_empty(),
+        "a submitted album leaves no staged rows"
+    );
+    let history = session.history(&conversation.id).expect("history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].source.as_deref(), Some("10"));
+    assert_eq!(history[0].content["text"], "one album");
+}

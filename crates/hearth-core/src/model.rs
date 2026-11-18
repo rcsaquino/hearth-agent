@@ -272,6 +272,23 @@ pub struct TelegramAdmission {
     pub duplicate: bool,
 }
 
+/// One staged inbound album.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StagedAlbum {
+    pub chat_id: i64,
+    pub group_id: String,
+    pub thread_id: Option<i64>,
+    pub members: Vec<StagedAlbumMember>,
+}
+
+/// One staged album member, kept as the raw Telegram message.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StagedAlbumMember {
+    pub update_id: i64,
+    pub message_id: i64,
+    pub message: Value,
+}
+
 /// An entry to append in a save.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewEntry {
@@ -317,6 +334,7 @@ pub struct Save {
     pub(crate) effects: Vec<EffectIntent>,
     pub(crate) telegram_update: Option<TelegramUpdate>,
     pub(crate) telegram_offset: Option<i64>,
+    pub(crate) album: Option<(i64, String)>,
     pub(crate) meta: Vec<MetaWrite>,
 }
 
@@ -331,6 +349,7 @@ impl Save {
             effects: Vec::new(),
             telegram_update: None,
             telegram_offset: None,
+            album: None,
             meta: Vec::new(),
         }
     }
@@ -400,6 +419,12 @@ impl Save {
     /// Advance the Telegram offset in the same save.
     pub fn telegram_offset(mut self, offset: i64) -> Self {
         self.telegram_offset = Some(offset);
+        self
+    }
+
+    /// Remove a staged album in the same save as its submission.
+    pub fn clear_album(mut self, chat_id: i64, group_id: impl Into<String>) -> Self {
+        self.album = Some((chat_id, group_id.into()));
         self
     }
 

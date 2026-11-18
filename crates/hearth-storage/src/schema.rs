@@ -34,3 +34,6 @@ pub const MIGRATION_0011: &str = include_str!("../migrations/0011.sql");
 
 /// Migration 0012 links a submission to the user entry it answers.
 pub const MIGRATION_0012: &str = include_str!("../migrations/0012.sql");
+
+/// Migration 0013 stages inbound album members until their quiet window.
+pub const MIGRATION_0013: &str = include_str!("../migrations/0013.sql");

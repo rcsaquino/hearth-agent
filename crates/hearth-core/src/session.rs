@@ -11,8 +11,8 @@ use crate::clock::{Clock, IdGen, SystemClock, UuidV7};
 use crate::error::CoreError;
 use crate::model::{
     Commit, CommitRecord, Conversation, Effect, EffectStatus, Entry, NewEntry, NewSubmission,
-    NewUsage, PromptBlob, Save, Submission, SubmissionStatus, SubmitResult, TaskCounts,
-    TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
+    NewUsage, PromptBlob, Save, StagedAlbum, StagedAlbumMember, Submission, SubmissionStatus,
+    SubmitResult, TaskCounts, TelegramAdmission, TelegramUpdate, UsageEvent, UsageTotals,
 };
 use crate::prompt::{Prompt, PromptInput};
 use crate::task::{ClaimedTask, NewTask, RecoveryReport, StepOutput, Task, TaskStatus};
@@ -322,6 +322,16 @@ impl Session {
                         "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                         (offset.to_string(),),
+                    )?;
+                }
+                if let Some((chat_id, group_id)) = save.album.as_ref() {
+                    writer.execute(
+                        "DELETE FROM telegram_album_members WHERE chat_id = ? AND group_id = ?",
+                        (*chat_id, group_id.as_str()),
+                    )?;
+                    writer.execute(
+                        "DELETE FROM telegram_albums WHERE chat_id = ? AND group_id = ?",
+                        (*chat_id, group_id.as_str()),
                     )?;
                 }
                 for meta in &save.meta {
@@ -1050,6 +1060,192 @@ impl Session {
                 }
                 Ok(inserted)
             })
+    }
+
+    /// Stage one album member durably until its quiet window passes.
+    ///
+    /// The member, the group's ready time, the update row, and the offset are
+    /// written together. A replayed member returns `false` and leaves the
+    /// group's ready time unchanged.
+    pub fn stage_telegram_album_member(
+        &self,
+        chat_id: i64,
+        group_id: &str,
+        thread_id: Option<i64>,
+        update: TelegramUpdate,
+        message: Value,
+        ready_at: i64,
+        next_offset: i64,
+    ) -> Result<bool, CoreError> {
+        let now = self.clock.now_micros();
+        let message_json = message.to_string();
+        let group_id = group_id.to_owned();
+        self.storage
+            .write(move |writer| -> Result<bool, CoreError> {
+                writer.execute(
+                    "INSERT INTO telegram_albums (chat_id, group_id, thread_id, ready_at, created_at) \
+                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(chat_id, group_id) DO NOTHING",
+                    (chat_id, group_id.as_str(), thread_id, ready_at, now),
+                )?;
+                let inserted = writer.execute(
+                    "INSERT INTO telegram_album_members \
+                 (update_id, chat_id, group_id, message_id, message_json) \
+                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(update_id) DO NOTHING",
+                    (
+                        update.update_id,
+                        chat_id,
+                        group_id.as_str(),
+                        update.message_id,
+                        message_json.as_str(),
+                    ),
+                )?;
+                if inserted != 1 {
+                    return Ok(false);
+                }
+                writer.execute(
+                    "UPDATE telegram_albums SET thread_id = ?, ready_at = ? \
+                 WHERE chat_id = ? AND group_id = ?",
+                    (thread_id, ready_at, chat_id, group_id.as_str()),
+                )?;
+                match writer.execute(
+                    "INSERT INTO telegram_updates (update_id, chat_id, message_id, processed_at) \
+                 VALUES (?, ?, ?, ?)",
+                    (update.update_id, update.chat_id, update.message_id, now),
+                ) {
+                    Ok(_) => {}
+                    Err(error) if error.is_unique_violation() => return Ok(false),
+                    Err(error) => return Err(error.into()),
+                }
+                writer.execute(
+                    "INSERT INTO meta (key, value) VALUES ('telegram_offset', ?) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (next_offset.to_string(),),
+                )?;
+                Ok(true)
+            })
+    }
+
+    /// The staged albums whose quiet window has passed, oldest first.
+    pub fn due_telegram_albums(&self, now: i64) -> Result<Vec<StagedAlbum>, CoreError> {
+        let groups: Vec<(i64, String, Option<i64>)> = self.storage.read(|reader| {
+            reader.query(
+                "SELECT chat_id, group_id, thread_id FROM telegram_albums \
+             WHERE ready_at <= ? ORDER BY ready_at, chat_id, group_id",
+                (now,),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+        })?;
+        let mut albums = Vec::with_capacity(groups.len());
+        for (chat_id, group_id, thread_id) in groups {
+            let rows: Vec<(i64, i64, String)> = self.storage.read(|reader| {
+                reader.query(
+                    "SELECT update_id, message_id, message_json FROM telegram_album_members \
+                 WHERE chat_id = ? AND group_id = ? ORDER BY message_id",
+                    (chat_id, group_id.as_str()),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+            })?;
+            let mut members = Vec::with_capacity(rows.len());
+            for (update_id, message_id, json) in rows {
+                let message = serde_json::from_str(&json)
+                    .map_err(|error| CoreError::Corrupt(error.to_string()))?;
+                members.push(StagedAlbumMember {
+                    update_id,
+                    message_id,
+                    message,
+                });
+            }
+            if members.is_empty() {
+                self.clear_telegram_album(chat_id, &group_id)?;
+                continue;
+            }
+            albums.push(StagedAlbum {
+                chat_id,
+                group_id,
+                thread_id,
+                members,
+            });
+        }
+        Ok(albums)
+    }
+
+    /// Whether any album is waiting for its quiet window.
+    pub fn telegram_album_pending(&self) -> Result<bool, CoreError> {
+        let pending: i64 = self.storage.read(|reader| {
+            reader.query_row("SELECT EXISTS(SELECT 1 FROM telegram_albums)", [], |row| {
+                row.get(0)
+            })
+        })?;
+        Ok(pending != 0)
+    }
+
+    /// Remove one staged album and its members.
+    pub fn clear_telegram_album(&self, chat_id: i64, group_id: &str) -> Result<(), CoreError> {
+        let group_id = group_id.to_owned();
+        self.storage.write(move |writer| -> Result<(), CoreError> {
+            writer.execute(
+                "DELETE FROM telegram_album_members WHERE chat_id = ? AND group_id = ?",
+                (chat_id, group_id.as_str()),
+            )?;
+            writer.execute(
+                "DELETE FROM telegram_albums WHERE chat_id = ? AND group_id = ?",
+                (chat_id, group_id.as_str()),
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Submit one merged album as one entry and submission, and clear its rows.
+    ///
+    /// The album's update ids were recorded when its members were staged, so
+    /// this save does not touch `telegram_updates` or the offset.
+    pub fn submit_telegram_album(
+        &self,
+        conversation_id: &str,
+        request_id: &str,
+        content: Value,
+        source: &str,
+        chat_id: i64,
+        group_id: &str,
+    ) -> Result<TelegramAdmission, CoreError> {
+        Self::require_request(&content)?;
+        let id = self.ids.new_id();
+        let entry = NewEntry {
+            kind: "user".to_owned(),
+            content: content.clone(),
+            source: Some(source.to_owned()),
+            prompt_hash: None,
+        };
+        let save = Save::new(conversation_id)
+            .entry_with(entry)
+            .submission(NewSubmission {
+                id: id.clone(),
+                request_id: request_id.to_owned(),
+                kind: "input".to_owned(),
+                content,
+            })
+            .clear_album(chat_id, group_id);
+        match self.save(save) {
+            Ok(_) => {
+                let submission = self
+                    .submission_by_id(&id)?
+                    .ok_or_else(|| CoreError::SubmissionNotFound(id.clone()))?;
+                Ok(TelegramAdmission {
+                    submission,
+                    duplicate: false,
+                })
+            }
+            Err(CoreError::Storage(error)) if error.is_unique_violation() => {
+                match self.submission_by_request_id(request_id)? {
+                    Some(submission) => Ok(TelegramAdmission {
+                        submission,
+                        duplicate: true,
+                    }),
+                    None => Err(CoreError::Storage(error)),
+                }
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Count queued submissions in one conversation.
