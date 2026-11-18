@@ -1880,3 +1880,114 @@ mod tests {
         assert_eq!(contents.len(), 3, "{contents:?}");
     }
 }
+
+#[cfg(test)]
+mod duplicate_tests {
+    use super::*;
+    use hearth_core::Harness;
+    use tempfile::TempDir;
+
+    fn home() -> (TempDir, hearth_core::Session) {
+        let directory = TempDir::new().expect("temp home");
+        let harness = Harness::open(directory.path()).expect("harness");
+        (directory, harness.session().clone())
+    }
+
+    fn write(session: &hearth_core::Session, item: NewMemory) -> WriteOutcome {
+        insert(
+            session,
+            Pending { item, vector: None },
+            crate::MemoryConfig::default().rules_max_tokens,
+        )
+        .expect("write")
+    }
+
+    #[test]
+    fn a_changed_value_about_one_subject_is_not_a_duplicate() {
+        let (_directory, session) = home();
+        let first = write(
+            &session,
+            NewMemory::new("the primary database is SQLite").subject("primary database"),
+        );
+        let second = write(
+            &session,
+            NewMemory::new("the primary database is Postgres").subject("primary database"),
+        );
+        assert!(second.created(), "a changed value is a new statement");
+        assert_ne!(first.memory().id, second.memory().id);
+    }
+
+    #[test]
+    fn a_statement_that_contains_an_earlier_one_replaces_it() {
+        let (_directory, session) = home();
+        let short = write(
+            &session,
+            NewMemory::new("Kya has a nut allergy").subject("kya"),
+        );
+        let long = write(
+            &session,
+            NewMemory::new(
+                "Kya has a nut allergy including pistachio; verify ingredients rather than \
+                 assuming a food is safe",
+            )
+            .subject("kya"),
+        );
+        assert!(long.created(), "the fuller wording must be stored");
+        assert_eq!(
+            count(&session).expect("count"),
+            1,
+            "one fact must leave one current row"
+        );
+        let earlier = long_ago(&session, &short.memory().id);
+        assert_eq!(earlier.superseded_by.as_deref(), Some(long.memory().id.as_str()));
+        assert!(long.memory().content.contains("pistachio"));
+    }
+
+    #[test]
+    fn a_statement_an_earlier_one_contains_keeps_the_earlier_row() {
+        let (_directory, session) = home();
+        let long = write(
+            &session,
+            NewMemory::new(
+                "Kya has a nut allergy including pistachio; verify ingredients rather than \
+                 assuming a food is safe",
+            )
+            .subject("kya"),
+        );
+        let short = write(
+            &session,
+            NewMemory::new("Kya has a nut allergy").subject("kya"),
+        );
+        assert!(!short.created(), "the shorter wording adds nothing");
+        assert_eq!(short.memory().id, long.memory().id);
+        assert_eq!(count(&session).expect("count"), 1);
+    }
+
+    #[test]
+    fn a_different_fact_about_the_same_subject_is_not_contained() {
+        let (_directory, session) = home();
+        write(
+            &session,
+            NewMemory::new("Kya has a nut allergy").subject("kya"),
+        );
+        let other = write(
+            &session,
+            NewMemory::new("Kya's sister is Ana").subject("kya"),
+        );
+        assert!(other.created(), "a different fact must be its own row");
+        assert_eq!(count(&session).expect("count"), 2);
+    }
+
+    fn long_ago(session: &hearth_core::Session, id: &str) -> Memory {
+        session
+            .storage()
+            .read(|reader| {
+                reader.query_row(
+                    &format!("SELECT {COLUMNS} FROM memories WHERE id = ?"),
+                    [id],
+                    map_memory,
+                )
+            })
+            .expect("read row")
+    }
+}

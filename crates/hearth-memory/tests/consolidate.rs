@@ -92,7 +92,7 @@ fn a_canonical_duplicate_closes_all_but_one() {
 }
 
 #[test]
-fn a_near_duplicate_is_reported_and_neither_row_changes() {
+fn a_near_duplicate_the_write_gate_refuses_is_closed_by_the_pass() {
     let (_directory, harness) = home();
     let service = MemoryService::new(harness.session().clone());
     seed(
@@ -100,7 +100,7 @@ fn a_near_duplicate_is_reported_and_neither_row_changes() {
         "m_near1",
         "the user prefers dark mode",
         "user",
-        "preference",
+        "fact",
         false,
     );
     seed(
@@ -114,9 +114,77 @@ fn a_near_duplicate_is_reported_and_neither_row_changes() {
 
     let report = service.consolidate().expect("consolidate");
     assert!(report.near_duplicates >= 1, "{report:?}");
-    assert_eq!(service.count().expect("count"), 2);
-    assert!(current(&service, "m_near1").valid_to.is_none());
-    assert!(current(&service, "m_near2").valid_to.is_none());
+    let first = current(&service, "m_near1");
+    let second = current(&service, "m_near2");
+    assert!(
+        first.valid_to.is_some() || second.valid_to.is_some(),
+        "one row must close"
+    );
+    let (kept, closed) = if first.valid_to.is_none() {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(closed.superseded_by.as_deref(), Some(kept.id.as_str()));
+}
+
+#[test]
+fn a_near_pair_keeps_the_fuller_wording() {
+    let (_directory, harness) = home();
+    let service = MemoryService::new(harness.session().clone());
+    seed(
+        harness.session(),
+        "m_full",
+        "kya has a nut allergy including pistachio and carries an epipen",
+        "kya",
+        "fact",
+        false,
+    );
+    seed(
+        harness.session(),
+        "m_thin",
+        "kya has a nut allergy",
+        "kya",
+        "fact",
+        false,
+    );
+
+    service.consolidate().expect("consolidate");
+    assert!(
+        current(&service, "m_full").valid_to.is_none(),
+        "the fuller wording must stay current even when it is older"
+    );
+    assert_eq!(
+        current(&service, "m_thin").superseded_by.as_deref(),
+        Some("m_full")
+    );
+}
+
+#[test]
+fn two_different_facts_about_one_subject_are_left_current() {
+    let (_directory, harness) = home();
+    let service = MemoryService::new(harness.session().clone());
+    seed(
+        harness.session(),
+        "m_allergy",
+        "kya has a nut allergy",
+        "kya",
+        "fact",
+        false,
+    );
+    seed(
+        harness.session(),
+        "m_sister",
+        "kya's sister is ana",
+        "kya",
+        "person",
+        false,
+    );
+
+    let report = service.consolidate().expect("consolidate");
+    assert_eq!(report.near_duplicates, 0, "{report:?}");
+    assert!(current(&service, "m_allergy").valid_to.is_none());
+    assert!(current(&service, "m_sister").valid_to.is_none());
 }
 
 #[test]

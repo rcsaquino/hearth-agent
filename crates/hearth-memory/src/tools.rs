@@ -714,13 +714,14 @@ mod tests {
         )
         .expect("result");
         assert!(
-            second.content.contains("not a duplicate"),
-            "a neighbour is not a replacement: {}",
+            second.content.contains("related"),
+            "a neighbour must be named: {}",
             second.content
         );
         assert!(
-            !second.content.contains("Pass supersedes"),
-            "a non-replacing statement must not recommend supersedes: {}",
+            second.content.contains("supersedes ="),
+            "the reply must name the replacement lever, because a changed value is a \
+             replacement the model has to make on this turn: {}",
             second.content
         );
     }
