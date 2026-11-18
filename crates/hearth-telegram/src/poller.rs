@@ -178,7 +178,6 @@ impl TelegramPoller {
                 let message_json = serde_json::to_value(message)
                     .map_err(|error| PollError::Core(CoreError::Invalid(error.to_string())))?;
                 let staged = self.session.stage_telegram_album_member(
-                    message.chat.id,
                     group_id,
                     message.message_thread_id,
                     TelegramUpdate {

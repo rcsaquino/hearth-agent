@@ -1069,7 +1069,6 @@ impl Session {
     /// group's ready time unchanged.
     pub fn stage_telegram_album_member(
         &self,
-        chat_id: i64,
         group_id: &str,
         thread_id: Option<i64>,
         update: TelegramUpdate,
@@ -1078,6 +1077,7 @@ impl Session {
         next_offset: i64,
     ) -> Result<bool, CoreError> {
         let now = self.clock.now_micros();
+        let chat_id = update.chat_id;
         let message_json = message.to_string();
         let group_id = group_id.to_owned();
         self.storage

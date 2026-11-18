@@ -831,7 +831,6 @@ fn a_staged_album_survives_a_restart() {
             }
             session
                 .stage_telegram_album_member(
-                    42,
                     "album-1",
                     None,
                     TelegramUpdate {

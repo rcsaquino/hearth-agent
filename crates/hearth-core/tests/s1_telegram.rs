@@ -445,7 +445,6 @@ fn a_delivery_recorded_for_the_absorbed_submission_settles_the_shared_answer() {
 fn stage(session: &hearth_core::Session, update_id: i64, message_id: i64, ready_at: i64) -> bool {
     session
         .stage_telegram_album_member(
-            1,
             "album-1",
             None,
             TelegramUpdate {
