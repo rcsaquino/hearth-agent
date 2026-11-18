@@ -2019,4 +2019,35 @@ mod tests {
         assert!(other.created(), "a different fact must be its own row");
         assert_eq!(count(&session).expect("count"), 2);
     }
+
+    #[test]
+    fn a_reworded_restatement_the_store_cannot_prove_is_left_current() {
+        let (_directory, session) = home();
+        let first = write(
+            &session,
+            NewMemory::new(
+                "Kya has a nut allergy including pistachio; verify ingredients rather than \
+                 assuming a food is safe",
+            )
+            .subject("kya"),
+        );
+        let second = write(
+            &session,
+            NewMemory::new(
+                "Kya, Sir's partner, has a nut allergy including pistachio, so ingredients \
+                 must be verified rather than assumed safe",
+            )
+            .subject("kya"),
+        );
+        assert!(
+            second.created(),
+            "neither wording contains the other, so the store must not choose"
+        );
+        assert_eq!(count(&session).expect("count"), 2);
+        let overlap = similarity(&first.memory().content, &second.memory().content);
+        assert!(
+            (overlap - 0.476).abs() < 0.001,
+            "the pair overlaps by 0.476, below the 0.60 to 0.71 a changed value scores: {overlap}"
+        );
+    }
 }
