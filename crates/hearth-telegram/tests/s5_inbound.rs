@@ -701,12 +701,7 @@ fn image_paths(blocks: &[Value]) -> Vec<String> {
     blocks
         .iter()
         .filter(|block| block["type"] == "image")
-        .map(|block| {
-            block["path"]
-                .as_str()
-                .expect("image path")
-                .to_owned()
-        })
+        .map(|block| block["path"].as_str().expect("image path").to_owned())
         .collect()
 }
 
@@ -723,7 +718,11 @@ fn an_album_arrives_as_one_submission_with_every_photo() {
     let blocks = blocks(&submission);
     assert_eq!(blocks[0]["text"], "Does this warrant ERCP?");
     let images = image_paths(&blocks);
-    assert_eq!(images.len(), 2, "every photo belongs to the album: {blocks:?}");
+    assert_eq!(
+        images.len(),
+        2,
+        "every photo belongs to the album: {blocks:?}"
+    );
     assert!(images[0].ends_with("30-photo.jpg"), "{}", images[0]);
     assert!(images[1].ends_with("31-photo.jpg"), "{}", images[1]);
     assert!(
