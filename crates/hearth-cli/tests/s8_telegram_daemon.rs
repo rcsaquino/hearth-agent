@@ -726,6 +726,152 @@ fn a_delivered_answer_is_not_sent_again_after_a_restart() {
     let _ = provider_thread.join();
 }
 
+#[test]
+fn an_album_produces_one_reply() {
+    use hearth_core::Harness;
+
+    let (provider_base, provider_thread) = fake_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(
+        vec![
+            json!({
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    "date": 1_730_000_000,
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "media_group_id": "album-1",
+                    "caption": "Does this warrant ERCP?",
+                    "photo": [
+                        {"file_id": "a", "file_unique_id": "a", "width": 100, "height": 100, "file_size": 3}
+                    ]
+                }
+            }),
+            json!({
+                "update_id": 2,
+                "message": {
+                    "message_id": 11,
+                    "date": 1_730_000_001,
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                    "media_group_id": "album-1",
+                    "photo": [
+                        {"file_id": "b", "file_unique_id": "b", "width": 100, "height": 100, "file_size": 3}
+                    ]
+                }
+            }),
+        ],
+        false,
+    );
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let delivered = wait_for_rich_count(&telegram_state, 1);
+    thread::sleep(Duration::from_millis(500));
+    let replies = telegram_state.rich.lock().expect("rich").clone();
+    assert_eq!(
+        replies.len(),
+        1,
+        "one album must produce one reply: {replies:?}"
+    );
+    assert!(delivered[0].contains("Telegram answer"));
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let session = harness.session();
+    let album = session
+        .submission_by_request_id("tg:42:10")
+        .expect("lookup album")
+        .expect("album submission");
+    assert!(
+        session
+            .submission_by_request_id("tg:42:11")
+            .expect("lookup second")
+            .is_none(),
+        "the second member must not start its own turn"
+    );
+    assert_eq!(album.content[0]["text"], "Does this warrant ERCP?");
+}
+
+#[test]
+fn a_staged_album_survives_a_restart() {
+    use hearth_core::{Harness, TelegramUpdate};
+
+    let (provider_base, provider_thread) = fake_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+    {
+        let harness = Harness::open(home.path()).expect("open harness");
+        let session = harness.session();
+        session
+            .create_conversation("Sam", "telegram", "42:0")
+            .expect("conversation");
+        for (update_id, message_id, file_id, with_caption) in
+            [(1, 10, "a", true), (2, 11, "b", false)]
+        {
+            let mut message = json!({
+                "message_id": message_id,
+                "date": 1_730_000_000 + message_id - 10,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "media_group_id": "album-1",
+                "photo": [
+                    {"file_id": file_id, "file_unique_id": file_id, "width": 100, "height": 100, "file_size": 3}
+                ]
+            });
+            if with_caption {
+                message["caption"] = json!("Does this warrant ERCP?");
+            }
+            session
+                .stage_telegram_album_member(
+                    42,
+                    "album-1",
+                    None,
+                    TelegramUpdate {
+                        update_id,
+                        chat_id: 42,
+                        message_id,
+                    },
+                    message,
+                    1,
+                    update_id + 1,
+                )
+                .expect("stage album member");
+        }
+    }
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let delivered = wait_for_rich_count(&telegram_state, 1);
+    assert!(delivered[0].contains("Telegram answer"));
+    daemon.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+
+    let harness = Harness::open(home.path()).expect("reopen harness");
+    let session = harness.session();
+    assert!(
+        session
+            .submission_by_request_id("tg:42:10")
+            .expect("lookup album")
+            .is_some(),
+        "the durable album must flush on startup"
+    );
+    assert!(
+        session
+            .due_telegram_albums(i64::MAX)
+            .expect("due")
+            .is_empty()
+    );
+}
+
 struct SlowProvider {
     base: String,
     started: Arc<AtomicBool>,
