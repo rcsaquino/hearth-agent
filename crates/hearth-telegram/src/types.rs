@@ -29,6 +29,8 @@ pub struct Message {
     #[serde(default)]
     pub rich_message: Option<RichMessage>,
     #[serde(default)]
+    pub media_group_id: Option<String>,
+    #[serde(default)]
     pub photo: Vec<PhotoSize>,
     #[serde(default)]
     pub document: Option<Document>,

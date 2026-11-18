@@ -1,8 +1,10 @@
 //! Telegram polling and durable admission.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use hearth_core::{CoreError, Session, TelegramUpdate};
 use hearth_model::Transcriber;
@@ -11,7 +13,7 @@ use thiserror::Error;
 
 use crate::api::{TelegramClient, TelegramError};
 use crate::media_store::InboundMedia;
-use crate::types::Message;
+use crate::types::{Message, Update};
 
 /// The largest attachment Telegram may deliver to Hearth.
 pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
@@ -20,6 +22,14 @@ pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_QUEUED_PER_CHAT: usize = 10;
 
 const BUSY_NOTICE: &str = "I'm busy with the current queue. Try again shortly.";
+
+const ALLOWED_UPDATES: &[&str] = &["message", "callback_query"];
+
+/// How long an album waits for another member before it is admitted.
+const ALBUM_QUIET_WINDOW: Duration = Duration::from_millis(500);
+
+/// The longest an album waits for a member that arrives slowly.
+const ALBUM_MAX_WAIT: Duration = Duration::from_secs(2);
 
 /// A polling failure.
 #[derive(Debug, Error)]
@@ -94,82 +104,83 @@ impl TelegramPoller {
         &self.session
     }
 
-    /// Poll once and admit authorized messages.
+    /// Poll once and admit authorized messages, holding an album until its
+    /// members arrive.
     pub fn poll_once(&self) -> Result<PollReport, PollError> {
         let offset = self.session.telegram_offset()?;
-        let updates =
-            self.client
-                .get_updates(offset, self.poll_timeout, &["message", "callback_query"])?;
+        let updates = self.collect_updates(offset)?;
         let mut report = PollReport {
             next_offset: offset,
             ..PollReport::default()
         };
-        for update in updates {
-            let next_offset = update.update_id + 1;
-            report.next_offset = next_offset;
-            let Some(message) = update.message.as_ref() else {
-                self.session.set_telegram_offset(next_offset)?;
+        let mut cursor = offset;
+        for item in batch_items(&updates) {
+            cursor = cursor.max(item.next_offset);
+            report.next_offset = cursor;
+            let Some(primary) = item.messages.first().copied() else {
+                self.session.set_telegram_offset(cursor)?;
                 report.ignored += 1;
                 continue;
             };
-            if !self.authorized(message) {
+            if !self.authorized(primary) {
                 tracing::warn!(
-                    update_id = update.update_id,
+                    update_id = item.update_id,
                     "ignored unauthorized telegram update"
                 );
-                self.session.set_telegram_offset(next_offset)?;
+                self.session.set_telegram_offset(cursor)?;
                 report.ignored += 1;
                 continue;
             }
-            if message
-                .text
-                .as_deref()
-                .is_some_and(|text| text.trim().eq_ignore_ascii_case("stop"))
-            {
+            if item.messages.iter().any(|message| {
+                message
+                    .text
+                    .as_deref()
+                    .is_some_and(|text| text.trim().eq_ignore_ascii_case("stop"))
+            }) {
                 let recorded = self.session.record_telegram_update(
                     TelegramUpdate {
-                        update_id: update.update_id,
-                        chat_id: message.chat.id,
-                        message_id: message.message_id,
+                        update_id: item.update_id,
+                        chat_id: primary.chat.id,
+                        message_id: primary.message_id,
                     },
-                    next_offset,
+                    cursor,
                 )?;
                 if !recorded {
-                    self.session.set_telegram_offset(next_offset)?;
+                    self.session.set_telegram_offset(cursor)?;
                     report.duplicates += 1;
                     continue;
                 }
                 let active = self
                     .stop
                     .as_ref()
-                    .is_some_and(|handler| handler.stop(message.chat.id));
-                tracing::info!(chat_id = message.chat.id, active, "telegram stop");
+                    .is_some_and(|handler| handler.stop(primary.chat.id));
+                tracing::info!(chat_id = primary.chat.id, active, "telegram stop");
                 report.stopped += 1;
                 continue;
             }
-            if self.session.telegram_update_seen(update.update_id)? {
-                self.session.set_telegram_offset(next_offset)?;
+            if self.session.telegram_update_seen(item.update_id)? {
+                self.session.set_telegram_offset(cursor)?;
                 report.duplicates += 1;
                 continue;
             }
 
-            if !has_content(message) {
-                self.session.set_telegram_offset(next_offset)?;
+            if !has_content(&item.messages) {
+                self.session.set_telegram_offset(cursor)?;
                 report.ignored += 1;
                 continue;
             }
 
-            let thread_id = message.message_thread_id.unwrap_or(0);
-            let key = format!("{}:{}", message.chat.id, thread_id);
+            let thread_id = primary.message_thread_id.unwrap_or(0);
+            let key = format!("{}:{}", primary.chat.id, thread_id);
             let conversation = match self.session.conversation_by_transport("telegram", &key)? {
                 Some(conversation) => conversation,
                 None => {
-                    let title = message
+                    let title = primary
                         .chat
                         .title
                         .clone()
                         .or_else(|| {
-                            message
+                            primary
                                 .from
                                 .as_ref()
                                 .and_then(|user| user.first_name.clone())
@@ -183,12 +194,12 @@ impl TelegramPoller {
                 let notify = self
                     .busy_notified
                     .lock()
-                    .map(|mut chats| chats.insert(message.chat.id))
+                    .map(|mut chats| chats.insert(primary.chat.id))
                     .unwrap_or(false);
                 if notify
                     && let Err(error) = self.client.send_message(
-                        message.chat.id,
-                        message.message_thread_id,
+                        primary.chat.id,
+                        primary.message_thread_id,
                         BUSY_NOTICE,
                         &[],
                     )
@@ -197,14 +208,14 @@ impl TelegramPoller {
                 }
                 let recorded = self.session.record_telegram_update(
                     TelegramUpdate {
-                        update_id: update.update_id,
-                        chat_id: message.chat.id,
-                        message_id: message.message_id,
+                        update_id: item.update_id,
+                        chat_id: primary.chat.id,
+                        message_id: primary.message_id,
                     },
-                    next_offset,
+                    cursor,
                 )?;
                 if !recorded {
-                    self.session.set_telegram_offset(next_offset)?;
+                    self.session.set_telegram_offset(cursor)?;
                     report.duplicates += 1;
                 } else {
                     report.busy += 1;
@@ -212,33 +223,33 @@ impl TelegramPoller {
                 continue;
             }
             if let Ok(mut chats) = self.busy_notified.lock() {
-                chats.remove(&message.chat.id);
+                chats.remove(&primary.chat.id);
             }
 
-            let blocks = self.blocks(message);
+            let blocks = self.blocks(&item.messages);
             if blocks.is_empty() {
-                self.session.set_telegram_offset(next_offset)?;
+                self.session.set_telegram_offset(cursor)?;
                 report.ignored += 1;
                 continue;
             }
 
-            let request_id = format!("tg:{}:{}", message.chat.id, message.message_id);
+            let request_id = format!("tg:{}:{}", primary.chat.id, primary.message_id);
             if let Some(handler) = self.stop.as_ref() {
-                handler.admit(message.chat.id);
+                handler.admit(primary.chat.id);
             }
             let admission = self.session.submit_telegram(
                 &conversation.id,
                 &request_id,
                 Value::Array(blocks),
                 TelegramUpdate {
-                    update_id: update.update_id,
-                    chat_id: message.chat.id,
-                    message_id: message.message_id,
+                    update_id: item.update_id,
+                    chat_id: primary.chat.id,
+                    message_id: primary.message_id,
                 },
-                next_offset,
+                cursor,
             )?;
             if admission.duplicate {
-                self.session.set_telegram_offset(next_offset)?;
+                self.session.set_telegram_offset(cursor)?;
                 report.duplicates += 1;
                 continue;
             }
@@ -247,18 +258,61 @@ impl TelegramPoller {
         Ok(report)
     }
 
-    fn blocks(&self, message: &Message) -> Vec<Value> {
+    /// Read the batch, and give an album a moment to deliver every member.
+    fn collect_updates(&self, offset: i64) -> Result<Vec<Update>, TelegramError> {
+        let mut updates = BTreeMap::new();
+        for update in self
+            .client
+            .get_updates(offset, self.poll_timeout, ALLOWED_UPDATES)?
+        {
+            updates.insert(update.update_id, update);
+        }
+        if !updates.values().any(is_album_update) {
+            return Ok(updates.into_values().collect());
+        }
+        let deadline = Instant::now() + ALBUM_MAX_WAIT;
+        loop {
+            thread::sleep(ALBUM_QUIET_WINDOW);
+            let before = updates.len();
+            for update in self.client.get_updates(offset, 0, ALLOWED_UPDATES)? {
+                updates.insert(update.update_id, update);
+            }
+            if updates.len() == before || Instant::now() >= deadline {
+                break;
+            }
+        }
+        Ok(updates.into_values().collect())
+    }
+
+    fn blocks(&self, messages: &[&Message]) -> Vec<Value> {
         let mut blocks = Vec::new();
-        if let Some(context) = message.reply_to_message.as_deref().and_then(reply_context) {
-            blocks.push(json!({"type": "text", "text": context}));
-        } else if let Some(context) = message.external_reply.as_ref().and_then(quoted_span) {
+        if let Some(context) = messages.iter().find_map(|message| {
+            message
+                .reply_to_message
+                .as_deref()
+                .and_then(reply_context)
+                .or_else(|| message.external_reply.as_ref().and_then(quoted_span))
+        }) {
             blocks.push(json!({"type": "text", "text": context}));
         }
 
-        if let Some(text) = message_text(message) {
+        let text = messages
+            .iter()
+            .filter_map(|message| message_text(message))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !text.is_empty() {
             blocks.push(json!({"type": "text", "text": text}));
         }
 
+        for message in messages {
+            self.media_blocks(message, &mut blocks);
+        }
+        blocks
+    }
+
+    /// Save one message's attachment and append its content block.
+    fn media_blocks(&self, message: &Message, blocks: &mut Vec<Value>) {
         if let Some(photo) = message
             .photo
             .iter()
@@ -354,8 +408,6 @@ impl TelegramPoller {
                 Err(note) => blocks.push(json!({"type": "text", "text": note})),
             }
         }
-
-        blocks
     }
 
     fn save_attachment(
@@ -515,13 +567,65 @@ fn quoted_span(reply: &crate::types::ExternalReply) -> Option<String> {
     Some(format!("Replying to a quoted span: {}", quote_body(text)))
 }
 
-fn has_content(message: &Message) -> bool {
-    message_text(message).is_some()
-        || !message.photo.is_empty()
-        || message.document.is_some()
-        || message.audio.is_some()
-        || message.voice.is_some()
-        || message.video.is_some()
+fn has_content(messages: &[&Message]) -> bool {
+    messages.iter().any(|message| {
+        message_text(message).is_some()
+            || !message.photo.is_empty()
+            || message.document.is_some()
+            || message.audio.is_some()
+            || message.voice.is_some()
+            || message.video.is_some()
+    })
+}
+
+/// One admission: a single message, or one album's members.
+struct BatchItem<'a> {
+    messages: Vec<&'a Message>,
+    update_id: i64,
+    next_offset: i64,
+}
+
+/// Collapse one album's updates into one admission item.
+fn batch_items(updates: &[Update]) -> Vec<BatchItem<'_>> {
+    let mut items: Vec<BatchItem> = Vec::new();
+    let mut albums: HashMap<(i64, &str), usize> = HashMap::new();
+    for update in updates {
+        let next_offset = update.update_id + 1;
+        let Some(message) = update.message.as_ref() else {
+            items.push(BatchItem {
+                messages: Vec::new(),
+                update_id: update.update_id,
+                next_offset,
+            });
+            continue;
+        };
+        let album = message
+            .media_group_id
+            .as_deref()
+            .map(|group| (message.chat.id, group));
+        if let Some(index) = album.and_then(|key| albums.get(&key).copied()) {
+            let item = &mut items[index];
+            item.messages.push(message);
+            item.next_offset = item.next_offset.max(next_offset);
+            continue;
+        }
+        if let Some(key) = album {
+            albums.insert(key, items.len());
+        }
+        items.push(BatchItem {
+            messages: vec![message],
+            update_id: update.update_id,
+            next_offset,
+        });
+    }
+    items
+}
+
+fn is_album_update(update: &Update) -> bool {
+    update
+        .message
+        .as_ref()
+        .is_some_and(|message| message.media_group_id.is_some())
 }
 
 fn file_block(path: &std::path::Path, name: &str, mime: &str) -> Value {
