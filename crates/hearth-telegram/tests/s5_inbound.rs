@@ -660,6 +660,43 @@ fn one_undecodable_update_does_not_stop_the_batch() {
 }
 
 #[test]
+fn a_reply_to_a_rich_message_keeps_the_quote() {
+    let bot = FakeBot::start(
+        vec![message(
+            80,
+            20,
+            json!({
+                "text": "why did you send this?",
+                "reply_to_message": {
+                    "message_id": 7,
+                    "date": 1_700_000_000,
+                    "chat": {"id": 10, "type": "private"},
+                    "from": {"id": 999, "is_bot": true, "first_name": "Hearth"},
+                    "rich_message": {
+                        "blocks": [
+                            {"type": "paragraph", "text": "The errands are due Friday."},
+                            {"type": "table", "cells": [[{"text": "Task"}, {"text": "When"}]]}
+                        ]
+                    }
+                },
+            }),
+        )],
+        vec![],
+    );
+    let (_home, _harness, poller) = setup(&bot, None);
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.admitted, 1);
+
+    let blocks = blocks(&submission(&poller, "tg:10:20"));
+    assert_eq!(blocks.len(), 2);
+    let context = blocks[0]["text"].as_str().expect("context text");
+    assert!(context.contains("Replying to Hearth"), "{context}");
+    assert!(context.contains("The errands are due Friday."), "{context}");
+    assert_eq!(blocks[1]["text"], "why did you send this?");
+    bot.stop();
+}
+
+#[test]
 fn a_quoted_span_arrives_as_reply_context() {
     let bot = FakeBot::start(
         vec![message(
