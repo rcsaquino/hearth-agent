@@ -107,6 +107,7 @@ struct Report {
     secret_leaks: usize,
     supersession_correct: usize,
     supersession_count: usize,
+    similar_notices: usize,
 }
 
 fn ratio(part: usize, whole: usize) -> f64 {
@@ -233,6 +234,7 @@ fn run_fixture(service: &MemoryService, fixture: &Fixture) -> Report {
     let mut precision_sum = 0.0;
     let mut tokens = Vec::new();
     let mut latencies = Vec::new();
+    let mut similar_notices = 0usize;
     let mut supersession_correct = 0usize;
     let mut supersession_count = 0usize;
 
@@ -243,6 +245,9 @@ fn run_fixture(service: &MemoryService, fixture: &Fixture) -> Report {
             .expect("recall");
         latencies.push(started.elapsed().as_secs_f64() * 1_000.0);
         tokens.push(hearth_model::estimate_tokens(&recall.digest).max(0) as u64);
+        if recall.digest.contains("similar:") {
+            similar_notices += 1;
+        }
 
         let digest: Vec<&str> = recall
             .items
@@ -397,6 +402,7 @@ fn run_fixture(service: &MemoryService, fixture: &Fixture) -> Report {
         secret_leaks,
         supersession_correct,
         supersession_count,
+        similar_notices,
     }
 }
 
@@ -424,6 +430,10 @@ fn print(report: &Report) {
         report.duplicates_refused,
         report.duplicate_failures,
         report.secret_leaks
+    );
+    println!(
+        "similar-pair notices {} of {} · the digest names a pair it cannot judge",
+        report.similar_notices, report.questions
     );
     for (category, entry) in &report.categories {
         println!(
@@ -460,6 +470,12 @@ fn the_memory_benchmark_meets_its_targets() {
         "twenty questions are the spot-check set"
     );
     assert_eq!(report.secret_leaks, 0, "a credential reached the store");
+    assert!(
+        report.similar_notices <= 20,
+        "the similarity notice must stay rare: {} of {} questions",
+        report.similar_notices,
+        report.questions
+    );
     assert_eq!(
         report.supersession_count, 15,
         "the fixture must keep its fifteen contradiction questions, or the gate measures nothing"

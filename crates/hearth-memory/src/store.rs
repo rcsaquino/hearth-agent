@@ -262,6 +262,24 @@ pub(crate) fn one_statement(left: &str, right: &str) -> bool {
         || contains_statement(right, left)
 }
 
+/// How much two statements about one subject overlap before the store stops
+/// calling them separate.
+///
+/// The floor sits in a measured gap. A reworded restatement of one fact overlaps
+/// by 0.476 and a changed value by 0.667, so no floor tells them apart and the
+/// store names the pair instead of choosing. The fixture's template pairs, which
+/// are different facts, stop at 0.429.
+const MAYBE_SIMILARITY: f32 = 0.45;
+
+/// Whether two statements may be one fact the store cannot prove.
+///
+/// This is the read-side question. A write is refused or replaces an earlier row
+/// when `one_statement` holds; everything this admits is handed to the reader as
+/// a pair to judge, never closed.
+pub(crate) fn maybe_one_statement(left: &str, right: &str) -> bool {
+    !one_statement(left, right) && similarity(left, right) >= MAYBE_SIMILARITY
+}
+
 /// The stable digest of a normalised statement.
 pub fn fingerprint(content: &str) -> String {
     let mut hasher = Sha256::new();

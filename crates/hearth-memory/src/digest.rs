@@ -12,7 +12,7 @@
 //! stated explicitly, because a digest that silently shows six of fourteen facts
 //! teaches the model that six is all there is.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use crate::model::Memory;
 
@@ -29,6 +29,9 @@ const RULE_CHARS: usize = 400;
 
 /// How many subjects the coverage line names before it says "and more".
 const COVERAGE_SUBJECTS: usize = 3;
+
+/// How many pairs the similarity notice names in one line.
+const NOTICE_PAIRS: usize = 2;
 
 /// What the message named, and how much more the store holds about it.
 #[derive(Debug, Clone, Default)]
@@ -135,23 +138,26 @@ pub fn recall_body(items: &[Memory], coverage: &Coverage, now: i64) -> String {
     if items.is_empty() && coverage.is_empty() {
         return String::new();
     }
-    // A canonical duplicate is one statement in two rows. Until the repair pass
-    // closes it, the digest shows it once and says how many rows it hid.
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+    // A duplicate is one statement in two rows. Until the repair pass closes it,
+    // the digest shows it once and says how many rows it hid. The write gate's own
+    // test decides, so a reworded copy does not spend a line either.
     let mut hidden = 0usize;
     let mut shown: Vec<&Memory> = Vec::new();
     for memory in items {
-        let key = (
-            crate::store::fingerprint(&memory.content),
-            memory.subject.clone(),
-        );
-        if seen.insert(key) {
-            shown.push(memory);
-        } else {
+        let repeated = shown.iter().any(|kept| {
+            kept.subject == memory.subject
+                && (crate::store::fingerprint(&kept.content)
+                    == crate::store::fingerprint(&memory.content)
+                    || crate::store::one_statement(&kept.content, &memory.content))
+        });
+        if repeated {
             hidden += 1;
+        } else {
+            shown.push(memory);
         }
     }
     let mut lines: Vec<String> = shown.iter().map(|memory| line(memory, now)).collect();
+    lines.extend(similarity_lines(&shown));
     lines.extend(coverage_lines(&shown, coverage));
     if hidden > 0 {
         lines.push(format!(
@@ -159,6 +165,41 @@ pub fn recall_body(items: &[Memory], coverage: &Coverage, now: i64) -> String {
         ));
     }
     lines.join("\n")
+}
+
+/// One line naming the pairs the store cannot judge.
+///
+/// Two rows about one subject can overlap because one restates the other or
+/// because they disagree, and the overlap is about the same either way. The line
+/// hands that judgement to the model on the turn the pair costs a line, and
+/// changes nothing on its own.
+fn similarity_lines(items: &[&Memory]) -> Vec<String> {
+    let mut pairs: Vec<(&Memory, &Memory, f32)> = Vec::new();
+    for (index, left) in items.iter().enumerate() {
+        for right in items.iter().skip(index + 1) {
+            if left.subject.is_empty() || left.subject != right.subject {
+                continue;
+            }
+            if !crate::store::maybe_one_statement(&left.content, &right.content) {
+                continue;
+            }
+            let overlap = crate::store::similarity(&left.content, &right.content);
+            pairs.push((left, right, overlap));
+        }
+    }
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+    pairs.sort_by(|left, right| right.2.total_cmp(&left.2));
+    let named: Vec<String> = pairs
+        .iter()
+        .take(NOTICE_PAIRS)
+        .map(|(left, right, _)| format!("{}/{}", left.id, right.id))
+        .collect();
+    vec![format!(
+        "similar: {} | if they say one thing, memory(forget) one",
+        named.join(", ")
+    )]
 }
 
 /// The coverage line, when the digest shows a subset.
@@ -518,7 +559,9 @@ mod tests {
         ];
         let block = recall_body(&items, &Coverage::default(), 0);
         assert_eq!(
-            block.matches("the release gate needs two approvals").count(),
+            block
+                .matches("the release gate needs two approvals")
+                .count(),
             2,
             "one statement under two subjects is two claims: {block}"
         );
