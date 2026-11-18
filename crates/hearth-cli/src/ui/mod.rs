@@ -961,7 +961,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unused_skill_shows_unused() {
+    fn a_loaded_user_skill_stops_saying_unused() {
         let (home, mut app) = initialized_app();
         std::fs::create_dir_all(home.path().join("skills")).expect("skills dir");
         std::fs::write(
@@ -1003,6 +1003,7 @@ mod tests {
 
         library.record_use("triage").expect("use");
         library.record_outcome("triage", true).expect("success");
+        library.record_use("simple").expect("load the user skill");
         app.skills.reload();
         let text = buffer_text(&app, 100, 40);
         let row = |needle: &str| -> String {
@@ -1018,16 +1019,22 @@ mod tests {
             "a successful run has a rate: {text}"
         );
         assert!(
-            user.contains("(unused)"),
-            "a user skill never gains a rate: {text}"
+            !user.contains("(unused)"),
+            "a loaded user skill has been used: {text}"
         );
-        let unused_at = user.find("(unused)").expect("unused");
+        assert_eq!(
+            user.split_whitespace().last(),
+            Some("used"),
+            "a user skill says it was used and shows no rate: {user:?}"
+        );
+        assert!(!user.contains('%'), "a user skill has no rate: {user:?}");
+        let used_at = user.find("used").expect("used");
         let percent_at = learned.find("100%").expect("percent");
-        let unused_end = user[..unused_at].chars().count() + "(unused)".chars().count();
+        let used_end = user[..used_at].chars().count() + "used".chars().count();
         let percent_end = learned[..percent_at].chars().count() + "100%".chars().count();
         assert_eq!(
-            unused_end, percent_end,
-            "the percentage and (unused) must share a column: {user:?} {learned:?}"
+            used_end, percent_end,
+            "the percentage and used must share a column: {user:?} {learned:?}"
         );
     }
 

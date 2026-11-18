@@ -372,3 +372,32 @@ fn setting_a_status_keeps_the_version_and_writes_the_changelog() {
             .is_err()
     );
 }
+
+#[test]
+fn a_user_skill_counts_its_own_loads_without_being_rewritten() {
+    let home = TempDir::new().expect("temp home");
+    user_skill(
+        home.path(),
+        "writing",
+        "Write clearly",
+        "## When to use\n\nAlways.\n\n## Steps\n\nWrite.\n\n## Pitfalls\n\nDo not ramble.",
+    );
+    let path = home.path().join("skills/writing.md");
+    let before = fs::read_to_string(&path).expect("read the user's skill");
+    let library = Arc::new(SkillLibrary::new(home.path()));
+    let tool = SkillTool::new(Arc::clone(&library));
+
+    for _ in 0..2 {
+        tool.call(&json!({"action": "load", "name": "writing"}))
+            .expect("load the user's skill");
+    }
+
+    let skill = library.find("writing").expect("find").expect("exists");
+    assert_eq!(skill.uses, 2, "a load is a use whoever wrote the skill");
+    assert!(skill.last_used.is_some(), "the use carries an instant");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read the user's skill"),
+        before,
+        "a user's file is read-only to Hearth"
+    );
+}
