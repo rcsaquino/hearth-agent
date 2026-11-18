@@ -1,4 +1,4 @@
-use hearth_core::{Harness, SubmissionStatus, TelegramUpdate};
+use hearth_core::{EffectIntent, Harness, Save, SubmissionStatus, TelegramUpdate};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -338,5 +338,77 @@ fn queued_submissions_are_counted_per_conversation() {
             .queued_submission_count(&telegram.id)
             .expect("count after settle"),
         1
+    );
+}
+
+#[test]
+fn an_answer_shared_by_an_absorbed_submission_is_delivered_once() {
+    let home = TempDir::new().expect("temp home");
+    let harness = Harness::open(home.path()).expect("open harness");
+    let session = harness.session();
+    let conversation = session
+        .create_conversation("Chat", "telegram", "1:0")
+        .expect("create conversation");
+
+    let active = session
+        .submit_telegram(
+            &conversation.id,
+            "tg:1:10",
+            json!({"text": "the first message"}),
+            TelegramUpdate {
+                update_id: 1,
+                chat_id: 1,
+                message_id: 10,
+            },
+            2,
+        )
+        .expect("submit active");
+    let absorbed = session
+        .submit_telegram(
+            &conversation.id,
+            "tg:1:11",
+            json!({"text": "the second message"}),
+            TelegramUpdate {
+                update_id: 2,
+                chat_id: 1,
+                message_id: 11,
+            },
+            3,
+        )
+        .expect("submit absorbed");
+
+    let answer = session
+        .save(Save::new(&conversation.id).entry("assistant", json!({"text": "one answer"})))
+        .expect("save answer");
+    let answer_id = answer.entry_ids[0].clone();
+    session
+        .settle(
+            &active.submission.id,
+            SubmissionStatus::Done,
+            Some(&answer_id),
+        )
+        .expect("settle active");
+    session
+        .settle(
+            &absorbed.submission.id,
+            SubmissionStatus::Done,
+            Some(&answer_id),
+        )
+        .expect("settle absorbed");
+
+    session
+        .save(Save::new(&conversation.id).effect(EffectIntent::new(
+            "telegram.send",
+            format!("tg:{}", active.submission.id),
+            json!({"chat_id": 1, "markdown": "one answer"}),
+        )))
+        .expect("record the delivery");
+
+    let owed = session
+        .done_answers_without_delivery(0)
+        .expect("read undelivered answers");
+    assert!(
+        owed.is_empty(),
+        "the shared answer was delivered once and is not owed again: {owed:?}"
     );
 }
