@@ -2941,3 +2941,58 @@ just after.
   writer and keeps the offset as the single admission boundary.
 - Migration 0013 adds the two tables. `SCHEMA_VERSION` moves to 13. No existing
   migration changes.
+
+## 2026-11-19: One memory writer, and the limit of token similarity
+
+- The keyword extractor is deleted. `hearth-memory/src/extract.rs`,
+  `hearth-runtime/src/extraction.rs`, its tests, and the daemon's post-turn
+  capture thread are gone, along with `RunOutcome.user_entry_ids`, which existed
+  only to feed that thread. The `memory` tool description now carries the
+  promise: save when the user asks for something to be remembered.
+- The evidence is the pair the extractor produced. "Kya has a nut allergy
+  including pistachio; verify ingredients rather than assuming a food is safe"
+  against "Kya, Sir's partner, has a nut allergy including pistachio, so
+  ingredients must be verified rather than assumed safe" scores 0.476 Jaccard and
+  0.786 containment, so `same_statement` refuses it and the store keeps both.
+  Every write the extractor made was a reworded copy of a statement the agent had
+  already saved, so the pass manufactured exactly the duplicate class the store
+  cannot detect.
+- `suggest_subject` and `leading_subject` are deleted with it. The extractor's
+  fallback was their only caller; a subject belongs to the agent, which knows what
+  the words are about.
+- A write now replaces an earlier row when the new statement contains every
+  content token of it, under the same subject and the same negation. Every word of
+  the earlier statement is in the new one, so the replacement loses nothing and
+  the fuller wording stays live. `may_replace` still refuses a replacement that
+  would lose a pin, an automatic extract's weaker kind or subject, or a subject
+  the new statement does not carry.
+- Lowering the merge threshold was rejected by measurement, not by taste. The
+  reported restatement scores 0.476 and the fixture's value swaps score 0.60 to
+  0.71 ("the primary database is SQLite" against "Postgres" is 0.667), so any
+  threshold that merges the first also merges the second. `contains_statement`
+  exists because containment is the only relation that proves a restatement
+  without that trade. The new `a_reworded_restatement_the_store_cannot_prove_is_left_current`
+  test pins the boundary.
+- `memory.consolidate` now closes the near pairs its write gate would already
+  have refused, and keeps the fuller row when one contains the other. A pair that
+  only overlaps is still reported and left current, because closing it could
+  retire a different fact. The report gains `near_closed`; `near_duplicates` now
+  counts the pairs left current. The Memory tab and the `memory.consolidated`
+  event show their sum as `closed` so neither line grows.
+- The save result no longer says "This is a separate statement, not a duplicate."
+  That sentence asserted a judgement the store cannot make, and the pair it was
+  tested on is a changed value that leaves two live rows. It now names the pair
+  and the repair: "If the two say the same thing, forget one." It does not invite
+  `supersedes`, because the write has already happened and a re-save naming the
+  neighbour would leave both the new row and the replacement current. This
+  supersedes the 2026-11-17 decision that the reply must not invite a merge.
+- A digest line naming undecidable pairs was rejected. The store cannot tell the
+  reported restatement from two different facts about one subject, so the line
+  would either miss it or flag ordinary statements on every turn.
+- Residual, filed as an open issue: a reworded restatement where neither side
+  contains the other stays current twice until the agent closes one. The store has
+  no safe automatic action, and no memory operation may call a model.
+- Verification: `./scripts/ci.sh`, the S4 consolidation suite, and
+  `cargo test -p hearth-eval --test memory_bench`. The benchmark holds 170 stored
+  rows both before and after, refuses its 5 duplicates, keeps its 15 supersessions,
+  and leaks no secret. Automatic recall is unchanged at 0.933 lexical.

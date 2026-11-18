@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.58, plain-language edition
+**Status:** Draft 0.59, plain-language edition
 **Date:** 2026-11-18
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,16 @@
 ---
 
 ## A note on language
+
+Draft 0.59 removes the keyword memory extractor. Every statement is written by
+the agent, which reads the request and the store together, and the `memory` tool
+description says to save when the user asks for something to be remembered. The
+extractor rewrote the user's sentence and stored its own copy of statements the
+agent had already saved, and a reworded copy is the one duplicate class the store
+cannot refuse. The consolidation pass now closes the near pairs its write gate
+would already have refused, keeps the fuller wording when one statement contains
+another, and still reports the pairs that only overlap, because a restatement and
+a changed value score the same on words alone.
 
 Draft 0.58 stages each album member in the record and admits the group after its
 quiet window on a later poll. The poller no longer sleeps on an album, the
@@ -1128,8 +1138,8 @@ The details:
 ### 6.5 One model
 
 One model is configured under `models` and used for everything: conversation, tool
-use, memory extraction, summaries, titles, and classification. There is no second
-routing path. The usage ledger and the TUI Overview record the provider and model
+use, memory capture in compaction, summaries, titles, and classification. There is no
+second routing path. The usage ledger and the TUI Overview record the provider and model
 that served each request.
 
 Housekeeping stays cheap by bounding the work, not by switching models or changing
@@ -1293,25 +1303,24 @@ when it writes, and the statement's expansions are indexed beside it.
 
 ### 7.3 How memories get in
 
-Two paths, and neither one makes a model call beyond the turn that is already
-happening.
-
-**The agent writes.** The `memory` tool with `action = save` is the primary path.
-The model calls it when the user says something lasting. It names the subject, chooses the kind, and can
+**The agent writes.** The `memory` tool with `action = save` is the only path from
+a turn, and the tool description carries the promise: save when the user asks for
+something to be remembered. The model names the subject, chooses the kind, and can
 name the statement it replaces. The write result reports any current statement
-about the same subject that overlaps the new one, so a contradiction is visible
-and repairable on the same turn rather than discovered by a later question.
+about the same subject that overlaps the new one, and names the pair as one the
+store cannot judge, so a contradiction or a restatement is repairable on the same
+turn rather than discovered by a later question.
 
-**A deterministic net catches explicit requests.** After the answer is delivered,
-four phrasings are read from the user's message without a model: "remember
-that", "my X is Y", "X is my Y", and a stated preference. At most three
-statements per message. Precision is worth more than recall here, because a
-noisy store spends tokens on every turn from then on and a wrong row is one
-the `memory` tool with `action = forget` away from gone.
+**There is no second writer.** A deterministic pass used to read "remember that
+..." from the user's message, rewrite the sentence into third person, and store
+it. It only ever produced a second copy in different words, which is the one
+duplicate class the store cannot refuse, so it is gone.
 
 **Compaction carries extraction in the same call.** The summary request already
 contains the range, so it returns the summary and up to three durable statements
-in one JSON object. This replaces a second request over the same text.
+in one JSON object. This replaces a second request over the same text. Neither
+path adds a request: the save is part of the turn, and the extraction rides on the
+summary call.
 
 Write rules:
 
@@ -1327,11 +1336,20 @@ Write rules:
   statement that swaps its own non-empty subject is never a duplicate, but a
   subjectless write is compared against the store so the missing field cannot
   hide a repeat.
-- One surface fact has one identity. The extractor names `user` for a remembered
-  first person, classifies `my favourite ...` as a preference, and writes both
-  relation orders as `Alice is the user's sister`. An automatic extract cannot
-  replace a subjectful, non-`fact`, or pinned row with a weaker one. It returns
-  the earlier row instead.
+- A statement that contains an earlier one replaces it, so the fuller wording is
+  the live one and nothing is lost: every word of the earlier row is in the new
+  one. Between two statements that merely overlap, the new one is written beside
+  the earlier row, because token overlap cannot tell a restatement from a changed
+  value. The two reported pairs measure this: a reworded restatement of one fact
+  overlaps by 0.48, while "the primary database is SQLite" against "Postgres"
+  overlaps by 0.67. Any threshold low enough to merge the first merges the
+  second.
+- The write result names a related current statement about the same subject, with
+  its overlap and how to remove one of the pair. The store does not call the pair
+  separate, because it cannot know.
+- An automatic extract, which is now only the compaction summary, cannot replace a
+  subjectful, non-`fact`, or pinned row with a weaker one. It returns the earlier
+  row instead.
 - A pinned rule must fit the rules budget; a write that would overflow it is
   refused with the current rules listed, so the model can replace one.
 - Credential-shaped content is refused before it reaches the table.
@@ -1342,9 +1360,7 @@ Write rules:
 - The store does not inspect the wording. A pronoun is stored like any other
   word, and nothing in the write path asks for a named actor. The store keeps its
   other gates: empty content, the 200-character limit, NUL, a subject over its
-  limit, credential-shaped content, and a pin that is not a rule. The extractor
-  keeps its own voice for the statements it composes, and stores an unresolvable
-  pronoun as written instead of dropping the candidate.
+  limit, credential-shaped content, and a pin that is not a rule.
 
 ### 7.4 How memories come back
 
@@ -1456,13 +1472,17 @@ text moves.
 - A replaced statement is not deleted. It leaves the current set and stays
   readable by id and by `as_of`.
 - There is no decay and no automatic archival. A statement stops being current
-  only when another statement replaces it, a canonical duplicate is closed by
-  the audit, or the user removes it.
+  only when another statement replaces it, a canonical or provable near duplicate
+  is closed by the audit, or the user removes it.
 - The nightly `memory.consolidate` pass makes no model call. In one transaction
   it closes all but one row of each canonical group, keeping the pinned row and
-  then the stronger kind, and records the report and the instant. It reports
-  near-duplicate pairs, one statement under different non-empty subjects, and
-  compound rows, and changes none of them. A second run is a no-op.
+  then the stronger kind, and records the report and the instant. It closes a
+  near-duplicate pair when the write gate would already have refused the second
+  write: the same statement under one subject, or one statement that contains the
+  other. The fuller wording is the row that stays. A pair that only overlaps is
+  reported and left current, because closing it could retire a different fact.
+  It also reports one statement under different non-empty subjects and compound
+  rows, and changes none of those. A second run is a no-op.
 - The report is bounded. Canonical groups are found over the whole store; the
   near and compound reads take the newest 10,000 current rows, and each sample
   list stops at 20 examples. The pass is restart-safe: a crash rolls the whole
