@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use hearth_core::{Harness, SubmissionStatus};
+use hearth_core::{Clock, Harness, IdGen, SubmissionStatus};
 use hearth_model::{MediaError, Transcriber};
 use hearth_telegram::{InboundMedia, TelegramClient, TelegramPoller};
 use serde_json::{Value, json};
@@ -96,6 +96,10 @@ impl FakeBot {
 
     fn requests(&self) -> Vec<Request> {
         self.state.lock().expect("state").requests.clone()
+    }
+
+    fn push_update(&self, update: Value) {
+        self.state.lock().expect("state").updates.push(update);
     }
 
     fn stop(mut self) {
@@ -246,8 +250,39 @@ fn setup(
     bot: &FakeBot,
     transcriber: Option<Arc<dyn Transcriber>>,
 ) -> (TempDir, Harness, TelegramPoller) {
+    let (home, harness, poller, _clock) = setup_with_clock(bot, transcriber);
+    (home, harness, poller)
+}
+
+struct TestClock(Arc<AtomicI64>);
+
+impl Clock for TestClock {
+    fn now_micros(&self) -> i64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+struct TestIds(Arc<AtomicU64>);
+
+impl IdGen for TestIds {
+    fn new_id(&self) -> String {
+        format!("id-{}", self.0.fetch_add(1, Ordering::SeqCst) + 1)
+    }
+}
+
+fn setup_with_clock(
+    bot: &FakeBot,
+    transcriber: Option<Arc<dyn Transcriber>>,
+) -> (TempDir, Harness, TelegramPoller, Arc<AtomicI64>) {
     let home = TempDir::new().expect("temp home");
-    let harness = Harness::open(home.path()).expect("open harness");
+    let clock = Arc::new(AtomicI64::new(1_000_000));
+    let ids = Arc::new(AtomicU64::new(0));
+    let harness = Harness::open_with(
+        home.path(),
+        Arc::new(TestClock(Arc::clone(&clock))),
+        Arc::new(TestIds(ids)),
+    )
+    .expect("open harness");
     let session = harness.session().clone();
     let client = TelegramClient::with_base_url("123:fake", bot.base_url.clone()).expect("client");
     let media = InboundMedia::new(home.path().join("media/inbound"));
@@ -261,7 +296,7 @@ fn setup(
         transcriber,
         None,
     );
-    (home, harness, poller)
+    (home, harness, poller, clock)
 }
 
 fn submission(poller: &TelegramPoller, request_id: &str) -> hearth_core::Submission {
@@ -705,48 +740,39 @@ fn image_paths(blocks: &[Value]) -> Vec<String> {
         .collect()
 }
 
+const ALBUM_QUIET_MICROS: i64 = 1_000_000;
+
 #[test]
-fn an_album_arrives_as_one_submission_with_every_photo() {
+fn an_album_is_staged_without_starting_a_turn() {
     let first = album_member(81, 30, None, "album-a");
     let second = album_member(82, 31, Some("Does this warrant ERCP?"), "album-b");
     let bot = FakeBot::start(vec![first, second], album_files("album"));
-    let (_home, _harness, poller) = setup(&bot, None);
+    let (_home, _harness, poller, _clock) = setup_with_clock(&bot, None);
     let report = poller.poll_once().expect("poll");
-    assert_eq!(report.admitted, 1, "one album is one submission");
-
-    let submission = submission(&poller, "tg:10:30");
-    let blocks = blocks(&submission);
-    assert_eq!(blocks[0]["text"], "Does this warrant ERCP?");
-    let images = image_paths(&blocks);
-    assert_eq!(
-        images.len(),
-        2,
-        "every photo belongs to the album: {blocks:?}"
-    );
-    assert!(images[0].ends_with("30-photo.jpg"), "{}", images[0]);
-    assert!(images[1].ends_with("31-photo.jpg"), "{}", images[1]);
+    assert_eq!(report.admitted, 0, "the album waits for its quiet window");
     assert!(
         poller
             .session()
-            .submission_by_request_id("tg:10:31")
+            .submission_by_request_id("tg:10:30")
             .expect("lookup")
             .is_none(),
-        "the second member must not start its own turn"
+        "no turn starts before the album is due"
     );
     bot.stop();
 }
 
 #[test]
-fn an_album_waits_for_a_member_that_arrives_on_the_next_poll() {
-    let first = album_member(83, 32, Some("Does this warrant ERCP?"), "wait-a");
-    let second = album_member(84, 33, None, "wait-b");
-    let bot = FakeBot::start_scripted(
-        vec![vec![first.clone()], vec![first, second]],
-        album_files("wait"),
-    );
-    let (_home, _harness, poller) = setup(&bot, None);
-    let report = poller.poll_once().expect("poll");
-    assert_eq!(report.admitted, 1, "the album is admitted once");
+fn an_album_is_admitted_after_its_quiet_window() {
+    let first = album_member(83, 32, None, "quiet-a");
+    let second = album_member(84, 33, Some("Does this warrant ERCP?"), "quiet-b");
+    let bot = FakeBot::start(vec![first, second], album_files("quiet"));
+    let (_home, _harness, poller, clock) = setup_with_clock(&bot, None);
+    let first_report = poller.poll_once().expect("first poll");
+    assert_eq!(first_report.admitted, 0);
+
+    clock.fetch_add(ALBUM_QUIET_MICROS + 1, Ordering::SeqCst);
+    let report = poller.poll_once().expect("second poll");
+    assert_eq!(report.admitted, 1, "the due album starts one turn");
 
     let submission = submission(&poller, "tg:10:32");
     let blocks = blocks(&submission);
@@ -755,8 +781,69 @@ fn an_album_waits_for_a_member_that_arrives_on_the_next_poll() {
     assert_eq!(
         images.len(),
         2,
-        "the member that arrived on the next poll stays in the album: {blocks:?}"
+        "every photo belongs to the album: {blocks:?}"
     );
+    assert!(images[0].ends_with("32-photo.jpg"), "{}", images[0]);
+    assert!(images[1].ends_with("33-photo.jpg"), "{}", images[1]);
+    bot.stop();
+}
+
+#[test]
+fn a_later_album_member_extends_the_quiet_window() {
+    let first = album_member(85, 34, None, "extend-a");
+    let bot = FakeBot::start(vec![first], album_files("extend"));
+    let (_home, _harness, poller, clock) = setup_with_clock(&bot, None);
+    let report = poller.poll_once().expect("first poll");
+    assert_eq!(report.admitted, 0);
+
+    clock.fetch_add(ALBUM_QUIET_MICROS - 400_000, Ordering::SeqCst);
+    bot.push_update(album_member(
+        86,
+        35,
+        Some("Does this warrant ERCP?"),
+        "extend-b",
+    ));
+    let report = poller.poll_once().expect("second poll");
+    assert_eq!(report.admitted, 0);
+
+    clock.fetch_add(500_000, Ordering::SeqCst);
+    let report = poller.poll_once().expect("third poll");
+    assert_eq!(report.admitted, 0, "the second member moved the window");
+
+    clock.fetch_add(600_000, Ordering::SeqCst);
+    let report = poller.poll_once().expect("fourth poll");
+    assert_eq!(report.admitted, 1);
+
+    let submission = submission(&poller, "tg:10:34");
+    let blocks = blocks(&submission);
+    assert_eq!(blocks[0]["text"], "Does this warrant ERCP?");
+    assert_eq!(image_paths(&blocks).len(), 2);
+    bot.stop();
+}
+
+#[test]
+fn a_repeated_album_caption_appears_once() {
+    let first = album_member(87, 36, Some("Same caption"), "same-a");
+    let second = album_member(88, 37, Some("Same caption"), "same-b");
+    let bot = FakeBot::start(vec![first, second], album_files("same"));
+    let (_home, _harness, poller, clock) = setup_with_clock(&bot, None);
+    poller.poll_once().expect("first poll");
+    clock.fetch_add(ALBUM_QUIET_MICROS + 1, Ordering::SeqCst);
+    poller.poll_once().expect("second poll");
+
+    let submission = submission(&poller, "tg:10:36");
+    let blocks = blocks(&submission);
+    let texts: Vec<&Value> = blocks
+        .iter()
+        .filter(|block| block["type"] == "text")
+        .collect();
+    assert_eq!(
+        image_paths(&blocks).len(),
+        2,
+        "both members are one submission"
+    );
+    assert_eq!(texts.len(), 1, "one caption block: {blocks:?}");
+    assert_eq!(texts[0]["text"], "Same caption");
     bot.stop();
 }
 
