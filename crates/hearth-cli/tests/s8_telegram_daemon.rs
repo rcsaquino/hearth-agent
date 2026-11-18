@@ -646,6 +646,86 @@ fn the_daemon_recovers_an_uncertain_telegram_answer() {
     );
 }
 
+#[test]
+fn a_delivered_answer_is_not_sent_again_after_a_restart() {
+    use hearth_core::{Harness, SubmissionStatus};
+
+    let (provider_base, provider_thread) = fake_provider();
+    let (telegram_base, telegram_state, telegram_thread) = fake_telegram_script(vec![], false);
+    *telegram_state.batch.lock().expect("batch") = Some(vec![
+        json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 10,
+                "date": 1_730_000_000,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "text": "the first message"
+            }
+        }),
+        json!({
+            "update_id": 2,
+            "message": {
+                "message_id": 11,
+                "date": 1_730_000_001,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "is_bot": false, "first_name": "Sam"},
+                "text": "the second message"
+            }
+        }),
+    ]);
+    let home = tempfile::TempDir::new().expect("temp home");
+    init_home(home.path(), &provider_base);
+    add_telegram_base(home.path(), &telegram_base);
+
+    let daemon = DaemonGuard::new(start_daemon(home.path()));
+    let delivered = wait_for_rich_count(&telegram_state, 1);
+    assert!(
+        !delivered[0].contains("Recovered reply"),
+        "the first delivery is not a recovery: {delivered:?}"
+    );
+    daemon.stop();
+
+    {
+        let harness = Harness::open(home.path()).expect("reopen harness");
+        let session = harness.session();
+        let active = session
+            .submission_by_request_id("tg:42:10")
+            .expect("lookup active")
+            .expect("active submission");
+        let absorbed = session
+            .submission_by_request_id("tg:42:11")
+            .expect("lookup absorbed")
+            .expect("absorbed submission");
+        assert_eq!(active.status, SubmissionStatus::Done);
+        assert_eq!(absorbed.status, SubmissionStatus::Done);
+        assert_eq!(
+            active.answer_entry_id, absorbed.answer_entry_id,
+            "the second message must be absorbed into the first answer"
+        );
+        assert!(
+            session
+                .done_answers_without_delivery(0)
+                .expect("undelivered answers")
+                .is_empty(),
+            "the shared answer was delivered and is not owed"
+        );
+    }
+
+    let restarted = DaemonGuard::new(start_daemon(home.path()));
+    thread::sleep(Duration::from_secs(2));
+    let after = telegram_state.rich.lock().expect("rich").clone();
+    assert_eq!(
+        after.len(),
+        1,
+        "a delivered answer must not be sent again after a restart: {after:?}"
+    );
+    restarted.stop();
+    telegram_state.stop.store(true, Ordering::SeqCst);
+    let _ = telegram_thread.join();
+    let _ = provider_thread.join();
+}
+
 struct SlowProvider {
     base: String,
     started: Arc<AtomicBool>,
