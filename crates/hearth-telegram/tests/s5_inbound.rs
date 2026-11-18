@@ -22,6 +22,8 @@ struct Request {
 #[derive(Default)]
 struct State {
     updates: Vec<Value>,
+    batches: Vec<Vec<Value>>,
+    batch_calls: usize,
     files: HashMap<String, (String, Vec<u8>, i64)>,
     fail_get_file: bool,
     requests: Vec<Request>,
@@ -36,11 +38,28 @@ struct FakeBot {
 
 impl FakeBot {
     fn start(updates: Vec<Value>, files: Vec<(String, String, Vec<u8>, i64)>) -> Self {
+        Self::start_with(Vec::new(), updates, files)
+    }
+
+    /// Serve one scripted update batch per poll, repeating the last batch.
+    fn start_scripted(
+        batches: Vec<Vec<Value>>,
+        files: Vec<(String, String, Vec<u8>, i64)>,
+    ) -> Self {
+        Self::start_with(batches, Vec::new(), files)
+    }
+
+    fn start_with(
+        batches: Vec<Vec<Value>>,
+        updates: Vec<Value>,
+        files: Vec<(String, String, Vec<u8>, i64)>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake bot");
         listener.set_nonblocking(true).expect("nonblocking");
         let address = listener.local_addr().expect("address");
         let state = Arc::new(Mutex::new(State {
             updates,
+            batches,
             files: files
                 .into_iter()
                 .map(|(file_id, path, bytes, size)| (file_id, (path, bytes, size)))
@@ -149,10 +168,19 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<State>>) {
             body: body.clone(),
         });
         match method.as_str() {
-            "getUpdates" => json!({
-                "ok": true,
-                "result": state.updates.clone(),
-            }),
+            "getUpdates" => {
+                let updates = if state.batches.is_empty() {
+                    state.updates.clone()
+                } else {
+                    let index = state.batch_calls.min(state.batches.len() - 1);
+                    state.batch_calls += 1;
+                    state.batches[index].clone()
+                };
+                json!({
+                    "ok": true,
+                    "result": updates,
+                })
+            }
             "getFile" if !state.fail_get_file => {
                 let file_id = body["file_id"].as_str().unwrap_or_default();
                 match state.files.get(file_id) {
@@ -636,6 +664,100 @@ fn a_reply_to_a_media_only_message_is_described_and_still_admitted() {
     assert_eq!(blocks[0]["type"], "text");
     assert_eq!(blocks[0]["text"], "Replying to Sam: (a voice message)");
     assert_eq!(blocks[1]["type"], "image");
+    bot.stop();
+}
+
+fn album_member(update_id: i64, message_id: i64, caption: Option<&str>, file_id: &str) -> Value {
+    let mut body = json!({
+        "media_group_id": "album-1",
+        "photo": [
+            {"file_id": file_id, "file_unique_id": file_id, "width": 100, "height": 100, "file_size": 3}
+        ],
+    });
+    if let Some(caption) = caption {
+        body["caption"] = json!(caption);
+    }
+    message(update_id, message_id, body)
+}
+
+fn album_files(prefix: &str) -> Vec<(String, String, Vec<u8>, i64)> {
+    vec![
+        (
+            format!("{prefix}-a"),
+            "photos/a.jpg".to_owned(),
+            vec![1, 2, 3],
+            3,
+        ),
+        (
+            format!("{prefix}-b"),
+            "photos/b.jpg".to_owned(),
+            vec![4, 5, 6],
+            3,
+        ),
+    ]
+}
+
+fn image_paths(blocks: &[Value]) -> Vec<String> {
+    blocks
+        .iter()
+        .filter(|block| block["type"] == "image")
+        .map(|block| {
+            block["path"]
+                .as_str()
+                .expect("image path")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn an_album_arrives_as_one_submission_with_every_photo() {
+    let first = album_member(81, 30, None, "album-a");
+    let second = album_member(82, 31, Some("Does this warrant ERCP?"), "album-b");
+    let bot = FakeBot::start(vec![first, second], album_files("album"));
+    let (_home, _harness, poller) = setup(&bot, None);
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.admitted, 1, "one album is one submission");
+
+    let submission = submission(&poller, "tg:10:30");
+    let blocks = blocks(&submission);
+    assert_eq!(blocks[0]["text"], "Does this warrant ERCP?");
+    let images = image_paths(&blocks);
+    assert_eq!(images.len(), 2, "every photo belongs to the album: {blocks:?}");
+    assert!(images[0].ends_with("30-photo.jpg"), "{}", images[0]);
+    assert!(images[1].ends_with("31-photo.jpg"), "{}", images[1]);
+    assert!(
+        poller
+            .session()
+            .submission_by_request_id("tg:10:31")
+            .expect("lookup")
+            .is_none(),
+        "the second member must not start its own turn"
+    );
+    bot.stop();
+}
+
+#[test]
+fn an_album_waits_for_a_member_that_arrives_on_the_next_poll() {
+    let first = album_member(83, 32, Some("Does this warrant ERCP?"), "wait-a");
+    let second = album_member(84, 33, None, "wait-b");
+    let bot = FakeBot::start_scripted(
+        vec![vec![first.clone()], vec![first, second]],
+        album_files("wait"),
+    );
+    let (_home, _harness, poller) = setup(&bot, None);
+    let report = poller.poll_once().expect("poll");
+    assert_eq!(report.admitted, 1, "the album is admitted once");
+
+    let submission = submission(&poller, "tg:10:32");
+    let blocks = blocks(&submission);
+    assert_eq!(blocks[0]["text"], "Does this warrant ERCP?");
+    let images = image_paths(&blocks);
+    assert_eq!(
+        images.len(),
+        2,
+        "the member that arrived on the next poll stays in the album: {blocks:?}"
+    );
     bot.stop();
 }
 
