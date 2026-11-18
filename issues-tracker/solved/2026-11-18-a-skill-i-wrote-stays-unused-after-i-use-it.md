@@ -43,3 +43,34 @@ Whether the count is worth persisting for skills I wrote, given they are read-on
 files that I own and could edit by hand. If recording a count would mean writing
 back into a file I manage, a session-level count that resets is a reasonable
 answer, as long as the tab stops saying unused after a use.
+
+## Resolution
+
+A load of a skill counts as a use for either scope, and a user skill that has
+been loaded no longer reads `(unused)`.
+
+- `record_use` now resolves through `find` instead of `find_learned`, so it counts
+  a skill the user wrote. A learned skill still writes its counters into its own
+  frontmatter, because the review pass archives on them.
+- A user skill stays read-only. Its count goes to `skills/.uses.json`, a hidden
+  ledger keyed by skill name, written through a temporary file and renamed at mode
+  0600. `load_all` overlays it on user skills only, so `uses`, `last_used`, and the
+  top-skills count mean the same thing in the daemon and in the tab. A missing or
+  unreadable ledger counts nothing and warns; the library never fails over a lost
+  count.
+- The Skills tab's rate column keeps `(unused)` at zero uses, keeps the
+  percentage for a learned skill, and shows `used` for a user skill with a count.
+  The word sits in the same right-aligned eight-character field, so the column
+  still lines up. No rate is invented for a file Hearth cannot write an outcome
+  into, which keeps the earlier decision about the rate and only changes the
+  count.
+
+Commits: `e705087` (test), `b77c9e0` (feat), `f0dfd3c` (docs).
+
+Verified: `a_user_skill_counts_its_own_loads_without_being_rewritten` drives the
+`skill` tool twice and asserts the count is 2 and the user's file is byte-for-byte
+unchanged. `a_loaded_user_skill_stops_saying_unused` renders the tab and asserts
+the row reads `used` with no percentage, in the same column as a learned skill's
+`100%`. A real home showed
+`{"writing":{"uses":2,"last_used":"2026-11-18T16:50:49.791916974Z"}}` after two
+loads. `./scripts/ci.sh` passes.
