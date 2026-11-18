@@ -238,6 +238,30 @@ pub(crate) fn same_statement(left: &str, right: &str) -> bool {
     shared / union >= MERGE_SIMILARITY || shared / smallest >= 0.9
 }
 
+/// Whether `earlier` says nothing `newer` does not say.
+///
+/// Token containment is the one relation that proves a restatement: every word of
+/// the earlier statement is in the newer one, so replacing it loses nothing. It is
+/// deliberately narrower than similarity, because similarity cannot tell a
+/// restatement from a changed value. The reported nut-allergy pair scores 0.48 and
+/// the fixture's SQLite/Postgres pair scores 0.67, so any threshold low enough to
+/// merge the first also merges the second.
+pub(crate) fn contains_statement(earlier: &str, newer: &str) -> bool {
+    if negated(earlier) != negated(newer) {
+        return false;
+    }
+    let earlier = content_tokens(earlier);
+    let newer = content_tokens(newer);
+    earlier.len() >= 3 && earlier.len() < newer.len() && earlier.is_subset(&newer)
+}
+
+/// Whether two current statements are one statement, so only one stays current.
+pub(crate) fn one_statement(left: &str, right: &str) -> bool {
+    same_statement(left, right)
+        || contains_statement(left, right)
+        || contains_statement(right, left)
+}
+
 /// The stable digest of a normalised statement.
 pub fn fingerprint(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -691,6 +715,17 @@ fn weaker_than(item: &NewMemory, earlier: &Memory) -> bool {
     earlier.kind != Kind::Fact && item.kind == Kind::Fact
 }
 
+/// Whether a new statement may replace this current one.
+///
+/// The pin belongs to the live rule, and an automatic extract cannot outrank the
+/// subject or kind the agent supplied. Everything else may be replaced, because a
+/// replacement keeps the earlier row readable by id and by `as_of`.
+fn may_replace(item: &NewMemory, earlier: &Memory) -> bool {
+    !(earlier.pinned && !item.pinned)
+        && !(!earlier.subject.is_empty() && item.subject.is_empty())
+        && !(item.source == Source::Extract && weaker_than(item, earlier))
+}
+
 fn insert_in(
     writer: &hearth_storage::Writer<'_>,
     pending: Pending,
@@ -749,7 +784,7 @@ fn insert_with(
 
     // The same words in another role replace the earlier row, so the statement
     // is current once rather than twice.
-    let earlier = if supersedes.is_none() {
+    let mut earlier = if supersedes.is_none() {
         writer.query_optional(
             &format!(
                 "SELECT {COLUMNS} FROM memories WHERE fingerprint = ? AND valid_to IS NULL LIMIT 1"
@@ -765,12 +800,7 @@ fn insert_with(
     // the rule stands and the copy is not written. Retiring it takes a write
     // that names the row.
     if let Some(current) = &earlier {
-        if current.pinned && !item.pinned {
-            return Ok(WriteOutcome::Unchanged(current.clone()));
-        }
-        // The compaction summary writes what it read. It cannot turn a stronger
-        // row into a weaker one, or the better subject and kind would be lost.
-        if item.source == Source::Extract && weaker_than(&item, current) {
+        if !may_replace(&item, current) {
             return Ok(WriteOutcome::Unchanged(current.clone()));
         }
     }
@@ -809,7 +839,17 @@ fn insert_with(
                 map_memory,
             )?);
         }
-        if let Some(near) = candidates
+        // A fuller wording says everything the earlier row said, so it replaces
+        // it instead of sitting beside it. A near duplicate with no containment
+        // is refused: the store cannot tell a restatement from a changed value.
+        let fuller = candidates
+            .iter()
+            .filter(|candidate| may_replace(&item, candidate))
+            .find(|candidate| contains_statement(&candidate.content, &item.content))
+            .cloned();
+        if let Some(fuller) = fuller {
+            earlier = Some(fuller);
+        } else if let Some(near) = candidates
             .into_iter()
             .find(|candidate| same_statement(&candidate.content, &item.content))
         {
@@ -1071,6 +1111,19 @@ mod tests {
         .expect("write")
     }
 
+    fn row(session: &Session, id: &str) -> Memory {
+        session
+            .storage()
+            .read(|reader| {
+                reader.query_row(
+                    &format!("SELECT {COLUMNS} FROM memories WHERE id = ?"),
+                    [id],
+                    map_memory,
+                )
+            })
+            .expect("read row")
+    }
+
     #[test]
     fn the_subject_list_stops_at_its_limit_longest_first() {
         let (_directory, session) = home();
@@ -1120,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn a_near_duplicate_about_a_subject_merges() {
+    fn a_near_duplicate_leaves_one_current_row() {
         let (_directory, session) = home();
         insert(
             &session,
@@ -1131,7 +1184,7 @@ mod tests {
             MemoryConfig::default().rules_max_tokens,
         )
         .expect("first");
-        let again = insert(
+        insert(
             &session,
             Pending {
                 item: NewMemory::new("ordered pad thai on friday again").subject("thai place"),
@@ -1140,8 +1193,12 @@ mod tests {
             MemoryConfig::default().rules_max_tokens,
         )
         .expect("second");
-        assert!(!again.created(), "the second order must not be a new row");
-        assert_eq!(count(&session).unwrap(), 1);
+        assert_eq!(count(&session).unwrap(), 1, "one order stays current");
+        let current = recent(&session, None, None, 1).expect("recent");
+        assert!(
+            current[0].content.contains("again"),
+            "the fuller wording is the one that stays current: {current:?}"
+        );
     }
 
     #[test]
@@ -1779,10 +1836,15 @@ mod tests {
             NewMemory::new("ordered pad thai on friday again").subject("thai place"),
         );
         assert!(
-            !again.created(),
+            again.created(),
+            "the fuller wording replaces the row it restates"
+        );
+        let closed = row(&session, &first.memory().id);
+        assert_eq!(
+            closed.superseded_by.as_deref(),
+            Some(again.memory().id.as_str()),
             "a same-subject duplicate must be found however old it is"
         );
-        assert_eq!(again.memory().id, first.memory().id);
     }
 
     #[test]
@@ -1879,29 +1941,6 @@ mod tests {
             .collect();
         assert_eq!(contents.len(), 3, "{contents:?}");
     }
-}
-
-#[cfg(test)]
-mod duplicate_tests {
-    use super::*;
-    use hearth_core::Harness;
-    use tempfile::TempDir;
-
-    fn home() -> (TempDir, hearth_core::Session) {
-        let directory = TempDir::new().expect("temp home");
-        let harness = Harness::open(directory.path()).expect("harness");
-        (directory, harness.session().clone())
-    }
-
-    fn write(session: &hearth_core::Session, item: NewMemory) -> WriteOutcome {
-        insert(
-            session,
-            Pending { item, vector: None },
-            crate::MemoryConfig::default().rules_max_tokens,
-        )
-        .expect("write")
-    }
-
     #[test]
     fn a_changed_value_about_one_subject_is_not_a_duplicate() {
         let (_directory, session) = home();
@@ -1938,8 +1977,11 @@ mod duplicate_tests {
             1,
             "one fact must leave one current row"
         );
-        let earlier = long_ago(&session, &short.memory().id);
-        assert_eq!(earlier.superseded_by.as_deref(), Some(long.memory().id.as_str()));
+        let earlier = row(&session, &short.memory().id);
+        assert_eq!(
+            earlier.superseded_by.as_deref(),
+            Some(long.memory().id.as_str())
+        );
         assert!(long.memory().content.contains("pistachio"));
     }
 
@@ -1976,18 +2018,5 @@ mod duplicate_tests {
         );
         assert!(other.created(), "a different fact must be its own row");
         assert_eq!(count(&session).expect("count"), 2);
-    }
-
-    fn long_ago(session: &hearth_core::Session, id: &str) -> Memory {
-        session
-            .storage()
-            .read(|reader| {
-                reader.query_row(
-                    &format!("SELECT {COLUMNS} FROM memories WHERE id = ?"),
-                    [id],
-                    map_memory,
-                )
-            })
-            .expect("read row")
     }
 }
