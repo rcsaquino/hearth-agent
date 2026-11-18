@@ -1690,7 +1690,10 @@ mod tests {
             "kind": "memory.consolidated",
             "data": {"canonical_closed": 2, "near_closed": 1, "near_duplicates": 1, "compound": 3}
         }));
-        assert!(text.contains("3 closed"), "the closed count adds both repairs: {text}");
+        assert!(
+            text.contains("3 closed"),
+            "the closed count adds both repairs: {text}"
+        );
         assert!(text.contains("1 near"), "{text}");
         assert!(text.contains("3 compound"), "{text}");
     }
