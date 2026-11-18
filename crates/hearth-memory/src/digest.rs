@@ -439,6 +439,93 @@ mod tests {
     }
 
     #[test]
+    fn a_near_duplicate_is_shown_once_and_counted() {
+        let items = vec![
+            memory("m_1", "user", "the user prefers dark mode"),
+            memory("m_2", "user", "the user prefers dark mode please"),
+        ];
+        let block = recall_body(&items, &Coverage::default(), 0);
+        assert_eq!(
+            block.matches("prefers dark mode").count(),
+            1,
+            "a pair the store can prove is one statement must not spend tokens twice: {block}"
+        );
+        assert!(
+            block.contains("1 hidden"),
+            "the digest must say how many rows it collapsed: {block}"
+        );
+        assert!(
+            !block.contains("similar:"),
+            "a provable pair needs no judgement from the model: {block}"
+        );
+    }
+
+    #[test]
+    fn a_similar_pair_the_store_cannot_prove_names_both_rows() {
+        let items = vec![
+            memory(
+                "m_allergy",
+                "kya",
+                "Kya has a nut allergy including pistachio; verify ingredients rather than \
+                 assuming a food is safe",
+            ),
+            memory(
+                "m_partner",
+                "kya",
+                "Kya, Sir's partner, has a nut allergy including pistachio, so ingredients must \
+                 be verified rather than assumed safe",
+            ),
+        ];
+        let block = recall_body(&items, &Coverage::default(), 0);
+        assert_eq!(
+            block.matches("nut allergy").count(),
+            2,
+            "neither wording is hidden, because the store cannot choose: {block}"
+        );
+        assert!(
+            block.contains("similar:"),
+            "the store must say the pair may be one fact: {block}"
+        );
+        assert!(
+            block.contains("m_allergy") && block.contains("m_partner"),
+            "both rows must be addressable: {block}"
+        );
+        assert!(
+            block.contains("forget"),
+            "the line must name the repair: {block}"
+        );
+    }
+
+    #[test]
+    fn two_different_facts_about_one_subject_get_no_notice() {
+        let items = vec![
+            memory("m_allergy", "kya", "Kya has a nut allergy"),
+            memory("m_sister", "kya", "Kya's sister is Ana"),
+        ];
+        let block = recall_body(&items, &Coverage::default(), 0);
+        assert!(
+            !block.contains("similar:"),
+            "two different facts are not a pair: {block}"
+        );
+        assert_eq!(block.lines().count(), 2, "{block}");
+    }
+
+    #[test]
+    fn the_same_words_under_two_subjects_are_both_shown() {
+        let items = vec![
+            memory("m_alice", "alice", "the release gate needs two approvals"),
+            memory("m_bob", "bob", "the release gate needs two approvals"),
+        ];
+        let block = recall_body(&items, &Coverage::default(), 0);
+        assert_eq!(
+            block.matches("the release gate needs two approvals").count(),
+            2,
+            "one statement under two subjects is two claims: {block}"
+        );
+        assert!(!block.contains("hidden"), "{block}");
+    }
+
+    #[test]
     fn an_empty_recall_renders_nothing() {
         assert!(recall_body(&[], &Coverage::default(), 0).is_empty());
     }
