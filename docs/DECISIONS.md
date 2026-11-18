@@ -2996,3 +2996,35 @@ just after.
   `cargo test -p hearth-eval --test memory_bench`. The benchmark holds 170 stored
   rows both before and after, refuses its 5 duplicates, keeps its 15 supersessions,
   and leaks no secret. Automatic recall is unchanged at 0.933 lexical.
+
+## 2026-11-19: A user skill counts its loads
+
+- A skill the user wrote is read-only to Hearth, so `record_use` used to resolve
+  through `find_learned`, return nothing, and leave its `uses` at zero for ever.
+  The Skills tab then said `(unused)` about a skill that had plainly been loaded.
+  The count and the rate are different facts, and only the rate was unknowable.
+- `record_use` now resolves through `find` and counts either scope. A learned skill
+  still writes its counters into its own frontmatter, because the review pass
+  archives on them. A user skill writes into `skills/.uses.json` instead: a
+  hidden JSON map from name to `uses` and `last_used`, written through a
+  temporary file and renamed, at mode 0600. The user's Markdown is never touched,
+  and a test reads the file before and after two loads to prove it.
+- The ledger is read by `load_all` and overlaid on a user skill only, so `uses`,
+  `last_used`, and `stats.top` mean the same thing whichever process reads them.
+  A missing or unreadable ledger counts nothing and logs a warning; the library
+  never fails because a count was lost. `load_all` already skips names starting
+  with `.`, so the ledger can never be parsed as a skill.
+- Rejected: a `skill_uses` table. The only writer is the daemon's `skill` tool, and
+  `build_tools` carries no `Session`, so recording a row would thread a session
+  through every tool builder to store one integer. Rejected: writing the count
+  into the user's skill, which the issue rules out. Rejected: a session count,
+  because the TUI and the daemon are separate processes and a session count in
+  the daemon is invisible to the tab.
+- The rate column adds one branch: a user skill with a count shows `used`, in the
+  same right-aligned eight-character field. `(unused)` stays for zero uses and a
+  percentage stays for a learned skill. The 2026-11-16 decision holds for the
+  rate; only its claim that a user skill can never leave zero is superseded.
+- Verification: `a_user_skill_counts_its_own_loads_without_being_rewritten` in
+  `crates/hearth-runtime/tests/skills.rs` and
+  `a_loaded_user_skill_stops_saying_unused` in `crates/hearth-cli/src/ui/mod.rs`.
+  `./scripts/ci.sh` passes.

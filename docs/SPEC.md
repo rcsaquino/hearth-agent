@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.59, plain-language edition
+**Status:** Draft 0.60, plain-language edition
 **Date:** 2026-11-18
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,12 @@
 ---
 
 ## A note on language
+
+Draft 0.60 counts a load of a user-made skill. A learned skill keeps its counters
+in its own frontmatter, but a user skill is read-only to Hearth, so the library
+records the count in a hidden ledger beside it and never rewrites the user's file.
+The Skills tab shows `used` for a user skill that has been loaded and keeps no
+success rate for it, because an outcome cannot be written anywhere Hearth owns.
 
 Draft 0.59 removes the keyword memory extractor. Every statement is written by
 the agent, which reads the request and the store together, and the `memory` tool
@@ -1775,7 +1781,9 @@ extraction and consolidation own memory writes. A skill's own output is never
 evidence for its revision; only the recorded outcome of using it counts.
 
 User-made skills live in `skills/`. Learned skills live in `skills/learned/`. Hearth
-may read both and write only the learned directory. A learned skill is a Markdown
+may read both and write only the learned directory. A user skill's load count
+lives in `skills/.uses.json`, a hidden ledger, so the count survives a restart
+without writing into a file the user owns. A learned skill is a Markdown
 file with frontmatter:
 
 | Field | Notes |
@@ -1828,12 +1836,14 @@ Rules:
   A skill with no counted use shows `(unused)` in the rate column; the column is
   eight characters wide and the label is padded to the widest row, so a
   percentage and `(unused)` end at the same edge. A rate appears only after a use
-  has been counted. `[` and `]` cycle the list through
+  has been counted. A user skill that has been loaded shows `used` and never a
+  percentage: Hearth counts the load, and it cannot record an outcome for a file
+  it does not write. `[` and `]` cycle the list through
   both scopes, user only, and learned only. The header names the mode, the empty
   state names the mode it is empty in, and the selection and body stay on a row
   that is still listed.
-  The `skill` tool loads a body by name, records the outcome, and can save or archive
-  a skill.
+  The `skill` tool loads a body by name, records the use for either scope, records
+  the outcome of a learned skill, and can save or archive a learned skill.
 - The skills index is the only prompt component the skill loop writes. The Prompt
   tab shows it, and a loaded body appears in the transcript.
 
