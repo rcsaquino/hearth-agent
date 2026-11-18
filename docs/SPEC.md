@@ -1,7 +1,7 @@
 # Hearth Specification
 
-**Status:** Draft 0.56, plain-language edition
-**Date:** 2026-11-17
+**Status:** Draft 0.57, plain-language edition
+**Date:** 2026-11-18
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
@@ -9,6 +9,15 @@
 ---
 
 ## A note on language
+
+Draft 0.57 makes an album one submission, keeps the quote of a rich message, and
+delivers a shared answer once. Telegram sends an album as one message per photo,
+so the poller holds the members for a short quiet window and admits them
+together. Hearth's own answers are rich messages, so a reply to one carries a
+`rich_message` rather than text, and that text now becomes reply context. A run
+that absorbs a queued message settles both with the same answer, and only the
+earliest submission for an answer owns its delivery, so a restart does not send
+it again.
 
 Draft 0.56 makes memory one tool with four actions, the same shape as `files`.
 The `memory` tool takes a required `action`: `save`, `recall`, `forget`, or
