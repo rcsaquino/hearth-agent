@@ -115,8 +115,8 @@ impl Tool for MemoryTool {
             MEMORY,
             "Read or change memory. `action` selects the operation: `save` stores one durable \
              statement, `recall` searches or reads by id, subject, or time, `forget` deletes one \
-             statement permanently, and `transcript` searches or reads the saved conversation
-             record.",
+             statement permanently, and `transcript` searches the saved record. Save when the
+             user asks you to remember something.",
             json!({
                 "type": "object",
                 "properties": {

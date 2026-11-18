@@ -734,7 +734,7 @@ fn insert_with(
 
     // An exact duplicate with the same kind and the same pinning is the same
     // statement; nothing to write. The same words in a different role are not:
-    // a fact the extractor caught and then a rule the model pinned are different
+    // a fact the summary caught and then a rule the model pinned are different
     // statements, and returning the fact would leave the rule unpinned.
     if let Some(existing) = writer.query_optional(
         &format!(
@@ -768,8 +768,8 @@ fn insert_with(
         if current.pinned && !item.pinned {
             return Ok(WriteOutcome::Unchanged(current.clone()));
         }
-        // The extractor writes what it heard. It cannot turn a stronger row into
-        // a weaker one, or the better subject and kind would be lost.
+        // The compaction summary writes what it read. It cannot turn a stronger
+        // row into a weaker one, or the better subject and kind would be lost.
         if item.source == Source::Extract && weaker_than(&item, current) {
             return Ok(WriteOutcome::Unchanged(current.clone()));
         }

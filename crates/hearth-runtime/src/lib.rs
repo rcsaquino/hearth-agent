@@ -9,7 +9,6 @@ mod compaction;
 mod daemon;
 mod doctor;
 mod events;
-pub mod extraction;
 mod helpers;
 mod home;
 mod init;

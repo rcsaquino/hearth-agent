@@ -26,7 +26,6 @@ mod consolidate;
 mod digest;
 mod embedding;
 mod errors;
-mod extract;
 mod model;
 mod query;
 mod rank;
@@ -50,7 +49,6 @@ pub use embedding::{
     BekkoEmbedding, EmbeddingProvider, MODEL_DIMS, MODEL_NAME, download_model, model_files_present,
 };
 pub use errors::{Code, MemoryError, Result};
-pub use extract::{Candidate, candidates};
 pub use model::{Kind, Memory, NewMemory, Source, WriteOutcome};
 pub use store::{Breakdown, CONTENT_LIMIT, breakdown_on, fingerprint};
 pub use tools::{FORGET, MEMORY, RECALL, SAVE, TRANSCRIPT, ToolMemory};
@@ -732,16 +730,6 @@ fn absorb(items: Vec<Memory>, memories: &mut HashMap<String, Memory>) -> Vec<Str
         memories.insert(memory.id.clone(), memory);
     }
     ids
-}
-
-/// The subject a statement suggests, when it opens with a name.
-///
-/// The agent chooses a subject through the tool, and it should: a person knows
-/// that "the board" is the OR board. This is the deterministic fallback the
-/// extractor uses, and it is exported so an import can seed a store with the same
-/// rule the automatic path applies.
-pub fn suggest_subject(content: &str) -> String {
-    extract::leading_subject(content)
 }
 
 #[cfg(test)]

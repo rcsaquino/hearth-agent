@@ -1,7 +1,7 @@
 //! Splitting text into statements.
 //!
-//! One conservative splitter, shared by the write gate and the deterministic
-//! extractor. A write is refused when it holds more than one statement, so the
+//! One conservative splitter, used by the write gate. A write is refused when it
+//! holds more than one statement, so the
 //! splitter must not turn a title, an abbreviation, a decimal, or an ellipsis
 //! into a boundary. It also must not guess at a lowercase continuation, because
 //! a false split would refuse a legitimate single statement.

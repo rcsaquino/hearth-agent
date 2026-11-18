@@ -157,16 +157,6 @@ fn a_plain_answer_settles_the_submission_and_records_usage() {
 
     assert_eq!(outcome.answer_text.as_deref(), Some("hello"));
     assert_eq!(outcome.submission.status, SubmissionStatus::Done);
-    assert_eq!(
-        outcome.user_entry_ids,
-        vec![
-            submission
-                .user_entry_id
-                .clone()
-                .expect("the submission names its user entry")
-        ],
-        "the outcome must name the entry the run answered"
-    );
     let answer_id = outcome.answer_entry_id.expect("answer entry id");
     assert_eq!(
         outcome.submission.answer_entry_id.as_deref(),

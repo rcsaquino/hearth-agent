@@ -987,23 +987,6 @@ impl TelegramWorker {
         match outcome {
             Ok(outcome) => {
                 self.deliver(chat_id, thread_id, &outcome);
-                if outcome.answer_text.is_some() {
-                    let session = self.session.clone();
-                    let memory = Arc::clone(&self.memory);
-                    let entries = outcome.user_entry_ids.clone();
-                    thread::spawn(move || {
-                        let mut written = 0;
-                        for entry in entries {
-                            match crate::extraction::capture_entry(&session, &memory, &entry) {
-                                Ok(report) => written += report.written,
-                                Err(error) => tracing::warn!(%error, "memory capture failed"),
-                            }
-                        }
-                        if written > 0 {
-                            tracing::info!(written, "memory captured");
-                        }
-                    });
-                }
                 if let Err(error) = agent.compact_soft(&conversation.id) {
                     tracing::warn!(%error, "soft compaction failed");
                 }

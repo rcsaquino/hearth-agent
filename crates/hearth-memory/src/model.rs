@@ -126,7 +126,7 @@ pub enum Source {
     User,
     /// The agent chose to record it.
     Agent,
-    /// The deterministic extractor caught it.
+    /// The compaction summary caught it.
     Extract,
     /// It arrived from a file or an import.
     Import,
