@@ -74,7 +74,9 @@ pub struct ConsolidationReport {
     pub truncated: bool,
     /// Current rows whose window this pass closed.
     pub canonical_closed: usize,
-    /// Near pairs found.
+    /// Near pairs this pass closed.
+    pub near_closed: usize,
+    /// Near pairs left current, because closing one would cost a statement.
     pub near_duplicates: usize,
     /// Statements repeated under different non-empty subjects.
     pub cross_subject: usize,
@@ -98,6 +100,7 @@ impl ConsolidationReport {
             "scanned": self.scanned,
             "truncated": self.truncated,
             "canonical_closed": self.canonical_closed,
+            "near_closed": self.near_closed,
             "near_duplicates": self.near_duplicates,
             "cross_subject": self.cross_subject,
             "compound": self.compound,
@@ -107,6 +110,7 @@ impl ConsolidationReport {
     /// Whether the pass found nothing to report.
     pub fn is_empty(&self) -> bool {
         self.canonical_closed == 0
+            && self.near_closed == 0
             && self.near_duplicates == 0
             && self.cross_subject == 0
             && self.compound == 0
@@ -271,10 +275,27 @@ fn read_current(
         }
     }
 
+    repair_near(writer, now, &rows, report)?;
+    Ok(())
+}
+
+/// Close the pairs that are one statement, and record the pairs that are not.
+///
+/// A pair is provable when the write gate would have refused the second write:
+/// the same statement under the same subject, or one statement that contains the
+/// other. Only those are closed. A pair that merely overlaps could be a changed
+/// value, and closing the wrong one would retire a fact, so it is reported.
+fn repair_near(
+    writer: &hearth_storage::Writer<'_>,
+    now: i64,
+    rows: &[Memory],
+    report: &mut ConsolidationReport,
+) -> Result<()> {
     let mut groups: BTreeMap<String, Vec<&Memory>> = BTreeMap::new();
-    for row in &rows {
+    for row in rows {
         groups.entry(row.subject.clone()).or_default().push(row);
     }
+    let mut closed_here: BTreeSet<String> = BTreeSet::new();
     for group in groups.values() {
         for index in 0..group.len().min(NEAR_GROUP) {
             for other in group.iter().take(NEAR_GROUP).skip(index + 1) {
@@ -282,21 +303,53 @@ fn read_current(
                 if left.id == other.id {
                     continue;
                 }
-                if !store::same_statement(&left.content, &other.content) {
+                if closed_here.contains(&left.id) || closed_here.contains(&other.id) {
                     continue;
                 }
-                report.near_duplicates += 1;
-                if report.near.len() < SAMPLE {
-                    report.near.push(NearPair {
-                        left: left.id.clone(),
-                        right: other.id.clone(),
-                        overlap: store::similarity(&left.content, &other.content),
-                    });
+                if !store::one_statement(&left.content, &other.content) {
+                    continue;
                 }
+                let (kept, redundant) = redundant_side(left, other);
+                if redundant.pinned {
+                    report.near_duplicates += 1;
+                    if report.near.len() < SAMPLE {
+                        report.near.push(NearPair {
+                            left: left.id.clone(),
+                            right: other.id.clone(),
+                            overlap: store::similarity(&left.content, &other.content),
+                        });
+                    }
+                    continue;
+                }
+                writer.execute(
+                    "UPDATE memories SET valid_to = ?, superseded_by = ?, pinned = 0 \
+                     WHERE id = ? AND valid_to IS NULL",
+                    rusqlite::params![now, kept.id, redundant.id],
+                )?;
+                closed_here.insert(redundant.id.clone());
+                report.near_closed += 1;
             }
         }
     }
     Ok(())
+}
+
+/// The pair's two sides as the row that stays and the row that stops.
+///
+/// The fuller wording wins, because it says everything the other said. Between
+/// two equally full statements the survivor rule decides, the same rule the
+/// canonical repair uses.
+fn redundant_side<'a>(left: &'a Memory, right: &'a Memory) -> (&'a Memory, &'a Memory) {
+    if store::contains_statement(&left.content, &right.content) {
+        return (right, left);
+    }
+    if store::contains_statement(&right.content, &left.content) {
+        return (left, right);
+    }
+    match survivor(&[left.clone(), right.clone()]) {
+        Some(kept) if kept.id == left.id => (left, right),
+        _ => (right, left),
+    }
 }
 
 fn write_stamp(

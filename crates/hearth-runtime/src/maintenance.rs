@@ -173,6 +173,7 @@ impl TaskHandler for MemoryConsolidationHandler {
                 checkpoint = json!({
                     "slot": "03:30",
                     "canonical_closed": report.canonical_closed,
+                    "near_closed": report.near_closed,
                     "near_duplicates": report.near_duplicates,
                     "cross_subject": report.cross_subject,
                     "compound": report.compound,
@@ -187,6 +188,7 @@ impl TaskHandler for MemoryConsolidationHandler {
                 }
                 tracing::info!(
                     closed = report.canonical_closed,
+                    near_closed = report.near_closed,
                     near = report.near_duplicates,
                     "memory consolidation complete"
                 );

@@ -120,8 +120,8 @@ fn audit(app: &App, frame: &mut Frame, area: Rect) {
             let attention = !report.is_empty();
             (
                 format!(
-                    " audit · {} canonical closed · {} near · {} subject · {} compound",
-                    report.canonical_closed,
+                    " audit · {} closed · {} near · {} subject · {} compound",
+                    report.canonical_closed + report.near_closed,
                     report.near_duplicates,
                     report.cross_subject,
                     report.compound

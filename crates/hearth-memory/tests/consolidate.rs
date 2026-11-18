@@ -113,7 +113,8 @@ fn a_near_duplicate_the_write_gate_refuses_is_closed_by_the_pass() {
     );
 
     let report = service.consolidate().expect("consolidate");
-    assert!(report.near_duplicates >= 1, "{report:?}");
+    assert_eq!(report.near_closed, 1, "{report:?}");
+    assert_eq!(report.near_duplicates, 0, "a closed pair is not reported");
     let first = current(&service, "m_near1");
     let second = current(&service, "m_near2");
     assert!(

@@ -312,8 +312,9 @@ pub fn event_summary(value: &serde_json::Value) -> String {
         "run_settled" => format!("Run {}", data["status"].as_str().unwrap_or("settled")),
         "turn_started" => format!("Turn {} started", data["turn"]),
         "memory.consolidated" => format!(
-            "Memory audit · {} canonical closed · {} near · {} compound",
-            data["canonical_closed"].as_u64().unwrap_or(0),
+            "Memory audit · {} closed · {} near · {} compound",
+            data["canonical_closed"].as_u64().unwrap_or(0)
+                + data["near_closed"].as_u64().unwrap_or(0),
             data["near_duplicates"].as_u64().unwrap_or(0),
             data["compound"].as_u64().unwrap_or(0)
         ),
@@ -1687,9 +1688,9 @@ mod tests {
     fn a_consolidation_event_names_the_counts() {
         let text = event_summary(&serde_json::json!({
             "kind": "memory.consolidated",
-            "data": {"canonical_closed": 2, "near_duplicates": 1, "compound": 3}
+            "data": {"canonical_closed": 2, "near_closed": 1, "near_duplicates": 1, "compound": 3}
         }));
-        assert!(text.contains("2 canonical closed"), "{text}");
+        assert!(text.contains("3 closed"), "the closed count adds both repairs: {text}");
         assert!(text.contains("1 near"), "{text}");
         assert!(text.contains("3 compound"), "{text}");
     }
