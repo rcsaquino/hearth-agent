@@ -255,13 +255,7 @@ impl TelegramPoller {
             blocks.push(json!({"type": "text", "text": context}));
         }
 
-        if let Some(text) = message
-            .text
-            .as_deref()
-            .or(message.caption.as_deref())
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        {
+        if let Some(text) = message_text(message) {
             blocks.push(json!({"type": "text", "text": text}));
         }
 
@@ -422,6 +416,67 @@ impl TelegramPoller {
 /// The largest quoted body Hearth forwards as reply context.
 const REPLY_CONTEXT_CHARS: usize = 500;
 
+/// The text the person typed, with a rich message flattened to plain text.
+fn message_text(message: &Message) -> Option<String> {
+    if let Some(text) = message
+        .text
+        .as_deref()
+        .or(message.caption.as_deref())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(text.to_owned());
+    }
+    message.rich_message.as_ref().and_then(rich_text)
+}
+
+fn rich_text(rich: &crate::types::RichMessage) -> Option<String> {
+    let mut text = String::new();
+    for block in &rich.blocks {
+        collect_rich_text(block, &mut text);
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// Collect the text of one rich block, ignoring structural and media fields.
+fn collect_rich_text(value: &Value, out: &mut String) {
+    match value {
+        Value::String(text) => out.push_str(text),
+        Value::Array(items) => {
+            for item in items {
+                collect_rich_text(item, out);
+            }
+        }
+        Value::Object(fields) => {
+            if let Some(text) = fields.get("text").or_else(|| fields.get("caption")) {
+                collect_rich_text(text, out);
+            } else if let Some(blocks) = fields.get("blocks") {
+                collect_rich_text(blocks, out);
+            } else if let Some(items) = fields.get("items") {
+                collect_rich_text(items, out);
+            } else if let Some(cells) = fields.get("cells") {
+                collect_rich_text(cells, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The quoted body, shortened to one context line.
+fn quote_body(text: &str) -> String {
+    let mut characters = text.chars();
+    let head: String = characters.by_ref().take(REPLY_CONTEXT_CHARS).collect();
+    if characters.next().is_some() {
+        format!("\"{head}…\"")
+    } else {
+        format!("\"{head}\"")
+    }
+}
+
 /// The context line describing the message being replied to.
 fn reply_context(quoted: &Message) -> Option<String> {
     let author = quoted
@@ -429,28 +484,23 @@ fn reply_context(quoted: &Message) -> Option<String> {
         .as_ref()
         .and_then(|user| user.first_name.as_deref())
         .unwrap_or("someone");
-    let body = match quoted
-        .text
-        .as_deref()
-        .or(quoted.caption.as_deref())
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        Some(text) => {
-            let mut characters = text.chars();
-            let head: String = characters.by_ref().take(REPLY_CONTEXT_CHARS).collect();
-            if characters.next().is_some() {
-                format!("\"{head}…\"")
-            } else {
-                format!("\"{head}\"")
-            }
-        }
-        None if !quoted.photo.is_empty() => "(a photo)".to_owned(),
-        None if quoted.document.is_some() => "(a document)".to_owned(),
-        None if quoted.audio.is_some() => "(an audio file)".to_owned(),
-        None if quoted.voice.is_some() => "(a voice message)".to_owned(),
-        None if quoted.video.is_some() => "(a video)".to_owned(),
-        None => return None,
+    if let Some(text) = message_text(quoted) {
+        return Some(format!("Replying to {author}: {}", quote_body(&text)));
+    }
+    let body = if !quoted.photo.is_empty() {
+        "(a photo)"
+    } else if quoted.document.is_some() {
+        "(a document)"
+    } else if quoted.audio.is_some() {
+        "(an audio file)"
+    } else if quoted.voice.is_some() {
+        "(a voice message)"
+    } else if quoted.video.is_some() {
+        "(a video)"
+    } else if quoted.rich_message.is_some() {
+        "(a rich message)"
+    } else {
+        return None;
     };
     Some(format!("Replying to {author}: {body}"))
 }
@@ -462,25 +512,11 @@ fn quoted_span(reply: &crate::types::ExternalReply) -> Option<String> {
         .and_then(|quote| quote.text.as_deref())
         .map(str::trim)
         .filter(|text| !text.is_empty())?;
-    let mut characters = text.chars();
-    let head: String = characters.by_ref().take(REPLY_CONTEXT_CHARS).collect();
-    let body = if characters.next().is_some() {
-        format!("\"{head}…\"")
-    } else {
-        format!("\"{head}\"")
-    };
-    Some(format!("Replying to a quoted span: {body}"))
+    Some(format!("Replying to a quoted span: {}", quote_body(text)))
 }
 
 fn has_content(message: &Message) -> bool {
-    message
-        .text
-        .as_deref()
-        .is_some_and(|text| !text.trim().is_empty())
-        || message
-            .caption
-            .as_deref()
-            .is_some_and(|text| !text.trim().is_empty())
+    message_text(message).is_some()
         || !message.photo.is_empty()
         || message.document.is_some()
         || message.audio.is_some()

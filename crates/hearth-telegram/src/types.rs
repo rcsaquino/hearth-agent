@@ -1,6 +1,7 @@
 //! The Telegram update shapes Hearth uses.
 
 use serde::Deserialize;
+use serde_json::Value;
 
 /// One incoming update.
 #[derive(Debug, Clone, Deserialize)]
@@ -26,6 +27,8 @@ pub struct Message {
     #[serde(default)]
     pub caption: Option<String>,
     #[serde(default)]
+    pub rich_message: Option<RichMessage>,
+    #[serde(default)]
     pub photo: Vec<PhotoSize>,
     #[serde(default)]
     pub document: Option<Document>,
@@ -46,6 +49,13 @@ pub struct Message {
 pub struct ExternalReply {
     #[serde(default)]
     pub quote: Option<Quote>,
+}
+
+/// A rich formatted message.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RichMessage {
+    #[serde(default)]
+    pub blocks: Vec<Value>,
 }
 
 /// A highlighted span the person replied to.
