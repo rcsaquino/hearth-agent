@@ -2882,3 +2882,34 @@ just after.
 - The digest coverage line names `memory(recall, subject)` and
   `memory(recall, as_of)`. The status key `memory_recall` keeps its name because
   it describes the recall subsystem, not a tool.
+
+## 2026-11-18: Telegram albums, quoted rich messages, and one delivery per answer
+
+- The poller groups updates that share a chat and `media_group_id` into one
+  admission. The batch is read again for a 500 ms quiet window, up to 2 s, before
+  the group is admitted, because Telegram can deliver an album's members across
+  two `getUpdates` responses. The group keeps the first member's request id and
+  update id, combines the caption from every member once, and appends each
+  member's photo or file block in message order. The offset advances past the
+  highest member id.
+- The album wait blocks the single poller thread, not a worker. It only runs when
+  the batch contains an album, so a text-only poll keeps one `getUpdates` call.
+- `Message.rich_message` is flattened to plain text for reply context, for the
+  incoming body, and for the content check. Hearth sends `sendRichMessage`, so a
+  reply to the bot carries `rich_message.blocks` instead of `text`; the previous
+  reply context read only text and captions and dropped the quote. The flattening
+  is generic over `text`, `caption`, `blocks`, `items`, and `cells`, which covers
+  paragraphs, headings, preformatted text, lists, tables, quotations, and styled
+  spans. A rich message with no text is described as a rich message.
+- `done_answers_without_delivery` returns one row per answer entry. An absorbed
+  submission is settled `done` with the active submission's answer, so the old
+  per-submission `tg:<id>` check reported it as undelivered and the startup
+  recovery sent the answer again. The query now only returns the earliest settled
+  submission for an answer. That keeps the effect keyed by submission while making
+  the shared answer owe at most one delivery. A crash before the delivery intent
+  still derives the intent from the record.
+- No schema change. The tests are
+  `an_answer_shared_by_an_absorbed_submission_is_delivered_once`,
+  `a_delivered_answer_is_not_sent_again_after_a_restart`,
+  `a_reply_to_a_rich_message_keeps_the_quote`, and the two album tests in
+  `s5_inbound`.

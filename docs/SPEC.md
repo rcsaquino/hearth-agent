@@ -863,7 +863,10 @@ Each tool and effect kind declares a retry policy:
 Model generation is `safe`; it has no local side effects beyond recorded usage. Telegram sends are
 `at_most_once`. If delivery is uncertain, the durable answer is delivered once as a
 "recovered reply" notice on the next successful interaction rather than silently
-duplicated.
+duplicated. An answer is delivered once: a run that absorbs queued submissions
+settles them with the active answer, and only the earliest submission that settled
+with an answer owns its delivery, so a restart does not send a delivered answer
+again.
 
 ### 4.7 Busy conversations and interruptions
 
@@ -1556,6 +1559,18 @@ processing, so it never advances past work that was not saved yet.
 Ordering is preserved per chat. A chat's submissions execute in save order. The
 daemon shows the typing indicator while a run is active; it does not add a seen
 reaction to the message.
+
+An album is one submission. Messages that share a `media_group_id` in one chat are
+held for a short quiet window and then saved once, with every photo or video in
+message order and the caption attached once. Hearth waits 500 ms for another
+member and repeats for at most 2 s of collection, so an album that delivers its
+members slowly is still admitted; a member that arrives after the quiet window
+starts its own submission.
+
+A reply carries the quoted message as a context block that names its author and
+its text, shortened to 500 characters. A quoted rich message, which is what Hearth
+sends, is flattened to plain text from its blocks. A quoted message with no text is
+described by its media kind.
 
 ### 8.3 How replies look
 
