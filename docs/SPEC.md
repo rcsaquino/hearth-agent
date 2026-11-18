@@ -1,6 +1,6 @@
 # Hearth Specification
 
-**Status:** Draft 0.57, plain-language edition
+**Status:** Draft 0.58, plain-language edition
 **Date:** 2026-11-18
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
@@ -9,6 +9,11 @@
 ---
 
 ## A note on language
+
+Draft 0.58 stages each album member in the record and admits the group after its
+quiet window on a later poll. The poller no longer sleeps on an album, the
+window resets on every member, and a staged album survives a restart. The window
+is 1 s, with no fixed cap.
 
 Draft 0.57 makes an album one submission, keeps the quote of a rich message, and
 delivers a shared answer once. Telegram sends an album as one message per photo,
@@ -1569,12 +1574,13 @@ Ordering is preserved per chat. A chat's submissions execute in save order. The
 daemon shows the typing indicator while a run is active; it does not add a seen
 reaction to the message.
 
-An album is one submission. Messages that share a `media_group_id` in one chat are
-held for a short quiet window and then saved once, with every photo or video in
-message order and the caption attached once. Hearth waits 500 ms for another
-member and repeats for at most 2 s of collection, so an album that delivers its
-members slowly is still admitted; a member that arrives after the quiet window
-starts its own submission.
+An album is one submission. A member is staged durably with its group's ready
+time, and the offset advances in the same save. The poller never sleeps on an
+album. It stages the member, keeps polling, and submits the group at the start of
+a later poll once 1 s has passed since the last member. The wait resets on every
+member, so a slow album keeps its full window. Every photo or video is kept in
+message order, and a repeated caption appears once. A group still staged after a
+restart is submitted on the first poll after startup.
 
 A reply carries the quoted message as a context block that names its author and
 its text, shortened to 500 characters. A quoted rich message, which is what Hearth

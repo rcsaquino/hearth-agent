@@ -2914,3 +2914,30 @@ just after.
   `a_delivered_answer_is_not_sent_again_after_a_restart`,
   `a_reply_to_a_rich_message_keeps_the_quote`, and the two album tests in
   `s5_inbound`.
+
+## 2026-11-18: A durable album queue
+
+- The poller stages each album member in `telegram_albums` and
+  `telegram_album_members`, in the same write as the update row and the offset.
+  The group's `ready_at` is `now + 1 s`, reset on every member. The poller no
+  longer sleeps on an album.
+- `poll_once` submits every due album before it reads the next batch. The
+  submission and the deletion of the staged rows are one save, so a crash either
+  leaves the album staged or leaves the submission and no rows. If a submission
+  already exists for the request id, the flush clears the rows.
+- While an album is pending, `poll_once` asks `getUpdates` with a zero timeout
+  and `run_poller` sleeps 100 ms between calls. Ingestion stays live. This is the
+  part `pi-telegram` gets from its 100 ms queue worker; Hearth keeps one poller
+  thread and no side queue file.
+- The quiet window resets without a hard cap, like `pi-telegram`. Telegram bounds
+  an album at 10 members, and the allowed user is single, so the wait is bounded
+  in practice.
+- A repeated caption is included once, by exact text. Telegram normally sends one
+  caption per album; the dedupe covers its repeated fragments.
+- Rejected alternatives. A second album worker thread avoids the poller tick but
+  shares the client and media store across threads. A `queue.json` side file
+  copies message content and adds a second durability boundary. A longer sleep in
+  `collect_updates` keeps the old poller stall. The staged table uses the existing
+  writer and keeps the offset as the single admission boundary.
+- Migration 0013 adds the two tables. `SCHEMA_VERSION` moves to 13. No existing
+  migration changes.

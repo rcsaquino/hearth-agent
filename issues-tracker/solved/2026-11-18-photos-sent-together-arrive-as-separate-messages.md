@@ -55,18 +55,21 @@ Telegram delivers an album as one message per member, all sharing a
 `media_group_id`, and the poller admitted every update separately. Each photo
 therefore became its own submission and turn.
 
-The poller now groups updates by chat and `media_group_id` into one submission.
-It rereads the batch for a 500 ms quiet window, up to 2 s, because a member can
-arrive in a later `getUpdates` response. The submission keeps the first member's
-request id, uses the caption from every member once, and adds each photo or file
-in message order. The offset advances past the highest member id.
+The poller now stages every album member in `telegram_albums` and
+`telegram_album_members`, in the same write as the update row and the offset. The
+group's ready time is 1 s after its last member. The poller keeps polling while
+the group waits, and a later poll submits the due group as one submission. A
+staged group survives a restart. The submission keeps the first member's request
+id, includes a repeated caption once, and adds each photo or file in message
+order.
 
-A caption on the second photo works: the same-batch test puts the caption on the
-second member and requires it once. A member that arrives after the quiet window
-still starts its own submission. That is a known limit of the local wait; no
-live send was used to tune it.
+A caption on the second photo works. A member that arrives after the 1 s window
+still starts its own submission. Telegram bounds an album at 10 members, so the
+window is bounded in practice.
 
-Commits: `79b6fb8` fixes the grouping, and `1384f70` adds the failing tests.
+First fix: `79b6fb8` grouped the batch inside one poll, with `1384f70` as its
+test. The durable queue replaces that wait in `16d7b19` and `c60aa7a`, with
+`e615ef9` as the failing poller tests and `4598763` as the restart proof.
 
 Verified: the same-batch test failed with two admitted submissions and passes
 with one submission and two image blocks in order. The split-poll test failed

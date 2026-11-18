@@ -116,11 +116,13 @@ keys.
 - `usage_events`: every model call, its input, cache read, cache write, output, and
   reasoning tokens, and latency.
 - `telegram_updates`: deduplication of incoming updates.
+- `telegram_albums`, `telegram_album_members`: staged album groups and their
+  members, kept until the group is submitted.
 - `memories`, `memories_fts`, `memory_vectors`: the memory store, documented
   below.
 
 The exact DDL is the versioned set under `crates/hearth-storage/migrations/`
-(`0001.sql` through `0010.sql`), applied by the matching migrations. The
+(`0001.sql` through `0013.sql`), applied by the matching migrations. The
 migrations are the executable schema authority; if this document and a migration
 disagree, the migration wins. `effects` has a `UNIQUE (kind, key)` constraint.
 Migration 0002 rebuilds the old memory index with the porter stemmer. Migration
@@ -130,13 +132,15 @@ both earlier memory designs with `memories`, `memories_fts`, and
 `memory_vectors`, and drops `memory_items`, `memory_events`, and the old
 `memory_fts`. Migration 0009 clears the pin on rows an older build retired
 without clearing it. Migration 0010 indexes the subject list in its longest-first
-read order, so the recall bound does not sort the store on every turn.
+read order, so the recall bound does not sort the store on every turn. Migration
+0013 adds the staged album tables and indexes their ready time and member order.
 
 ## Indexes
 
 `entries(conversation_id, seq)`, `tasks(status, next_wake_at)`,
-`submissions(status)`, `usage_events(ts)`, `effects(status)`, and the memory
-indexes listed below.
+`submissions(status)`, `usage_events(ts)`, `effects(status)`,
+`telegram_albums(ready_at)`, `telegram_album_members(chat_id, group_id, message_id)`,
+and the memory indexes listed below.
 
 ## Memory schema
 
