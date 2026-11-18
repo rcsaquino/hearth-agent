@@ -1022,10 +1022,9 @@ mod tests {
             !user.contains("(unused)"),
             "a loaded user skill has been used: {text}"
         );
-        assert_eq!(
-            user.split_whitespace().last(),
-            Some("used"),
-            "a user skill says it was used and shows no rate: {user:?}"
+        assert!(
+            user.contains(" used"),
+            "a user skill says it was used: {user:?}"
         );
         assert!(!user.contains('%'), "a user skill has no rate: {user:?}");
         let used_at = user.find("used").expect("used");

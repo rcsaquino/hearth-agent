@@ -799,10 +799,10 @@ fn insert_with(
     // The pin is why a rule is injected, so an unpinned copy of it is a no-op:
     // the rule stands and the copy is not written. Retiring it takes a write
     // that names the row.
-    if let Some(current) = &earlier {
-        if !may_replace(&item, current) {
-            return Ok(WriteOutcome::Unchanged(current.clone()));
-        }
+    if let Some(current) = &earlier
+        && !may_replace(&item, current)
+    {
+        return Ok(WriteOutcome::Unchanged(current.clone()));
     }
 
     // Replacement is deliberate, so it skips the duplicate merge: a caller that

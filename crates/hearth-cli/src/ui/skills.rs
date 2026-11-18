@@ -108,11 +108,15 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     }
 }
 
-/// The rate column. A skill with no counted use has no measured rate, so it
-/// says so instead of showing a zero that reads as a failure.
+/// The rate column. A skill with no counted use has no measured rate, so it says
+/// so instead of showing a zero that reads as a failure. A user skill can be used
+/// and still has no rate, because Hearth records the load of a file it cannot
+/// write an outcome into.
 fn rate(skill: &hearth_runtime::skills::Skill) -> String {
     if skill.uses == 0 {
         "(unused)".to_owned()
+    } else if skill.scope == hearth_runtime::skills::SkillScope::User {
+        "used".to_owned()
     } else {
         format!("{:.0}%", skill.success_rate() * 100.0)
     }

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use hearth_model::ToolSpec;
 use hearth_tools::{Tool, ToolError, ToolOutput};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -121,6 +122,24 @@ pub struct SkillStats {
     pub top: Vec<(String, u64)>,
 }
 
+/// One user skill's counted loads.
+///
+/// A learned skill keeps its counters in its own frontmatter, because the review
+/// pass archives on them. A user skill is read-only to Hearth, so its count lives
+/// in a ledger beside the library instead of in a file the user owns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct UseRecord {
+    uses: u64,
+    last_used: String,
+}
+
+/// The ledger file, keyed by skill name.
+type UseLedger = BTreeMap<String, UseRecord>;
+
+/// The ledger's file name. It is a hidden file, so `load_all` never reads it as a
+/// skill.
+const USE_LEDGER: &str = ".uses.json";
+
 /// A skill library failure.
 #[derive(Debug, Error)]
 pub enum SkillError {
@@ -215,6 +234,16 @@ impl SkillLibrary {
                 }
             }
         }
+        let ledger = self.read_ledger();
+        for skill in &mut skills {
+            if skill.scope != SkillScope::User {
+                continue;
+            }
+            if let Some(record) = ledger.get(&skill.name) {
+                skill.uses = record.uses;
+                skill.last_used = Some(record.last_used.clone());
+            }
+        }
         skills.sort_by(|left, right| {
             scope_rank(left.scope)
                 .cmp(&scope_rank(right.scope))
@@ -284,14 +313,25 @@ impl SkillLibrary {
         Ok(self.find(name)?.map(|skill| skill.body))
     }
 
-    /// Record one use of a learned skill. User skills are read-only.
+    /// Record one use of a skill.
+    ///
+    /// A learned skill writes its own counters. A user skill is never rewritten,
+    /// so its count goes to the ledger beside the library.
     pub fn record_use(&self, name: &str) -> Result<Option<Skill>, SkillError> {
-        let Some(mut skill) = self.find_learned(name)? else {
+        let Some(mut skill) = self.find(name)? else {
             return Ok(None);
         };
         skill.uses = skill.uses.saturating_add(1);
         skill.last_used = Some(now());
-        write_skill(&skill)?;
+        if skill.scope == SkillScope::Learned {
+            write_skill(&skill)?;
+        } else {
+            let mut ledger = self.read_ledger();
+            let uses = skill.uses;
+            let last_used = skill.last_used.clone().unwrap_or_else(now);
+            ledger.insert(skill.name.clone(), UseRecord { uses, last_used });
+            self.write_ledger(&ledger)?;
+        }
         Ok(Some(skill))
     }
 
@@ -437,6 +477,50 @@ impl SkillLibrary {
         Ok(stats)
     }
 
+    /// The ledger path. It sits beside the user's skills and is never a skill.
+    fn ledger_path(&self) -> PathBuf {
+        self.skills_root().join(USE_LEDGER)
+    }
+
+    /// Read the use ledger. A missing or unreadable ledger counts nothing.
+    ///
+    /// A count is a convenience: a torn file must not empty the library, so a
+    /// parse failure is logged and treated as no ledger.
+    fn read_ledger(&self) -> UseLedger {
+        let Ok(text) = fs::read_to_string(self.ledger_path()) else {
+            return UseLedger::new();
+        };
+        match serde_json::from_str(&text) {
+            Ok(ledger) => ledger,
+            Err(error) => {
+                tracing::warn!(%error, "the skill use ledger was unreadable");
+                UseLedger::new()
+            }
+        }
+    }
+
+    /// Write the use ledger through a temporary file, so a crash cannot leave a
+    /// half-written count behind.
+    fn write_ledger(&self, ledger: &UseLedger) -> Result<(), SkillError> {
+        fs::create_dir_all(self.skills_root())?;
+        let path = self.ledger_path();
+        let temporary = path.with_extension("json.tmp");
+        let encoded = serde_json::to_string(ledger)
+            .map_err(|error| SkillError::Invalid(format!("the use ledger: {error}")))?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(encoded.as_bytes())?;
+        file.flush()?;
+        fs::rename(&temporary, &path)?;
+        Ok(())
+    }
+
     /// Find one learned skill by name.
     fn find_learned(&self, name: &str) -> Result<Option<Skill>, SkillError> {
         Ok(self
@@ -521,14 +605,11 @@ impl Tool for SkillTool {
                     .ok_or_else(|| {
                         ToolError::invalid("not_found", format!("skill not found: {name}"))
                     })?;
-                let skill = if skill.scope == SkillScope::Learned {
-                    self.library
-                        .record_use(name)
-                        .map_err(skill_tool_error)?
-                        .unwrap_or(skill)
-                } else {
-                    skill
-                };
+                let skill = self
+                    .library
+                    .record_use(name)
+                    .map_err(skill_tool_error)?
+                    .unwrap_or(skill);
                 Ok(ToolOutput {
                     content: format!(
                         "[{} v{} {}] {}\n---\n{}",
