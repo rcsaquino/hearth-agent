@@ -48,3 +48,27 @@ never been sent, when in fact it had been sent and shown in the chat.
 deliverable on startup when no delivery was recorded for it. This looks like the
 same recovery deciding that a reply was owed when it had in fact been sent, so
 the two should be read together.
+
+## Resolution
+
+An absorbed submission is settled `done` with the active submission's answer
+entry. `Session::done_answers_without_delivery` asked whether each settled
+submission had its own `tg:<submission id>` effect, so the absorbed submission
+looked undelivered even though the active submission had already delivered the
+shared answer. Startup recovery derived a delivery from that row and sent the
+answer again as "Recovered reply:".
+
+The query now returns only the earliest settled submission for an answer entry.
+Delivery stays keyed by submission, and a shared answer owes one delivery. The
+gap and the age of the reply do not matter; the second message only needs to be
+queued while the first run is active so the two submissions share an answer.
+
+Commits: `f286f2a` fixes the query, `4f9da5c` adds the failing core test, and
+`7c4cb1e` adds the daemon restart test.
+
+Verified: the core test failed with the absorbed submission in the owed list and
+passes after the fix. The daemon test sends two messages in one batch, confirms
+both settle with the same answer entry, restarts the daemon, and requires one
+reply. Against the old query it reproduced the report exactly:
+`["Telegram answer", "Recovered reply:\n\nTelegram answer"]`. After the fix it
+passes with one reply.

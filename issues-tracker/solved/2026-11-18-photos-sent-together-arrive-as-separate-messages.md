@@ -48,3 +48,26 @@ Grouping needs a short wait: an album's members arrive within a few hundred
 milliseconds of each other, so collecting them for a moment before admitting the
 turn is enough. Not established what the right window is, or what happens to a
 caption that arrives on the second photo rather than the first.
+
+## Resolution
+
+Telegram delivers an album as one message per member, all sharing a
+`media_group_id`, and the poller admitted every update separately. Each photo
+therefore became its own submission and turn.
+
+The poller now groups updates by chat and `media_group_id` into one submission.
+It rereads the batch for a 500 ms quiet window, up to 2 s, because a member can
+arrive in a later `getUpdates` response. The submission keeps the first member's
+request id, uses the caption from every member once, and adds each photo or file
+in message order. The offset advances past the highest member id.
+
+A caption on the second photo works: the same-batch test puts the caption on the
+second member and requires it once. A member that arrives after the quiet window
+still starts its own submission. That is a known limit of the local wait; no
+live send was used to tune it.
+
+Commits: `79b6fb8` fixes the grouping, and `1384f70` adds the failing tests.
+
+Verified: the same-batch test failed with two admitted submissions and passes
+with one submission and two image blocks in order. The split-poll test failed
+with one image and passes with two. The full `hearth-telegram` suite passes.

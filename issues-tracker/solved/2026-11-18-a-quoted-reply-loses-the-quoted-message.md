@@ -42,3 +42,22 @@ quote was invisible.
 
 Hard to notice from the assistant's side, since the typed text still reads as
 complete English. Nothing signals that anything was dropped.
+
+## Resolution
+
+Hearth sends its answers with `sendRichMessage`. Telegram keeps that as a
+`rich_message` on the message and does not fill the `text` field. The reply
+context read `text`, `caption`, and media only, so a reply to Hearth's own
+message produced no context block. A reply to a user's plain text message did,
+which is the difference the report saw.
+
+`Message` now parses `rich_message`, and the poller flattens its blocks to plain
+text for the reply context, the incoming body, and the content check. The
+flattening reads `text`, `caption`, `blocks`, `items`, and `cells`, so
+paragraphs, headings, tables, lists, quotations, and styled spans all survive as
+text. A rich message with no text is described as a rich message.
+
+Commit: `1fe30ef`; test: `2c955f9`.
+
+Verified: the new test failed with one block (the typed text alone) and passes
+with two (the quote and the typed text). The full `hearth-telegram` suite passes.
