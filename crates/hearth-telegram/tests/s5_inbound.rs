@@ -22,8 +22,6 @@ struct Request {
 #[derive(Default)]
 struct State {
     updates: Vec<Value>,
-    batches: Vec<Vec<Value>>,
-    batch_calls: usize,
     files: HashMap<String, (String, Vec<u8>, i64)>,
     fail_get_file: bool,
     requests: Vec<Request>,
@@ -38,28 +36,11 @@ struct FakeBot {
 
 impl FakeBot {
     fn start(updates: Vec<Value>, files: Vec<(String, String, Vec<u8>, i64)>) -> Self {
-        Self::start_with(Vec::new(), updates, files)
-    }
-
-    /// Serve one scripted update batch per poll, repeating the last batch.
-    fn start_scripted(
-        batches: Vec<Vec<Value>>,
-        files: Vec<(String, String, Vec<u8>, i64)>,
-    ) -> Self {
-        Self::start_with(batches, Vec::new(), files)
-    }
-
-    fn start_with(
-        batches: Vec<Vec<Value>>,
-        updates: Vec<Value>,
-        files: Vec<(String, String, Vec<u8>, i64)>,
-    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake bot");
         listener.set_nonblocking(true).expect("nonblocking");
         let address = listener.local_addr().expect("address");
         let state = Arc::new(Mutex::new(State {
             updates,
-            batches,
             files: files
                 .into_iter()
                 .map(|(file_id, path, bytes, size)| (file_id, (path, bytes, size)))
@@ -172,19 +153,10 @@ fn handle_connection(mut stream: TcpStream, state: &Arc<Mutex<State>>) {
             body: body.clone(),
         });
         match method.as_str() {
-            "getUpdates" => {
-                let updates = if state.batches.is_empty() {
-                    state.updates.clone()
-                } else {
-                    let index = state.batch_calls.min(state.batches.len() - 1);
-                    state.batch_calls += 1;
-                    state.batches[index].clone()
-                };
-                json!({
-                    "ok": true,
-                    "result": updates,
-                })
-            }
+            "getUpdates" => json!({
+                "ok": true,
+                "result": state.updates.clone(),
+            }),
             "getFile" if !state.fail_get_file => {
                 let file_id = body["file_id"].as_str().unwrap_or_default();
                 match state.files.get(file_id) {

@@ -1249,9 +1249,18 @@ fn run_poller(poller: TelegramPoller, shutdown: Arc<AtomicBool>) {
         match poller.poll_once() {
             Ok(report) => {
                 backoff = Duration::from_secs(1);
-                if report.admitted > 0 || report.duplicates > 0 || report.ignored > 0 {
+                if report.albums_pending > 0 {
+                    thread::sleep(Duration::from_millis(100));
+                }
+                if report.admitted > 0
+                    || report.staged > 0
+                    || report.duplicates > 0
+                    || report.ignored > 0
+                {
                     tracing::info!(
                         admitted = report.admitted,
+                        staged = report.staged,
+                        pending = report.albums_pending,
                         duplicates = report.duplicates,
                         ignored = report.ignored,
                         "telegram poll complete"

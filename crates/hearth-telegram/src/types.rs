@@ -1,10 +1,10 @@
 //! The Telegram update shapes Hearth uses.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// One incoming update.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Update {
     pub update_id: i64,
     #[serde(default)]
@@ -12,7 +12,7 @@ pub struct Update {
 }
 
 /// One incoming message.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Message {
     pub message_id: i64,
     #[serde(default)]
@@ -47,21 +47,21 @@ pub struct Message {
 }
 
 /// A reply to a message the bot cannot see, such as a post in a channel.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExternalReply {
     #[serde(default)]
     pub quote: Option<Quote>,
 }
 
 /// A rich formatted message.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RichMessage {
     #[serde(default)]
     pub blocks: Vec<Value>,
 }
 
 /// A highlighted span the person replied to.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Quote {
     #[serde(default)]
     pub text: Option<String>,
@@ -70,7 +70,7 @@ pub struct Quote {
 }
 
 /// The chat a message belongs to.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Chat {
     pub id: i64,
     #[serde(rename = "type")]
@@ -80,7 +80,7 @@ pub struct Chat {
 }
 
 /// The sender of a message.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct User {
     pub id: i64,
     #[serde(default)]
@@ -92,7 +92,7 @@ pub struct User {
 }
 
 /// The bot's own identity.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Me {
     pub id: i64,
     #[serde(default)]
@@ -104,7 +104,7 @@ pub struct Me {
 }
 
 /// One size of an incoming photo.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PhotoSize {
     pub file_id: String,
     #[serde(default)]
@@ -118,7 +118,7 @@ pub struct PhotoSize {
 }
 
 /// One incoming document.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Document {
     pub file_id: String,
     #[serde(default)]
@@ -132,7 +132,7 @@ pub struct Document {
 }
 
 /// One incoming audio file.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Audio {
     pub file_id: String,
     #[serde(default)]
@@ -146,7 +146,7 @@ pub struct Audio {
 }
 
 /// One incoming voice note.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Voice {
     pub file_id: String,
     #[serde(default)]
@@ -158,7 +158,7 @@ pub struct Voice {
 }
 
 /// One incoming video.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Video {
     pub file_id: String,
     #[serde(default)]
@@ -172,7 +172,7 @@ pub struct Video {
 }
 
 /// The Bot API file descriptor.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FileInfo {
     pub file_id: String,
     #[serde(default)]

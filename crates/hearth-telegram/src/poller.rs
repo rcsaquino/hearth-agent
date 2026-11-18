@@ -1,19 +1,17 @@
 //! Telegram polling and durable admission.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
 
-use hearth_core::{CoreError, Session, TelegramUpdate};
+use hearth_core::{Conversation, CoreError, Session, TelegramUpdate};
 use hearth_model::Transcriber;
 use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::api::{TelegramClient, TelegramError};
 use crate::media_store::InboundMedia;
-use crate::types::{Message, Update};
+use crate::types::Message;
 
 /// The largest attachment Telegram may deliver to Hearth.
 pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
@@ -25,11 +23,8 @@ const BUSY_NOTICE: &str = "I'm busy with the current queue. Try again shortly.";
 
 const ALLOWED_UPDATES: &[&str] = &["message", "callback_query"];
 
-/// How long an album waits for another member before it is admitted.
-const ALBUM_QUIET_WINDOW: Duration = Duration::from_millis(500);
-
-/// The longest an album waits for a member that arrives slowly.
-const ALBUM_MAX_WAIT: Duration = Duration::from_secs(2);
+/// How long an album waits after its last member before it is admitted.
+pub const ALBUM_QUIET_MICROS: i64 = 1_000_000;
 
 /// A polling failure.
 #[derive(Debug, Error)]
@@ -53,6 +48,8 @@ pub trait StopHandler: Send + Sync {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PollReport {
     pub admitted: usize,
+    pub staged: usize,
+    pub albums_pending: usize,
     pub duplicates: usize,
     pub ignored: usize,
     pub stopped: usize,
@@ -104,118 +101,117 @@ impl TelegramPoller {
         &self.session
     }
 
-    /// Poll once and admit authorized messages, holding an album until its
-    /// members arrive.
+    /// Poll once and admit authorized messages.
+    ///
+    /// A due album is submitted before the new batch is read. An album member
+    /// is staged for a later poll, so the poller never sleeps on an album.
     pub fn poll_once(&self) -> Result<PollReport, PollError> {
         let offset = self.session.telegram_offset()?;
-        let updates = self.collect_updates(offset)?;
         let mut report = PollReport {
             next_offset: offset,
             ..PollReport::default()
         };
-        let mut cursor = offset;
-        for item in batch_items(&updates) {
-            cursor = cursor.max(item.next_offset);
-            report.next_offset = cursor;
-            let Some(primary) = item.messages.first().copied() else {
-                self.session.set_telegram_offset(cursor)?;
+        report.admitted = self.flush_albums(self.session.now_micros())?;
+        let timeout = if self.session.telegram_album_pending()? {
+            0
+        } else {
+            self.poll_timeout
+        };
+        let updates = self.client.get_updates(offset, timeout, ALLOWED_UPDATES)?;
+        for update in updates {
+            let next_offset = update.update_id + 1;
+            report.next_offset = report.next_offset.max(next_offset);
+            let Some(message) = update.message.as_ref() else {
+                self.session.set_telegram_offset(next_offset)?;
                 report.ignored += 1;
                 continue;
             };
-            if !self.authorized(primary) {
+            if !self.authorized(message) {
                 tracing::warn!(
-                    update_id = item.update_id,
+                    update_id = update.update_id,
                     "ignored unauthorized telegram update"
                 );
-                self.session.set_telegram_offset(cursor)?;
+                self.session.set_telegram_offset(next_offset)?;
                 report.ignored += 1;
                 continue;
             }
-            if item.messages.iter().any(|message| {
-                message
-                    .text
-                    .as_deref()
-                    .is_some_and(|text| text.trim().eq_ignore_ascii_case("stop"))
-            }) {
+            if message
+                .text
+                .as_deref()
+                .is_some_and(|text| text.trim().eq_ignore_ascii_case("stop"))
+            {
                 let recorded = self.session.record_telegram_update(
                     TelegramUpdate {
-                        update_id: item.update_id,
-                        chat_id: primary.chat.id,
-                        message_id: primary.message_id,
+                        update_id: update.update_id,
+                        chat_id: message.chat.id,
+                        message_id: message.message_id,
                     },
-                    cursor,
+                    next_offset,
                 )?;
                 if !recorded {
-                    self.session.set_telegram_offset(cursor)?;
+                    self.session.set_telegram_offset(next_offset)?;
                     report.duplicates += 1;
                     continue;
                 }
                 let active = self
                     .stop
                     .as_ref()
-                    .is_some_and(|handler| handler.stop(primary.chat.id));
-                tracing::info!(chat_id = primary.chat.id, active, "telegram stop");
+                    .is_some_and(|handler| handler.stop(message.chat.id));
+                tracing::info!(chat_id = message.chat.id, active, "telegram stop");
                 report.stopped += 1;
                 continue;
             }
-            if self.session.telegram_update_seen(item.update_id)? {
-                self.session.set_telegram_offset(cursor)?;
+            if self.session.telegram_update_seen(update.update_id)? {
+                self.session.set_telegram_offset(next_offset)?;
                 report.duplicates += 1;
                 continue;
             }
 
-            if !has_content(&item.messages) {
-                self.session.set_telegram_offset(cursor)?;
+            if !has_content(&[message]) {
+                self.session.set_telegram_offset(next_offset)?;
                 report.ignored += 1;
                 continue;
             }
 
-            let thread_id = primary.message_thread_id.unwrap_or(0);
-            let key = format!("{}:{}", primary.chat.id, thread_id);
-            let conversation = match self.session.conversation_by_transport("telegram", &key)? {
-                Some(conversation) => conversation,
-                None => {
-                    let title = primary
-                        .chat
-                        .title
-                        .clone()
-                        .or_else(|| {
-                            primary
-                                .from
-                                .as_ref()
-                                .and_then(|user| user.first_name.clone())
-                        })
-                        .unwrap_or_else(|| "Telegram".to_owned());
-                    self.session.create_conversation(&title, "telegram", &key)?
+            if let Some(group_id) = message.media_group_id.as_deref() {
+                let ready_at = self.session.now_micros() + ALBUM_QUIET_MICROS;
+                let message_json = serde_json::to_value(message)
+                    .map_err(|error| PollError::Core(CoreError::Invalid(error.to_string())))?;
+                let staged = self.session.stage_telegram_album_member(
+                    message.chat.id,
+                    group_id,
+                    message.message_thread_id,
+                    TelegramUpdate {
+                        update_id: update.update_id,
+                        chat_id: message.chat.id,
+                        message_id: message.message_id,
+                    },
+                    message_json,
+                    ready_at,
+                    next_offset,
+                )?;
+                if staged {
+                    report.staged += 1;
+                } else {
+                    self.session.set_telegram_offset(next_offset)?;
+                    report.duplicates += 1;
                 }
-            };
+                continue;
+            }
 
+            let conversation = self.conversation_for(message)?;
             if self.session.queued_submission_count(&conversation.id)? >= MAX_QUEUED_PER_CHAT {
-                let notify = self
-                    .busy_notified
-                    .lock()
-                    .map(|mut chats| chats.insert(primary.chat.id))
-                    .unwrap_or(false);
-                if notify
-                    && let Err(error) = self.client.send_message(
-                        primary.chat.id,
-                        primary.message_thread_id,
-                        BUSY_NOTICE,
-                        &[],
-                    )
-                {
-                    tracing::warn!(%error, "telegram busy notice failed");
-                }
+                self.notify_busy(message);
                 let recorded = self.session.record_telegram_update(
                     TelegramUpdate {
-                        update_id: item.update_id,
-                        chat_id: primary.chat.id,
-                        message_id: primary.message_id,
+                        update_id: update.update_id,
+                        chat_id: message.chat.id,
+                        message_id: message.message_id,
                     },
-                    cursor,
+                    next_offset,
                 )?;
                 if !recorded {
-                    self.session.set_telegram_offset(cursor)?;
+                    self.session.set_telegram_offset(next_offset)?;
                     report.duplicates += 1;
                 } else {
                     report.busy += 1;
@@ -223,65 +219,150 @@ impl TelegramPoller {
                 continue;
             }
             if let Ok(mut chats) = self.busy_notified.lock() {
-                chats.remove(&primary.chat.id);
+                chats.remove(&message.chat.id);
             }
 
-            let blocks = self.blocks(&item.messages);
+            let blocks = self.blocks(&[message]);
             if blocks.is_empty() {
-                self.session.set_telegram_offset(cursor)?;
+                self.session.set_telegram_offset(next_offset)?;
                 report.ignored += 1;
                 continue;
             }
 
-            let request_id = format!("tg:{}:{}", primary.chat.id, primary.message_id);
+            let request_id = format!("tg:{}:{}", message.chat.id, message.message_id);
             if let Some(handler) = self.stop.as_ref() {
-                handler.admit(primary.chat.id);
+                handler.admit(message.chat.id);
             }
             let admission = self.session.submit_telegram(
                 &conversation.id,
                 &request_id,
                 Value::Array(blocks),
                 TelegramUpdate {
-                    update_id: item.update_id,
-                    chat_id: primary.chat.id,
-                    message_id: primary.message_id,
+                    update_id: update.update_id,
+                    chat_id: message.chat.id,
+                    message_id: message.message_id,
                 },
-                cursor,
+                next_offset,
             )?;
             if admission.duplicate {
-                self.session.set_telegram_offset(cursor)?;
+                self.session.set_telegram_offset(next_offset)?;
                 report.duplicates += 1;
                 continue;
             }
             report.admitted += 1;
         }
+        report.albums_pending = usize::from(self.session.telegram_album_pending()?);
         Ok(report)
     }
 
-    /// Read the batch, and give an album a moment to deliver every member.
-    fn collect_updates(&self, offset: i64) -> Result<Vec<Update>, TelegramError> {
-        let mut updates = BTreeMap::new();
-        for update in self
-            .client
-            .get_updates(offset, self.poll_timeout, ALLOWED_UPDATES)?
+    /// Submit every staged album whose quiet window has passed.
+    fn flush_albums(&self, now: i64) -> Result<usize, PollError> {
+        let due = self.session.due_telegram_albums(now)?;
+        let mut admitted = 0;
+        for album in due {
+            let messages: Vec<Message> = match album
+                .members
+                .iter()
+                .map(|member| serde_json::from_value(member.message.clone()))
+                .collect()
+            {
+                Ok(messages) => messages,
+                Err(error) => {
+                    tracing::warn!(%error, "a staged album member could not be read");
+                    self.session
+                        .clear_telegram_album(album.chat_id, &album.group_id)?;
+                    continue;
+                }
+            };
+            let Some(first) = messages.first() else {
+                self.session
+                    .clear_telegram_album(album.chat_id, &album.group_id)?;
+                continue;
+            };
+            let conversation = self.conversation_for(first)?;
+            if self.session.queued_submission_count(&conversation.id)? >= MAX_QUEUED_PER_CHAT {
+                self.notify_busy(first);
+                continue;
+            }
+            let refs: Vec<&Message> = messages.iter().collect();
+            let blocks = self.blocks(&refs);
+            if blocks.is_empty() {
+                self.session
+                    .clear_telegram_album(album.chat_id, &album.group_id)?;
+                continue;
+            }
+            let request_id = format!("tg:{}:{}", album.chat_id, album.members[0].message_id);
+            if self
+                .session
+                .submission_by_request_id(&request_id)?
+                .is_some()
+            {
+                self.session
+                    .clear_telegram_album(album.chat_id, &album.group_id)?;
+                continue;
+            }
+            if let Some(handler) = self.stop.as_ref() {
+                handler.admit(album.chat_id);
+            }
+            let admission = self.session.submit_telegram_album(
+                &conversation.id,
+                &request_id,
+                Value::Array(blocks),
+                &album.members[0].message_id.to_string(),
+                album.chat_id,
+                &album.group_id,
+            )?;
+            if admission.duplicate {
+                self.session
+                    .clear_telegram_album(album.chat_id, &album.group_id)?;
+            } else {
+                admitted += 1;
+            }
+            if let Ok(mut chats) = self.busy_notified.lock() {
+                chats.remove(&album.chat_id);
+            }
+        }
+        Ok(admitted)
+    }
+
+    fn conversation_for(&self, message: &Message) -> Result<Conversation, CoreError> {
+        let thread_id = message.message_thread_id.unwrap_or(0);
+        let key = format!("{}:{}", message.chat.id, thread_id);
+        match self.session.conversation_by_transport("telegram", &key)? {
+            Some(conversation) => Ok(conversation),
+            None => {
+                let title = message
+                    .chat
+                    .title
+                    .clone()
+                    .or_else(|| {
+                        message
+                            .from
+                            .as_ref()
+                            .and_then(|user| user.first_name.clone())
+                    })
+                    .unwrap_or_else(|| "Telegram".to_owned());
+                self.session.create_conversation(&title, "telegram", &key)
+            }
+        }
+    }
+
+    fn notify_busy(&self, message: &Message) {
+        let notify = self
+            .busy_notified
+            .lock()
+            .map(|mut chats| chats.insert(message.chat.id))
+            .unwrap_or(false);
+        if notify
+            && let Err(error) = self.client.send_message(
+                message.chat.id,
+                message.message_thread_id,
+                BUSY_NOTICE,
+                &[],
+            )
         {
-            updates.insert(update.update_id, update);
+            tracing::warn!(%error, "telegram busy notice failed");
         }
-        if !updates.values().any(is_album_update) {
-            return Ok(updates.into_values().collect());
-        }
-        let deadline = Instant::now() + ALBUM_MAX_WAIT;
-        loop {
-            thread::sleep(ALBUM_QUIET_WINDOW);
-            let before = updates.len();
-            for update in self.client.get_updates(offset, 0, ALLOWED_UPDATES)? {
-                updates.insert(update.update_id, update);
-            }
-            if updates.len() == before || Instant::now() >= deadline {
-                break;
-            }
-        }
-        Ok(updates.into_values().collect())
     }
 
     fn blocks(&self, messages: &[&Message]) -> Vec<Value> {
@@ -296,9 +377,11 @@ impl TelegramPoller {
             blocks.push(json!({"type": "text", "text": context}));
         }
 
+        let mut seen = HashSet::new();
         let text = messages
             .iter()
             .filter_map(|message| message_text(message))
+            .filter(|text| seen.insert(text.clone()))
             .collect::<Vec<_>>()
             .join("\n\n");
         if !text.is_empty() {
@@ -576,56 +659,6 @@ fn has_content(messages: &[&Message]) -> bool {
             || message.voice.is_some()
             || message.video.is_some()
     })
-}
-
-/// One admission: a single message, or one album's members.
-struct BatchItem<'a> {
-    messages: Vec<&'a Message>,
-    update_id: i64,
-    next_offset: i64,
-}
-
-/// Collapse one album's updates into one admission item.
-fn batch_items(updates: &[Update]) -> Vec<BatchItem<'_>> {
-    let mut items: Vec<BatchItem> = Vec::new();
-    let mut albums: HashMap<(i64, &str), usize> = HashMap::new();
-    for update in updates {
-        let next_offset = update.update_id + 1;
-        let Some(message) = update.message.as_ref() else {
-            items.push(BatchItem {
-                messages: Vec::new(),
-                update_id: update.update_id,
-                next_offset,
-            });
-            continue;
-        };
-        let album = message
-            .media_group_id
-            .as_deref()
-            .map(|group| (message.chat.id, group));
-        if let Some(index) = album.and_then(|key| albums.get(&key).copied()) {
-            let item = &mut items[index];
-            item.messages.push(message);
-            item.next_offset = item.next_offset.max(next_offset);
-            continue;
-        }
-        if let Some(key) = album {
-            albums.insert(key, items.len());
-        }
-        items.push(BatchItem {
-            messages: vec![message],
-            update_id: update.update_id,
-            next_offset,
-        });
-    }
-    items
-}
-
-fn is_album_update(update: &Update) -> bool {
-    update
-        .message
-        .as_ref()
-        .is_some_and(|message| message.media_group_id.is_some())
 }
 
 fn file_block(path: &std::path::Path, name: &str, mime: &str) -> Value {
