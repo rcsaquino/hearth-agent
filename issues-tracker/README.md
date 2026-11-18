@@ -43,11 +43,12 @@ Start every file with the same block.
 | --- | --- |
 | Kind | bug |
 | Reported | 2026-11-15 |
-| Area | hearth-memory |
+| Area | memory |
 ```
 
-`Area` is the crate or directory most involved. Files written before this block
-existed are bugs by default.
+`Area` is the part of the product most affected, in plain words: `settings`,
+`memory`, `Telegram`, and so on. The fixer locates the crate. Files written
+before this block existed are bugs by default.
 
 Names are `YYYY-MM-DD-short-slug.md`, using the date the issue was written. The
 slug describes the subject, not the kind; the kind belongs in the header where
@@ -57,27 +58,34 @@ it can be read without decoding a filename.
 
 Write it to `open/`.
 
-Write for an agent that has only the repository. It cannot see the
-conversation, the host, the logs, or the person who noticed the problem. If a
-claim cannot be re-derived from code in the repository, it does not belong in
-the file.
+You do not need to read the code. Finding the cause is the fixer's job. Your
+job is to record what a user saw and what they expected.
 
-For a `bug`, state the observed behaviour and the mechanism. Point at the file
-and the function, type, or constant that carries it. Do not propose a fix; the
-file describes the fault, the fixer decides the approach.
+Write in plain language, as a user who uses the program would describe it:
 
-Cite by name, never by position. The fixer may read a different revision, so a
-line number is wrong as soon as anything above it moves, and a pasted function
-is a copy of one revision rather than a fact about the fault. Name the file and
-the symbol: `ContextBudget::new` in `crates/hearth-core/src/budget.rs` locates
-the mechanism in every revision that has it; `budget.rs:44` locates one
-snapshot. Quote a short fragment inline when the exact text is the evidence,
-but do not paste blocks of repository source. An input, an output, or a command
-may go in a block, because there is no name to cite instead.
+- **What it is** — a bug, a feature, a change, or a chore.
+- **What happens now** — the current behaviour.
+- **What should happen** — the expected behaviour.
 
-For a `feature` or `change`, state what should happen and why it is worth doing.
-Describe the desired behaviour, not the implementation. Leave the design to the
-implementer, and say plainly if there is a design constraint that must hold.
+If you are not sure which kind it is, describe what you saw. A wrong kind can
+be corrected later.
+
+For example:
+
+> Clicking the submit button is bugged. What happens now is that nothing
+> happens when I click submit. What should happen is that the form submits.
+
+Do not name files, functions, or code. Do not guess the cause. Do not study the
+repository to make the report sound technical. A plain report of what a user
+saw is more useful than a technical guess that is wrong.
+
+The fixer cannot see the conversation, the host, the logs, or the user who
+noticed the problem. Keep what is needed to understand the report in the file:
+the steps, the words on screen, the error text, and the expected result.
+
+For a `feature` or `change`, describe the desired behaviour and why it is worth
+doing. Leave the design to the implementer. State plainly if there is a
+constraint that must hold.
 
 Do not paste secrets, tokens, keys, credentials, or message identifiers.
 
@@ -87,7 +95,8 @@ established. An issue can be closed. A forgotten one cannot be worked on.
 ## If you are working an issue
 
 1. Read `open/`.
-2. Establish the current state. For a `bug`, reproduce it or show from the code
+2. Establish the current state. The report gives the symptom, not the diagnosis;
+   find the mechanism yourself. For a `bug`, reproduce it or show from the code
    that it cannot still occur. For a `feature` or `change`, show that it does
    not already exist.
 3. Do the work.
@@ -124,9 +133,10 @@ decision, and the next reader needs to know it was deliberate.
   new issue and reference the old one.
 - One issue per file. Two unrelated things in one file means one of them gets
   lost.
-- Cite symbols, not coordinates. No line numbers and no pasted source, in an
-  issue or in a Resolution. A file and a symbol outlive a revision;
-  `file.rs:100` does not.
+- Report the behaviour, not the code. An open issue describes what a user saw
+  and expected, in plain words. A Resolution may name the file and symbol that
+  changed, but never a line number or pasted source; `file.rs:100` locates one
+  revision and no more.
 - Update the file, not a chat message. Anything a worker needs must be in the
   file.
 - Ordering inside a directory does not matter. Nothing is by priority unless a
