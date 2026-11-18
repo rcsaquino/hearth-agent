@@ -1152,8 +1152,10 @@ impl Session {
                    AND owner.status = 'done' \
                    ORDER BY owner.created_at, owner.id LIMIT 1) \
                  AND NOT EXISTS ( \
-                   SELECT 1 FROM effects f WHERE f.kind = 'telegram.send' \
-                   AND f.key = 'tg:' || s.id) \
+                   SELECT 1 FROM effects f \
+                   JOIN submissions owner ON f.key = 'tg:' || owner.id \
+                   WHERE f.kind = 'telegram.send' \
+                   AND owner.answer_entry_id = s.answer_entry_id) \
                  ORDER BY s.settled_at, s.id",
                 (since,),
                 |row| {
