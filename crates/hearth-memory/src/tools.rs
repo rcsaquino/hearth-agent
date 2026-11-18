@@ -237,7 +237,7 @@ impl MemoryTool {
         .map_err(failure)?
         {
             reply.push_str(&format!(
-                "\nrelated: {} ({:.2} overlap) {}. This is a separate statement, not a duplicate.",
+                "\nrelated: {} ({:.2} overlap) {}. If the two say the same thing, forget one.",
                 neighbour.id,
                 overlap,
                 digest::tool_line(&neighbour, now)
@@ -719,9 +719,14 @@ mod tests {
             second.content
         );
         assert!(
-            second.content.contains("supersedes ="),
-            "the reply must name the replacement lever, because a changed value is a \
-             replacement the model has to make on this turn: {}",
+            !second.content.contains("not a duplicate"),
+            "the store cannot call a reworded restatement separate: {}",
+            second.content
+        );
+        assert!(
+            second.content.contains("forget one"),
+            "the reply must name the repair, because the store cannot close a \
+             restatement it cannot prove: {}",
             second.content
         );
     }
