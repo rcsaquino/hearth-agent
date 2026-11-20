@@ -1,14 +1,82 @@
 # Hearth Specification
 
-**Status:** Draft 0.61, plain-language edition
-**Date:** 2026-11-18
+**Status:** Draft 0.62, plain-language edition
+**Date:** 2026-11-20
 **Maintainer:** the project team
 **Built with:** 100% Rust application code; SQLite is a bundled native dependency, and there is no Node, Python, or JavaScript runtime.
 **Borrowed from:** the ideas in `@earendil-works/pi-durable`, not its code
 
 ---
 
+## 0. Northstar
+
+**In plain terms.** Hearth has three goals that do not change. They are the reason
+the project exists. The rest of this document is a plan for meeting them. When a
+detail, a milestone, or a new idea conflicts with a goal, the detail changes. The
+goal does not.
+
+The goals:
+
+1. **It learns from its own work.** Every useful memory row, and every learned
+   skill, must be able to improve a later answer. Memory rows hold facts,
+   preferences, people, decisions, commitments, episodes, and rules; skills hold
+   procedures. Both cite the work that justified them, both are versioned or
+   reversible, and neither rewrites the core: `SOUL.md`, settings, code, tools, and
+   the system prompt stay under human control. This is learning in the record, not
+   training the model.
+2. **It spends the right tokens for the job.** A correct answer is the first
+   requirement. After that, Hearth spends the fewest tokens that keep the measured
+   quality floor. It caches the stable prefix, retrieves instead of stuffing,
+   compacts old history, bounds tool output, and gives housekeeping narrow work. It
+   does not save tokens by hiding a needed memory, skipping a needed tool result,
+   or answering from a weaker context. The budget guards against waste; it is not a
+   cap on necessary work.
+3. **Every stored memory is reachable, quickly.** If a statement is in the store,
+   Hearth must be able to return it. "100% recall" here means coverage, not that
+   every statement is printed in the automatic digest: every current row is
+   reachable by id, by subject when it has one, by a direct term, and by
+   enumerating the store; a replaced row stays reachable by id and by an as-of
+   read. No stored row is lost. The digest is a shortcut, not the only door.
+   Retrieval is local, never calls a model, and meets the latency gate in section
+   14: 100 ms at p95 on the benchmark store.
+
+These goals are not traded against each other. A token saving that loses
+reachability is rejected. A learning step that spends without evidence is
+rejected. A speed change that drops a row is rejected. If no design meets all
+three, the change is out of scope, not a reason to weaken a goal.
+
+**How the spec follows the northstar.** Every draft, milestone, and behavior
+change names:
+
+- the goal it serves;
+- the measurement it moves;
+- the goal it might weaken, and the evidence that it does not.
+
+A change that lowers a measured goal below its gate is rejected even when it
+improves another number. Section 0 is not reopened by a draft. The spec evolves;
+the goals do not.
+
+**Where the goals live in this document.**
+
+| Goal | Design | Measurement |
+|---|---|---|
+| Learn from its own work | Sections 7.3, 7.7, and 9.6: provenance, consolidation, and the skill lifecycle | Every memory row keeps provenance; every learned skill cites entry ids; the nightly review reports its changes |
+| Spend the right tokens | Sections 5.5, 6, and 13: budgets, cache, compaction, and the usage ledger | Prompt audit and usage ledger; section 14 targets; no quality target falls |
+| Reachable memory, quickly | Sections 7.1 through 7.9 and 14: one store, four paths, local retrieval | 1.00 coverage; retrieval p95 at or below 100 ms at the gate |
+
+---
+
 ## A note on language
+
+Draft 0.62 fixes the northstar. Three goals now govern the project: Hearth learns
+from its own recorded work, it spends the right tokens for the job, and every
+stored memory stays reachable and quick. Section 0 defines them as fixed; the rest
+of the document adapts to them. "100% recall" is defined as coverage, not as a
+promise that every row appears in the automatic digest: every stored statement is
+reachable by id, current rows by subject, term, and enumeration, and replaced rows
+by an as-of read. The memory benchmark reports coverage beside automatic and
+one-call recall, section 6 gains a quality floor, and every draft, milestone, and
+change must name the goal it serves and the measurement it moves.
 
 Draft 0.61 makes the digest name a pair it cannot judge. Two rows about one
 subject that overlap enough to be one fact, and that the write gate cannot prove
@@ -347,7 +415,7 @@ disagree, the precise rule wins. This edition is a plain-language rewrite of Dra
 0.1; no requirement was intentionally weakened.
 
 **Suggested review path.** For a product review, read every "In plain terms"
-paragraph plus the short version, glossary, sections 1, 4, 6, 7, 8, 17, and 18.
+paragraph plus the short version, glossary, sections 0, 1, 4, 6, 7, 8, 17, and 18.
 For implementation, read everything.
 
 ---
@@ -357,14 +425,24 @@ For implementation, read everything.
 Hearth is a personal agent that lives in Telegram and keeps its own records. It is
 not a coding tool that also chats. It is a companion that can code when needed.
 
-- **It remembers for years.** Facts, preferences, people, projects, and past work
-  are kept in a memory built to last, not a chat window that forgets.
+Its northstar is three fixed goals: learn from its own work, spend the right
+tokens for the job, and keep every stored memory reachable and quick (section 0).
+
+- **It remembers, and it can always find what it stored.** Facts, preferences,
+  people, projects, and past work are kept in a memory built to last. Every stored
+  statement is reachable by id, and every current statement by subject, term, or
+  enumeration. Retrieval is local and fast; the automatic digest is a shortcut,
+  not the only door.
+- **It learns from its own work.** Facts and preferences become memory rows, and
+  procedures become versioned skills. Each change cites the recorded work that
+  justified it, and none of it rewrites Hearth's core.
 - **It never loses committed work.** A message, an answer, a tool result, or a task
   is written down before it is shown or acted on. A crash can interrupt work, but it
   does not erase work that was already saved.
-- **It stays cheap.** Hearth reuses the beginning of each request, retrieves only
-  what a turn needs, loads tools and skills on demand, and summarizes old
-  conversation before it becomes expensive.
+- **It spends the right tokens.** Hearth reuses the beginning of each request,
+  retrieves only what a turn needs, loads tools and skills on demand, and summarizes
+  old conversation before it becomes expensive. It does not cut the context a
+  correct answer needs; the budget guards against waste.
 - **It is yours.** One user, one local database, no Hearth account, no telemetry.
   Model providers are choices, not dependencies baked into the design.
 - **It is built test-first, and built small.** Every behavior begins as a failing
@@ -372,9 +450,9 @@ not a coding tool that also chats. It is a companion that can code when needed.
   only for the current milestone, in the simplest form that passes, with one
   definition per rule (YAGNI, KISS, DRY; section 15.5).
 
-If you read nothing else, read sections 1, 4, 6, 7, and 8. They explain what
-Hearth is, how it survives failure, how it stays affordable, how it remembers, and
-how you talk to it.
+If you read nothing else, read sections 0, 1, 4, 6, 7, and 8. They explain the
+goals, what Hearth is, how it survives failure, how it spends tokens, how it
+remembers, and how you talk to it.
 
 ---
 
@@ -405,6 +483,10 @@ how you talk to it.
 | **Compaction** | Replacing an old stretch of conversation with a summary so the model can keep working without rereading everything. |
 | **Checkpoint** | A saved note of the current step and what comes next, so work can resume. |
 | **Provenance** | The record of where a fact came from and when. |
+| **Northstar** | The three fixed goals in section 0. A change that weakens one is rejected. |
+| **Memory coverage (100% recall)** | Every stored statement is reachable by id; every current statement by subject when present, a direct term, and enumeration; every replaced statement by id and an as-of read. It is not the same as automatic recall. |
+| **Automatic recall** | What the bounded digest shows without a memory call. It is measured separately from coverage. |
+| **Quality floor** | The measured targets in sections 7.9 and 14 that a cheaper design may not fall below. |
 | **SQLite** | A small, single-file database built into the program. |
 | **Backoff** | Waiting longer after each failed retry. |
 | **Context window** | The maximum amount of text a model can read in one request. |
@@ -417,6 +499,7 @@ how you talk to it.
 
 ## Contents
 
+0. Northstar
 A note on language
 The short version
 Glossary
@@ -426,7 +509,7 @@ Glossary
 3. Where Everything Lives
 4. The Permanent Record
 5. One Answer, Step by Step
-6. Keeping It Cheap
+6. Spending the Right Tokens
 7. Memory
 8. Telegram
 9. Tools
@@ -459,18 +542,24 @@ with one durable record of everything it knows and does.
 Hearth:
 
 - talks to its user primarily through Telegram;
-- remembers facts, preferences, people, projects, and past work across years;
+- remembers facts, preferences, people, projects, and past work across years, and
+  keeps every stored statement reachable by id, with history readable as of a
+  date, and every current statement reachable by subject, term, or enumeration;
+- learns from its own recorded work: facts and preferences become memory rows,
+  procedures become versioned skills, and neither rewrites its core;
 - runs durable background tasks that survive restarts, crashes, and reboots;
 - uses tools such as files, shell, web, media, and scheduling under a
   configurable policy;
 - keeps its transcript, memory, task state, and usage ledger in one local database;
-- stays affordable by caching, budgeting, compacting, and retrieving instead of
-  stuffing everything into every request.
+- spends the right tokens by caching, budgeting, compacting, and retrieving
+  instead of stuffing everything into every request, without cutting the context
+  a correct answer needs.
 
-### 1.2 Seven principles
+### 1.2 Eight principles
 
-These are the decisions that shape everything else. When a later detail is
-ambiguous, these principles decide it.
+These are the decisions that shape everything else. Section 0 sets the goals;
+these principles decide the design. When a later detail is ambiguous, these
+principles decide it.
 
 **1. Write it down before you show it.**
 Every input, answer, tool result, memory write, and task step is saved before it is
@@ -483,12 +572,15 @@ Memory is not a growing block of text pasted into every request. It has records,
 provenance, search, conflict handling, consolidation (tidying and merging), and
 forgetting. The model
 asks the library for what it needs, and Hearth also brings a few relevant items
-without being asked.
+without being asked. Every stored statement remains reachable by id, and every
+current statement by subject when present, term, or enumeration, even when the
+digest does not show it.
 
 **3. Every token pays rent.**
 A token spent on repeated instructions, unused tools, or six copies of the same
 fact is a token not spent on the actual request. Stable text goes first, changing
-text goes last, and every addition to the prompt has a budget.
+text goes last, and every addition to the prompt has a budget. The target is not
+the lowest count; it is the lowest count that still meets the quality floor.
 
 **4. One user, one writer.**
 A single daemon owns the database and its conversations. There is no multi-writer
@@ -510,6 +602,12 @@ Tools are Rust code compiled into Hearth. Behavior is a small settings file plus
 code defaults. Knowledge lives in memory rows and Markdown skills. There is no
 untrusted plugin runtime and no dynamic JavaScript extension layer.
 
+**8. Learning is evidence, not drift.**
+Hearth improves from its own recorded work. A memory row keeps provenance, and a
+skill version cites the entry ids that justified it. Learning writes memory rows
+and learned skills only; it never rewrites `SOUL.md`, settings, code, tools, or
+the system prompt. A change without evidence is not a lesson.
+
 ### 1.3 What it is not
 
 Hearth is not, in version 1.0:
@@ -521,16 +619,18 @@ Hearth is not, in version 1.0:
 - a migration tool for other agent harnesses;
 - a coding IDE or repository agent, although coding tools exist;
 - a model trainer or fine-tuning system;
-- a promise of perfect recall. Hearth targets measured, budgeted recall, not
-  omniscience.
+- a promise that every fact appears in the automatic digest. Hearth promises 100%
+  coverage: every stored statement is reachable by id and by an as-of read, and
+  every current statement by subject when present, term, or enumeration. The
+  digest is bounded on purpose;
+- a self-modifying core. Hearth learns through memory rows and learned skills,
+  not by rewriting its code, settings, `SOUL.md`, or system prompt.
 
 ### 1.4 What it borrowed from pi-durable, and what it changed
 
 **In plain terms.** Hearth borrows the durable ideas from pi-durable, not its
 TypeScript code: save first, keep history immutable, treat work as resumable
 tasks, and summarize old conversation without deleting it.
-
-Changed, and why:
 
 Changed, and why:
 
@@ -1052,12 +1152,14 @@ message. It uses the same memory flush and summary path.
 
 ---
 
-## 6. Keeping It Cheap
+## 6. Spending the Right Tokens
 
 **In plain terms.** The model has a desk of limited size. Hearth keeps the stable
 things at the front of the desk, puts new things at the end, and only brings out
 what this turn needs. It reuses the provider's cache, retrieves summaries instead
-of full histories, and lets a cheaper model do the housekeeping.
+of full histories, and gives housekeeping narrow, bounded work on the same model.
+The goal is the lowest token count that still produces the right answer, not the
+lowest count at any cost.
 
 ### 6.1 What the model sees
 
@@ -1123,7 +1225,7 @@ the provider and model keep their own defaults. The one generation control Heart
 sets is the reasoning level from `models.thinking` (`reasoning_effort`, or DeepSeek's
 `thinking` toggle for off).
 
-### 6.3 Cost rules
+### 6.3 Spending rules
 
 1. **Stable prefix, changing suffix.** Anything that changes per turn goes last.
 2. **Retrieve less, later.** Summaries and recall first; full content, optional
@@ -1132,6 +1234,17 @@ sets is the reasoning level from `models.thinking` (`reasoning_effort`, or DeepS
    to a file. Prompts carry no duplicates and no filler.
 4. **Bounded housekeeping.** Extraction, summaries, titles, and classification get
    narrow instructions and bounded inputs.
+5. **Quality floor.** A cheaper path is accepted only when the measured targets in
+   sections 7.9 and 14 stay at or above their gates. Saving tokens is not a reason
+   to hide a needed memory, skip a needed tool result, or answer from a weaker
+   context.
+
+The budget is a guard against waste, not a limit on correctness. If a correct
+answer needs another tool result, a larger retrieved memory, or a longer
+transcript, Hearth spends it. If the request still exceeds the window, Hearth
+compacts, then fails with a clear budget error. It never silently drops a needed
+fact to make the number smaller. Correctness is checked by the seam tests and the
+release acceptance list; a cheaper path that fails either is not a saving.
 
 ### 6.4 Reusing the provider's cache
 
@@ -1157,8 +1270,9 @@ use, memory capture in compaction, summaries, titles, and classification. There 
 second routing path. The usage ledger and the TUI Overview record the provider and model
 that served each request.
 
-Housekeeping stays cheap by bounding the work, not by switching models or changing
-the provider's generation defaults.
+Housekeeping stays affordable by bounding the work, not by switching models or
+changing the provider's generation defaults. For 1.0, a second model is not a cost
+strategy; it is a second behavior to measure and keep in step.
 
 ### 6.6 Auditing the prompt
 
@@ -1393,6 +1507,15 @@ message
   -> diversify, then keep the best scores up to the item cap
 ```
 
+Reachability is an invariant, not a ranking outcome. Every stored statement has
+an id, and a replaced row stays readable by id and by an as-of read. A current
+row also has its indexed terms and its subject when it has one, and paging the
+store until every current row is seen reaches all of them. The semantic channel
+may be absent; the lexical and subject paths still work. A committed row must be
+reachable by at least one path; an index that cannot reach it is a defect, and no
+cache is authoritative over the table. The digest may show only ten rows, but it
+always names the remainder and the call that fetches it.
+
 The ranking features are the evidence a personal message actually provides.
 
 | Feature | Weight | Why |
@@ -1538,22 +1661,28 @@ boundary is the start of the next local day. An instant is read exactly as given
 
 ### 7.9 How we know it works
 
-**In plain terms.** Memory is measured on a fixed fixture, and the numbers are
+**In plain terms.** Memory is measured on fixed fixtures, and the numbers are
 printed with the target beside them.
 
 `crates/hearth-eval/tests/memory_bench.rs` replays 200 planted statements as the
 history they describe, then asks 195 questions across seven categories. It
-reports two numbers on purpose:
+reports three numbers on purpose:
 
 - **Automatic recall** is what the digest put in front of the model.
-- **Recoverable** is automatic recall, or the answer appearing in one
+- **Recoverable in one call** is automatic recall, or the answer appearing in one
   `memory` recall call.
+- **Coverage** is whether every stored statement is reachable at all: current
+  rows by id, by subject when present, by a direct term, and by enumeration;
+  replaced rows by id and by an as-of read.
 
-The second number is the honest form of "nothing is lost", because a bounded
-digest will always miss something. Measured on the committed fixture:
+Coverage is the northstar's 100%: the store may not lose a row. Automatic recall
+is a separate, bounded quality number, and one-call recall sits between them.
+Coverage is measured on the reachability fixture; the other rows are the
+195-question benchmark. Measured on the committed fixtures:
 
 | Measurement | Target | Result |
 |---|---|---|
+| **Coverage: every stored statement reachable** | **1.00** | **1.00** |
 | Recoverable in one call, lexical | 0.98 | 0.99 |
 | Recoverable in one call, hybrid | 0.98 | 0.99 |
 | Automatic recall, lexical | 0.92 | 0.933 |
@@ -1565,11 +1694,13 @@ digest will always miss something. Measured on the committed fixture:
 | Duplicate writes that became new rows | 0 | 0 |
 | Secrets stored | 0 | 0 |
 
-`crates/hearth-eval/tests/memory_reachability.rs` proves the stronger property
-that makes 100% a construction rather than a hope: every stored statement is
-reachable by its id, by its subject, by a direct term, and by paging the whole
-store. Enumeration is always available, so a statement can be unreachable by a
-question but never by the system.
+`crates/hearth-eval/tests/memory_reachability.rs` proves coverage on its own
+fixture as a construction rather than a hope: every current statement is
+reachable by its id, by its subject when it has one, by a direct term, and by
+paging the whole store; a replaced statement stays reachable by id and by an as-of
+read. Enumeration is always available, so a statement can be unreachable by a
+question but never by the system. This is the northstar's 100%; the 0.99 rows above
+measure one-call ranking, not whether the row exists.
 
 The residual is stated rather than hidden. Two of the 195 questions need more
 than one call, and both are paraphrases with no shared vocabulary. Six of the
@@ -1791,6 +1922,13 @@ rewrites its own core.
 Self-improvement has two outputs: memory rows for facts and preferences, and skills
 for procedures. Nothing else changes itself. `SOUL.md`, settings, code, tools, and
 the system prompt are off limits.
+
+**The learning contract.** Learning is evidence-gated and reversible. A memory
+row keeps its provenance. A skill is created or revised only from recorded
+successful work, every version is kept, and a skill that stops helping is
+quarantined or archived rather than silently deleted. The loop may change memory
+rows and learned skills; it may not change `SOUL.md`, settings, code, tools, or the
+system prompt. Zero new skills is a valid night.
 
 Memory and skills are separate loops that share evidence. Skill review reads recent
 successful entries, the skill index and bodies, and relevant memory rows
@@ -2173,6 +2311,7 @@ Reference host: 4 CPU cores, 8 GB RAM, SSD.
 | Idle memory use | 120 MB or less | The daemon is quiet when nothing is happening. |
 | Startup and recovery, 100k entries | 500 ms or less | Restarting does not feel like an outage. |
 | Save time, 95th percentile | 15 ms or less | Most saves finish before a person notices. |
+| Memory coverage, any size | 100% | Every current statement is reachable by id, subject when present, a direct term, and enumeration; every replaced statement by id and an as-of read. No stored row is lost. This is the northstar's 100% recall. |
 | Memory retrieval, 4,200 items | 100 ms or less | The measured gate. Recall is fast on a personal store; this is the number the benchmark suite gates. |
 | Memory retrieval, 200,000 items | measured, no gate | 9.1 ms at p50, 221.3 ms at p95, and 937.3 ms at p99 on the reference host with 200,000 distinct subjects and the 195 fixture questions. Measured by `the_200k_store_is_measured`. The p95 is driven by questions that share a word with the noise; the 100 ms gate stays on the 4,200-row store. The hybrid vector scan at 200,000 rows is not measured: linear extrapolation from about 10 ms at 4,000 rows gives about 500 ms, so the 100 ms gate is not claimed there. |
 | Time to first token, excluding provider | 300 ms or less | Hearth's own overhead is small. |
@@ -2272,10 +2411,13 @@ only for named invariants such as save atomicity, tombstones, and sequence gaps.
   workspace suite remains authoritative.
 - CI runs formatting, `clippy -D warnings`, the full test suite, the short crash
   injection set, and a memory evaluation smoke test on every change.
-- Coverage is informational only. Seam coverage is reviewed at each milestone. A
+- Code coverage is informational only. Seam coverage is reviewed at each milestone. A
   milestone does not close because a percentage was met.
 - A change that alters behavior without a corresponding test change is rejected,
   unless it is a pure refactor with an unchanged test suite.
+- Northstar check. Every behavior change names the goal it serves, the measurement
+  it moves, and the goal it might weaken. A change that lowers a measured goal
+  below its gate is rejected; the goal is not revised to fit the change.
 - Code review checks that tests are at seams, that expectations are independent, and
   that no test broke because of an internal rename.
 - Code review also rejects speculative generality, unused abstractions, and copied
@@ -2325,7 +2467,7 @@ defines the suites that must pass before release.
   rate limits, and overflows; Telegram tests against a local fake Bot API.
 - Crash tests: a separate process is killed at `before_commit`, `after_commit`,
   and `mid_stream` (`HEARTH_CRASH_AT`).
-- Memory benchmarks from 7.8, and a 7-day soak with restarts and backup/restore.
+- Memory benchmarks from 7.9, and a 7-day soak with restarts and backup/restore.
 
 ### 16.2 Release acceptance for 1.0
 
@@ -2334,17 +2476,21 @@ defines the suites that must pass before release.
 2. Telegram single-user flow works end to end: text, image, document, voice input,
    and files out.
 3. A scheduled reminder survives a restart and fires once.
-4. The memory benchmark meets the targets in 7.8.
+4. The memory benchmark meets the targets in 7.9, including 1.00 coverage.
 5. Prompt cache hit and fixed overhead meet section 14.
 6. The Doctor tab and the backup/restore checks pass on a clean host.
 7. No secret appears in logs, memory, or transcripts across the adversarial test
    suite.
+8. The northstar holds: every stored statement is reachable, the retrieval gate
+   and the quality floor are met, and every learned skill cites evidence. No
+   change in this release weakens a goal.
 
 ---
 
 ## 17. Milestones
 
-**In plain terms.** Each milestone produces something usable and testable. Memory
+**In plain terms.** Each milestone produces something usable and testable, and
+each one names the northstar goal it serves and the measurement it moves. Memory
 comes before broad tool polish, because a personal agent is only useful when it
 remembers and only affordable when memory carries the load.
 
@@ -2354,21 +2500,25 @@ remembers and only affordable when memory carries the load.
 | M1 Durable core | Entries, saves, tasks, submissions, recovery; fake provider | Work that survives a kill | Crash recovery suite passes |
 | M2 Agent loop | Provider, streaming, tool loop, files, shell, web, message, local chat, live watch | A local agent that can answer and use tools | End-to-end answer with tools; usage ledger accurate; a tool-using run can be watched live |
 | M3 Telegram | Polling, authorization, dedupe, attachments, final replies | The agent in your pocket | Single-user end to end; replay causes no duplicates |
-| M4 Memory v1 | Standing memory, full-text search, tools, extraction, provenance, consolidation skeleton | An agent that remembers the basics | Recall evaluation baseline; no secret stores |
-| M5 Token efficiency | Budgets, lazy tools, spill, prompt cache, compaction, memory flush | An agent that stays cheap | Section 14 targets on a 100-turn script |
-| M6 Memory v2 | Better retrieval, diversity, temporal validity, episodes, decay | An agent that remembers well for years | Section 7.8 targets |
-| M7 Background work | Scheduler, reminders, helpers, skills, notifications, skill review | An agent that works while you are away | Restart-safe reminder; a skill is created, promoted, revised, and archived across restarts |
+| M4 Memory v1 | Standing memory, full-text search, tools, extraction, provenance, consolidation skeleton | An agent that remembers the basics | Coverage baseline: every stored statement reachable; no secret stores |
+| M5 Right-sized token spend | Budgets, lazy tools, spill, prompt cache, compaction, memory flush | An agent that spends enough to stay correct and no more | Section 14 targets on a 100-turn script; no measured quality target falls |
+| M6 Fast, complete memory | Better retrieval, diversity, temporal validity, episodes, decay | An agent that remembers well for years | Section 7.9 targets, including 1.00 coverage and the section 14 retrieval gate |
+| M7 Background work | Scheduler, reminders, helpers, skills, notifications, skill review | An agent that works while you are away | Restart-safe reminder; a skill is created, promoted, revised, and archived across restarts; every change cites entry ids |
 | M8 Hardening | Backup/restore, docs, packaging, soak | A release you can trust | 1.0 acceptance list |
 
 Every milestone exit includes its seam tests, written red-first. A milestone that
 ships behavior without tests at an approved seam is not complete, regardless of
-manual demos.
+manual demos. A milestone that cannot meet all three goals is reshaped; it does
+not close by weakening a goal or moving its gate.
 
 ---
 
 ## 18. Open Questions
 
 None. The 1.0 scope is fixed. A scope change needs a new draft.
+The northstar in section 0 is not in scope for change. A draft may change the plan;
+it may not change the goals. A proposal that cannot meet all three is out of scope,
+not a reason to relax one.
 
 ---
 
@@ -2437,3 +2587,6 @@ install contains nothing personal.
 | Idle compaction threshold | 100k tokens or 65% of usable | 5.5 |
 | Idle memory target | 120 MB | 14 |
 | Annual database target | 2 GB | 14 |
+| Memory coverage | 100% of stored statements reachable | 7.4, 7.9, 14 |
+| Memory retrieval gate | 100 ms p95 at 4,200 rows | 14 |
+| Token quality floor | No measured target below its gate | 6.3, 7.9, 14 |

@@ -8,12 +8,19 @@ binding product definition is [SPEC.md](docs/SPEC.md); implementation choices an
 deviations are in [DECISIONS.md](docs/DECISIONS.md); the storage columns are in
 [SCHEMA.md](docs/SCHEMA.md), with the migrations as the executable authority.
 
+The fixed goals are in [SPEC.md](docs/SPEC.md) section 0: learn from its own work,
+spend the right tokens for the job, and keep every stored memory reachable and
+quick. Every change is checked against them.
+
 This file is for coding agents working in this repository. Hearth also reads
 `AGENTS.md` files from the workspace and its ancestors as project guidance, so
 keep this file accurate, free of secrets, and free of live personal data.
 
 ## Ground rules
 
+- The three northstar goals in `docs/SPEC.md` section 0 are fixed. Do not weaken
+  one to make a change fit. Name the goal a change serves and the measurement it
+  moves.
 - Never print, log, commit, or echo a token, key, password, private path, real
   name, Telegram id, or personal database. Use the placeholders `USER_NAME`,
   `123456789`, `~/.hearth`, and `example.com` in examples and docs.
@@ -147,8 +154,8 @@ nonblocking accept so a failed test cannot hang the suite.
 | `hearth-config` | Strict settings parsing, `${ENV}` expansion, validation, and 0600 checks. |
 | `hearth-core` | Conversations, entries, saves, tasks, submissions, prompt assembly, compaction, guidance, memory records. |
 | `hearth-storage` | SQLite connections, one writer and a read pool, migrations, snapshots, FTS5. |
-| `hearth-model` | OpenAI-compatible streaming, tool calls, usage, pricing, media clients. |
-| `hearth-memory` | Statements, rules, the retrieval cascade, the digest, and four tools. |
+| `hearth-model` | OpenAI-compatible streaming, tool calls, usage, media clients. |
+| `hearth-memory` | Statements, rules, the retrieval cascade, the digest, and one memory tool with four actions. |
 | `hearth-tools` | Files, shell, web search, web fetch, media, workspace confinement, spill. |
 | `hearth-telegram` | Bot API polling, replies, attachments, and the message tool. |
 | `hearth-runtime` | Daemon, agent loop, scheduler, helpers, skills, watch socket. |
@@ -177,9 +184,10 @@ Key invariants:
   window and point `superseded_by` at the replacement. Recall is three cheap
   channels (FTS5, subject, INT8 vectors behind a 0.40 floor) fused by RRF k=60,
   ranked by a linear score over cheap features, then filled to the 10-item cap.
-  No memory operation calls a model. Every new statement names its actor in the
-  content, and a pronoun is refused; existing rows still render. The digest
-  reports what it left out.
+  No memory operation calls a model. A statement is stored as written; a pronoun
+  is neither refused nor required. Every stored statement must be reachable by id
+  and by an as-of read; every current statement by subject when present, a direct
+  term, and enumeration. The digest reports what it left out.
 - The tool set is flat and compiled in. `media` enters the registry only when a
   media service is configured. There is no tool discovery layer, no browser, and
   no office-document reader.
@@ -225,9 +233,11 @@ second identity.
 
 ## Known residuals
 
-- Memory recall is 0.933 automatic and 0.99 recoverable in one call on the lexical
-  path, and 0.954 and 0.99 with the local encoder installed. Paraphrase is the
-  weak category at 0.90 hybrid and 0.65 lexical.
+- Memory coverage is 100%: every stored statement is reachable by id and by an
+  as-of read, and every current statement by subject when present, term, and
+  enumeration. Automatic recall is 0.933 and one-call recoverable is 0.99 on the
+  lexical path, and 0.954 and 0.99 with the local encoder installed. Paraphrase is
+  the weak category at 0.90 hybrid and 0.65 lexical.
 - Two of the 195 benchmark questions need more than one tool call. Both are
   paraphrases with no shared vocabulary. Six of the thirteen automatic misses are
   topics the fixture gives two live answers to.

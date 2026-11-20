@@ -4,6 +4,28 @@ This file records interpretations, deviations, and approved decisions that affec
 the build. `SPEC.md` remains the binding product definition. Every deviation needs
 sir's approval and a spec draft bump before it is treated as settled.
 
+## 2026-11-20: Northstar (approved)
+
+- The project has three fixed goals, recorded in `SPEC.md` section 0:
+  1. learn from its own recorded work;
+  2. spend the right tokens for the job;
+  3. keep every stored memory reachable and quick.
+- The goals are not reopened by a spec draft. The spec, milestones, tests, and
+  reviews adapt to the goals. A change that weakens a goal is rejected.
+- "100% recall" means memory coverage: every stored statement is reachable by id
+  and by an as-of read, and every current statement by subject when present, by a
+  direct term, and by enumeration. It does not mean every statement appears in the
+  automatic digest. Automatic recall and one-call recall remain separate measured
+  numbers with their own targets.
+- The quality floor for token spend is the measured set in `SPEC.md` 7.9 and 14. A
+  cheaper path is accepted only when those numbers stay at or above target.
+- Self-improvement writes only memory rows and learned skills. It cites recorded
+  evidence, versions or archives its changes, and never rewrites `SOUL.md`,
+  settings, code, tools, or the system prompt.
+- Every draft, milestone, and behavior change names the goal it serves, the
+  measurement it moves, and the goal it might weaken. Section 0 is the authority.
+- This is a documentation decision. No runtime behavior changes in this draft.
+
 ## 2026-11-08: Build ground rules (approved)
 
 - `SPEC.md` Draft 0.3 is binding. No silent drift.

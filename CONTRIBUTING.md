@@ -44,6 +44,10 @@ smallest direct design, and keep one authoritative definition for each rule.
 Prefer a little repetition over a premature abstraction. New dependencies need a
 one-line justification in `docs/DECISIONS.md`.
 
+The three goals in [SPEC.md](docs/SPEC.md) section 0 are fixed. A change names the
+goal it serves, the measurement it moves, and the goal it might weaken. Do not
+relax a goal to fit a design.
+
 Use `cargo fmt` and address clippy rather than suppressing it. Keep modules small
 and public interfaces narrow. The main seams are `Harness`, `Session`, `Storage`,
 `Provider`, `Tool`, and the transport layers.

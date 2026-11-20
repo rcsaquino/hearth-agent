@@ -7,6 +7,10 @@ durable record in a local SQLite database. It is written in Rust. One daemon own
 the database, runs the agent loop, and talks to one Telegram bot. There is no
 Hearth account, no telemetry, and no hosted storage.
 
+Hearth's northstar is three fixed goals: it learns from its own recorded work, it
+spends the right tokens for the job, and every stored memory is reachable quickly.
+The spec derives from these goals; see [SPEC.md](docs/SPEC.md) section 0.
+
 The full behavior and design are defined in [SPEC.md](docs/SPEC.md); the storage
 columns are defined in [SCHEMA.md](docs/SCHEMA.md), with the migrations as the
 executable authority. This tree is the pre-1.0 implementation.
@@ -21,7 +25,8 @@ acceptance matrix pass; a seven-day real-time soak is still pending.
 
 - Keeps an append-only conversation record that survives crashes and restarts.
 - Remembers facts, preferences, people, projects, and past work in a local
-  library with full-text and local-vector recall, provenance, and backups.
+  library with full-text and local-vector recall, provenance, backups, and 100%
+  reachability of stored statements.
 - Reads your standing rules from `HEARTH.md` and project rules from `AGENTS.md`.
 - Runs an agent loop with tools: files, shell, web search, web fetch, media,
   memory, skills, reminders, helpers, and Telegram files or voice.
